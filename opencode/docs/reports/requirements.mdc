@@ -815,16 +815,306 @@ workflow:
 
 ---
 
-## 15. References
+## 15. Configuration Defaults
 
-### Research Sources
-- [serde-saphyr](https://crates.io/crates/serde-saphyr) - YAML parsing benchmarks
-- [Askama](https://github.com/askama-rs/askama) - Template engine benchmarks
-- [AutoAgents](https://github.com/liquidos-ai/AutoAgents) - Agent SDK documentation
-- [llama-cpp-2](https://crates.io/crates/llama-cpp-2) - Vulkan integration
-- [LM Studio](https://lmstudio.ai/docs/developer/openai-compat) - OpenAI compatibility
-- [Rust-SWE-bench](https://arxiv.org/html/2602.22764v1) - AI coding research
-- [ilert Engineering Blog](https://www.ilert.com/blog/scaling-rust-development-with-cursor-ilert) - LLM-friendly Rust patterns
+### 15.1 Default LLM Provider
+
+**Selection**: **llama.cpp (direct)** - User preference from requirements gathering
+
+**Rationale**:
+- Fastest performance (zero HTTP overhead)
+- Direct GPU control
+- Single binary deployment
+- Fine-grained resource management
+
+**Generated Code Template**:
+```rust
+// Default agent template uses llama.cpp directly
+use llama_cpp_2::{LlamaBackend, LlamaModel, LlamaContext};
+use autoagents_llamacpp::LlamaCppProviderBuilder;
+
+let backend = LlamaBackend::init()?;
+let model = LlamaModel::load_from_file(config.model_path)?;
+
+let llm = LlamaCppProviderBuilder::new()
+    .model(config.model_path)
+    .n_ctx(config.context_size)
+    .n_gpu_layers(config.n_gpu_layers)  // Vulkan offloading
+    .build()
+    .await?;
+```
+
+**Override in YAML**:
+```yaml
+llm:
+  provider: "lmstudio"  # Explicitly choose LM Studio
+  base_url: "http://localhost:1234/v1"
+```
+
+### 15.2 Default Loop Configuration
+
+**Maximum Iterations**: **Unlimited** - No default limit, relies on validation or timeout only
+
+**Rationale**:
+- Flexibility for complex tasks requiring many iterations
+- Prevents premature termination
+- Validation criteria determine when to stop
+- Timeout provides safety net
+
+**Configuration**:
+```yaml
+- loop: Improvement loop
+  type: "validation"
+  validation:
+    quality_score: ">= 90"
+  # No max_iterations specified → unlimited
+  termination:
+    timeout: "10m"  # Required safety net
+```
+
+### 15.3 Default Aggregation Strategy
+
+**Strategy**: **Merge and summarize based on the task at hand**
+
+**Rationale**:
+- Provides unified output from multiple agent perspectives
+- Reduces decision complexity for user
+- Task-aware aggregation (not just vote/collect)
+
+**Generated Code Template**:
+```rust
+// Aggregation logic
+struct AggregatedResult {
+    merged: HashMap<String, Value>,
+    summary: String,
+    agent_results: Vec<AgentResult>,
+}
+
+impl Aggregation {
+    fn merge(&self, results: Vec<AgentResult>) -> AggregatedResult {
+        // Task-specific merging logic
+        // Conflicts resolved by priority or user-defined rules
+        // Summary generated from merged content
+    }
+}
+```
+
+### 15.4 Default Timeout Configuration
+
+**Operation-Specific Defaults**:
+
+| Category | Default Timeout | Rationale |
+|----------|------------------|-----------|
+| **Instant** (<1s) | 1 second | Memory operations, simple calculations |
+| **Fast** (1-10s) | **30 seconds** | User preference for file writes, web fetches |
+| **Medium** (10-60s) | 60 seconds | Large file ops, web scraping |
+| **Slow** (1-10m) | 10 minutes | Code generation, complex analysis |
+| **Very Slow** (10m+) | 30 minutes | Model training, entire project analysis |
+
+**Override in YAML**:
+```yaml
+timespans:
+  fast:
+    default: 30s  # User preference
+  medium:
+    default: 60s
+```
+
+### 15.5 Agent Spawning Configuration
+
+**Default**: **Require explicit permission** - Agents cannot spawn other agents unless specified
+
+**Rationale**:
+- Security: Prevent unauthorized sub-agent creation
+- Control: User must explicitly enable spawning capability
+- Hierarchical: Top-level agents control spawning
+
+**Schema**:
+```yaml
+agents:
+  - name: controller
+    permissions:
+      can_spawn: true  # Required to spawn sub-agents
+      agent: "all"  # Or specify tool permissions
+  - name: worker
+    # No can_spawn → cannot spawn sub-agents
+```
+
+### 15.6 Loop Timeout Handling
+
+**Strategy**: **Detailed logging with path to attempts, results, and timeout analysis**
+
+**Requirements**:
+- Log each loop iteration attempt
+- Capture where iteration got stuck
+- Summary of what made timeout occur
+- Path to last successful state for resumption
+
+**Generated Code Template**:
+```rust
+struct LoopLog {
+    iteration: u32,
+    started_at: Instant,
+    completed_at: Option<Instant>,
+    status: LoopStatus,
+    stuck_at: Option<String>,  // Tool or operation name
+    stuck_reason: String,         // Why it failed
+    result: Option<AgentOutput>,
+}
+
+impl LoopTimeoutHandler {
+    fn on_timeout(&self, log: &LoopLog) {
+        // Log detailed failure summary
+        // Provide path to resume from last good state
+        // Analyze pattern of timeouts for optimization
+    }
+}
+```
+
+### 15.7 Permission Inheritance
+
+**Default**: **Inheritable** - Step permissions inherit from workflow, workflow from agent
+
+**Rationale**:
+- Less verbose YAML (no permission repetition)
+- Hierarchical control
+- Override only when needed
+
+**Inheritance Rules**:
+```yaml
+workflow:
+  permissions:
+    agent: "read-only"  # All steps inherit read-only
+  - step: Safe analysis
+    # Inherits read-only automatically
+  - step: Write report
+    permissions:
+      agent: "write"  # Override to enable writing
+```
+
+### 15.8 Profiling and Metrics
+
+**Level**: **Yes, very detailed metrics**
+
+**Metrics to Collect**:
+- **Timing Metrics**:
+  - Time to respond (first token)
+  - Thinking time (before tool call)
+  - Tool execution time (each tool)
+  - Loop iteration time
+  - Total workflow time
+
+- **LLM Metrics**:
+  - Token I/O counts (input tokens, output tokens)
+  - Tokens per second
+  - Context window usage
+  - Memory usage (average)
+  - Memory usage at specified intervals (user-configurable)
+
+- **Execution Metrics**:
+  - Line-item level logging for each operation
+  - Parallel execution support
+  - Tool usage frequency
+  - Success/failure rates
+
+- **Model Settings**:
+  - Model name and version
+  - Backend (Vulkan, CUDA, Metal)
+  - Context size
+  - Temperature, top-k, top-p
+
+- **I/O Logging**:
+  - Input prompt IO for different stages
+  - Output variable references for stage results
+
+- **Advanced Features**:
+  - Parallel execution tracking
+  - Smart graceful degradation when local system overwhelmed
+  - Orchestration strategies for local context management
+
+**Generated Code Template**:
+```rust
+struct ExecutionMetrics {
+    timing: TimingMetrics,
+    llm: LLMMetrics,
+    execution: ExecutionMetrics,
+    model: ModelSettings,
+}
+
+impl MetricsCollector {
+    fn collect(&self, operation: &str) -> ExecutionMetrics {
+        // Collect detailed metrics at each step
+        // Log at line-item level
+    }
+
+    fn log_memory_interval(&self, interval: Option<Duration>) {
+        // If interval specified: log memory + other data at interval
+        // If not specified: log only memory average
+    }
+}
+```
+
+**Configuration in YAML**:
+```yaml
+profiling:
+  enabled: true
+  level: "detailed"  # | "basic" | "none"
+  memory_interval: "10s"  # Optional: log memory at interval
+  log_per_line_item: true
+  track_parallel: true
+```
+
+### 15.9 Default Permissions for New Agents
+
+**Default**: **Custom required** - Must explicitly specify permissions in agent definition
+
+**Rationale**:
+- Security by default (no implicit permissions)
+- Explicit opt-in (user must think about permissions)
+- Clear intent in YAML
+
+**Schema**:
+```yaml
+agents:
+  - name: new-agent
+    # No default permissions → error if not specified
+    permissions:
+      agent: "read-only"  # Required
+      tools: ["file-read", "grep"]  # Required
+```
+
+### 15.10 Additional Requirements
+
+**Requested from User**:
+
+1. **Workflow Visualization**
+   - Generate visual graph/flowchart from YAML workflow
+   - Show agent relationships and data flow
+   - Export as SVG, PNG, or interactive HTML
+
+2. **Agent Debugging Tools**
+   - Built-in step-by-step agent execution with pause/inspect
+   - View intermediate states and tool outputs
+   - Modify agent state during execution
+
+3. **Transpilation UUID and Results Tracking**
+   - Generate unique UUID for each transpilation run
+   - Track results through logging and logging tools
+   - Query results by UUID for debugging
+
+4. **Multi-YAML File Agentic Workflow Suites**
+   - Reference other workflow files with parameters
+   - Combine multiple workflows into single execution
+   - Hierarchical workflow composition
+
+5. **Benchmarking and Log Aggregation**
+   - Built-in benchmarking tooling around log aggregation
+   - Compare performance across different runs
+   - Aggregate metrics from multiple transpilations
+
+---
+
+## 16. References
 
 ---
 
@@ -887,4 +1177,4 @@ workflow:
 
 **Document Status**: Complete  
 **Last Updated**: 2026-03-04  
-**Version**: 2.0
+**Version**: 3.0
