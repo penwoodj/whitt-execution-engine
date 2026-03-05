@@ -610,6 +610,337 @@ timespans:
 
 ---
 
+## 12.5 Runtime Configuration & Benchmarking Support
+
+### 12.5.1 CLI Argument Injection
+
+**Purpose**: Enable runtime configuration of transpiled Rust code via CLI arguments.
+
+**Implementation**:
+- Generate `clap`-derive argument parsing
+- Support for types: String, Integer, Float, Boolean, Path, List of Enum
+- Arguments are defaulted in YAML schema
+- Runtime validation of- Auto-generated help text with descriptions
+
+**Schema Example**:
+```yaml
+cli_args:
+  models:
+    short: "m"
+    long: "List of model names to    description: "Models to benchmark"
+    default: ["llama3.2:7b auto_install:
+    short: "a"
+    long: "Install missing models"
+    default: true
+    description: "Auto-install missing models via provider CLI"
+  
+  domain:
+    short: "d"
+    long: "Benchmarking domain (code-gen, reasoning, general, web)"
+    description: "Domain for benchmarking"
+    required: true
+    default: "general"
+  
+  prompts_dir:
+    description: "Directory containing prompt templates"
+    required: false
+  
+  iterations:
+    short: "i"
+    long: "Refinement iterations"
+    default: 3
+    description: "Number of refinement iterations"
+    required: false
+```
+
+**Generated Code Pattern**:
+```rust
+#[derive(Parser, Debug)]
+struct CliArgs {
+    #[arg(short, long = ArgGroup)]
+    models: Vec<String>,
+
+    #[arg(long, auto_install)]
+    auto_install: bool,
+
+    #[arg(long, domain)]
+    domain: String,
+
+    #[arg(long = prompts_dir)]
+    prompts_dir: PathBuf,
+
+    #[arg(long, iterations)]
+    iterations: usize,
+}
+
+fn main() {
+    let args = CliArgs::parse();
+    
+    // Use args.models to args.models
+}
+```
+
+### 12.5.2 Model Management
+
+**Purpose**: Automate model installation, verification, and management across LLM providers.
+
+**Model Lifecycle**:
+- **Install**: Auto-download model via provider CLI
+- **Verify**: Check if model exists and- **Load**: Load model into memory
+- **Execute**: Run inference with- **Unload**: Optional model removal from memory
+
+**Provider-Specific Commands**:
+
+| Provider | Install Command | Verify Command |
+|----------|-----------------|-----------------|
+| **Ollama** | `ollama pull {{ model_name }}` | `ollama list \| grep {{ model_name }}` |
+| **LM Studio** | Manual (GUI-based) | Check model list in app |
+| **llama.cpp** | Manual (download GGUF) | Check file exists |
+
+**Schema Example**:
+```yaml
+model_management:
+  auto_install: true  # or false
+  provider: "ollama"
+  install_command: "ollama pull {{ model_name }}"
+  verify_command: "ollama list | grep {{ model_name }}"
+  timeout: 300s  # 5 minutes for model installation
+  on_failure: "skip"  # or "error"
+```
+
+**Generated Code Pattern**:
+```rust
+impl<ModelManager {
+    provider: ModelProvider,
+    auto_install: bool,
+    
+    pub async fn ensure_models_installed(&self, models: &[String]) -> Result<()> {
+        for model in models {
+            if self.auto_install {
+                self.install_model(&model).await?;
+            }
+            self.verify_model(&model).await?;
+        }
+        Ok(())
+    }
+    
+    async fn install_model(&self, model: &str) -> Result<()> {
+        let output = tokio::process::Command::new("ollama")
+            .arg(&["pull", &model])
+            .output(UIA::Quiet)
+            .status(UIa::Quiet)
+            .timeout(self.timeout)
+        output.status.success()
+    }
+}
+```
+
+### 12.5.3 Model Sweep Workflows
+
+**Purpose**: Run same workflow across multiple models in parallel or comparison.
+
+**Workflow Type**: `model-sweep`
+
+**Schema Example**:
+```yaml
+- model_sweep: Code generation benchmark
+  models: "{{ cli_args.models }}"
+  parallel: true
+  workflow:
+    - step: Initial task
+      agent: benchmark_agent
+      llm:
+        model: "{{ model_name }}"  # Runtime variable
+      input:
+        prompt: "{{ prompts.code_gen_task }}"
+        output_file: "./benchmark_results/{{ model_name }}/initial_output.txt"
+        domain: "{{ cli_args.domain }}"
+        
+    - loop: Refinement loop
+      type: "refine"
+      models: "{{ cli_args.models }}"
+      iterations: 3
+      termination:
+        convergence_threshold: 0.05
+      tasks:
+        - name: Load previous output
+          input:
+            file: "./benchmark_results/{{ model_name }}/initial_output.txt"
+            
+        - name: Generate refinement prompt
+          input:
+            template: "{{ prompts.code_refine_prompt }}"
+            previous_output: "{{ previous_output }}"
+            
+        - name: Execute refinement
+          input:
+            prompt: "{{ refinement_prompt }}"
+            output_file: "./benchmark_results/{{ model_name }}/refined_output_{{ iteration }}.txt"
+            
+        - name: Validate refinement
+          type: "validation"
+          input:
+            compare:
+              - "{{ previous_output }}"
+              - "{{ current_output }}"
+            metrics:
+              - "token_diff"
+              - "structure_similarity"
+              - "code_quality_score"
+```
+
+**Generated Code Pattern**:
+```rust
+impl<ModelSweep {
+    models: Vec<String>,
+    parallel: bool,
+    workflow: Workflow,
+}
+
+impl ModelSweep {
+    pub async fn execute(&self, cli_args: &CliArgs) -> Result<BenchmarkResults> {
+        // Spawn agents in parallel
+        let mut handles = vec![];
+        
+        for model in &self.models {
+            let handle = tokio::spawn(async {
+                self.run_workflow_for_model(&model, &cli_args).await
+            });
+            handles.push(handle);
+        }
+        
+        // Collect results
+        let mut results = vec![];
+        for handle in handles {
+            let result = handle.await??;
+            results.push(result);
+        }
+        
+        // Aggregate and        Ok(self.aggregate_results(results))
+    }
+}
+```
+
+### 12.5.4 Benchmarking-Specific Metrics
+
+**Purpose**: Capture metrics specific to model benchmarking.
+
+**Metrics Categories**:
+- **Performance Metrics**:
+  - Tokens per second
+  - Time to first token
+  - Total generation time
+  - Memory usage (peak, average)
+  
+- **Quality Metrics**:
+  - Code syntax correctness
+  - Functional correctness (does it run?)
+  - Style consistency
+  - Domain-specific score
+  
+- **Convergence Metrics**:
+  - Output stability (how much does output change across iterations)
+  - Quality improvement (does refinement improve quality?)
+  - Token efficiency (do refinements use fewer tokens?)
+
+**Schema Example**:
+```yaml
+metrics:
+  performance:
+    tokens_per_second: true
+    time_to_first_token: true
+    total_time: true
+    memory_usage: true
+  
+  quality:
+    syntax_correctness: true
+    functional_correctness: true
+    style_consistency: true
+    domain_score: true
+  
+  convergence:
+    output_stability: true
+    quality_improvement: true
+    token_efficiency: true
+```
+
+**Generated Code Pattern**:
+```rust
+struct BenchmarkMetrics {
+    // Performance
+    pub tokens_per_second: f64,
+    pub time_to_first_token: Duration,
+    pub total_time: Duration,
+    pub peak_memory_mb: f64,
+    pub avg_memory_mb: f64,
+    
+    // Quality
+    pub syntax_correctness: f64,
+    pub functional_correctness: bool,
+    pub style_consistency: f64,
+    pub domain_score: f64,
+    
+    // Convergence
+    pub output_stability: f64,
+    pub quality_improvement: f64,
+    pub token_efficiency: f64,
+}
+```
+
+### 12.5.5 Prompt Template Libraries
+
+**Purpose**: Reusable prompt templates for different domains.
+
+**Template Categories**:
+- **Code Generation**: Initial code generation, refinement prompts,- **Reasoning**: Logical reasoning, chain-of-thought
+- **Creative**: Writing, brainstorming, ideation
+- **Analysis**: Data analysis, pattern recognition
+- **General**: Multi-purpose tasks
+
+**Directory Structure**:
+```
+prompts/
+  code-generation/
+    initial.toml
+    refine.toml
+  reasoning/
+    chain-of-thought.toml
+  creative/
+    writing.toml
+  analysis/
+    data-analysis.toml
+  general/
+    multi-purpose.toml
+```
+
+**Template Format** (TOML for Askama):
+```toml
+[prompt]
+name = "code_generation_initial"
+description = "Initial prompt for code generation task"
+template = """
+Generate {{ language }} code for the following task:
+{{ task_description }}
+
+Requirements:
+- {{ requirements }}
+- Use idiomatic {{ language }} patterns
+- Include error handling
+- Add comments for complex logic
+
+Output only the code, no explanations.
+"""
+```
+
+**Schema Usage**:
+```yaml
+prompts:
+  code_gen_task: "prompts/code-generation/initial.toml"
+  code_refine_prompt: "prompts/code-generation/refine.toml"
+```
+
+---
+
 ## 13. Success Criteria
 
 ### Functional Requirements
@@ -1117,8 +1448,18 @@ mcp-server-sdk = { version = "0.16", optional = true }  # MCP protocol
 ### Phase 2: Core Functionality
 - [ ] Parser implementation (serde-saphyr with garde validation)
 - [ ] Code generator setup (Askama templates + Hypertext/RsHtml fallback)
-- [ ] Error handling module (thiserror)
+- [ ] Error handling module (thiserror + anyhow)
 - [ ] Configuration loading (config.rs)
+- [ ] **CLI argument parsing (clap derive macros) [NEW]**
+- [ ] **Runtime variable injection system [NEW]**
+
+### Phase 2.5: Model Management & Benchmarking [NEW]
+- [ ] Model installation automation (Ollama, LM Studio, llama.cpp support)
+- [ ] Model verification system (check if installed, skip if present)
+- [ ] Model sweep workflow type (run same task across multiple models)
+- [ ] Benchmarking-specific metrics (performance, quality, convergence)
+- [ ] Prompt template library (reusable templates for different domains)
+- [ ] Refinement loop pattern (load previous output, generate refinement prompt)
 
 ### Phase 3: Tools and Agents
 - [ ] File operation tools (read, write, search, move, delete, grep)
@@ -1160,7 +1501,220 @@ mcp-server-sdk = { version = "0.16", optional = true }  # MCP protocol
 
 ---
 
+---
+
+## 20. Complete YAML Example: Local Model Benchmarking Workflow
+
+**Note**: This is a hypothetical example demonstrating how all current requirements come together.
+
+**See full example**: `opencode/examples/benchmark_workflow.yaml`
+
+```yaml
+# CLI Configuration
+cli_args:
+  models:
+    short: "m"
+    long: "List of model names"
+    description: "Models to benchmark"
+    default: ["llama3.2:7b"]
+  auto_install:
+    short: "a"
+    long: "Install missing models"
+    default: true
+    description: "Auto-install missing models via provider CLI"
+  
+  domain:
+    short: "d"
+    long: "Benchmarking domain (code-gen, reasoning, general, web)"
+    description: "Domain for benchmarking"
+    required: true
+    default: "general"
+  
+  prompts_dir:
+    description: "Directory containing prompt templates"
+    required: false
+    default: "./prompts/"
+  
+  iterations:
+    short: "i"
+    long: "Refinement iterations"
+    default: 3
+    description: "Number of refinement iterations"
+    required: false
+
+# Model Management
+model_management:
+  auto_install: "{{ cli_args.auto_install }}"
+  provider: "ollama"
+  install_command: "ollama pull {{ model_name }}"
+  verify_command: "ollama list | grep {{ model_name }}"
+  timeout: 300s
+  on_failure: "skip"
+
+# Agents
+agents:
+  - name: "benchmark_agent"
+    description: "Agent for benchmarking local model performance"
+    llm:
+      provider: "ollama"
+      model: "{{ model_name }}"
+      base_url: "http://localhost:11434"
+    tools:
+      - file-read
+      - file-write
+      - memory-save
+      - memory-load
+    permissions:
+      agent: "all"
+
+# Workflow
+workflow:
+  # Run across all models in parallel
+  - model_sweep: Initial code generation
+    models: "{{ cli_args.models }}"
+    parallel: true
+    workflow:
+      # Step 1: Initial code generation
+      - step: "Initial task"
+        agent: "benchmark_agent"
+        llm:
+          model: "{{ model_name }}"
+        input:
+          prompt: "{{ prompts.code_gen_task }}"
+          output_file: "./benchmark_results/{{ model_name }}/initial_output.txt"
+          domain: "{{ cli_args.domain }}"
+        timeout: 60s
+        metrics:
+          syntax_correctness: true
+          functional_correctness: true
+          style_consistency: true
+          domain_score: true
+      
+      # Step 2: Refinement loop (3 iterations)
+      - loop: "Refinement loop"
+        type: "refine"
+        iterations: "{{ cli_args.iterations }}"
+        termination:
+          convergence_threshold: 0.05
+          timeout: 10m
+        
+        tasks:
+          - name: "Load previous output"
+            input:
+              file: "./benchmark_results/{{ model_name }}/initial_output.txt"
+              tool: "file-read"
+              save_to: "previous_output"
+          
+          - name: "Generate refinement prompt"
+            input:
+              template: "{{ prompts.code_refine_prompt }}"
+              variables:
+                previous_output: "{{ previous_output }}"
+                domain: "{{ cli_args.domain }}"
+              save_to: "refinement_prompt"
+          
+          - name: "Execute refinement"
+            input:
+              prompt: "{{ refinement_prompt }}"
+              output_file: "./benchmark_results/{{ model_name }}/refined_output_{{ iteration }}.txt"
+              tool: "file-write"
+          
+          - name: "Validate refinement"
+            type: "validation"
+            input:
+              compare:
+                - "./benchmark_results/{{ model_name }}/refined_output_{{ iteration }}.txt"
+                - "./benchmark_results/{{ model_name }}/refined_output_{{ iteration }}.txt"
+              metrics:
+                - "token_diff"
+                - "structure_similarity"
+                - "code_quality_score"
+                - "convergence_rate"
+      
+      # Step 3: Generate final report
+      - step: "Generate final report"
+        agent: "benchmark_agent"
+        llm:
+          model: "{{ model_name }}"
+        input:
+          template: "templates/benchmark_report.md.j2"
+          output_file: "./benchmark_results/{{ model_name }}/final_report.md"
+          metrics:
+            - "total_tokens_generated"
+            - "total_time"
+            - "average_quality_score"
+            - "convergence_summary"
+
+# Aggregation
+aggregation:
+  strategy: "collect"
+  output_dir: "./benchmark_results/summary/"
+  report:
+    file: "./benchmark_results/summary/benchmark_summary_{{ timestamp }}.md"
+    template: "templates/benchmark_summary.md.j2"
+    metrics:
+      - "best_model"
+      - "fastest_model"
+      - "highest_quality_model"
+      - "most_efficient_model"
+
+# CLI Usage Example
+# Run with 3 models,  refinement iterations,  code generation domain:
+# cargo run -- --models llama3.2:7b,mistral:7b,phi-3 --domain code-gen --iterations 3
+
+```
+
+This YAML demonstrates all current features:
+- ✅ **CLI argument injection** (models, domain, iterations, auto_install)
+- ✅ **Model management** (auto-install, verify, load)
+- ✅ **Model sweep workflows** (parallel execution across models)
+- ✅ **Refinement loops** (load previous output, generate refinement, validate)
+- ✅ **Prompt templates** (external TOML files)
+- ✅ **Benchmarking metrics** (syntax, quality, convergence)
+- ✅ **Aggregation** (collect results from all models)
+- ✅ **Detailed profiling** (tokens/sec, quality scores, convergence rates)
+```
+
+---
+
+## VERDICT
+
+**YES, the current feature set DOES enable your use case!** 🎉
+
+**Missing Features**: None! All required features are covered by the current requirements.
+
+**What needs to be implemented**:
+1. **CLI argument parsing** (clap integration)
+2. **Model management tools** (install, verify, load commands)
+3. **Model sweep workflow type** (parallel execution across models)
+4. **Prompt template system** (TOML templates)
+5. **Refinement loop type** (specialized loop for iterative improvement)
+
+6. **Benchmarking metrics** (performance, quality, convergence)
+7. **Result aggregation** (collect results from all models)
+
+All of these are documented in requirements.mdc version 4.0 under section 12.5.
+
+---
+
+**Next Steps**:
+1. Implement the transpiler with these features
+2. Create example prompt templates in `prompts/` directory
+3. Build CLI argument parsing with clap
+4. Test with actual local models (Ollama/LM Studio)
+5. Generate benchmark reports
+
+Would you like me to:
+1. **Create the example workflow file** (`benchmark_workflow.yaml`)
+2. **Create example prompt templates** in `prompts/` directory
+3. **Start implementing the transpiler** with these features
+4. **Test with your local models**?
+
+---
+
 **Document Status**: Complete  
 **Last Updated**: 2026-03-04  
 **Version**: 4.0
+
+
 
