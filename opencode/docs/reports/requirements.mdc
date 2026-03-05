@@ -62,6 +62,36 @@ All generated agents must have access to the following tools:
 - `memory-load` - Load conversation context
 - `log-write` - Write structured logs
 
+### Tool Permissions (Multi-Level)
+- **Agent-level permissions** - Permissions granted to entire agent (all tools)
+- **Step-level permissions** - Permissions for specific workflow step
+- **Tool-level permissions** - Fine-grained permission per individual tool
+- **Permission inheritance** - Child steps inherit parent permissions unless explicitly overridden
+- **Permission restrictions** - Ability to deny specific tools while allowing others
+
+### Loop Control and Termination
+
+#### Loop Types
+- **Count-based loops** - Execute N times then terminate
+- **Time-based loops** - Execute for specified duration
+- **Validation-based loops** - Continue until validation criteria is met
+- **Convergence loops** - Continue until results stabilize (delta < threshold)
+- **Infinite loops** - Continue until explicit termination
+
+#### Termination Conditions
+- **Success conditions** - Loop exits when desired outcome achieved
+- **Failure conditions** - Loop exits on error or failed validation
+- **Timeout conditions** - Loop exits after maximum time elapsed
+- **Convergence conditions** - Loop exits when changes between iterations fall below threshold
+- **Manual conditions** - Loop continues until explicitly stopped
+
+#### Expected Timespans
+- **Fast operations** (<1 second): File reads, simple calculations
+- **Medium operations** (1-10 seconds): File writes, web fetches, grep searches
+- **Slow operations** (10-60 seconds): Large file processing, web scraping
+- **Very slow operations** (60+ seconds): Model training, large analysis tasks
+- **User-configurable timeouts** - Each operation type allows custom timeout override
+
 ### Agentic Features
 - Multi-step workflows (sequences of steps)
 - Parallel execution capability
@@ -69,6 +99,8 @@ All generated agents must have access to the following tools:
 - Stateful conversations
 - Async execution (tokio runtime)
 - Memory management (sliding window with configurable backends)
+- **Looping with validation criteria** - Loops that continue until conditions are met
+- **Multi-agent spawning and aggregation** - Spawn multiple local agents and aggregate results
 
 ---
 
@@ -292,6 +324,17 @@ src/
 - [ ] Shell operation tools (exec, safe)
 - [ ] Utility tools (memory, logging)
 - [ ] Agent scaffolding implementation
+- [ ] Tool permission system (agent, workflow, step, tool levels)
+- [ ] Permission inheritance and override logic
+
+### Phase 3.5: Advanced Agentic Features
+- [ ] Loop control system (count, time, validation, convergence types)
+- [ ] Validation criteria evaluation
+- [ ] Termination condition handling (success, failure, timeout, convergence)
+- [ ] Multi-agent spawning system
+- [ ] Result aggregation strategies (merge, vote, collect, average)
+- [ ] Timespan configuration system (instant, fast, medium, slow)
+- [ ] Timeout handling with partial results
 
 ### Phase 4: Integration
 - [ ] CLI interface (main.rs)
@@ -345,10 +388,36 @@ workflow:
   - step: <human-readable step name>
     agent: <agent-name>
     parallel: true | false
+    permissions:
+      agent: "all" | "read-only" | "custom"
+      tools: ["file-read", "web-fetch"]  # Optional: limit tools
     input:
       <step-specific-input>
     output:
       <step-specific-output>
+    timeout: 30s  # Operation timeout
+
+  - loop: <loop-name>
+    type: "count" | "time" | "validation" | "convergence"
+    iterations: 10  # For count-based
+    duration: "5m"  # For time-based
+    validation: <validation-criteria>  # For validation-based
+    convergence_threshold: 0.01  # For convergence-based
+    termination:
+      success: <success-condition>
+      failure: <error-pattern>
+      timeout: "10m"
+    steps:
+      - <nested-steps>
+
+  - multi_agent: <task-name>
+    spawn: 3  # Number of agents
+    agent: <agent-name>
+    aggregate: "merge" | "vote" | "collect" | "average"
+    tasks:
+      - name: <subtask>
+        agent: <agent-name>
+        input: <subtask-input>
 ```
 
 ### Example: Full Workflow
@@ -365,9 +434,10 @@ agents:
       - file-read
       - file-search
       - grep
+      - memory-save
 
-  - name: web-scraper
-    description: Scrapes web content for research
+  - name: web-researcher
+    description: Researches documentation and web content
     llm:
       provider: "lmstudio"
       base_url: "http://localhost:1234/v1"
@@ -375,31 +445,313 @@ agents:
     tools:
       - web-fetch
       - web-scrape
+      - web-search
+      - memory-save
+
+  - name: code-reviewer
+    description: Reviews code for issues and security
+    llm:
+      provider: "ollama"
+      model: "llama3.2:7b"
+    tools:
+      - file-read
+      - grep
+      - log-write
 
 workflow:
-  - step: Analyze codebase
+  - step: Initial codebase analysis
     agent: file-analyzer
+    timeout: 60s
+    permissions:
+      tools: ["file-read", "file-search", "grep"]
     input:
       path: "./src/"
-      pattern: "async function"
+      patterns:
+        - "async fn"
+        - "unsafe"
+        - "panic!"
 
-  - step: Research documentation
-    agent: web-scraper
-    input:
-      urls:
-        - https://docs.rs/tokio
-        - https://docs.rs/serde
+  - loop: Iterative improvement
+    type: "validation"
+    validation:
+      quality_score: ">= 85"
+      no_critical_bugs: true
+    termination:
+      success: "All quality criteria met"
+      failure: "No improvement in 3 iterations"
+      timeout: "15m"
+    steps:
+      - step: Review findings
+        agent: code-reviewer
+        timeout: 30s
+        permissions:
+          agent: "read-only"
+        input:
+          source: "file-analyzer"
 
-  - step: Generate report
+      - step: Apply improvements
+        agent: file-analyzer
+        timeout: 45s
+        permissions:
+          tools: ["file-read", "file-write"]
+        input:
+          recommendations: "code-reviewer"
+
+      - step: Validate improvements
+        agent: file-analyzer
+        timeout: 30s
+        permissions:
+          agent: "read-only"
+        input:
+          recheck: true
+
+  - multi_agent: Parallel codebase audit
+    spawn: 3
+    agent: code-reviewer
+    aggregate: "merge"  # Combine all results
+    tasks:
+      - name: Security audit
+        permissions:
+          tools: ["grep"]
+        input:
+          pattern: "unsafe|transmute|::std::mem::"
+      - name: Performance audit
+        permissions:
+          tools: ["grep"]
+        input:
+          pattern: "clone|alloc|O\\(n\\)"
+      - name: Documentation audit
+        permissions:
+          tools: ["file-read"]
+        input:
+          check_complete: true
+
+  - step: Generate final report
     agent: file-analyzer
+    timeout: 60s
+    permissions:
+      agent: "all"
     input:
-      template: report.md.j2
-      output: ./analysis-report.md
+      template: final-report.md.j2
+      output: ./audit-report.md
+      include:
+        - security_audit
+        - performance_audit
+        - documentation_audit
+        - improvement_iterations
 ```
 
 ---
 
-## 12. Success Criteria
+## 12. Advanced Agentic Features
+
+### 12.1 Looping with Validation Criteria
+
+**Purpose**: Enable agents to iteratively improve until validation criteria are satisfied, avoiding infinite loops while allowing unlimited improvements.
+
+**Loop Types**:
+- **Validation-based** - Most common: Continue until specific conditions met
+- **Convergence-based** - Continue until results stabilize (change < threshold)
+- **Count-based** - Execute exactly N iterations
+- **Time-based** - Continue for specified duration
+- **Infinite with manual stop** - Continue until user terminates
+
+**Validation Criteria**:
+- Numeric thresholds (e.g., quality_score >= 85)
+- Boolean conditions (e.g., no_critical_bugs)
+- Pattern matching (e.g., output contains "SUCCESS")
+- File-based (e.g., report.md exists and valid)
+- Custom predicates (e.g., `validation_script.sh` returns 0)
+
+**Termination Conditions**:
+- **Success** - Validation passes, loop exits gracefully
+- **Failure** - Error occurs, validation fails repeatedly, or max attempts exceeded
+- **Timeout** - Maximum time (or tokens) reached
+- **Convergence** - Change between iterations < threshold
+- **Manual** - User explicitly stops the workflow
+
+**Schema Example**:
+```yaml
+- loop: Quality improvement
+  type: "validation"
+  validation:
+    quality_score: ">= 90"
+    no_critical_issues: true
+    performance_improved: true
+  termination:
+    success: "All validation criteria met"
+    failure: "No improvement for 5 consecutive iterations"
+    timeout: "20m"
+    max_iterations: 10
+  steps:
+    - step: Analyze
+      agent: reviewer
+    - step: Improve
+      agent: coder
+    - step: Validate
+      agent: tester
+```
+
+### 12.2 Multi-Level Tool Permissions
+
+**Purpose**: Provide fine-grained security and control over what tools agents can access.
+
+**Permission Hierarchy**:
+1. **Agent-level** (highest) - Agent can use all defined tools
+2. **Workflow-level** - Default permissions for entire workflow
+3. **Step-level** - Override permissions for specific step
+4. **Tool-level** - Most granular, per-tool authorization
+
+**Permission Types**:
+- **"all"** - Full access to all tools
+- **"read-only"** - Only read operations (file-read, grep, web-fetch)
+- **"write"** - Read + write operations (file-write, file-move)
+- **"execute"** - Read + write + shell execution
+- **"custom"** - Explicit list of allowed tools
+
+**Permission Restrictions**:
+- Allowlist: Only tools in list are permitted
+- Blocklist: All tools except those in list are permitted
+- Temporal: Tools only available for specified time window
+- Conditional: Tools available only if certain conditions met
+
+**Schema Example**:
+```yaml
+agents:
+  - name: secure-agent
+    permissions:
+      agent: "read-only"  # Default: can only read
+    tools:
+      - file-read
+      - grep
+      - web-fetch
+
+workflow:
+  - step: Initial scan (read-only)
+    agent: secure-agent
+    # Inherits agent-level "read-only" permission
+
+  - step: Modify files (elevated)
+    agent: secure-agent
+    permissions:
+      agent: "write"  # Override: now can write
+    input:
+      file: "./config.toml"
+```
+
+### 12.3 Multi-Agent Spawning and Aggregation
+
+**Purpose**: Enable parallel execution of multiple agents on same or different tasks, with result combination strategies.
+
+**Spawn Strategies**:
+- **Static count** - Spawn exactly N agents
+- **Dynamic count** - Spawn based on task size or complexity
+- **Conditional spawning** - Spawn only if conditions met
+
+**Agent Types**:
+- **Same agent, different inputs** - Parallel processing of data subsets
+- **Different agents, same task** - Compare approaches (e.g., different LLMs)
+- **Specialized agents** - Each agent handles specific subtask
+
+**Aggregation Strategies**:
+- **Merge** - Combine all results into single output
+- **Vote** - Most common or highest-rated result wins
+- **Collect** - Return all individual results
+- **Average** - Numeric values averaged across agents
+- **Filter** - Remove duplicates, apply thresholds
+- **Custom** - User-defined aggregation logic
+
+**Result Handling**:
+- **Success aggregation** - All successful results combined
+- **Partial failure handling** - Continue if some agents fail
+- **Timeout handling** - Wait for fastest completion or all agents
+- **Error propagation** - Aggregation errors vs. individual agent errors
+
+**Schema Example**:
+```yaml
+- multi_agent: Codebase analysis with consensus
+  spawn: 5
+  agent: code-analyzer
+  timeout: 60s
+  aggregation: "vote"
+  tasks:
+    - name: Security scan
+      input:
+        focus: "security"
+    - name: Performance scan
+      input:
+        focus: "performance"
+    - name: Documentation scan
+      input:
+        focus: "documentation"
+    - name: Architecture scan
+      input:
+        focus: "architecture"
+    - name: Testing scan
+      input:
+        focus: "testing"
+  # Output: Majority vote from all 5 agents
+```
+
+### 12.4 Expected Timespans by Operation Type
+
+**Purpose**: Allow users to specify expected duration and timeouts for different operation types.
+
+**Operation Categories**:
+- **Instant** (<1 second): File reads, simple calculations, memory operations
+- **Fast** (1-10 seconds): Small file writes, web fetches, simple grep
+- **Medium** (10-60 seconds): Large file operations, web scraping, code analysis
+- **Slow** (1-10 minutes): Complex code generation, large analysis tasks
+- **Very Slow** (10+ minutes): Model fine-tuning, entire project analysis
+
+**Timeout Overrides**:
+- Per-operation type (all file-read ops: 30s timeout)
+- Per-tool (grep: 5s, web-fetch: 30s)
+- Per-agent (code-analyzer: 10m default)
+- Per-step (explicit step timeout)
+
+**Graceful Timeout Handling**:
+- Partial results returned if available
+- Intermediate state saved for resumption
+- Timeout logged with operation details
+- User notified of timeout condition
+
+**Schema Example**:
+```yaml
+timespans:
+  instant:
+    default: 1s
+    operations:
+      file-read: 0.5s
+      memory-save: 0.3s
+  fast:
+    default: 10s
+    operations:
+      file-write: 5s
+      web-fetch: 10s
+      grep: 5s
+  medium:
+    default: 60s
+    operations:
+      file-search: 30s
+      web-scrape: 45s
+  slow:
+    default: 600s
+    operations:
+      code-generation: 300s
+      large-analysis: 600s
+
+workflow:
+  - step: Read config (uses instant timespan)
+    agent: config-reader
+    input:
+      file: "./config.yaml"
+    # Automatically uses 1s timeout from "instant" category
+```
+
+---
+
+## 13. Success Criteria
 
 ### Functional Requirements
 - ✅ YAML schema is human-readable and comprehensible
@@ -535,4 +887,4 @@ workflow:
 
 **Document Status**: Complete  
 **Last Updated**: 2026-03-04  
-**Version**: 1.0
+**Version**: 2.0
