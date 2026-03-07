@@ -1712,9 +1712,737 @@ Would you like me to:
 
 ---
 
-**Document Status**: Complete  
-**Last Updated**: 2026-03-04  
-**Version**: 4.0
+## 21. Llama.cpp Vulkan Integration Requirements
+
+**Purpose**: Detailed requirements for llama.cpp Vulkan backend integration as code generation targets for the transpiler. These features are transpiler-specific because they require code generation, configuration parsing, and Rust integration.
+
+### 21.1 ModelProvider Adapter for Llama.cpp
+
+**Requirement**: Generate code that implements the AutoAgents ModelProvider trait using llama.cpp Rust bindings.
+
+**Why Needed**:
+- The AgentSDK expects agents to work with any ModelProvider that implements `generate()` and `stream()` methods
+- Llama.cpp has its own C++ API that requires a Rust adapter
+- Without a Rust adapter, transpiled code would need to call C functions directly, violating abstraction
+
+**Transpiler Responsibilities**:
+1. Parse YAML model configuration (provider: "llamacpp", model_path, backend settings)
+2. Generate ModelProvider implementation that wraps llama.cpp APIs
+3. Implement `generate()` method using `llama_decode()`
+4. Implement `stream()` method for progressive token delivery
+5. Add proper error handling with thiserror
+
+**Generated Code Pattern**:
+```rust
+use llama_cpp_2::{LlamaBackend, LlamaModel, LlamaContext};
+use autoagents::ModelProvider;
+
+struct LlamaCppModelProvider {
+    backend: LlamaBackend,
+    model: LlamaModel,
+    ctx: LlamaContext,
+}
+
+impl ModelProvider for LlamaCppModelProvider {
+    async fn generate(&self, prompt: &str) -> Result<String> {
+        // Use llama.cpp llama_decode() to generate
+    }
+
+    async fn stream(&self, prompt: &str) -> impl Stream<Item = Result<String>> {
+        // Progressive token delivery
+    }
+}
+```
+
+**YAML Schema**:
+```yaml
+llm:
+  provider: "llamacpp"
+  model_path: "/path/to/model.gguf"
+  backend: "vulkan"
+  n_gpu_layers: 50
+```
+
+**Requirements Coverage**: R0036 - Model abstraction, R0037 - Provider support
+
+---
+
+### 21.2 Vulkan Backend Enablement
+
+**Requirement**: Generate code that enables llama.cpp's Vulkan GPU backend before loading models.
+
+**Why Needed**:
+- Llama.cpp supports GPU acceleration via Vulkan, CUDA, Metal, OpenCL, and CPU
+- Vulkan backend is preferred on Linux for AMD/Intel GPUs
+- The transpiler must generate configuration code that initializes Vulkan backend
+
+**Transpiler Responsibilities**:
+1. Recognize Vulkan configuration from YAML (`backend: "vulkan"`)
+2. Generate: `llama_backend_init(true)` with Vulkan enabled
+3. Configure Vulkan-specific parameters (device selection, memory allocation)
+4. Add device discovery and selection logic
+
+**Generated Code Pattern**:
+```rust
+use llama_cpp_2::LlamaBackend;
+
+// Vulkan backend initialization (generated when backend: "vulkan")
+let backend = LlamaBackend::init(true).map_err(|e| {
+    ModelLoadError::BackendInitError(e.to_string())
+})?;
+
+// Vulkan device selection
+let device_id = select_vulkan_device(
+    config.preferred_device.as_deref(),
+    config.max_batch_size,
+)?;
+```
+
+**YAML Schema**:
+```yaml
+llm:
+  backend: "vulkan"  # or "cuda", "metal", "cpu"
+  device: "auto"  # or specific device ID
+  max_batch_size: 32
+```
+
+**Requirements Coverage**: R0038 - Hardware acceleration
+
+---
+
+### 21.3 GPU Layer Offload Control
+
+**Requirement**: Generate code that controls how much of the model is offloaded to GPU vs. CPU.
+
+**Why Needed**:
+- Different hardware has different memory capacities and performance characteristics
+- 100% offload might cause OOM on consumer GPUs
+- Users need fine-grained control over GPU memory usage
+
+**Transpiler Responsibilities**:
+1. Parse GPU offload configuration from YAML
+2. Generate llama.cpp parameters: `n_gpu_layers`, `split_mode`, `main_gpu`
+3. Validate offload percentage against available GPU memory
+4. Support both percentage and per-layer configurations
+
+**Generated Code Pattern**:
+```rust
+use llama_cpp_2::LlamaModelParams;
+
+// Configured GPU offload (YAML: gpu_offload: 50%)
+let mut params = LlamaModelParams::default();
+params.set_n_gpu_layers((total_layers * 50) / 100);
+
+// Per-layer offload (YAML: gpu_layers: [0, 1, 2, 4, 8, 16, 32])
+if let Some(layers) = config.gpu_layers.as_ref() {
+    params.set_gpu_layer_ids(layers);
+}
+```
+
+**YAML Schema**:
+```yaml
+llm:
+  gpu_offload: 50  # 0-100 percentage
+  # OR
+  gpu_layers: [0, 1, 2, 4, 8, 16, 32]  # Per-layer control
+  split_mode: "layer"  # or "row"
+  main_gpu: 0
+```
+
+**Requirements Coverage**: R0038 - Hardware acceleration
+
+---
+
+### 21.4 Model Load Lifecycle
+
+**Requirement**: Generate code that properly handles the model loading sequence with error recovery.
+
+**Why Needed**:
+- Proper model loading involves multiple steps
+- Errors can occur at any step
+- Resources must be cleaned up on failure
+
+**Transpiler Responsibilities**:
+1. Generate sequence: backend init → model load → kv-cache allocate → vocab load
+2. Handle failures at each step with appropriate error types
+3. Clean up resources if loading fails
+4. Use proper RAII patterns (Drop trait)
+
+**Generated Code Pattern**:
+```rust
+use llama_cpp_2::{LlamaBackend, LlamaModel, LlamaContext};
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum ModelLoadError {
+    #[error("Backend initialization failed: {0}")]
+    BackendInitError(String),
+    #[error("Model load failed: {0}")]
+    ModelLoadError(String),
+    #[error("Context initialization failed: {0}")]
+    ContextInitError(String),
+}
+
+fn load_model(path: &str) -> Result<LlamaCppModel, ModelLoadError> {
+    // Step 1: Backend init
+    let backend = LlamaBackend::init(true)
+        .map_err(|e| ModelLoadError::BackendInitError(e.to_string()))?;
+
+    // Step 2: Model load
+    let model = LlamaModel::load_from_file(path, &params)
+        .map_err(|e| {
+            ModelLoadError::ModelLoadError(e.to_string())
+        })?;
+
+    // Step 3: Context allocate
+    let ctx = LlamaContext::new_with_model(&model, &context_params)
+        .map_err(|e| ModelLoadError::ContextInitError(e.to_string()))?;
+
+    Ok(LlamaCppModel { backend, model, ctx })
+}
+```
+
+**YAML Schema**:
+```yaml
+llm:
+  model_path: "/path/to/model.gguf"
+  n_ctx: 8192
+  n_batch: 512
+```
+
+**Requirements Coverage**: R0042 - Model lifecycle
+
+---
+
+### 21.5 Multi-Instance Model Control
+
+**Requirement**: Generate code that supports loading multiple model instances simultaneously.
+
+**Why Needed**:
+- Use cases: Mix different models, parallel inference, A/B testing
+- Llama.cpp supports multiple instances via separate structs
+- Users need to switch between models at runtime
+
+**Transpiler Responsibilities**:
+1. Parse multi-instance configuration from YAML
+2. Generate a ModelManager struct with HashMap storage
+3. Provide methods for model selection and switching
+4. Ensure thread-safe access (Arc<RwLock>)
+
+**Generated Code Pattern**:
+```rust
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+struct ModelManager {
+    models: Arc<RwLock<HashMap<String, LlamaCppModelProvider>>>,
+}
+
+impl ModelManager {
+    pub async fn get_model(&self, name: &str) -> Result<LlamaCppModelProvider> {
+        let models = self.models.read().await;
+        models.get(name)
+            .cloned()
+            .ok_or_else(|| ModelNotFound(name.to_string()))
+    }
+
+    pub async fn load_model(&mut self, name: &str, config: ModelConfig)
+        -> Result<()> {
+        let provider = LlamaCppModelProvider::new(config).await?;
+        let mut models = self.models.write().await;
+        models.insert(name.to_string(), provider);
+        Ok(())
+    }
+}
+
+// Usage in generated workflow
+let code_generator = manager.get_model("code-model").await?;
+let plan = code_generator.generate(&prompt).await?;
+```
+
+**YAML Schema**:
+```yaml
+models:
+  - name: "code-model"
+    provider: "llamacpp"
+    model_path: "code-model.gguf"
+    gpu_offload: 100
+
+  - name: "fast-model"
+    provider: "llamacpp"
+    model_path: "fast-model.gguf"
+    gpu_offload: 50
+```
+
+**Requirements Coverage**: R0042 - Model lifecycle
+
+---
+
+### 21.6 Context Length and KV-Cache Budgeting
+
+**Requirement**: Generate code that configures context window size and KV-cache allocation.
+
+**Why Needed**:
+- Larger context windows enable longer conversations
+- KV-cache allocation determines memory usage
+- Different models support different max context lengths
+
+**Transpiler Responsibilities**:
+1. Parse context length from YAML
+2. Generate llama.cpp parameters: `n_ctx`, `n_pos`
+3. Validate against model's supported context length
+4. Provide KV-cache budgeting options
+
+**Generated Code Pattern**:
+```rust
+use llama_cpp_2::LlamaContextParams;
+
+// Context length configuration (generated from YAML: n_ctx: 8192)
+let mut params = LlamaContextParams::default();
+params.set_n_ctx(8192);
+
+// KV-cache budgeting (optional optimization)
+params.set_n_past(4096);  // Only keep last 4096 tokens in cache
+params.set_n_eval(0);
+```
+
+**YAML Schema**:
+```yaml
+llm:
+  n_ctx: 8192  # Context length
+  n_batch: 512  # Batch size for prompt processing
+  n_past: 4096  # KV-cache budget (optional)
+```
+
+**Requirements Coverage**: R0038 - Hardware acceleration
+
+---
+
+### 21.7 Streaming and Progressive Delivery
+
+**Requirement**: Generate code that produces text incrementally as tokens are produced.
+
+**Why Needed**:
+- Improves perceived latency and responsiveness
+- Enables real-time UI updates
+- Allows early termination or modification
+
+**Transpiler Responsibilities**:
+1. Parse streaming configuration from YAML
+2. Generate streaming implementation with tokio-stream
+3. Handle EOS token detection
+4. Support early termination conditions
+
+**Generated Code Pattern**:
+```rust
+use tokio_stream::{Stream, StreamExt};
+use llama_cpp_2::{LlamaContext, LlamaToken};
+
+async fn generate_stream(
+    &self,
+    prompt: &str,
+) -> impl Stream<Item = Result<String>> {
+    let tokens = tokenize(prompt);
+    let mut output = String::new();
+
+    for token in tokens {
+        // Decode token and yield to stream
+        let text = token_to_string(token);
+        yield Ok(text);
+
+        // Check for EOS
+        if token == LlamaToken::eos(self.ctx) {
+            break;
+        }
+
+        output.push_str(&text);
+    }
+}
+
+// Usage in generated workflow
+let mut stream = model.generate_stream(&prompt).await?;
+while let Some(token) = stream.next().await {
+    println!("{}", token?);
+}
+```
+
+**YAML Schema**:
+```yaml
+llm:
+  streaming: true
+  max_tokens: 1024
+  stop_sequences: ["\n\n", "---"]
+```
+
+**Requirements Coverage**: R0036 - Model abstraction
+
+---
+
+### 21.8 Parameter Presets and Profiles
+
+**Requirement**: Generate code that applies pre-defined configurations for common scenarios.
+
+**Why Needed**:
+- Users don't want to manually configure every parameter
+- Presets encapsulate best practices
+- Speed vs. quality tradeoffs are common concerns
+
+**Transpiler Responsibilities**:
+1. Parse preset names from YAML
+2. Map preset names to llama.cpp parameter sets
+3. Allow overrides of preset values
+4. Define common presets (fast, balanced, quality, quality-low-memory)
+
+**Generated Code Pattern**:
+```rust
+#[derive(Debug, Clone, Copy)]
+pub enum LlamaCppPreset {
+    Fast { n_gpu_layers: u32, n_ctx: u32 },
+    Balanced { n_gpu_layers: u32, n_ctx: u32 },
+    Quality { n_gpu_layers: u32, n_ctx: u32 },
+    QualityLowMemory { n_gpu_layers: u32, n_ctx: u32 },
+}
+
+impl LlamaCppPreset {
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "fast" => LlamaCppPreset::Fast {
+                n_gpu_layers: 30,
+                n_ctx: 2048,
+            },
+            "balanced" => LlamaCppPreset::Balanced {
+                n_gpu_layers: 50,
+                n_ctx: 4096,
+            },
+            "quality" => LlamaCppPreset::Quality {
+                n_gpu_layers: 999,
+                n_ctx: 8192,
+            },
+            _ => LlamaCppPreset::Balanced {
+                n_gpu_layers: 50,
+                n_ctx: 4096,
+            },
+        }
+    }
+}
+```
+
+**YAML Schema**:
+```yaml
+llm:
+  preset: "quality"  # or "fast", "balanced", "quality-low-memory"
+  # Override specific parameters
+  temperature: 0.7
+  top_p: 0.9
+```
+
+**Requirements Coverage**: R0038 - Hardware acceleration
+
+---
+
+### 21.9 Benchmark Hooks for Tuning
+
+**Requirement**: Generate code that collects performance metrics for tuning and optimization.
+
+**Why Needed**:
+- Users need to tune parameters for optimal performance
+- Benchmarking helps identify which layers to offload
+- Token generation speed metrics enable automated performance testing
+
+**Transpiler Responsibilities**:
+1. Parse benchmark configuration from YAML
+2. Generate timing hooks around llama.cpp decode calls
+3. Provide metrics collection (tokens/sec, memory usage, latency)
+4. Allow benchmark results to be logged or stored
+
+**Generated Code Pattern**:
+```rust
+use std::time::Instant;
+use std::collections::HashMap;
+
+pub struct BenchmarkMetrics {
+    pub tokens_generated: usize,
+    pub tokens_per_second: f64,
+    pub peak_memory_mb: f64,
+    pub latency_ms: u64,
+}
+
+fn generate_with_benchmark(&self, prompt: &str) -> Result<String, BenchmarkMetrics> {
+    let start_time = Instant::now();
+    let mut total_tokens = 0;
+
+    // ... generation loop
+
+    let duration = start_time.elapsed();
+    let tokens_per_second = (total_tokens as f64) / duration.as_secs_f64();
+
+    Ok((
+        generated_text,
+        BenchmarkMetrics {
+            tokens_generated: total_tokens,
+            tokens_per_second,
+            peak_memory_mb: get_gpu_memory_usage(),
+            latency_ms: duration.as_millis() as u64,
+        },
+    ))
+}
+
+// Usage in generated workflow
+let (result, metrics) = model.generate_with_benchmark(&prompt).await?;
+if metrics.tokens_per_second < 10.0 {
+    warn!("Slow generation: {} t/s", metrics.tokens_per_second);
+}
+```
+
+**YAML Schema**:
+```yaml
+llm:
+  benchmark: true
+  metrics:
+    - tokens_per_second
+    - latency
+    - memory_usage
+  output_file: "./benchmark_results.json"
+```
+
+**Requirements Coverage**: R0038 - Hardware acceleration
+
+---
+
+### 21.10 Safe Unload on Cancellation
+
+**Requirement**: Generate code that properly cleans up resources when models are unloaded or cancelled.
+
+**Why Needed**:
+- Prevents resource leaks (GPU memory, system memory)
+- Ensures backend is properly deinitialized
+- Critical for long-running workflows and multi-instance scenarios
+
+**Transpiler Responsibilities**:
+1. Generate Drop implementation for model structs
+2. Implement graceful shutdown on cancellation signals
+3. Ensure model is freed before backend deinitialization
+4. Handle nested models/unloads properly
+
+**Generated Code Pattern**:
+```rust
+impl Drop for LlamaCppModelProvider {
+    fn drop(&mut self) {
+        // Step 1: Free context first (depends on model)
+        drop(std::mem::take(&mut self.ctx));
+
+        // Step 2: Free model (depends on backend)
+        drop(std::mem::take(&mut self.model));
+
+        // Step 3: Backend cleanup (no longer any models)
+        drop(std::mem::take(&mut self.backend));
+    }
+}
+
+// Graceful shutdown on cancellation
+async fn generate_with_cleanup(&self, prompt: &str) -> Result<String> {
+    let mut stream = self.generate_stream(prompt).await?;
+    let mut buffer = String::new();
+
+    loop {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                // Safe cleanup on cancellation
+                return Ok(buffer); // Return partial result
+            }
+            token = stream.next() => {
+                match token {
+                    Some(Ok(text)) => buffer.push_str(&text),
+                    Some(Err(e)) => return Err(e),
+                    None => break, // End of stream
+                }
+            }
+        }
+    }
+
+    Ok(buffer)
+}
+```
+
+**YAML Schema**:
+```yaml
+llm:
+  cleanup_on_cancel: true  # Default: true
+  partial_results: true     # Return partial results on cancellation
+```
+
+**Requirements Coverage**: R0042 - Model lifecycle
+
+---
+
+### 21.11 YAML Schema for Llama.cpp Integration
+
+**Complete Schema Example**:
+```yaml
+# Model provider configuration
+llm:
+  provider: "llamacpp"  # Required: llamacpp, lmstudio, ollama, openai
+
+  # Model specification
+  model_path: "/path/to/model.gguf"  # Required for llamacpp
+
+  # Backend selection
+  backend: "vulkan"  # vulkan, cuda, metal, cpu
+
+  # GPU offload
+  gpu_offload: 50  # 0-100 percentage
+  # OR per-layer:
+  gpu_layers: [0, 1, 2, 4, 8, 16, 32]
+  split_mode: "layer"  # layer, row
+  main_gpu: 0
+
+  # Context configuration
+  n_ctx: 8192  # Context length
+  n_batch: 512   # Batch size
+  n_past: 4096  # KV-cache budget (optional)
+
+  # Generation parameters
+  preset: "balanced"  # fast, balanced, quality, quality-low-memory
+  temperature: 0.7
+  top_p: 0.9
+  top_k: 40
+  max_tokens: 1024
+  stop_sequences: ["\n\n", "---"]
+
+  # Streaming
+  streaming: true  # Enable streaming generation
+
+  # Benchmarking
+  benchmark: false  # Enable performance metrics
+  metrics:
+    - tokens_per_second
+    - latency
+    - memory_usage
+
+  # Cleanup
+  cleanup_on_cancel: true  # Clean up on cancellation
+  partial_results: true     # Return partial results
+
+# Multi-instance configuration
+models:
+  - name: "code-model"
+    provider: "llamacpp"
+    model_path: "/models/code-model.gguf"
+    backend: "vulkan"
+    gpu_offload: 100
+
+  - name: "fast-model"
+    provider: "llamacpp"
+    model_path: "/models/fast-model.gguf"
+    backend: "vulkan"
+    gpu_offload: 50
+    preset: "fast"
+```
+
+---
+
+### 21.12 Transpiler-Specific Scope Clarification
+
+**These features ARE transpiler-specific because**:
+1. **Code Generation**: The transpiler must generate Rust code implementing these features
+2. **Configuration Parsing**: The transpiler must parse YAML configurations for these features
+3. **Trait Implementation**: The transpiler must generate ModelProvider trait implementations
+4. **Lifecycle Management**: The transpiler must generate resource management code
+5. **Error Handling**: The transpiler must generate proper error types and handling
+
+**These features are NOT runtime-only**:
+- The transpiler generates the code that implements these features
+- The runtime (AgentSDK) doesn't know about llama.cpp specifics
+- The generated code provides the abstraction layer between AgentSDK and llama.cpp
+
+**Coverage Summary**:
+- **ModelProvider adapter** (21.1): Code generation for trait implementation
+- **Vulkan backend** (21.2): Code generation for backend initialization
+- **GPU offload** (21.3): Code generation for GPU memory management
+- **Model lifecycle** (21.4): Code generation for resource management
+- **Multi-instance** (21.5): Code generation for instance management
+- **Context management** (21.6): Code generation for context configuration
+- **Streaming** (21.7): Code generation for async streaming
+- **Presets** (21.8): Code generation for parameter mapping
+- **Benchmarking** (21.9): Code generation for metrics collection
+- **Safe unload** (21.10): Code generation for cleanup logic
+
+**Total**: 10/10 llama.cpp Vulkan integration features covered
+
+---
+
+**Document Status**: Complete
+**Last Updated**: 2026-03-06
+**Version**: 5.0
+
+---
+
+## 22. Complete Transpiler Feature Matrix
+
+### 22.1 Transpiler-Specific Features (R0054-R0075)
+
+| Feature ID | Feature Name | Status | Plan Reference | Implementation Reference |
+|------------|--------------|---------|----------------|------------------------|
+| R0054 | Schema Definition | ✅ Documented | Research Plan: YAML Schema Design | Impl Plan: P1-T1 |
+| R0055 | Schema Evolution | ✅ Documented | Research Plan: YAML Schema Design | Impl Plan: P4-T5 |
+| R0056 | Static Validation | ✅ Documented | Research Plan: Validation & Linting | Impl Plan: P3-T1 |
+| R0057 | Linting | ✅ Documented | Research Plan: Validation & Linting | Impl Plan: P3-T2 |
+| R0058 | Parser & AST | ✅ Documented | Research Plan: Parser & AST Design | Impl Plan: P1-T2 |
+| R0059 | Typed WorkflowIR | ✅ Documented | Research Plan: Parser & AST Design | Impl Plan: P1-T3 |
+| R0060 | Deterministic Normalization | ✅ Documented | Research Plan: Caching & Performance | Impl Plan: P1-T4 |
+| R0061 | AgentSDK Mapping | ✅ Documented | Research Plan: Code Generation Patterns | Impl Plan: P2-T2 |
+| R0062 | Custom Tool Bindings | ✅ Documented | Research Plan: Code Generation Patterns | Impl Plan: P2-T3 |
+| R0063 | Project Layout Generator | ✅ Documented | Research Plan: Project Layout | Impl Plan: P2-T5 |
+| R0064 | Packaging Strategy Selector | ✅ Documented | Research Plan: Project Layout | Impl Plan: P2-T6 |
+| R0065 | Runtime Hooks Generation | ✅ Documented | Research Plan: Code Generation Patterns | Impl Plan: P2-T4 |
+| R0066 | Effect Preview Emission | ✅ Documented | Research Plan: Validation & Linting | Impl Plan: P3-T3 |
+| R0067 | Verifier Integration Stubs | ✅ Documented | Research Plan: Sandboxing & Security | Impl Plan: P3-T4 |
+| R0068 | Deterministic Formatting | ✅ Documented | Research Plan: Testing Strategies | Impl Plan: P1-T4 |
+| R0069 | Build Orchestration | ✅ Documented | Implementation Plan: P4-T3 | Impl Plan: P4-T3 |
+| R0070 | Golden Tests | ✅ Documented | Research Plan: Testing Strategies | Impl Plan: P4-T1 |
+| R0071 | Property Tests | ✅ Documented | Research Plan: Testing Strategies | Impl Plan: P4-T2 |
+| R0072 | Compilation Caching | ✅ Documented | Research Plan: Caching & Performance | Impl Plan: P4-T4 |
+| R0073 | Sandboxed Codegen | ✅ Documented | Research Plan: Sandboxing & Security | Impl Plan: P3-T5 |
+| R0074 | Capability-Aware Lowering | ✅ Documented | Research Plan: Caching & Performance | Impl Plan: P4-T6 |
+| R0075 | Schema Docs Generator | ✅ Documented | Implementation Plan: P4-T7 | Impl Plan: P4-T7 |
+
+**Coverage**: 22/22 transpiler-specific features (100%)
+
+### 22.2 Llama.cpp Vulkan Integration Features
+
+| Feature | Name | Status | Plan Reference | Implementation Reference |
+|----------|-------|---------|----------------|------------------------|
+| L1 | ModelProvider Adapter | ✅ Documented | Research Plan: ModelProvider Integration | Impl Plan: P2_5-T1 |
+| L2 | Vulkan Backend Enablement | ✅ Documented | Research Plan: ModelProvider Integration | Impl Plan: P2_5-T2 |
+| L3 | GPU Layer Offload Control | ✅ Documented | Research Plan: ModelProvider Integration | Impl Plan: P2_5-T3 |
+| L4 | Model Load Lifecycle | ✅ Documented | Research Plan: ModelProvider Integration | Impl Plan: P2_5-T4 |
+| L5 | Multi-Instance Control | ✅ Documented | Research Plan: ModelProvider Integration | Impl Plan: P2_5-T5 |
+| L6 | Context Length & KV-Cache | ✅ Documented | Research Plan: ModelProvider Integration | Impl Plan: P2_5-T6 |
+| L7 | Streaming & Progressive Delivery | ✅ Documented | Research Plan: ModelProvider Integration | Impl Plan: P2_5-T7 |
+| L8 | Parameter Presets & Profiles | ✅ Documented | Research Plan: ModelProvider Integration | Impl Plan: P2_5-T8 |
+| L9 | Benchmark Hooks for Tuning | ✅ Documented | Research Plan: ModelProvider Integration | Impl Plan: P2_5-T9 |
+| L10 | Safe Unload on Cancellation | ✅ Documented | Research Plan: ModelProvider Integration | Impl Plan: P2_5-T10 |
+
+**Coverage**: 10/10 llama.cpp Vulkan integration features (100%)
+
+### 22.3 Model Layer Features (R0036-R0042)
+
+| Feature ID | Feature Name | Status | Plan Reference | Implementation Reference |
+|------------|--------------|---------|----------------|------------------------|
+| R0036 | Model Abstraction | ✅ Documented | Research Plan: ModelProvider Integration | Impl Plan: P2_5-T1 |
+| R0037 | Provider Support | ✅ Documented | Research Plan: ModelProvider Integration | Impl Plan: P2_5-T1 |
+| R0038 | Hardware Acceleration | ✅ Documented | Research Plan: ModelProvider Integration | Impl Plan: P2_5-T2, P2_5-T3, P2_5-T6, P2_5-T8, P2_5-T9 |
+| R0042 | Model Lifecycle | ✅ Documented | Research Plan: ModelProvider Integration | Impl Plan: P2_5-T4, P2_5-T5, P2_5-T10 |
+
+**Coverage**: 4/4 model layer features (100%)
+
+---
+
+**Document Status**: Complete
+**Last Updated**: 2026-03-06
+**Version**: 5.0
+
 
 
 

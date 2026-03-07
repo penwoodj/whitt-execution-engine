@@ -221,7 +221,87 @@ Each stage is independent, deterministic, and testable.
 
 ---
 
-### Layer 6: CLI & Documentation
+### Layer 6: LLM Backend Integration
+
+**Components:**
+- **ModelProvider Adapter** (`model_provider.rs`)
+  - AutoAgents ModelProvider trait implementation
+  - llama.cpp Rust bindings integration
+  - generate() and stream() methods
+  - Error handling and type safety
+
+- **Vulkan Backend** (`vulkan.rs`)
+  - Vulkan backend initialization
+  - GPU device selection
+  - Backend configuration parsing
+  - Feature flag support
+
+- **GPU Offload** (`gpu_offload.rs`)
+  - Layer offload configuration
+  - Percentage-based offload
+  - Per-layer offload support
+  - Memory budget validation
+
+- **Model Lifecycle** (`model_lifecycle.rs`)
+  - Backend initialization sequence
+  - Model load with error handling
+  - KV-cache allocation
+  - Vocabulary loading
+  - Resource cleanup on failure
+
+- **Model Manager** (`model_manager.rs`)
+  - Multi-instance configuration
+  - Instance selection logic
+  - Model switching support
+  - Thread-safe access (Arc<RwLock>)
+
+- **Context Management** (`context.rs`)
+  - Context length configuration
+  - KV-cache budgeting
+  - Cache eviction strategy
+  - Context length validation
+
+- **Streaming Generator** (`streaming.rs`)
+  - Token stream implementation
+  - Progressive delivery
+  - EOS token detection
+  - Early termination support
+
+- **Parameter Presets** (`presets.rs`)
+  - Preset definitions (fast, balanced, quality, etc.)
+  - Profile configuration parser
+  - Preset-to-parameter mapping
+  - Override support
+
+- **Benchmark Hooks** (`benchmark.rs`)
+  - Timing instrumentation
+  - Token generation metrics
+  - Memory usage tracking
+  - Metrics reporting
+
+- **Cleanup Handlers** (`cleanup.rs`)
+  - Drop implementation for model structs
+  - Cancellation signal handling
+  - Graceful shutdown logic
+  - Resource cleanup order
+
+**Dependencies:**
+- `llama-cpp-2`: llama.cpp Rust bindings with Vulkan support
+- `vulkan-rs`: GPU device querying
+- `tokio-stream`: Async streaming support
+- `instant`: Timing for benchmarks
+- Code generation layer
+
+**Outputs:**
+- ModelProvider trait implementation
+- Vulkan-enabled model instances
+- GPU offload configurations
+- Streaming text generation
+- Performance metrics
+
+---
+
+### Layer 7: CLI & Documentation
 
 **Components:**
 - **CLI** (`main.rs`)
@@ -282,14 +362,22 @@ Each stage is independent, deterministic, and testable.
    - AgentSDK mapping layer generates trait calls
    - Tool bindings generate trait implementations
    - Runtime hooks generate instrumentation
+   - ModelProvider adapter generates llama.cpp integration
    ↓
-9. Layout generator creates Cargo project structure
+9. LLM backend generation
+   - Vulkan backend initialization code
+   - GPU offload configuration
+   - Context length and KV-cache setup
+   - Streaming generation logic
+   - Model lifecycle management
    ↓
-10. Packaging selector applies strategy (standalone/import/inline)
+10. Layout generator creates Cargo project structure
     ↓
-11. Build orchestration compiles generated code
+11. Packaging selector applies strategy (standalone/import/inline)
     ↓
-12. Binary is output to user
+12. Build orchestration compiles generated code
+    ↓
+13. Binary is output to user
 ```
 
 ### Caching Flow
@@ -331,7 +419,17 @@ src/
 ├── build.rs            # Build orchestration
 ├── cache.rs           # Compilation caching
 ├── migrate.rs          # Schema migrations
-└── docs.rs            # Documentation generation
+├── docs.rs            # Documentation generation
+├── model_provider.rs   # ModelProvider adapter for llama.cpp
+├── vulkan.rs          # Vulkan backend initialization
+├── gpu_offload.rs     # GPU layer offload control
+├── model_lifecycle.rs  # Model load/unload lifecycle
+├── model_manager.rs    # Multi-instance model control
+├── context.rs         # Context length and KV-cache budgeting
+├── streaming.rs       # Streaming and progressive delivery
+├── presets.rs        # Parameter presets and profiles
+├── benchmark.rs       # Benchmark hooks for tuning
+└── cleanup.rs        # Safe unload on cancellation
 
 templates/
 ├── agent.askama         # Agent creation template
@@ -459,7 +557,7 @@ examples/
 
 ## References
 
-- **Requirements**: R0054-R0075 (Transpiler Internals)
+- **Requirements**: R0054-R0075 (Transpiler Internals), R0036-R0042 (Model Layer)
 - **Research Plan**: `transpiler_research_plan.yml`
 - **Implementation Plan**: `transpiler_implementation_plan.yml`
 - **Related Projects**:
@@ -467,3 +565,6 @@ examples/
   - Argo Workflows (YAML DSL)
   - Prefect (flow schemas)
   - Rust compiler (AST/IR design)
+  - llama.cpp (C++ inference engine)
+  - llama-cpp-2 (Rust bindings)
+  - AutoAgents (ModelProvider trait)
