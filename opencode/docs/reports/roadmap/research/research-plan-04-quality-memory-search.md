@@ -39,8 +39,23 @@ Scope:
 - No deprecated libraries without warnings.
 - All sources must include a relevance rationale.
 
-## Next Steps
+- ## Next Steps
 - Synthesize concrete recommendations and validation tests.
+- Produce updated evidence and ADR cross-links.
+
+## Synthesis and Implementation Plan Updates (Plan 04)
+- ADR-informed blueprint:
+  - Verifier/Repair Loops: implement layered verifier with deterministic repair steps, idempotent replays, and artifact generation for each run.
+  - Local Memory: design a bounded in-memory store with eviction policy (e.g., LRU) and optional spill-to-disk for large artifacts; ensure zero-copy handling where possible.
+  - Retrieval and Search: implement a two-plane retrieval pipeline – local memory index (text and structured data) plus optional remote vector-search for semantic retrieval; gate remote access by policy flags.
+  - Scraping: enforce robots policy, site allowlists, and provenance capture; store scrape artifacts with timestamps and source metadata.
+  - Benchmarking: add Criterion benchmarks for hot paths (indexing, search, retrieval latency) with baseline comparisons; define thresholds aligned to v0.1.0 acceptance criteria.
+  - Observability: instrument critical paths with OpenTelemetry (traces/metrics) and expose dashboards for memory, latency, and failure rates.
+- Tradeoffs and decision rationale:
+  - In-memory first approach reduces latency but increases memory pressure; mitigated by bounded caches and eviction.
+  - Local vs remote retrieval balance offers determinism and privacy guarantees; remote retrieval enabled behind policy gates.
+- Acceptance criteria mapping (v0.1.0): ensure memory usage stays within bounds, benchmarks show ≤X% regression, and observability data is emitted for key paths.
+- Next steps: implement a lightweight prototype and run initial benchmarks; iteratively update reports as ADRs evolve.
 - Produce evidence CSVs and attach to the plan.
 
 ## ADR Readings Integrated
