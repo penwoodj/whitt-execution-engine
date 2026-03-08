@@ -1,82 +1,97 @@
 # YAML to Rust Agent SDK Transpiler
 
-## Make Local LLMs Actually Useful
+## What It Is
 
-**Write a YAML workflow → Get a fully functional Rust agent running locally in seconds.**
+Write a YAML workflow → Get compiled Rust code that runs local LLMs.
 
-No API keys. No cloud dependencies. Just you, a local LLM, and an agent that can actually do things.
+This is a compiler. You define workflows in YAML, it generates Rust code with type-safe execution, built-in tools, and autonomous capabilities.
 
 ---
 
-## The Problem
+## Why
 
-Local LLMs are impressive, but they're stuck in chat interfaces. To make them truly useful, they need:
+Local LLMs are powerful but stuck in chat. To be useful, they need:
 
-- **Multi-step workflows** (not just single prompts)
-- **Access to tools** (file operations, web scraping, shell commands)
-- **State management** (memory across tasks)
-- **Parallel execution** (do multiple things at once)
+- **Multi-step workflows** (sequences with loops, branches, conditions)
+- **Access to tools** (files, web, shell commands)
+- **Queue and scheduler** (prioritize work, pause, resume, cancel)
+- **Human gates** (confirm destructive actions, preview changes)
+- **Auditability** (every run logged, reproducible, inspectable)
 
-Building this in Rust manually is complex. Writing agent code takes time. Debugging it takes longer.
+Building this in Rust manually takes time. Debugging takes longer.
 
-**This transpiler bridges that gap.**
+This transpiler bridges that gap.
 
 ---
 
 ## How It Works
 
-You define an agentic workflow in human-readable YAML. The transpiler converts it into working Rust code using production-ready Agent SDK libraries.
+You define a workflow in YAML:
 
 ```yaml
 agents:
-  - name: file-analyzer
-    description: Analyzes code and finds patterns
+  - name: analyzer
     model: ollama://llama3.2
-    tools:
-      - file-read
-      - file-search
-      - grep
-
-  - name: web-scraper
-    description: Scrapes web content for research
-    model: ollama://llama3.2
-    tools:
-      - web-fetch
-      - web-scrape
+    tools: [file-read, grep, web-scrape]
 
 workflow:
   - step: Analyze codebase
-    agent: file-analyzer
+    agent: analyzer
     input:
       path: ./src/
-      pattern: "async function"
+      pattern: "async fn"
 
   - step: Research documentation
-    agent: web-scraper
+    agent: analyzer
     input:
-      urls:
-        - https://docs.rs/tokio
-        - https://docs.rs/serde
+      urls: [https://docs.rs/tokio]
 
   - step: Generate report
-    agent: file-analyzer
-    input:
-      template: report.md.j2
-      output: ./analysis-report.md
+    agent: analyzer
+    output: ./analysis.md
 ```
 
-The transpiler generates Rust code with:
-- **Type-safe agent definitions** (derive macros from AutoAgents)
-- **Tool implementations** (file read/write, web scraping, shell commands)
-- **Async execution** (tokio runtime)
-- **Memory management** (sliding window with configurable backends)
-- **Error handling** (thiserror + anyhow patterns)
+The transpiler compiles this to Rust code with:
+- Type-safe agent definitions (AutoAgents SDK)
+- Tool implementations (file, web, shell operations)
+- Async execution (tokio runtime)
+- Queue and scheduler (prioritized work, cancellation)
+- Memory management (sliding window, configurable backends)
+- Observability (logs, metrics, provenance)
+
+---
+
+## Vision
+
+### Compiler-Centered, Local-First
+
+- YAML is the source language
+- Rust WorkflowIR is the compilation target
+- `.glyphnova/` stores all artifacts (specs, runs, logs, hashes)
+- Everything runs locally, no cloud dependencies
+
+### Queue, Scheduler, Safety
+
+Every workflow runs in a work container:
+
+- Chat sessions are scoped execution contexts
+- Queue items have states (pending, running, paused, completed)
+- Scheduler handles priorities, retries, persistence
+- Risky operations require human confirmation
+- File mutations are staged with preview diffs
+
+### Autonomous Loops (Future)
+
+Workflows can run autonomously within bounds:
+
+- Declared modes with bounded goals and stop conditions
+- Checkpoints and validation thresholds
+- Human override always available
+- Metrics drive improvements (performance, quality, trust)
 
 ---
 
 ## Built-in Tools
-
-Out of the box, generated agents have access to:
 
 ### File Operations
 - `file-read` - Read file contents
@@ -89,7 +104,7 @@ Out of the box, generated agents have access to:
 ### Web Capabilities
 - `web-fetch` - Fetch web pages
 - `web-scrape` - Extract structured data from HTML
-- `web-search` - Search the web via APIs
+- `web-search` - Search web via APIs
 
 ### Shell Operations
 - `shell-exec` - Execute shell commands with timeout
@@ -109,68 +124,52 @@ Out of the box, generated agents have access to:
 | 500 lines YAML | ~2ms | 1-2s | **~2s** |
 | 5,000 lines YAML | ~5ms | 2-8s | **~2-8s** |
 
-**Benchmarks based on**: serde-saphyr (89 MB/s) + Askama (5-10x faster than interpreted) + tokio (modern hardware)
+Benchmarks: serde-saphyr (89 MB/s) + Askama (5-10x faster than interpreted) + tokio
 
 ---
 
 ## Tech Stack
 
-Based on deep research for transpilation speed and LLM maintainability:
-
 | Component | Library | Why? |
 |-----------|----------|-------|
-| **YAML Parsing** | serde-saphyr | 1.5x faster than deprecated serde_yaml, built-in schema validation |
-| **Code Generation** | Askama | Pre-compiled templates, 5-10x faster than Tera/Handlebars |
-| **Agent SDK** | AutoAgents | Production-ready, 11+ LLM providers, excellent docs |
-| **Async Runtime** | tokio | Industry standard, battle-tested |
-| **Error Handling** | thiserror + anyhow | Type-safe for libraries, convenient for apps |
+| YAML Parsing | serde-saphyr | 1.5x faster than serde_yaml, schema validation |
+| Code Generation | Askama | Pre-compiled templates, 5-10x faster |
+| Agent SDK | AutoAgents | Production-ready, 11+ LLM providers |
+| Async Runtime | tokio | Industry standard, battle-tested |
+| Error Handling | thiserror + anyhow | Type-safe for libraries, convenient for apps |
 
 ---
 
-## YAML Schema Design
+## Multi-Model Support
 
-The schema is **intentionally specific and human-readable**:
+Works with local LLM providers:
 
-- **Verbs describe actions** (`analyze`, `scrape`, `generate`)
-- **Nouns represent resources** (`codebase`, `documentation`, `report`)
-- **Compositional patterns** (workflows as sequences of steps)
-- **Clear type constraints** (agent names, tool names, model URIs)
+- Ollama (ollama://model-name)
+- LM Studio (lmstudio://model-name)
+- llama.cpp (llamacpp://path/to/model.gguf)
+- OpenAI-compatible (openai://model-name, for cloud fallback)
 
-This isn't a generic configuration format—it's a **domain-specific language for agentic workflows**.
-
----
-
-## Example Use Case
-
-You want to analyze a Rust codebase and generate a refactoring plan:
-
-1. **Define the workflow in YAML** (2 minutes)
-2. **Run the transpiler** (2 seconds)
-3. **Execute the generated agent** (instant startup, local LLM)
-4. **Get the refactoring plan** (parallel analysis, tool access)
-
-No API keys. No cloud services. Just fast, local, capable agents.
+Automatic model installation, verification, and benchmarking coming in v0.2.0.
 
 ---
 
-## Architecture
+## Project Structure
 
-### Branching Strategy
-- `main`: Production releases
-- `dev`: Integration branch
-- `feature-workspace`: Feature development
-- `initial-creation`: Initial setup
-
-### Project Structure
 ```
 src/
   main.rs           # CLI entry point
   lib.rs            # Library API
   parser.rs         # YAML parsing (serde-saphyr)
   generator.rs      # Code generation (Askama)
+  scheduler.rs      # Queue and scheduler
   templates/        # Rust code templates
   tools/            # Built-in tool implementations
   agents/           # Agent scaffolding
+
+.glyphnova/         # System-of-record
+  workflows/        # Workflow specs and IR
+  runs/             # Execution artifacts, logs, hashes
+  metrics/          # Performance and quality metrics
 ```
 
 ---
@@ -179,29 +178,66 @@ src/
 
 🚧 **In Development**
 
+Roadmap by phase (see ADRs in `opencode/docs/reports/roadmap/`):
+
+**Phase 1: Foundation** (ADR-0001)
 - [x] Research complete (tech stack selection)
 - [x] Repository structure
 - [ ] YAML schema specification
 - [ ] Parser implementation
-- [ ] Code generator (Askama templates)
-- [ ] Tool implementations
-- [ ] Agent scaffolding
+- [ ] WorkflowIR compiler
+- [ ] .glyphnova/ system-of-record
+
+**Phase 2: MVP Queue & Scheduler** (ADR-0002)
+- [ ] Chat session work containers
+- [ ] Queue state machine
+- [ ] Scheduler (prioritize, cancel, retry, persist)
+- [ ] Human-gated safety (confirmations, staged diffs)
+- [ ] CLI control surface
+
+**Phase 3: CLI & Backends** (ADR-0003)
 - [ ] CLI interface
-- [ ] Documentation
-- [ ] Test suite
+- [ ] Backend abstraction (Ollama, llama.cpp, LM Studio)
+- [ ] Networking boundary (local-first defaults)
+
+**Phase 4: UI & Visualization** (ADR-0004)
+- [ ] Queue visualization
+- [ ] Graph workflow navigation
+- [ ] Real-time execution monitoring
+
+**Phase 5: Quality Loops** (ADR-0005)
+- [ ] Generate-verify-repair cycles
+- [ ] Convergence loops
+- [ ] Benchmark suite integration
+
+**Phase 6: Memory & Search** (ADR-0006)
+- [ ] Sliding window memory
+- [ ] Vector search integration
+- [ ] Context compression
+
+**Phase 7: Automation** (ADR-0007)
+- [ ] Cron scheduling
+- [ ] Git automation
+- [ ] Refinement loops
+
+**Phase 8: Autonomy** (ADR-0008)
+- [ ] Bounded autonomous loops
+- [ ] Metrics-driven UX
+- [ ] Human override controls
 
 ---
 
-## Contributing
+## Example Use Case
 
-This project is designed to be **maintainable by AI agents**. If you're contributing:
+Analyze a Rust codebase and generate a refactoring plan:
 
-- Follow LLM-friendly Rust patterns (explicit lifetimes, simple trait bounds)
-- Keep functions small and well-documented
-- Use domain-driven module organization
-- Add examples for all major features
+1. **Define workflow in YAML** (2 minutes)
+2. **Run transpiler** (2 seconds)
+3. **Execute generated agent** (instant startup, local LLM)
+4. **Review queued work** (pause, reprioritize, approve)
+5. **Get refactoring plan** (parallel analysis, tool access)
 
-See `.cursor/rules/rust-coding.mdc` for AI development guidelines.
+No API keys. No cloud services. Local, auditable, safe.
 
 ---
 
@@ -213,8 +249,8 @@ MIT / Apache-2.0 (dual license, matches dependencies)
 
 ## Acknowledgments
 
-Research and benchmarks informed by:
+Research and architecture informed by:
+- [AutoAgents](https://github.com/liquidos-ai/AutoAgents) - Production agent SDK
 - [serde-saphyr](https://github.com/bourumir-wyngs/serde-saphyr) - Fast YAML parsing
 - [Askama](https://github.com/askama-rs/askama) - Type-safe templates
-- [AutoAgents](https://github.com/liquidos-ai/AutoAgents) - Production agent SDK
-- [Rust-SWE-bench](https://arxiv.org/html/2602.22764v1) - AI coding research
+- [tokio](https://tokio.rs) - Async runtime
