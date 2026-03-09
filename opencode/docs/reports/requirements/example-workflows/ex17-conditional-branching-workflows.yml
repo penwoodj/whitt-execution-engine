@@ -1,0 +1,925 @@
+---
+workflow_id: conditional_branching_workflows
+name: Conditional Branching with Nested Sub-Agents and Interdependent Validation
+description: Complex event-based workflow demonstrating branching logic, nested sub-agents, and interdependent validation loops
+
+# Model Configuration
+models:
+  primary:
+    provider: lmstudio
+    model: "llama-3.2-3b-instruct"
+    backend: vulkan
+    gpu_layers: 32
+
+  interpreter:
+    provider: lmstudio
+    model: "llama-3.2-3b-instruct"
+    backend: vulkan
+    gpu_layers: 32
+
+# Execution Mode
+execution:
+  mode: parallel
+  memory:
+    max_allocated_memory_mb: 8192
+    model_memory_mb: 4096
+    unload_unused: true
+
+# Logging
+logging:
+  level: debug
+  detail: high
+  output_type: chat
+  format: json
+  console: true
+  include_timestamps: true
+
+# Top-Level Orchestration Configuration
+orchestration:
+  workflow_type: "event_based_branching"
+  max_concurrent_sub_agents: 3
+  event_propagation: "bidirectional"
+  validation_aggregation: "hierarchical"
+
+  # Top-level overall validation criteria
+  overall_validation_criteria:
+    - criteria: "all_sub_agents_valid"
+      description: "All sub-agents must pass their validation criteria"
+      threshold: 1.0
+      weight: 0.4
+
+    - criteria: "interdependent_checks_passed"
+      description: "All interdependent validation checks must pass"
+      threshold: 1.0
+      weight: 0.3
+
+    - criteria: "overall_quality_score"
+      description: "Overall quality score must meet threshold"
+      threshold: 0.85
+      weight: 0.3
+
+  # Validation event response flows
+  event_flows:
+    event_type: "validation_result"
+    sources:
+      - sub_agent_1_security
+      - sub_agent_2_performance
+      - sub_agent_3_functionality
+    handlers:
+      - event: "validation_passed"
+        action: "propagate_to_top_level"
+        aggregation_method: "conjunction"
+        continue_execution: true
+
+      - event: "validation_failed"
+        action: "trigger_retry_or_branch"
+        decision_logic:
+          conditions:
+            - condition: "retry_count < 3"
+              result: "retry_sub_workflow"
+            - condition: "interdependent_check == 'critical' AND retry_count >= 3"
+              result: "fail_workflow"
+              notify: true
+            - condition: "interdependent_check != 'critical' AND retry_count >= 3"
+              result: "branch_to_alternative_path"
+              log_warning: true
+
+      - event: "validation_incomplete"
+        action: "wait_for_other_sub_agents"
+        timeout_seconds: 30
+        if_timeout:
+          then: "proceed_with_partial_results"
+          log_warning: true
+
+    # Bidirectional propagation
+    bidirectional_flows:
+      - direction: "top_to_bottom"
+        trigger: "validation_criteria_changed"
+        action: "notify_all_sub_agents"
+        payload: "new_validation_criteria"
+
+      - direction: "bottom_to_top"
+        trigger: "validation_result_ready"
+        action: "aggregate_and_evaluate"
+        payload: "validation_result"
+
+      - direction: "cross_agent"
+        trigger: "interdependent_validation_needed"
+        action: "coordinate_between_sub_agents"
+        payload: "validation_request"
+
+  # Sub-agent relationships and interdependencies
+  sub_agent_relationships:
+    - agent_id: "sub_agent_1_security"
+      dependencies: []
+      dependents:
+        - sub_agent_2_performance
+        - sub_agent_3_functionality
+      interdependent_validations:
+        - validation: "security_score"
+          requires:
+            - from: sub_agent_2_performance
+              metric: "performance_baseline"
+              condition: ">= 0.8"
+            - from: sub_agent_3_functionality
+              metric: "functionality_coverage"
+              condition: ">= 0.9"
+
+    - agent_id: "sub_agent_2_performance"
+      dependencies:
+        - sub_agent_1_security
+      dependents:
+        - sub_agent_3_functionality
+      interdependent_validations:
+        - validation: "performance_score"
+          requires:
+            - from: sub_agent_1_security
+              metric: "security_overhead"
+              condition: "< 0.15"
+            - from: sub_agent_3_functionality
+              metric: "feature_count"
+              condition: ">= 5"
+
+    - agent_id: "sub_agent_3_functionality"
+      dependencies:
+        - sub_agent_1_security
+        - sub_agent_2_performance
+      dependents: []
+      interdependent_validations:
+        - validation: "functionality_score"
+          requires:
+            - from: sub_agent_1_security
+              metric: "security_compliance"
+              condition: "== 1.0"
+            - from: sub_agent_2_performance
+              metric: "response_time_ms"
+              condition: "< 100"
+
+# Sub-Workflow Registry
+sub_workflows:
+  - workflow_id: "security_validation_workflow"
+    name: "Security Validation Sub-Workflow"
+    path: "./workflows/security_validation.yml"
+    validation_config:
+      loop_type: "validation"
+      exact_criteria: true
+      tolerance: 0.0
+      max_iterations: 5
+      stop_conditions:
+        - validation.security_score >= 0.9
+        - validation.security_vulnerabilities == 0
+      interdependent_checks:
+        - check: "performance_dependency"
+          agent: "sub_agent_2_performance"
+          metric: "performance_baseline"
+          condition: ">= 0.8"
+          on_failure: "log_warning_and_continue"
+
+        - check: "functionality_dependency"
+          agent: "sub_agent_3_functionality"
+          metric: "functionality_coverage"
+          condition: ">= 0.9"
+          on_failure: "propagate_failure_up"
+
+  - workflow_id: "performance_validation_workflow"
+    name: "Performance Validation Sub-Workflow"
+    path: "./workflows/performance_validation.yml"
+    validation_config:
+      loop_type: "validation"
+      exact_criteria: false
+      tolerance: 0.1
+      max_iterations: 5
+      stop_conditions:
+        - validation.performance_score >= 0.85
+        - validation.response_time_ms < 100
+      interdependent_checks:
+        - check: "security_dependency"
+          agent: "sub_agent_1_security"
+          metric: "security_overhead"
+          condition: "< 0.15"
+          on_failure: "log_warning_and_adjust"
+
+        - check: "functionality_dependency"
+          agent: "sub_agent_3_functionality"
+          metric: "feature_count"
+          condition: ">= 5"
+          on_failure: "propagate_failure_up"
+
+  - workflow_id: "functionality_validation_workflow"
+    name: "Functionality Validation Sub-Workflow"
+    path: "./workflows/functionality_validation.yml"
+    validation_config:
+      loop_type: "validation"
+      exact_criteria: true
+      tolerance: 0.0
+      max_iterations: 5
+      stop_conditions:
+        - validation.functionality_score >= 0.9
+        - validation.feature_coverage >= 0.95
+      interdependent_checks:
+        - check: "security_dependency"
+          agent: "sub_agent_1_security"
+          metric: "security_compliance"
+          condition: "== 1.0"
+          on_failure: "fail_workflow"
+
+        - check: "performance_dependency"
+          agent: "sub_agent_2_performance"
+          metric: "response_time_ms"
+          condition: "< 100"
+          on_failure: "propagate_failure_up"
+
+# Pipeline Definition
+pipeline:
+  # Step 1: Initialize Orchestration Context
+  - step: initialize_orchestration
+    id: step_1
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Initialize orchestration context for multi-agent validation:
+
+        Requirements:
+        1. Create orchestration state
+        2. Initialize sub-agent execution contexts
+        3. Setup event propagation channels
+        4. Configure validation aggregation
+        5. Prepare interdependency tracking
+
+        Orchestration state should include:
+        - active_sub_agents: []
+        - validation_results: {}
+        - interdependency_status: {}
+        - event_log: []
+        - retry_counts: {}
+
+      orchestration_config: "${orchestration}"
+
+    output:
+      save_to: orchestration_context
+      format: json
+      fields:
+        - orchestration_id
+        - sub_agents_initialized
+        - event_channels_ready
+        - state_snapshot
+
+  # Step 2: Branch Decision - Event-Based Routing
+  - step: branch_on_event_condition
+    id: step_2
+    model: "${models.interpreter}"
+    input:
+      prompt: |
+        Analyze initial conditions and determine execution path:
+
+        Orchestration context:
+        ${step.step_1.output}
+
+        Conditions to evaluate:
+        1. Are all sub-agent workflows available?
+        2. Are interdependency configurations valid?
+        3. Is system load acceptable?
+
+        Branching logic:
+        IF all conditions met:
+          THEN proceed to parallel sub-agent execution
+
+        IF sub-agent workflows missing:
+          THEN wait and retry or skip missing agents
+
+        IF interdependency configuration invalid:
+          THEN fail workflow with configuration error
+
+        IF system load too high:
+          THEN defer execution or run serially instead of parallel
+
+        Output:
+        - decision: "proceed"|"wait"|"skip"|"fail"|"serial"
+        - reason: explanation of decision
+        - execution_mode: "parallel"|"serial"
+        - sub_agents_to_execute: []
+
+        Strict yes/no decision required.
+        Answer format: "Decision: [proceed|wait|skip|fail|serial]"
+      branch_conditions:
+        - condition: "sub_agents_available"
+          check: all sub-workflows exist
+          strict_answer: yes
+          branch_on: "yes"
+          then: "proceed_to_parallel_execution"
+
+        - condition: "interdependency_valid"
+          check: no circular dependencies
+          strict_answer: yes
+          branch_on: "yes"
+          then: "proceed_to_parallel_execution"
+
+        - condition: "system_load_acceptable"
+          check: memory_usage < 80%
+          strict_answer: yes
+          branch_on: "yes"
+          then: "proceed_to_parallel_execution"
+
+    output:
+      save_to: branch_decision
+      format: json
+      fields:
+        - decision
+        - reason
+        - execution_mode
+        - sub_agents_to_execute
+
+    branches:
+      - branch_id: "proceed_to_parallel_execution"
+        next_step: step_3_parallel_execution
+        description: "All conditions met, proceed with parallel execution"
+
+      - branch_id: "proceed_to_serial_execution"
+        next_step: step_3_serial_execution
+        description: "Proceed with serial execution due to system constraints"
+
+      - branch_id: "fail_workflow"
+        next_step: step_fail
+        description: "Critical configuration error, fail workflow"
+
+  # Step 3A: Parallel Sub-Agent Execution (Branch A)
+  - step: parallel_sub_agent_execution
+    id: step_3_parallel_execution
+    model: "${models.primary}"
+    parallel_group: sub_agent_execution
+    max_parallel: 3
+    input:
+      prompt: |
+        Execute sub-agents in parallel based on orchestration config:
+
+        Branch decision:
+        ${step.step_2.output}
+
+        Orchestration config:
+        ${orchestration}
+
+        Sub-workflows to execute:
+        1. security_validation_workflow
+           - Agent: sub_agent_1_security
+           - Sub-workflow: security_validation_workflow
+           - Validation loop: exact criteria (security_score >= 0.9, vulnerabilities == 0)
+           - Interdependencies: performance_baseline >= 0.8, functionality_coverage >= 0.9
+
+        2. performance_validation_workflow
+           - Agent: sub_agent_2_performance
+           - Sub-workflow: performance_validation_workflow
+           - Validation loop: abstract criteria (performance_score >= 0.85, response_time < 100)
+           - Interdependencies: security_overhead < 0.15, feature_count >= 5
+
+        3. functionality_validation_workflow
+           - Agent: sub_agent_3_functionality
+           - Sub-workflow: functionality_validation_workflow
+           - Validation loop: exact criteria (functionality_score >= 0.9, coverage >= 0.95)
+           - Interdependencies: security_compliance == 1.0, response_time < 100
+
+        Execution requirements:
+        1. Spawn 3 sub-agents simultaneously
+        2. Each sub-agent executes its sub-workflow
+        3. Each sub-workflow runs validation loop
+        4. Each sub-workflow checks interdependencies
+        5. Validation results propagate up via events
+        6. Interdependency failures propagate between sub-agents
+        7. Top-level orchestration aggregates results
+
+        Event flow:
+        - sub-workflow completes → validation_result event → orchestration
+        - interdependency check fails → interdependent_failure event → other sub-agents
+        - orchestration receives all results → aggregate and evaluate
+
+      sub_agents:
+        - agent_id: sub_agent_1_security
+          workflow_ref: security_validation_workflow
+          validation_config: "${sub_workflows[0].validation_config}"
+          interdependent_validations: "${sub_workflows[0].validation_config.interdependent_checks}"
+
+        - agent_id: sub_agent_2_performance
+          workflow_ref: performance_validation_workflow
+          validation_config: "${sub_workflows[1].validation_config}"
+          interdependent_validations: "${sub_workflows[1].validation_config.interdependent_checks}"
+
+        - agent_id: sub_agent_3_functionality
+          workflow_ref: functionality_validation_workflow
+          validation_config: "${sub_workflows[2].validation_config}"
+          interdependent_validations: "${sub_workflows[2].validation_config.interdependent_checks}"
+
+      event_handling:
+        on_validation_result:
+          - aggregate_at_top_level: true
+          - propagate_to_dependents: true
+          - log_result: true
+
+        on_interdependent_failure:
+          - notify_dependent_sub_agents: true
+          - adjust_validation_criteria: true
+          - propagate_failure_up: true
+
+    output:
+      save_to: parallel_execution_results
+      format: json
+      fields:
+        - sub_agents_executed
+        - validation_results
+        - interdependency_status
+        - event_log
+        - total_duration_secs
+    timeout_secs: 120
+
+    branches:
+      - branch_id: "from_step_2_proceed_to_parallel"
+        enabled_by: "step_2.branch_decision.decision == 'proceed' AND step_2.branch_decision.execution_mode == 'parallel'"
+
+  # Step 3B: Serial Sub-Agent Execution (Branch B)
+  - step: serial_sub_agent_execution
+    id: step_3_serial_execution
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Execute sub-agents serially based on orchestration config:
+
+        Branch decision:
+        ${step.step_2.output}
+
+        Execute sequentially:
+        1. sub_agent_1_security → security_validation_workflow
+        2. sub_agent_2_performance → performance_validation_workflow
+        3. sub_agent_3_functionality → functionality_validation_workflow
+
+        Each sub-agent:
+        - Executes its sub-workflow
+        - Runs validation loop
+        - Checks interdependencies
+        - Propagates results up
+        - Waits for dependent results if needed
+
+      sub_agents:
+        - agent_id: sub_agent_1_security
+          workflow_ref: security_validation_workflow
+          validation_config: "${sub_workflows[0].validation_config}"
+
+        - agent_id: sub_agent_2_performance
+          workflow_ref: performance_validation_workflow
+          validation_config: "${sub_workflows[1].validation_config}"
+
+        - agent_id: sub_agent_3_functionality
+          workflow_ref: functionality_validation_workflow
+          validation_config: "${sub_workflows[2].validation_config}"
+
+    output:
+      save_to: serial_execution_results
+      format: json
+      fields:
+        - sub_agents_executed
+        - validation_results
+        - interdependency_status
+        - event_log
+        - total_duration_secs
+
+    branches:
+      - branch_id: "from_step_2_proceed_to_serial"
+        enabled_by: "step_2.branch_decision.decision == 'proceed' AND step_2.branch_decision.execution_mode == 'serial'"
+
+  # Step 4: Aggregate Validation Results (Convergent Point)
+  - step: aggregate_validation_results
+    id: step_4
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Aggregate validation results from all sub-agents:
+
+        Execution results (parallel or serial):
+        ${step.step_3_parallel_execution.output}
+        ${step.step_3_serial_execution.output}
+
+        Orchestration config:
+        ${orchestration}
+
+        Overall validation criteria:
+        ${orchestration.overall_validation_criteria}
+
+        Aggregation logic:
+        1. Collect validation results from all sub-agents
+        2. Evaluate interdependency status
+        3. Calculate overall quality score
+        4. Check against overall validation criteria
+        5. Determine final outcome
+
+        Overall validation criteria (all must be met):
+        - all_sub_agents_valid: All sub-agents must pass
+        - interdependent_checks_passed: All interdependent checks must pass
+        - overall_quality_score: Weighted score >= 0.85
+
+        Weights:
+        - all_sub_agents_valid: 0.4
+        - interdependent_checks_passed: 0.3
+        - overall_quality_score: 0.3
+
+        Event response flow:
+        - If all criteria met → proceed to step_5_success
+        - If any criteria not met → branch to step_6_analysis
+
+      aggregation_method: "weighted_average"
+      validation_criteria: "${orchestration.overall_validation_criteria}"
+
+    output:
+      save_to: aggregated_results
+      format: json
+      fields:
+        - all_sub_agents_valid
+        - interdependent_checks_passed
+        - overall_quality_score
+        - final_decision
+        - criteria_breakdown
+        - recommendations
+
+  # Step 5: Success Branch
+  - step: workflow_success
+    id: step_5_success
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Workflow successful! Generate success report:
+
+        Aggregated results:
+        ${step.step_4.output}
+
+        Success details:
+        - All sub-agents validated successfully
+        - All interdependent checks passed
+        - Overall quality threshold met
+        - Ready for deployment
+
+        Generate:
+        1. Success summary
+        2. Validation metrics
+        3. Performance characteristics
+        4. Deployment recommendations
+
+      aggregated_results: "${step.step_4.output}"
+
+    output:
+      save_to: success_report
+      format: json
+      fields:
+        - status
+        - summary
+        - validation_metrics
+        - deployment_ready
+
+    branches:
+      - branch_id: "from_step_4_all_passed"
+        enabled_by: "step.step_4.output.final_decision == 'success'"
+
+  # Step 6: Analysis Branch
+  - step: analyze_and_branch
+    id: step_6_analysis
+    model: "${models.interpreter}"
+    input:
+      prompt: |
+        Analyze validation failures and determine next action:
+
+        Aggregated results:
+        ${step.step_4.output}
+
+        Branching logic based on failure analysis:
+
+        Determine which criteria failed:
+        1. all_sub_agents_valid failed?
+           - Which sub-agent failed?
+           - Why did it fail?
+           - Can it be fixed?
+
+        2. interdependent_checks_passed failed?
+           - Which interdependency check failed?
+           - Which sub-agents are involved?
+           - How to resolve?
+
+        3. overall_quality_score failed?
+           - What was the score?
+           - What brought it down?
+           - How to improve?
+
+        Branching decision (strict yes/no):
+        IF any critical failure (security compliance != 1.0):
+          THEN branch: fail_workflow
+          Answer: "Decision: fail"
+
+        IF quality score below threshold but > 0.7:
+          THEN branch: retry_specific_sub_agent
+          Answer: "Decision: retry"
+
+        IF quality score very low (< 0.7):
+          THEN branch: fail_workflow
+          Answer: "Decision: fail"
+
+        IF interdependency issues:
+          THEN branch: adjust_interdependencies_and_retry
+          Answer: "Decision: adjust"
+
+        Output strict decision: "Decision: [fail|retry|adjust]"
+      aggregated_results: "${step.step_4.output}"
+
+      branch_conditions:
+        - condition: "critical_failure"
+          check: security_compliance != 1.0
+          strict_answer: yes
+          branch_on: "yes"
+          then: "fail_workflow"
+
+        - condition: "minor_failure_retriable"
+          check: overall_quality_score >= 0.7 AND retry_count < 3
+          strict_answer: yes
+          branch_on: "yes"
+          then: "retry_specific_sub_agent"
+
+        - condition: "severe_failure"
+          check: overall_quality_score < 0.7
+          strict_answer: yes
+          branch_on: "yes"
+          then: "fail_workflow"
+
+        - condition: "interdependency_issues"
+          check: interdependent_checks_failed AND retry_count < 2
+          strict_answer: yes
+          branch_on: "yes"
+          then: "adjust_interdependencies_and_retry"
+
+    output:
+      save_to: branch_analysis
+      format: json
+      fields:
+        - decision
+        - reason
+        - failed_criteria
+        - retry_action
+        - next_step
+
+    branches:
+      - branch_id: "fail_workflow"
+        next_step: step_fail
+        description: "Critical failure, terminate workflow"
+        enabled_by: "step_6_analysis.branch_analysis.decision == 'fail'"
+
+      - branch_id: "retry_specific_sub_agent"
+        next_step: step_7_retry
+        description: "Retry specific sub-agent with adjusted parameters"
+        enabled_by: "step_6_analysis.branch_analysis.decision == 'retry'"
+
+      - branch_id: "adjust_interdependencies_and_retry"
+        next_step: step_8_adjust
+        description: "Adjust interdependencies and retry all sub-agents"
+        enabled_by: "step_6_analysis.branch_analysis.decision == 'adjust'"
+
+  # Step 7: Retry Branch
+  - step: retry_sub_agent
+    id: step_7_retry
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Retry specific sub-agent with adjusted validation criteria:
+
+        Branch analysis:
+        ${step.step_6_analysis.output}
+
+        Retry requirements:
+        1. Identify failed sub-agent
+        2. Adjust validation criteria (loosen tolerance, adjust thresholds)
+        3. Update interdependency constraints if needed
+        4. Re-execute sub-agent
+        5. Re-aggregate validation results
+
+        Event flow on retry:
+        - Notify orchestration of retry
+        - Re-execute sub-agent sub-workflow
+        - Propagate new validation results
+        - Re-aggregate at top-level
+
+      branch_analysis: "${step.step_6_analysis.output}"
+      retry_config:
+        max_retries: 3
+        adjustment_strategy: "loosen_tolerance"
+        tolerance_adjustment: 0.1
+        adjust_interdependencies: true
+
+    output:
+      save_to: retry_results
+      format: json
+      fields:
+        - retry_count
+        - sub_agent_retried
+        - validation_results_after_retry
+        - criteria_adjustments
+        - final_outcome
+
+    branches:
+      - branch_id: "from_step_6_analysis_retry"
+        enabled_by: "step_6_analysis.branch_analysis.decision == 'retry'"
+
+  # Step 8: Adjust Branch
+  - step: adjust_and_retry_all
+    id: step_8_adjust
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Adjust interdependencies and retry all sub-agents:
+
+        Branch analysis:
+        ${step.step_6_analysis.output}
+
+        Adjustment requirements:
+        1. Identify interdependency conflicts
+        2. Adjust interdependency constraints
+        3. Relax or reconfigure interdependencies
+        4. Re-execute all sub-agents
+        5. Re-aggregate with new results
+
+        Event flow on adjustment:
+        - Notify all sub-agents of adjustment
+        - Update interdependency configuration
+        - Re-execute all sub-agent sub-workflows
+        - Propagate new validation results
+        - Re-aggregate at top-level with adjusted criteria
+
+      branch_analysis: "${step.step_6_analysis.output}"
+      adjustment_config:
+        strategy: "reconfigure_interdependencies"
+        relax_constraints: true
+        reconfigure_sub_agents: true
+
+    output:
+      save_to: adjustment_results
+      format: json
+      fields:
+        - adjustments_made
+        - interdependencies_reconfigured
+        - sub_agents_retried
+        - validation_results_after_adjustment
+        - final_outcome
+
+    branches:
+      - branch_id: "from_step_6_analysis_adjust"
+        enabled_by: "step_6_analysis.branch_analysis.decision == 'adjust'"
+
+  # Step 9: Final Evaluation Loop (Top-Level Validation Loop)
+  - step: final_evaluation
+    id: step_9
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Final evaluation after retry/adjustment:
+
+        Results from branches:
+        - Retry results: ${step.step_7_retry.output}
+        - Adjustment results: ${step.step_8_adjust.output}
+
+        Requirements:
+        1. Evaluate final validation status
+        2. Check if all overall criteria met
+        3. Determine final workflow outcome
+        4. If still failing, determine if more retries needed
+
+        Top-level validation loop:
+        - Check overall validation criteria
+        - IF met: proceed to success
+        - IF not met AND retry_count < 3: loop back to retry/adjust
+        - IF not met AND retry_count >= 3: fail workflow
+
+        Strict yes/no decision needed:
+        "Decision: [success|retry|fail]"
+      retry_branch_results: "${step.step_7_retry.output}"
+      adjustment_branch_results: "${step.step_8_adjust.output}"
+      overall_criteria: "${orchestration.overall_validation_criteria}"
+      max_retries: 3
+
+    output:
+      save_to: final_evaluation
+      format: json
+      fields:
+        - final_decision
+        - overall_validation_status
+        - criteria_met
+        - total_retry_count
+        - workflow_outcome
+
+    validation_loop:
+      type: validation
+      exact_criteria: true
+      tolerance: 0.0
+      max_iterations: 3
+      stop_conditions:
+        - evaluation.final_decision == "success"
+        - evaluation.total_retry_count >= 3
+      on_loop:
+        - increment_retry_counter
+        - adjust_criteria_if_needed
+        - log_attempt
+
+  # Step 10: Workflow Failure
+  - step: workflow_failure
+    id: step_fail
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Workflow failed. Generate failure report:
+
+        Failure details:
+        - Branch analysis: ${step.step_6_analysis.output}
+        - Retry attempts: ${step.step_7_retry.output}
+        - Adjustment attempts: ${step.step_8_adjust.output}
+        - Final evaluation: ${step.step_9.output}
+
+        Failure report should include:
+        1. Summary of failure
+        2. Which criteria failed
+        3. What was attempted (retry/adjust)
+        4. Why retries/adjustments didn't work
+        5. Recommendations for improvement
+
+      failure_context:
+        branch_analysis: "${step.step_6_analysis.output}"
+        retry_results: "${step.step_7_retry.output}"
+        adjustment_results: "${step.step_8_adjust.output}"
+        final_evaluation: "${step.step_9.output}"
+
+    output:
+      save_to: failure_report
+      format: json
+      fields:
+        - status
+        - failure_summary
+        - failed_criteria
+        - attempts_made
+        - recommendations
+
+    branches:
+      - branch_id: "from_step_6_analysis_fail"
+        enabled_by: "step_6_analysis.branch_analysis.decision == 'fail'"
+
+      - branch_id: "from_step_9_final_fail"
+        enabled_by: "step.step_9.final_evaluation.final_decision == 'fail'"
+
+# Workflow Variables
+workflow:
+  workspace_path: /workspace
+  sub_workflows_path: /workspace/workflows
+  output_path: /workspace/output
+  timestamp: ${workflow.timestamp}
+
+# Retry Configuration
+retry:
+  default:
+    max_attempts: 3
+    backoff_strategy: exponential
+    on_failure: escalate_model
+
+  escalation:
+    fallback_models:
+      - provider: ollama
+        model: "llama3.2"
+      - provider: llamacpp
+        model: "/models/llama-3.2-3b.Q4_K_M.gguf"
+        backend: vulkan
+
+# Metrics
+metrics:
+  enabled: true
+  collect:
+    - sub_agent_executions
+    - validation_loop_iterations
+    - interdependency_checks
+    - branch_decisions
+    - retry_counts
+    - total_execution_duration_seconds
+  output:
+    path: /workspace/output/conditional_branching_metrics.json
+    format: json
+
+# Event-Driven Execution Summary
+execution_summary:
+  workflow_type: "event_based_branching"
+  branching_points:
+    - step_2: event_based_initial_branch (4 branches)
+    - step_4: aggregation_convergent_point
+    - step_6: failure_analysis_branch (3 branches)
+    - step_9: top_level_validation_loop
+
+  event_propagation:
+    - bottom_to_top: validation results
+    - top_to_bottom: validation criteria changes
+    - cross_agent: interdependency validation requests
+
+  validation_layers:
+    - sub_workflow_level: each sub-workflow has its own validation loop
+    - interdependent_level: cross-agent validation checks
+    - top_level: overall validation criteria and final decision
+
+  overall_validation_loop:
+    enabled: true
+    max_iterations: 3
+    stop_conditions:
+      - all_criteria_met
+      - max_retries_exceeded

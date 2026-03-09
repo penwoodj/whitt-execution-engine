@@ -1,0 +1,208 @@
+---
+workflow_id: rag_crud_operations
+name: Local RAG CRUD Operations
+description: Demonstrate RAG operations with add, query, update, delete
+
+# Model Configuration
+model:
+  provider: lmstudio
+  model: "llama-3.2-3b-instruct"
+  backend: vulkan
+  gpu_layers: 32
+
+# RAG Configuration
+rag:
+  enabled: true
+  backend: chroma
+  config:
+    path: /workspace/.rag
+    embedding_model: lmstudio://all-MiniLM-L6-v2
+    chunk_size: 512
+    chunk_overlap: 50
+    collection_name: codebase_docs
+
+# Execution Mode
+execution:
+  mode: parallel
+  memory:
+    max_allocated_memory_mb: 6144
+    model_memory_mb:
+      main_model: 4096
+      embedding_model: 2048
+
+# Logging
+logging:
+  level: debug
+  detail: high
+  output_type: log
+  format: json
+  console: false
+  log_file: rag_workflow.log
+
+# Pipeline Definition
+pipeline:
+  # Step 1: Add Documentation to RAG
+  - step: add_docs_to_rag
+    model: "${model}"
+    input:
+      prompt: "Load documentation from ${workflow.docs_path} into RAG"
+      rag_operation: add
+    rag:
+      operation: add
+      documents:
+        - path: "${workflow.docs_path}/**/*.md"
+          metadata:
+            type: documentation
+            project: yaml-transpiler
+            source: project_docs
+        - path: "${workflow.docs_path}/**/*.rs"
+          metadata:
+            type: source_code
+            project: yaml-transpiler
+            source: project_code
+    output:
+      save_to: rag_add_result
+      format: json
+      fields:
+        - documents_added
+        - embeddings_created
+
+  # Step 2: Query RAG for Async Patterns
+  - step: query_async_patterns
+    model: "${model}"
+    input:
+      prompt: |
+        Query the RAG system for:
+        1. How to define async functions in Rust
+        2. Common async patterns in tokio
+        3. Error handling in async code
+        4. Best practices for async Rust
+
+      rag_operation: query
+    rag:
+      operation: query
+      query: "async functions tokio error handling patterns"
+      top_k: 5
+      similarity_threshold: 0.7
+      include_metadata: true
+      filter:
+        type: [documentation, source_code]
+    output:
+      save_to: rag_query_result
+      format: json
+      fields:
+        - results
+        - similarities
+        - metadata
+
+  # Step 3: Generate Code Based on RAG Results
+  - step: generate_code_from_rag
+    model: "${model}"
+    input:
+      prompt: |
+        Based on these RAG query results:
+        ${step.query_async_patterns.output}
+
+        Generate a complete Rust async function with proper error handling.
+        Include comments explaining the async patterns used.
+      rag_context: "${step.query_async_patterns.output.results}"
+    output:
+      save_to: generated_code
+      format: text
+      path: "${workflow.output_path}/generated_async_fn.rs"
+
+  # Step 4: Update RAG with Generated Code
+  - step: update_rag_with_code
+    model: "${model}"
+    input:
+      prompt: "Update RAG with the generated code"
+      rag_operation: update
+    rag:
+      operation: update
+      documents:
+        - path: "${workflow.output_path}/generated_async_fn.rs"
+          metadata:
+            type: generated_code
+            source: workflow_generation
+            model: "${model.model}"
+            generated_at: 2026-03-08
+    output:
+      save_to: rag_update_result
+      format: json
+      fields:
+        - documents_updated
+        - embeddings_updated
+
+  # Step 5: Test RAG Query with New Content
+  - step: query_after_update
+    model: "${model}"
+    input:
+      prompt: "Query for the newly added async function"
+      rag_operation: query
+    rag:
+      operation: query
+      query: "generated async function error handling"
+      top_k: 3
+      similarity_threshold: 0.8
+      include_metadata: true
+      filter:
+        type: generated_code
+    output:
+      save_to: verification_query_result
+      format: json
+
+  # Step 6: Clean Up Old Documents from RAG
+  - step: cleanup_old_docs
+    model: "${model}"
+    input:
+      prompt: "Delete documents older than 30 days"
+      rag_operation: delete
+    rag:
+      operation: delete
+      filter:
+        created_before: 2025-02-07
+        type: [temp, cache]
+    output:
+      save_to: rag_delete_result
+      format: json
+      fields:
+        - documents_deleted
+        - count
+
+# RAG Indexing Configuration
+rag_indexing:
+  auto_index:
+    enabled: true
+    paths:
+      - "${workflow.docs_path}/**/*.md"
+      - "${workflow.docs_path}/**/*.rs"
+    on_change: true
+    index_interval_secs: 300
+
+  reindex:
+    enabled: false
+    schedule: "0 2 * * *"
+
+# Retry Configuration
+retry:
+  default:
+    max_attempts: 3
+    backoff_strategy: exponential
+    delay_ms: 1000
+
+  rag_specific:
+    add:
+      max_attempts: 5
+      backoff_strategy: linear
+      delay_ms: 500
+
+    query:
+      max_attempts: 3
+      backoff_strategy: exponential
+      delay_ms: 1000
+
+# Workflow Variables
+workflow:
+  docs_path: /workspace/docs
+  output_path: /workspace/output
+  rag_path: /workspace/.rag

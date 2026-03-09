@@ -1,0 +1,311 @@
+---
+workflow_id: agentsdk_agent_with_subagents
+name: AgentSDK Agent with Sub-agents
+description: High-level agent spawning sub-agents with AgentSDK framework
+
+# Agent Configuration
+agent:
+  id: main_orchestrator
+  framework: agentsdk
+  model:
+    provider: lmstudio
+    model: "llama-3.2-3b-instruct"
+    backend: vulkan
+    gpu_layers: 32
+
+  description: Orchestrates sub-agents for comprehensive codebase analysis
+
+  tools:
+    - name: file_analyzer
+      type: sub_agent
+      agent_id: code_analyzer_subagent
+      timeout_secs: 120
+
+    - name: documentation_fetcher
+      type: sub_agent
+      agent_id: docs_fetcher_subagent
+      timeout_secs: 180
+
+    - name: test_runner
+      type: tool
+      tool_type: shell_exec
+      command: "cargo test"
+      timeout_secs: 300
+
+    - name: git_operations
+      type: tool
+      tool_type: cli_run
+      cli: git
+      allowed_operations: [log, diff, branch, status]
+
+# Sub-agent Definitions
+sub_agents:
+  - id: code_analyzer_subagent
+    framework: agentsdk
+    model:
+      provider: llamacpp
+      model: "/models/code-analyzer.Q4_K_M.gguf"
+      backend: vulkan
+      gpu_layers: 32
+
+    description: Analyzes code structure and patterns
+
+    tools:
+      - name: grep
+        type: tool
+        tool_type: grep
+
+      - name: file_search
+        type: tool
+        tool_type: file_search
+
+      - name: ast_parser
+        type: tool
+        tool_type: script_run
+        script: /scripts/parse_ast.py
+        timeout_secs: 60
+
+    permissions:
+      allow:
+        - file_read: /workspace/src/*
+        - grep: /workspace/src/*
+      deny:
+        - file_write: /workspace/src/*
+
+  - id: docs_fetcher_subagent
+    framework: agentsdk
+    model:
+      provider: ollama
+      model: "mistral-7b"
+    description: Fetches and analyzes documentation
+
+    tools:
+      - name: web_fetch
+        type: tool
+        tool_type: web_fetch
+        timeout_secs: 30
+
+      - name: web_scrape
+        type: tool
+        tool_type: web_scrape
+        timeout_secs: 60
+
+    permissions:
+      allow:
+        - web_fetch: https://docs.rs/*
+        - web_scrape: https://docs.rs/*
+      deny:
+        - web_fetch: *
+
+# Execution Mode
+execution:
+  mode: dynamic_parallelization
+  memory:
+    max_allocated_memory_mb: 12288
+    model_memory_mb:
+      main_orchestrator: 4096
+      code_analyzer_subagent: 4096
+      docs_fetcher_subagent: 2048
+    parallel_sub_agents: true
+    max_parallel_sub_agents: 2
+
+# Logging
+logging:
+  level: debug
+  detail: high
+  output_type: mixed
+  format: json
+  console: true
+  log_file: agentsdk_workflow.log
+
+  scopes:
+    execution:
+      level: debug
+      detail: high
+    memory:
+      level: info
+      detail: medium
+    tool:
+      level: debug
+      detail: high
+    validation:
+      level: info
+      detail: medium
+
+# Workflow Definition
+workflow:
+  # Phase 1: Orchestrator spawns sub-agents
+  - step: spawn_analysis_agents
+    type: orchestrate
+    agent: "${agent}"
+    input:
+      prompt: |
+        Analyze the codebase at ${workflow.codebase_path}
+
+        Spawn these sub-agents in parallel:
+        1. code_analyzer_subagent - Analyze code structure
+        2. docs_fetcher_subagent - Fetch relevant documentation
+
+        Wait for both to complete, then synthesize results.
+      codebase_path: "${workflow.codebase_path}"
+    sub_agents:
+      - code_analyzer_subagent:
+        input:
+          prompt: |
+            Analyze ${workflow.codebase_path}
+            Focus on async patterns, error handling, and code organization.
+
+      docs_fetcher_subagent:
+        input:
+          prompt: |
+            Find documentation for:
+            - tokio async runtime
+            - serde serialization
+            - anyhow error handling
+          Search: https://docs.rs
+
+    output:
+      save_to: phase_1_results
+      format: json
+      fields:
+        - code_analysis
+        - documentation_analysis
+
+  # Phase 2: Orchestrator runs tests
+  - step: run_tests
+    type: tool_call
+    agent: "${agent}"
+    tool: test_runner
+    input:
+      command: ["cargo", "test", "--workspace"]
+      working_dir: "${workflow.codebase_path}"
+    output:
+      save_to: test_results
+      format: json
+
+  # Phase 3: Synthesize results
+  - step: synthesize_results
+    type: agent_task
+    agent: "${agent}"
+    input:
+      prompt: |
+        Synthesize these results:
+        1. Code analysis: ${step.spawn_analysis_agents.output.code_analysis}
+        2. Documentation: ${step.spawn_analysis_agents.output.documentation_analysis}
+        3. Test results: ${step.run_tests.output}
+
+        Generate comprehensive report with:
+        - Code quality assessment
+        - Recommended improvements
+        - Documentation gaps
+        - Test coverage analysis
+      code_analysis: "${step.spawn_analysis_agents.output.code_analysis}"
+      documentation: "${step.spawn_analysis_agents.output.documentation_analysis}"
+      tests: "${step.run_tests.output}"
+    output:
+      save_to: synthesis_report
+      format: json
+      path: "${workflow.output_path}/synthesis_report.json"
+
+# Loop for Iterative Improvement
+improvement_loop:
+  type: validation
+  abstract_criteria: quality_threshold_met
+  tolerance: 0.85
+  max_iterations: 3
+
+  steps:
+    - analyze: spawn_analysis_agents
+    - test: run_tests
+    - synthesize: synthesize_results
+
+  validation:
+    check: "${step.synthesize_results.output.quality_score} >= 0.85"
+
+  iteration_logic:
+    if_not_met:
+      step: apply_improvements
+      prompt: |
+        Based on the synthesis report:
+        ${step.synthesize_results.output}
+
+        Apply improvements to the codebase:
+        ${workflow.codebase_path}
+
+        Focus on recommendations with priority >= medium.
+      output:
+        save_to: applied_improvements
+
+# Retry Configuration
+retry:
+  default:
+    max_attempts: 3
+    backoff_strategy: exponential
+    delay_ms: 1000
+
+  sub_agent_specific:
+    code_analyzer_subagent:
+      max_attempts: 5
+      backoff_strategy: linear
+      delay_ms: 500
+
+    docs_fetcher_subagent:
+      max_attempts: 3
+      backoff_strategy: exponential
+      delay_ms: 1500
+
+# Permissions
+permissions:
+  global:
+    allow:
+      - file_read: /workspace/*
+      - file_write: /workspace/output/*
+    deny:
+      - file_delete: /workspace/src/*
+      - shell_exec: rm -rf
+
+  agent_specific:
+    main_orchestrator:
+      allow:
+        - sub_agent_spawn: all
+        - tool_call: [test_runner, git_operations]
+      deny:
+        - file_write: /workspace/src/*
+
+    code_analyzer_subagent:
+      allow:
+        - tool_call: [grep, file_search, ast_parser]
+      deny:
+        - shell_exec: *
+        - web_fetch: *
+
+    docs_fetcher_subagent:
+      allow:
+        - tool_call: [web_fetch, web_scrape]
+      deny:
+        - file_write: *
+        - shell_exec: *
+
+# Folder Permissions
+folder_permissions:
+  workspace_src:
+    path: /workspace/src
+    operations: [read, search]
+    allowed_agents: [main_orchestrator, code_analyzer_subagent]
+
+  workspace_output:
+    path: /workspace/output
+    operations: [read, write, create]
+    allowed_agents: [main_orchestrator]
+
+  workspace_tests:
+    path: /workspace/tests
+    operations: [read, execute]
+    allowed_agents: [main_orchestrator]
+
+# Workflow Variables
+workflow:
+  codebase_path: /workspace
+  output_path: /workspace/output
+  max_memory_mb: 12288
+  quality_threshold: 0.85

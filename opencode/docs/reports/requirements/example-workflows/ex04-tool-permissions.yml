@@ -1,0 +1,224 @@
+---
+workflow_id: tool_permissions_workflow
+name: Folder and Tool Permissions
+description: Demonstrate permission system with folder-level and tool-level restrictions
+
+# Model Configuration
+model:
+  provider: lmstudio
+  model: "llama-3.2-3b-instruct"
+  backend: vulkan
+  gpu_layers: 32
+
+# Execution Mode
+execution:
+  mode: parallel
+  memory:
+    max_allocated_memory_mb: 4096
+    model_memory_mb: 4096
+
+# Logging
+logging:
+  level: info
+  detail: medium
+  output_type: log
+  format: json
+  console: true
+  log_file: permissions_workflow.log
+
+# Pipeline Definition
+pipeline:
+  # Step 1: Analyze code (allowed to read /workspace/src)
+  - step: analyze_code
+    model: "${model}"
+    input:
+      prompt: |
+        Analyze the codebase at ${workflow.codebase_path}
+        Focus on error handling patterns.
+      codebase: "${workflow.codebase_path}"
+    output:
+      save_to: analysis
+      format: json
+    retry:
+      max_attempts: 3
+      delay_ms: 1000
+
+  # Step 2: Generate fixes (allowed to read but NOT write /workspace/src)
+  - step: generate_fixes
+    model: "${model}"
+    input:
+      prompt: |
+        Generate fixes for these issues:
+        ${step.analyze_code.output}
+
+        Output fixes as JSON.
+      issues: "${step.analyze_code.output}"
+    output:
+      save_to: fixes
+      format: json
+      path: "${workflow.output_path}/fixes.json"
+    retry:
+      max_attempts: 3
+      delay_ms: 1000
+
+  # Step 3: Apply fixes (allowed to write /workspace/output, NOT /workspace/src)
+  - step: write_fixes_report
+    model: "${model}"
+    input:
+      prompt: |
+        Generate a report of the fixes:
+        ${step.generate_fixes.output}
+
+        Explain what would be changed and why.
+      fixes: "${step.generate_fixes.output}"
+    output:
+      save_to: report
+      format: markdown
+      path: "${workflow.output_path}/fixes_report.md"
+    retry:
+      max_attempts: 3
+      delay_ms: 1000
+
+  # Step 4: Run tests (allowed to execute cargo test)
+  - step: run_tests
+    model: "${model}"
+    tool:
+      type: shell_exec
+      command: ["cargo", "test"]
+      working_dir: "${workflow.codebase_path}"
+      timeout_secs: 300
+    input:
+      prompt: Run test suite and collect results
+    output:
+      save_to: test_results
+      format: json
+
+# Global Permissions
+permissions:
+  global:
+    allow:
+      - file_read: /workspace/src/*
+      - file_write: /workspace/output/*
+      - dir_list: /workspace/*
+      - shell_exec: cargo test
+    deny:
+      - file_delete: /workspace/src/*
+      - file_write: /workspace/src/*
+      - shell_exec: rm -rf
+      - shell_exec: sudo
+      - web_fetch: http://*
+
+# Step-Specific Permissions
+step_permissions:
+  analyze_code:
+    allow:
+      - file_read: /workspace/src/*
+      - file_search: /workspace/src/*
+    deny:
+      - file_write: /workspace/src/*
+      - shell_exec: *
+
+  generate_fixes:
+    allow:
+      - file_read: /workspace/src/*
+      - file_write: /workspace/output/*
+    deny:
+      - file_write: /workspace/src/*
+
+  write_fixes_report:
+    allow:
+      - file_read: /workspace/output/*
+      - file_write: /workspace/output/*
+    deny:
+      - file_write: /workspace/src/*
+
+  run_tests:
+    allow:
+      - shell_exec: cargo test
+      - shell_exec: cargo build
+    deny:
+      - shell_exec: cargo publish
+      - shell_exec: cargo install
+
+# Tool-Level Permissions
+tool_permissions:
+  grep:
+    allow:
+      - path: /workspace/src/*
+      - pattern: "*"
+    deny:
+      - path: /workspace/.git/*
+      - path: /workspace/target/*
+
+  web_fetch:
+    allow:
+      - domain: docs.rs
+      - domain: github.com
+      - protocol: https
+    deny:
+      - domain: *
+      - protocol: http
+
+  shell_exec:
+    allow:
+      - command: cargo test
+      - command: cargo build
+      - command: cargo check
+      - command: git log
+    deny:
+      - command: rm -rf
+      - command: sudo
+      - command: docker
+      - command: kubectl
+
+# Folder Permissions
+folder_permissions:
+  - path: /workspace/src
+    operations: [read, search]
+    allowed_tools: [file_read, grep, file_search]
+    allowed_steps: [analyze_code, generate_fixes]
+
+  - path: /workspace/output
+    operations: [read, write, create, delete]
+    allowed_tools: [file_write, file_read]
+    allowed_steps: [generate_fixes, write_fixes_report]
+
+  - path: /workspace/.git
+    operations: [read]
+    allowed_tools: [git_operations]
+    allowed_steps: []
+
+  - path: /workspace/target
+    operations: []
+    deny_all: true
+
+# Agent-Specific Permissions
+agent_permissions:
+  default:
+    max_file_size_mb: 100
+    max_execution_time_secs: 600
+    max_concurrent_operations: 5
+
+  step_specific:
+    analyze_code:
+      max_file_size_mb: 500
+      max_execution_time_secs: 300
+
+    run_tests:
+      max_execution_time_secs: 600
+      max_memory_mb: 2048
+
+# Permission Logging
+permission_logging:
+  log_denied_operations: true
+  log_denied_to_file: /workspace/permission_denials.log
+  alert_on_denial:
+    - shell_exec: rm -rf
+    - shell_exec: sudo
+    - file_delete: /workspace/src/*
+
+# Workflow Variables
+workflow:
+  codebase_path: /workspace
+  output_path: /workspace/output
+  max_memory_mb: 4096

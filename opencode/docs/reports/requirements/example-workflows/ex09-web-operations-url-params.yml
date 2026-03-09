@@ -1,0 +1,264 @@
+---
+workflow_id: web_operations_url_params
+name: Web Operations with Full URL Parameters
+description: Demonstrates web_fetch, web_scrape, web_search with full URL parameters (headers, auth, timeout, SSL)
+
+model:
+  primary: unsloth/Qwen2.5-Coder-1.5B-Instruct
+  fallback: jinaai/ReaderLM-v2
+
+policy:
+  runtime: medium
+  logging: verbose
+  context_budget: generous
+  review: none
+
+logging:
+  level: trace
+  detail: maximum
+  output_type: mixed
+  scopes:
+    execution:
+      level: trace
+      detail: maximum
+    web_operations:
+      level: debug
+      detail: high
+
+pipeline:
+  - step: fetch_with_url_params
+    model: "${model.primary}"
+    tool:
+      type: web_fetch
+      config:
+        url: "https://api.github.com/repos/rust-lang/rust"
+        method: GET
+        headers:
+          User-Agent: "YAML-Transpiler/1.0"
+          Accept: "application/vnd.github.v3+json"
+        timeout_secs: 30
+        follow_redirects: true
+        validate_ssl: true
+        allow_insecure: false
+        retry:
+          max_attempts: 3
+          delay_ms: 1000
+          on_timeout: reduce_timeout
+          on_rate_limit: wait_5_seconds
+        authentication:
+          type: bearer_token
+          token: "${workflow.github_token}"
+        body:
+          if_method_post:
+            content_type: application/json
+            body: '{"query": "rust-lang/rust", "type": repositories"}'
+        caching:
+          enabled: true
+          cache_ttl_secs: 3600
+          cache_path: /workspace/.cache/web_fetch/
+
+    input:
+      prompt: |
+        Fetch GitHub API with custom URL parameters:
+
+        URL: https://api.github.com/repos/rust-lang/rust
+        Method: GET
+        Headers:
+          - User-Agent: YAML-Transpiler/1.0
+          - Accept: application/vnd.github.v3+json
+        Timeout: 30 seconds
+        SSL Validation: Enabled
+        Follow Redirects: Yes
+        Retry: 3 attempts on timeout (reduce timeout)
+        Authentication: Bearer token (from environment variable)
+        Caching: 1 hour TTL
+
+        Expected output:
+        - Response headers
+        - Response body as JSON
+        - Cache hit/miss status
+
+        Output to: ${workflow.output_path}/github_response.json
+      output:
+        save_to: github_api_response
+        format: json
+
+  - step: scrape_with_scrape_params
+    model: "${model.primary}"
+    tool:
+      type: web_scrape
+      config:
+        url: "https://docs.rs/tokio/latest/"
+        extract_text: true
+        extract_links: true
+        extract_images: false
+        extract_metadata: true
+        max_size_bytes: 1048576  # 1MB limit
+        timeout_secs: 60
+        encoding: utf-8
+        allow_subsequent_requests: false
+        follow_links:
+          enabled: false
+          max_depth: 2
+        selectors:
+          h1: "h1.title"
+          h2: "h2"
+          h3: "h3"
+          p: "p"
+          code: "code, pre"
+        cleanup:
+          remove_html_tags: true
+          normalize_whitespace: true
+          remove_comments: true
+          replace_special_chars: true
+
+    input:
+      prompt: |
+        Scrape Tokio documentation with extraction parameters:
+
+        URL: https://docs.rs/tokio/latest/
+        Extraction:
+          - Text: Yes
+          - Links: Yes
+          - Images: No
+          - Metadata: Yes
+        Max Size: 1MB
+        Timeout: 60 seconds
+        Encoding: UTF-8
+        Cleanup: Remove HTML tags, normalize whitespace, remove comments
+
+        Expected output:
+        - Extracted text content
+        - List of all links found
+        - Metadata (title, description, language)
+        - Cleanup statistics
+
+        Output to: ${workflow.output_path}/tokio_docs_scrape.json
+      output:
+        save_to: scraped_documentation
+        format: json
+
+  - step: search_with_search_params
+    model: "${model.primary}"
+    tool:
+      type: web_search
+      config:
+        query: "Rust async runtime tokio patterns"
+        engine: google
+        max_results: 10
+        safe_search: true
+        language: en
+        region: us
+        time_range: "1year"
+        filters:
+          - domain: docs.rs
+            enabled: true
+          - domain: github.com
+            enabled: true
+        exclude_domains:
+          - facebook.com
+          - twitter.com
+          - youtube.com
+        sort_by: relevance
+        display_url: true
+        highlight_snippets: true
+        snippet_length: 160
+
+    input:
+      prompt: |
+        Search for Rust async runtime information:
+
+        Query: "Rust async runtime tokio patterns"
+        Engine: Google
+        Max Results: 10
+        Safe Search: Enabled
+        Language: English (US)
+        Time Range: 1 year
+        Filters:
+          - Include: docs.rs, github.com
+          - Exclude: facebook.com, twitter.com, youtube.com
+        Sort: By Relevance
+        Display URLs: Yes
+        Highlight: Yes
+        Snippet Length: 160 chars
+
+        Expected output:
+        - Search results with URLs
+        - Snippets from each result
+        - Metadata (position, time, source)
+        - Filtering statistics
+      output:
+        save_to: search_results
+        format: json
+
+  - step: scrape_and_analyze
+    model: "${model.primary}"
+    input:
+      prompt: |
+        Analyze scraped web content:
+
+        Source: ${step.scrape_with_scrape_params.output}
+        Output: ${workflow.output_path}/analysis.json
+      output:
+        save_to: web_analysis
+        format: json
+
+  - step: use_cached_results
+    model: "${model.primary}"
+    input:
+      prompt: |
+        Demonstrate web fetch caching:
+
+        Use cached response from: ${workflow.output_path}/github_response.json
+
+        Expected output:
+        - Cache hit/miss status
+        - Time to retrieve (should be fast)
+        - Cached at timestamp
+        - Response verification
+      output:
+        save_to: cache_verification
+        format: json
+
+# URL Parameter Validation
+validation:
+  url_parameters:
+    - validate_headers: true
+      required_headers:
+        - User-Agent
+      optional_headers:
+        - Authorization
+        - Accept
+    - validate_timeout: true
+      min_timeout_secs: 5
+      max_timeout_secs: 600
+    - validate_ssl: true
+      validate_cert: true
+      allow_insecure: false
+    - validate_auth:
+        supported_types:
+          - bearer_token
+          - basic_auth
+          - api_key_header
+          - api_key_query
+    - validate_caching:
+        supported_ttls:
+          - 60
+          - 300
+          - 3600
+          - 86400
+
+# Web Operation Metrics
+metrics:
+  enabled: true
+  track:
+    - url_parameters
+    - response_time
+    - cache_hit_rate
+    - extraction_success_rate
+    - retry_count
+    - timeout_events
+
+workflow:
+  github_token: "${env.GITHUB_TOKEN}"
+  output_path: /workspace/output/web_operations

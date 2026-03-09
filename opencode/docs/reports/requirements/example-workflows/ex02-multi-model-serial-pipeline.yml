@@ -1,0 +1,220 @@
+---
+workflow_id: multi_model_serial_pipeline
+name: Multi-Model Serial Pipeline
+description: Same pipeline, load/unload different model for each step
+
+# Model Configuration
+models:
+  step1_model:
+    provider: llamacpp
+    model: "/models/code-specialist.gguf"
+    backend: vulkan
+    gpu_layers: 32
+    load_priority: high
+
+  step2_model:
+    provider: lmstudio
+    model: "deepseek-coder-6.7b"
+    backend: vulkan
+    gpu_layers: 32
+    load_priority: medium
+
+  step3_model:
+    provider: ollama
+    model: "llama3.2-70b"
+    load_priority: low
+
+# Execution Mode
+execution:
+  mode: serial
+  memory:
+    load_unload_strategy: one_at_a_time
+    swap_timeout_secs: 10
+    max_allocated_memory_mb: 8192
+    model_memory_mb:
+      llamacpp_code_specialist: 4096
+      lmstudio_deepseek_coder: 2048
+      ollama_llama3_2_70b: 8192
+
+# Logging
+logging:
+  level: debug
+  detail: high
+  output_type: stateless_direct_io
+  format: json
+  log_file: multi_model_pipeline.log
+  console: false
+  include_timestamps: true
+  include_stack_traces: false
+
+# Pipeline Definition
+pipeline:
+  # Step 1: Code Analysis (Code Specialist Model)
+  - step: analyze_code
+    id: step_1
+    model: "${models.step1_model}"
+    input:
+      prompt: |
+        Analyze this Rust codebase for async patterns:
+        ${workflow.codebase_path}
+
+        Focus on:
+        1. tokio usage patterns
+        2. async trait implementations
+        3. error propagation strategies
+        4. concurrency patterns
+
+        Output structured analysis.
+      codebase: "${workflow.codebase_path}"
+    output:
+      save_to: async_patterns_analysis
+      format: json
+    logging:
+      level: info
+      detail: medium
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+      delay_ms: 1000
+
+  # Step 2: Generate Improvements (DeepSeek Coder)
+  - step: generate_improvements
+    id: step_2
+    model: "${models.step2_model}"
+    input:
+      prompt: |
+        Based on this async pattern analysis:
+        ${step.step_1.output}
+
+        Generate concrete improvements:
+        1. Replace manual async patterns with tokio utilities where applicable
+        2. Suggest proper error handling with anyhow/thiserror
+        3. Identify potential race conditions
+        4. Recommend structured logging integration
+
+        Provide code examples for each improvement.
+      analysis: "${step.step_1.output}"
+    output:
+      save_to: improvement_suggestions
+      format: json
+    logging:
+      level: debug
+      detail: high
+    retry:
+      max_attempts: 3
+      backoff_strategy: linear
+      delay_ms: 2000
+
+  # Step 3: Final Review (Llama 3.2 70B)
+  - step: final_review
+    id: step_3
+    model: "${models.step3_model}"
+    input:
+      prompt: |
+        Review these improvement suggestions:
+        ${step.step_2.output}
+
+        And the original async analysis:
+        ${step.step_1.output}
+
+        Provide:
+        1. Quality assessment of suggestions
+        2. Priority ranking
+        3. Risk assessment for each change
+        4. Integration strategy
+
+        Output as final review report.
+      improvements: "${step.step_2.output}"
+      analysis: "${step.step_1.output}"
+    output:
+      save_to: final_review
+      format: json
+      path: "${workflow.output_path}/review_report.json"
+    logging:
+      level: info
+      detail: medium
+    retry:
+      max_attempts: 2
+      backoff_strategy: exponential
+      delay_ms: 3000
+
+# Auto Model Routing
+auto_model_routing:
+  enabled: true
+  failure_history:
+    track_per_task_category: true
+    max_history_entries: 100
+
+  on_500_error:
+    action: escalate_to_next_model
+    fallback_order:
+      - "${models.step1_model}"
+      - "${models.step2_model}"
+      - "${models.step3_model}"
+
+  priority_adjustment:
+    - model: "${models.step1_model}"
+      task_category: code_analysis
+      base_priority: 0.9
+      adjust_on_failure: -0.1
+      adjust_on_success: +0.01
+
+    - model: "${models.step2_model}"
+      task_category: code_generation
+      base_priority: 0.85
+      adjust_on_failure: -0.15
+      adjust_on_success: +0.02
+
+    - model: "${models.step3_model}"
+      task_category: code_review
+      base_priority: 0.95
+      adjust_on_failure: -0.05
+      adjust_on_success: +0.005
+
+# Retry Configuration
+retry:
+  default:
+    max_attempts: 3
+    backoff_strategy: exponential
+    on_failure: escalate_model
+
+  step_specific:
+    step_1:
+      max_attempts: 5
+      backoff_strategy: linear
+      delay_ms: 500
+
+    step_2:
+      max_attempts: 3
+      backoff_strategy: exponential
+      delay_ms: 1000
+
+    step_3:
+      max_attempts: 2
+      backoff_strategy: exponential
+      delay_ms: 3000
+
+# Validation Loop
+validation_loop:
+  type: exact_validation
+  exact_criteria:
+    - json_schema_valid: true
+    - contains_field: "quality_assessment"
+    - contains_field: "priority_ranking"
+    - contains_field: "risk_assessment"
+    - all_priorities_valid: true
+  steps:
+    - review_generation: step_3
+  max_iterations: 3
+  stop_on:
+    - all_criteria_met: true
+
+# Workflow Variables
+workflow:
+  codebase_path: /workspace/src
+  output_path: /workspace/output
+  max_memory_mb: 8192
+  task_categories:
+    - code_analysis
+    - code_generation
+    - code_review

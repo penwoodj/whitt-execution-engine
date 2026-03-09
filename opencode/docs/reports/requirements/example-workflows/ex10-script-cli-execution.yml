@@ -1,0 +1,73 @@
+---
+workflow_id: script_cli_execution
+name: Script and CLI Execution with Environment Variables
+description: Demonstrates script_run and cli_run with env_vars, working_dir, timeout, output capture
+
+model:
+  primary: unsloth/Qwen2.5-Coder-1.5B-Instruct
+
+policy:
+  runtime: short
+  logging: verbose
+
+logging:
+  level: debug
+  detail: high
+  output_type: log
+
+pipeline:
+  - step: run_python_script_with_env
+    model: "${model.primary}"
+    tool:
+      type: script_run
+      script: /scripts/analyze_codebase.py
+      args:
+        - "--input"
+        - "${workflow.codebase_path}"
+        - "--output"
+        - "${workflow.output_path}/analysis.csv"
+      working_dir: "${workflow.codebase_path}"
+      timeout_secs: 120
+      env_vars:
+        PYTHONPATH: "${workflow.codebase_path}"
+        MODEL_PATH: "${model.primary}"
+        LOG_LEVEL: debug
+      capture_output:
+        stdout: /workspace/logs/script_stdout.log
+        stderr: /workspace/logs/script_stderr.log
+    output:
+      save_to: python_script_result
+      format: json
+      fields:
+        - script_path
+        - execution_time_secs
+        - exit_code
+
+  - step: run_bash_cli_with_params
+    model: "${model.primary}"
+    tool:
+      type: cli_run
+      cli: git
+      args:
+        - "--version"
+        - "--all"
+      working_dir: "${workflow.codebase_path}"
+      timeout_secs: 30
+      env_vars:
+        GIT_LIKE: "true"
+      capture_output:
+        json_log: /workspace/logs/git_events.json
+    output:
+      save_to: git_cli_result
+      format: json
+
+  - step: analyze_script_results
+    model: "${model.primary}"
+    input:
+      prompt: |
+        Analyze script execution results:
+        - ${step.run_python_script_with_env.output}
+        - ${step.run_bash_cli_with_params.output}
+      output:
+        save_to: analysis_summary
+        format: json

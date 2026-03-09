@@ -1,0 +1,186 @@
+---
+workflow_id: direct_llm_pipeline_single_model
+name: Direct LLM Pipeline (Single Model)
+description: Simple pipeline with single model, passing results between steps
+
+# Model Configuration
+models:
+  primary:
+    provider: lmstudio
+    model: "llama-3.2-3b-instruct"
+    backend: vulkan
+    gpu_layers: 32
+
+# Execution Mode
+execution:
+  mode: parallel  # parallel, serial, hybrid
+  memory:
+    max_allocated_memory_mb: 4096
+    model_memory_mb: 4096
+    unload_unused: true
+
+# Logging
+logging:
+  level: debug
+  detail: high
+  output_type: chat
+  format: json
+  console: true
+  include_timestamps: true
+
+# Pipeline Definition
+pipeline:
+  # Step 1: Initial Code Analysis
+  - step: analyze_code
+    id: step_1
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Analyze the following Rust code and identify all async functions:
+        ${workflow.codebase_path}/src/main.rs
+
+        Focus on:
+        1. Function signatures
+        2. Return types
+        3. Error handling patterns
+        4. Dependencies
+
+        Output as structured JSON with fields: functions, summary, patterns.
+      file_path: "${workflow.codebase_path}/src/main.rs"
+    output:
+      save_to: code_analysis
+      format: json
+      fields:
+        - functions
+        - summary
+        - patterns
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+      delay_ms: 1000
+
+  # Step 2: Generate Optimization Suggestions
+  - step: suggest_optimizations
+    id: step_2
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Based on this code analysis:
+        ${step.step_1.output}
+
+        Generate optimization suggestions for:
+        1. Performance improvements
+        2. Error handling enhancements
+        3. Code clarity improvements
+
+        For each suggestion, provide:
+        - Priority (high/medium/low)
+        - Description
+        - Example code
+        - Impact assessment
+
+        Output as structured JSON.
+      analysis: "${step.step_1.output}"  # Variable reference from previous step
+    output:
+      save_to: optimization_suggestions
+      format: json
+      fields:
+        - suggestions
+        - prioritized_list
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+      delay_ms: 1000
+
+  # Step 3: Generate Refactored Code
+  - step: generate_refactored_code
+    id: step_3
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Using these optimization suggestions:
+        ${step.step_2.output}
+
+        Refactor the following code:
+        ${workflow.codebase_path}/src/main.rs
+
+        Requirements:
+        1. Apply high-priority suggestions
+        2. Preserve all functionality
+        3. Add comments explaining changes
+        4. Follow Rust best practices
+
+        Output the complete refactored code.
+      suggestions: "${step.step_2.output}"  # Variable reference
+      original_code_path: "${workflow.codebase_path}/src/main.rs"
+    output:
+      save_to: refactored_code
+      format: text
+      path: "${workflow.output_path}/refactored_main.rs"
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+      delay_ms: 1000
+
+  # Step 4: Validation Loop
+  - step: validate_refactored_code
+    id: step_4
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Validate this refactored code:
+        ${step.step_3.output}
+
+        Check for:
+        1. Syntax errors
+        2. Missing imports
+        3. Type mismatches
+        4. Logic errors
+
+        Report any issues found.
+      refactored_code: "${step.step_3.output}"
+    output:
+      save_to: validation_result
+      format: json
+      fields:
+        - is_valid
+        - issues
+        - errors
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+      delay_ms: 1000
+
+# Validation Loop for Refactoring
+validation_loop:
+  type: validation
+  abstract_criteria: improvement_detected
+  tolerance: 0.05
+  steps:
+    - refactored_code_generation: step_3
+    - validation: step_4
+  stop_condition:
+    - validation_result.is_valid == true
+    - validation_result.errors == []
+  max_iterations: 5
+
+# Retry Configuration
+retry:
+  default:
+    max_attempts: 3
+    backoff_strategy: exponential
+    on_failure: escalate_model
+
+  escalation:
+    fallback_models:
+      - provider: ollama
+        model: "llama3.2"
+      - provider: llamacpp
+        model: "/models/llama-3.2-3b.Q4_K_M.gguf"
+        backend: vulkan
+
+# Workflow Variables
+workflow:
+  codebase_path: /workspace/src
+  output_path: /workspace/output
+  max_memory_mb: 4096

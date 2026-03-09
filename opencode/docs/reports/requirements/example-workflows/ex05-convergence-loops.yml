@@ -1,0 +1,110 @@
+---
+workflow_id: convergence_optimization_loop
+name: Convergence Loops
+description: Continue until results stabilize below threshold
+
+# Model Configuration
+model:
+  provider: llamacpp
+  model: "/models/optimizer.Q4_K_M.gguf"
+  backend: vulkan
+  gpu_layers: 32
+
+# Execution Mode
+execution:
+  mode: serial
+  memory:
+    load_unload_strategy: one_at_a_time
+    swap_timeout_secs: 10
+
+# Logging
+logging:
+  level: debug
+  detail: high
+  output_type: log
+  format: json
+  console: false
+  log_file: convergence_loop.log
+
+# Pipeline Definition
+pipeline:
+  # Step 1: Initial Code Optimization
+  - step: optimize_iteration_1
+    model: "${model}"
+    input:
+      prompt: |
+        Optimize this code for performance:
+        ${workflow.code_path}
+
+        Focus on:
+        1. Algorithm efficiency
+        2. Memory usage
+        3. Parallelization opportunities
+
+        Output optimization score (0-1) and suggested changes.
+      code: "${workflow.code_path}"
+    output:
+      save_to: iteration_1
+      format: json
+      fields:
+        - score
+        - changes
+        - metrics
+      track_metric: optimization_score
+
+  # Step 2: Second Optimization (Compare with previous)
+  - step: optimize_iteration_2
+    model: "${model}"
+    input:
+      prompt: |
+        Previous optimization scored ${step.optimize_iteration_1.output.score} with these changes:
+        ${step.optimize_iteration_1.output.changes}
+
+        Try to improve the score further:
+        ${workflow.code_path}
+
+        Output new optimization score and changes.
+      previous_score: "${step.optimize_iteration_1.output.score}"
+      previous_changes: "${step.optimize_iteration_1.output.changes}"
+      code: "${workflow.code_path}"
+    output:
+      save_to: iteration_2
+      format: json
+      fields:
+        - score
+        - changes
+        - metrics
+      track_metric: optimization_score
+
+# Convergence Loop Definition
+convergence_loop:
+  type: convergence
+  threshold: 0.01
+  metric: "abs(${current.optimization_score} - ${previous.optimization_score})"
+  max_iterations: 10
+
+  steps:
+    - iteration: optimize_iteration_1
+      output_ref: iteration_1
+
+    - iteration: optimize_iteration_2
+      output_ref: iteration_2
+
+  stop_condition:
+    - convergence_met: "${loop.convergence_value} < 0.01"
+
+  fallback_stop_condition:
+    - max_iterations_reached: "${loop.iteration_count} >= 10"
+    - score_degraded: "${current.optimization_score} < ${best.optimization_score} * 0.9"
+
+# Retry Configuration
+retry:
+  default:
+    max_attempts: 3
+    backoff_strategy: exponential
+    delay_ms: 1000
+
+# Workflow Variables
+workflow:
+  code_path: /workspace/src/main.rs
+  output_path: /workspace/output

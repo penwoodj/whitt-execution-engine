@@ -1,0 +1,626 @@
+---
+workflow_id: local_file_crud
+name: Local File CRUD Operations
+description: Demonstrates explicit file read, write, and delete operations for local file management
+
+# Model Configuration
+models:
+  primary:
+    provider: lmstudio
+    model: "llama-3.2-3b-instruct"
+    backend: vulkan
+    gpu_layers: 32
+
+# Execution Mode
+execution:
+  mode: parallel
+  memory:
+    max_allocated_memory_mb: 4096
+    model_memory_mb: 4096
+    unload_unused: true
+
+# Logging with Hierarchical Structure
+logging:
+  level: debug
+  detail: high
+  output_type: chat
+  format: json
+  console: true
+  include_timestamps: true
+
+  scopes:
+    # Workflow-level logging
+    workflow_execution:
+      level: debug
+      detail: high
+      message_format: "{timestamp} [WORKFLOW] {step_id}: {message}"
+
+    # Step-level logging
+    step_execution:
+      level: info
+      detail: medium
+      message_format: "{timestamp} [STEP {step_id}] {step_name}: {message}"
+
+    # Tool-level logging (file operations)
+    file_operations:
+      level: debug
+      detail: high
+      message_format: "{timestamp} [FILE] {operation}: {file_path} - {status}"
+
+    # Agent-level logging
+    agent_execution:
+      level: info
+      detail: medium
+      message_format: "{timestamp} [AGENT] {agent_id}: {message}"
+
+    # State-level logging
+    state_management:
+      level: debug
+      detail: low
+      message_format: "{timestamp} [STATE] {state_change}: {details}"
+
+  # Output types for different log levels
+  output_types:
+    - chat
+    - log
+    - stateless_direct_io
+
+# Pipeline Definition
+pipeline:
+  # Step 1: Read multiple configuration files
+  - step: read_configuration_files
+    id: step_1
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Read and parse these configuration files:
+
+        1. Read: /workspace/config/app_config.json
+        2. Read: /workspace/config/database.yaml
+        3. Read: /workspace/config/environment.yml
+
+        Extract:
+        - Application name
+        - Database connection settings
+        - Environment variables
+
+        Output as structured JSON with:
+        - file1_name: app_config.json
+        - file1_content: parsed JSON
+        - file2_name: database.yaml
+        - file2_content: parsed YAML
+        - file3_name: environment.yml
+        - file3_content: parsed YAML
+        - summary: Extracted key values
+
+      # Explicit file read operation
+      file_operations:
+        - operation: read
+          file_path: /workspace/config/app_config.json
+          format: json
+          encoding: utf-8
+          buffer_size_kb: 64
+
+        - operation: read
+          file_path: /workspace/config/database.yaml
+          format: yaml
+          encoding: utf-8
+          buffer_size_kb: 64
+
+        - operation: read
+          file_path: /workspace/config/environment.yml
+          format: yaml
+          encoding: utf-8
+          buffer_size_kb: 64
+    output:
+      save_to: configuration
+      format: json
+      fields:
+        - files_read
+        - file_contents
+        - summary
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+      delay_ms: 1000
+
+  # Step 2: Write processed configuration
+  - step: write_processed_config
+    id: step_2
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Process and rewrite the configuration files with improvements:
+
+        Input data:
+        ${step.step_1.output}
+
+        Requirements:
+        1. Standardize JSON formatting
+        2. Add validation comments
+        3. Document missing fields
+        4. Ensure backward compatibility
+        5. Add schema validation structure
+
+        Output the processed configuration as:
+        - A consolidated JSON file
+        - With embedded validation schema
+        - With documentation comments
+
+      # Explicit file write operation
+      file_operations:
+        - operation: write
+          file_path: /workspace/output/processed_config.json
+          format: json
+          encoding: utf-8
+          pretty_print: true
+          indent_size: 2
+
+        - operation: write
+          file_path: /workspace/output/processed_config.schema.json
+          format: json
+          encoding: utf-8
+          pretty_print: true
+          indent_size: 2
+
+        - operation: write
+          file_path: /workspace/output/processed_config.txt
+          format: text
+          encoding: utf-8
+          include_header: true
+          header: "Processed Configuration\n========================\nGenerated: ${workflow.timestamp}\nModel: ${models.primary.model}\n\n"
+    output:
+      save_to: processed_config
+      format: json
+      fields:
+        - files_written
+        - output_files
+        - validation_schema
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+      delay_ms: 1000
+
+  # Step 3: Create a new file using LLM-generated content
+  - step: create_new_document
+    id: step_3
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Create a new project documentation file based on the processed configuration:
+
+        Processed config:
+        ${step.step_2.output}
+
+        Requirements:
+        1. Generate comprehensive documentation
+        2. Include configuration explanations
+        3. Add usage examples
+        4. Include troubleshooting section
+        5. Format as Markdown
+
+        Create file: /workspace/output/project_documentation.md
+
+      # Explicit file write operation
+      file_operations:
+        - operation: write
+          file_path: /workspace/output/project_documentation.md
+          format: markdown
+          encoding: utf-8
+          pretty_print: true
+          line_width: 80
+    output:
+      save_to: documentation
+      format: json
+      fields:
+        - file_created
+        - file_path
+        - word_count
+        - markdown_structure
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+      delay_ms: 1000
+
+  # Step 4: Backup and archive old files
+  - step: backup_old_files
+    id: step_4
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Backup and archive the original configuration files:
+
+        Source files:
+        - /workspace/config/app_config.json
+        - /workspace/config/database.yaml
+        - /workspace/config/environment.yml
+
+        Target backup directory: /workspace/backups/config_${workflow.timestamp}
+
+        Requirements:
+        1. Create backup directory with timestamp
+        2. Copy each file to backup directory
+        3. Create archive (.tar.gz) of backup directory
+        4. Verify backup integrity
+        5. Delete backup directory after archiving
+
+      # Explicit file operations for backup
+      file_operations:
+        - operation: read
+          file_path: /workspace/config/app_config.json
+          format: json
+          encoding: utf-8
+
+        - operation: read
+          file_path: /workspace/config/database.yaml
+          format: yaml
+          encoding: utf-8
+
+        - operation: read
+          file_path: /workspace/config/environment.yml
+          format: yaml
+          encoding: utf-8
+
+        - operation: write
+          file_path: /workspace/backups/config_${workflow.timestamp}/app_config.json
+          format: json
+          encoding: utf-8
+          pretty_print: true
+
+        - operation: write
+          file_path: /workspace/backups/config_${workflow.timestamp}/database.yaml
+          format: yaml
+          encoding: utf-8
+          pretty_print: true
+
+        - operation: write
+          file_path: /workspace/backups/config_${workflow.timestamp}/environment.yml
+          format: yaml
+          encoding: utf-8
+          pretty_print: true
+
+        - operation: create_directory
+          path: /workspace/backups/config_${workflow.timestamp}
+          recursive: true
+
+        - operation: create_directory
+          path: /workspace/backups/archive_${workflow.timestamp}
+          recursive: true
+
+        - operation: archive
+          source: /workspace/backups/config_${workflow.timestamp}
+          destination: /workspace/backups/archive_${workflow.timestamp}/config_backup_${workflow.timestamp}.tar.gz
+          compression: gzip
+          include_timestamp: true
+    output:
+      save_to: backup_summary
+      format: json
+      fields:
+        - backup_directory
+        - archive_file
+        - files_backed_up
+        - backup_timestamp
+        - integrity_verified
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+      delay_ms: 1000
+
+  # Step 5: Update file with new content
+  - step: update_configuration_file
+    id: step_5
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Update the configuration file with new settings:
+
+        Target file: /workspace/config/app_config.json
+
+        Add/Update:
+        1. Version number to 2.0.0
+        2. Add new feature flag
+        3. Update database connection string
+        4. Add monitoring endpoints
+
+        Backup original before updating:
+        - Create backup as /workspace/config/app_config.json.backup
+
+        After updating:
+        - Validate JSON structure
+        - Check for syntax errors
+        - Verify required fields present
+
+      # Explicit file operations for update
+      file_operations:
+        - operation: backup
+          source: /workspace/config/app_config.json
+          destination: /workspace/config/app_config.json.backup
+          timestamp: true
+
+        - operation: read
+          file_path: /workspace/config/app_config.json
+          format: json
+          encoding: utf-8
+
+        - operation: write
+          file_path: /workspace/config/app_config.json
+          format: json
+          encoding: utf-8
+          pretty_print: true
+          backup_existing: true
+
+    output:
+      save_to: config_update_result
+      format: json
+      fields:
+        - original_file
+        - backup_file
+        - updated_file
+        - changes_applied
+        - validation_status
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+      delay_ms: 1000
+
+  # Step 6: Delete old or unused files
+  - step: clean_up_old_files
+    id: step_6
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Clean up old configuration files:
+
+        Target files to delete:
+        1. /workspace/config/app_config.json.old
+        2. /workspace/config/database.yaml.bak
+        3. /workspace/config/environment.yml.tmp
+
+        Requirements:
+        1. Verify files exist before deletion
+        2. Confirm with user before permanent deletion
+        3. Log all deletion operations
+        4. Generate cleanup report
+
+        Output:
+        - List of files checked
+        - List of files deleted
+        - List of files skipped
+        - Cleanup statistics
+
+      # Explicit file operations for cleanup
+      file_operations:
+        - operation: check_exists
+          file_path: /workspace/config/app_config.json.old
+          fail_if_missing: false
+
+        - operation: check_exists
+          file_path: /workspace/config/database.yaml.bak
+          fail_if_missing: false
+
+        - operation: check_exists
+          file_path: /workspace/config/environment.yml.tmp
+          fail_if_missing: false
+
+        - operation: delete
+          file_path: /workspace/config/app_config.json.old
+          confirm_deletion: true
+          log_operation: true
+
+        - operation: delete
+          file_path: /workspace/config/database.yaml.bak
+          confirm_deletion: true
+          log_operation: true
+
+        - operation: delete
+          file_path: /workspace/config/environment.yml.tmp
+          confirm_deletion: true
+          log_operation: true
+
+        - operation: create_directory
+          path: /workspace/cleanup_reports
+          recursive: true
+
+        - operation: write
+          file_path: /workspace/cleanup_reports/cleanup_report_${workflow.timestamp}.json
+          format: json
+          encoding: utf-8
+          pretty_print: true
+    output:
+      save_to: cleanup_summary
+      format: json
+      fields:
+        - files_checked
+        - files_deleted
+        - files_skipped
+        - cleanup_timestamp
+        - report_file
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+      delay_ms: 1000
+
+  # Step 7: Validate all file operations
+  - step: validate_file_operations
+    id: step_7
+    model: "${models.primary}"
+    input:
+      prompt: |
+        Validate all file operations performed:
+
+        Perform these validations:
+        1. Read files exist and are readable
+        2. Write files created successfully
+        3. Backup files created with correct content
+        4. Update files modified with expected changes
+        5. Delete operations completed as expected
+        6. All output files are valid JSON/YAML
+        7. No permission errors occurred
+        8. File sizes match expectations
+
+        For each validation:
+        - Check file existence
+        - Read file content
+        - Validate format (JSON/YAML/Markdown)
+        - Check content structure
+        - Verify metadata (timestamps, sizes)
+
+        Output comprehensive validation report:
+        - All files checked
+        - Validation status (PASS/FAIL)
+        - Any errors or warnings
+        - File integrity verification results
+
+      # Explicit file operations for validation
+      file_operations:
+        - operation: check_exists
+          file_path: /workspace/config/app_config.json
+          fail_if_missing: false
+
+        - operation: check_exists
+          file_path: /workspace/output/processed_config.json
+          fail_if_missing: false
+
+        - operation: check_exists
+          file_path: /workspace/output/project_documentation.md
+          fail_if_missing: false
+
+        - operation: check_exists
+          file_path: /workspace/backups/config_${workflow.timestamp}/app_config.json
+          fail_if_missing: false
+
+        - operation: check_exists
+          file_path: /workspace/backups/archive_${workflow.timestamp}/config_backup_${workflow.timestamp}.tar.gz
+          fail_if_missing: false
+
+        - operation: check_exists
+          file_path: /workspace/cleanup_reports/cleanup_report_${workflow.timestamp}.json
+          fail_if_missing: false
+
+        - operation: get_file_info
+          file_path: /workspace/output/processed_config.json
+          fields:
+            - size_bytes
+            - modification_time
+            - checksum
+
+        - operation: get_file_info
+          file_path: /workspace/output/project_documentation.md
+          fields:
+            - size_bytes
+            - modification_time
+            - checksum
+
+        - operation: get_file_info
+          file_path: /workspace/backups/archive_${workflow.timestamp}/config_backup_${workflow.timestamp}.tar.gz
+          fields:
+            - size_bytes
+            - modification_time
+            - checksum
+    output:
+      save_to: validation_report
+      format: json
+      fields:
+        - file_validations
+        - validation_results
+        - errors
+        - warnings
+        - overall_status
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+      delay_ms: 1000
+
+# Workflow Variables
+workflow:
+  codebase_path: /workspace/src
+  config_path: /workspace/config
+  output_path: /workspace/output
+  backup_path: /workspace/backups
+  cleanup_reports_path: /workspace/cleanup_reports
+  timestamp: ${workflow.timestamp}
+
+# Retry Configuration
+retry:
+  default:
+    max_attempts: 3
+    backoff_strategy: exponential
+    delay_ms: 1000
+    on_failure: escalate_model
+
+  escalation:
+    fallback_models:
+      - provider: ollama
+        model: "llama3.2"
+      - provider: llamacpp
+        model: "/models/llama-3.2-3b.Q4_K_M.gguf"
+        backend: vulkan
+
+# Hierarchical Logging Parameters
+logging_parameters:
+  workflow_level:
+    level: debug
+    detail: high
+    output_type: log
+    format: json
+
+  step_level:
+    level: info
+    detail: medium
+    output_type: chat
+    format: json
+
+  tool_level:
+    level: debug
+    detail: high
+    output_type: stateless_direct_io
+    format: json
+
+  agent_level:
+    level: info
+    detail: medium
+    output_type: log
+    format: json
+
+# File Operation Policies
+file_operations:
+  max_file_size_mb: 100
+  allowed_extensions:
+    - json
+    - yaml
+    - yml
+    - md
+    - txt
+    - tar
+    - gz
+  encoding: utf-8
+  backup_before_overwrite: true
+  validation_on_write: true
+  integrity_check_after_write: true
+
+# Memory Management
+memory:
+  max_concurrent_file_operations: 5
+  file_operation_timeout_secs: 30
+  disk_space_mb_required: 1000
+
+# State Management
+state:
+  save_interval_secs: 60
+  checkpoint_interval_steps: 3
+  state_file_path: /workspace/.workflow_state/local_file_crud.json
+
+metrics:
+  enabled: true
+  collect:
+    - file_operations_count
+    - files_read
+    - files_written
+    - files_deleted
+    - files_backed_up
+    - validation_errors
+    - operation_duration_seconds
+    - memory_used_mb
+  output:
+    path: /workspace/output/file_operations_metrics.json
+    format: json

@@ -6,6 +6,8 @@ Write a YAML workflow → Get compiled Rust code that runs local LLMs.
 
 This is a compiler. You define workflows in YAML, it generates Rust code with type-safe execution, built-in tools, and autonomous capabilities.
 
+**yaml-to-rust-agentsdk is a YAML local agentic runtime and YAML local agentic workflow execution framework with the ability to save and track workflow execution through optionally persistent reusable compiled Rust code generated from a YAML workflow.**
+
 ---
 
 ## Why
@@ -21,6 +23,115 @@ Local LLMs are powerful but stuck in chat. To be useful, they need:
 Building this in Rust manually takes time. Debugging takes longer.
 
 This transpiler bridges that gap.
+
+---
+
+## Dual Execution Modes
+
+The transpiler supports **two distinct execution modes**:
+
+### Mode 1: Execution Engine (Direct Execution)
+
+**Use case**: For development, iteration, testing, and self-improvement workflows
+
+**What it does**:
+- Directly executes YAML workflows
+- Rich execution logs and metrics
+- Supports iterative workflow improvement
+- No need to compile code
+
+**Process**:
+```
+YAML Workflow → Validation → WorkflowIR → Execute → Output + Logs
+```
+
+**When to use**:
+- Developing new workflows
+- Testing workflow parameters
+- Iterating on validation criteria
+- Collecting data for workflow improvements
+- Self-improving agentic workflows
+
+**Output**:
+- Console output: Human-readable results
+- Logs: Structured execution logs (JSON/structured)
+- Chat files: Conversation history with LLM calls
+- Output files: Files specified in workflow output sections
+- Metrics: Performance, quality, convergence data
+
+**Example**: Test a new validation loop, adjust criteria, re-execute until convergence achieved.
+
+---
+
+### Mode 2: Code Generator (Reusable Code)
+
+**Use case**: For production, frequent execution, or when workflow is stable
+
+**What it does**:
+- Compiles YAML workflows to reusable Rust code
+- Generates production-ready executable
+- Supports CLI execution with parameter passing
+- No external YAML dependencies at runtime
+
+**Process**:
+```
+YAML Workflow → WorkflowIR → Rust Code → Compile → Reusable Executable
+```
+
+**When to use**:
+- Workflow is production-ready
+- Need frequent executions with variations
+- Want to optimize startup time
+- Need to integrate workflow into larger systems
+- Want to embed workflow logic in other applications
+
+**Generated Code Features**:
+- Self-contained execution engine
+- CLI interface for parameter passing
+- Built-in retry and validation logic
+- Native model loading/unloading
+- Optimized for performance
+- No YAML parsing at runtime
+
+**Example**: After developing and testing a workflow 100 times, generate reusable Rust code for production use.
+
+---
+
+### Workflow Improvement Loop
+
+The two modes work together to enable self-improving workflows:
+
+1. **Development Phase**:
+   - Use execution mode to iterate on workflow design
+   - Use execution logs to identify improvement opportunities
+   - Test different model configurations
+   - Tune parameters (concurrency, retry, validation)
+
+2. **Data Collection**:
+   - Execution logs capture quality metrics
+   - Convergence data shows improvement patterns
+   - Error patterns reveal edge cases
+
+3. **Improvement**:
+   - Analyze logs to improve validation criteria
+   - Optimize model selection and routing
+   - Refine loop convergence thresholds
+
+4. **Code Generation**:
+   - When workflow is stable, generate reusable Rust code
+   - Test generated code independently
+   - Deploy to production
+
+5. **Iterate Again**:
+   - Monitor performance with compiled code
+   - Identify new improvements
+   - Regenerate code when needed
+
+**Benefits**:
+- Development speed: Quick iterations with execution mode
+- Production performance: Compiled code optimization
+- Reusability: Reusable code eliminates re-transpilation overhead
+- Self-improvement: Data-driven workflow optimization
 
 ---
 
