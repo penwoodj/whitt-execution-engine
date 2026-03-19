@@ -2,38 +2,575 @@
 workflow_id: comprehensive_ai_code_refactoring_system
 name: Comprehensive AI-Powered Code Refactoring and Documentation System
 description: Coherent end-to-end workflow demonstrating all schema features through realistic AI-powered codebase improvement
+# this entire file is highly validated with varying local system hardware limitations in mind
+
+agentic_workflow:
+  
 
 # Model Configuration
-models:
-  primary_analyzer:
-    provider: lmstudio
-    model: "llama-3.2-3b-instruct"
-    backend: vulkan
-    gpu_layers: 32
+models: # this should be loadable via a centralized and workspace folder scoped config files. If models aren't specified we use the automatic model router or if model on step is set to automatic_model_router
+  global_model_config: "./path/to/config.yml" 
+  "llama-3.2-3b-instruct":
+    name: primary_analyzer # variable reference name later in the workflow
+    host: lmstudio # enum lmstudio | ollama | llama_cpp_with_vulkan
+    allowed_processors: "(cpu_main | cpu_alt_1) & gpu_cluster2_brady" # compute modules that can be used that uses available compute bandwidth and logical notation to decide at the moment of loading the model into memory which cpu &| gpu to use.  | means backup if the previous one is in use and doesn't have enough available bandwidth needed to run this model based on saved information about what the machine can handle inside the execution engine and & is to attempt to load the model into both sources at once if available.  most providers/hosts will likely only support gpu offloading, and currently I only have a cpu and gpu in my cluster so all we'll need to support initially will be cpu_name or gpu_name or cpu_name & gpu_name or cpu_name | gpu_name or gpu_name | cpu_name
+    max_allowed:
+      ram: 13% # percentage of ram allowed to be used by this workflow.  From the percentage we calculate the ram in GB or MB. After we know the max memory allowed when running the model we use that to calculate the context size to load in the model and what kv cache quantitization to use if not explicitly specified.  Each model will have min max usefulness range so if the % with the system specs isn't sufficient for the minimum spec (e.g. min_attention_tokens) then when attempting to run the workflow that and all other runtime errors are returned and the workflow will not attempt to execute.  That way if a workflow is sent to a different machine without as much specs they get warned when attempting to run it with a good message that tells them why in detail and how to fix it in terms of changing settings if it just needs to be bigger % it recommends that but if it doesn't have enough resources offers alternatives models that have similar capabilities with changes to the workflow suggestioned to compensate for the smaller llm
+      vram: 3.7gb # same as above just the second step onward in terms of behavior
+      cpu: 49%
+      gpu: 74%
+      attention_tokens: 150000
+      concurrent_requests: 2 # if available by provider and possibly from the global model config, and informs parallelization opportunities for the execution and transpilation engines, along with how many sub_agents, with the workflow set workflow_execution_strategy.processing === parallel.  there will be a logging.errors.workflow_parsing.hardware_limitation_error.
+    min_allowed:
+      ram: 9% # percentage of ram allowed to be used by this workflow.  From the percentage we calculate the ram in GB or MB. After we know the max memory allowed when running the model we use that to calculate the context size to load in the model and what kv cache quantitization to use if not explicitly specified.  Each model will have min max usefulness range so if the % with the system specs isn't sufficient for the minimum spec (e.g. min_attention_tokens) then when attempting to run the workflow that and all other runtime errors are returned and the workflow will not attempt to execute.  That way if a workflow is sent to a different machine without as much specs they get warned when attempting to run it with a good message that tells them why in detail and how to fix it in terms of changing settings if it just needs to be bigger % it recommends that but if it doesn't have enough resources offers alternatives models that have similar capabilities with changes to the workflow suggestioned to compensate for the smaller llm
+      vram: 24% # hardcoded memory number like 3.7gb or 350mb or 20000kb takes precidence so if the min allowed % is greater than a hardcoded 3.6gb it is 3.6gb but if both are memory numbers and the min is bigger than system copacity you get a hardware limitation error that would return some helpful tips for an llm to alter the workflow to make it still effective on a smaller system. the default template error messages and responses can be show in logging.errors.workflow_parsing.hardware_limitation_error.
+      cpu: 49%
+      gpu: 74%
+      attention_tokens: 73500 # if ram+vram is insufficient in terms of availability or machine capabilities to load this many tokens then the workflow gets a run time error with a helpful error message clearly stating what happened and how to change the workflow file to make it work with clear detailed info in the error message 
+    model_memory_cache_size: "min" # enum min | max | medium | medium-min | medium-max maps to the smallest to largest kv cache size that still fits the model usefulness minimums found in global model configs found in the automatic model router
+    thinking:
+      budget_tokens: 4096       # Reasoning token budget
+      capture_in_output: true   # Include reasoning in final output
+      capture_in_events: true   # Emit reasoning as events
+      stream_to_log: true       # Stream reasoning to log file
+    hooks:
+      # these are the lifecycle hooks for basic agents.  no tools.
+      on_agent_create:  #...
+      on_run_start:  #...
+      on_run_complete:  #...
+      on_run_error:  #...
+      on_turn_start:  #...
+      on_turn_complete:  #...
+      on_turn_error:  #...
+      on_thinking:  #...
+      on_memory_recall:  #...
+      on_memory_store:  #...
+      on_stream_chunk:  #...
+      on_stream_complete:   #...
+    gaurdrails: # if present gaurdrails are enabled. if not present gaurdrails are disabled.
+      enforcement_policy: block        # block | warn | allow (global default)
+      input:
+        guards: [prompt_injection, pii_redaction, max_length]
+        #...
+      output:
+        guards: [toxicity_filter, pii_redaction, format_validation, max_length]
+        #...
+          
 
-  secondary_validator:
-    provider: ollama
-    model: "llama3.2"
-    backend: cpu
 
-  embedder:
-    provider: jinaai
-    model: "ReaderLM-v2"
-    backend: vulkan
+   # all other fields will be provider/host related fields for loading in the model. For example you might have a forced static token length or directly specific kv cache quantitization or any other settings that is supported for running a model.  I do want the fields to have standardized name across all providers but each provider will have some fields they all support and some fields that are provider specific if a model load-in setting isn't supported then a runtime error should occur with reference to the fact that that provider/host doesn't have that setting or feature.
 
-  fallback_model:
-    provider: llamacpp
-    model: "/models/llama-3.2-3b.Q4_K_M.gguf"
-    backend: vulkan
+agents:
+  - id: main_agent
+    framework: agentsdk
+    model: "llama-3.2-3b-instruct" # can be specified with a model name var "${models.primary_analyzer}"
+    custom_executor_name: foobar # if  not set always a react_agent. llm name when referenced is always the basic agent 
+    max_turns: 10
+    tool_use:
+      stop_on_tool_failure: false
+      accumulate_tool_results: true 
+      output: #todo 
+      permission: always_ask # ask: always show a prompt with the command and have the command in an edit input. We will also show an option for single try confirm, which is default with enter; we will also have a trust confirm that allows running that specific command with varying arguments freely. | if always_trust is always run this without asking | always_ask  always asks for a confirm with an edit input for the command.  Can be set on individual tools here or in workflow steps
+    tools: #or can be array of strings ["grep","ast_parser", "./path/to/script" /*run by file type*/]
+      - name: file_search
+        type: tool
+        tool_type: grep
+      - name: custom_script_1
+        type: default_terminal 
+  
+        run: |
+          node /path/to/script.js --arg1=${var.asdfg} --param2=bar
 
+    hooks:
+      # ── RUN LIFECYCLE ──────────────────────────────────────────
+      on_create: # Fires once when agent is instantiated (before any run)
+        # EVERY POSSIBLE OPTION: What is in this on_create hook is every possible hook action property and with an example of the correct type
+        # ── CONTROL FLOW ─────────────────────────────────────
+        stop_step:
+          condition: |
+            result == null
+
+          # EVERY POSSIBLE OPTION: Condition String in Control Flow hook actions operators and properties
+            #   operators:
+            #     comparison: ["==", "!=", ">", ">=", "<", "<="]   # equals (string, number, bool) | not equals |greater than (number) | greater than or equal | less than | less than or equal
+            #     logical: ["&&", "||", "!"]   # and | or | not
+            #     string: [contains, starts_with, ends_with, matches, length] # "hello" contains "ell" | "hello" starts_with "hel" | "hello" ends_with "llo" | regex match: "abc123" matches "\\d+" | "hello" length > 3      
+            #    collection: [in, not_in, empty, not_empty, length, all, any, none, has]   # membership: "b" in ["a", "b", "c"] | inverse membership: "d" not_in ["a", "b", "c"] | empty check: [] empty == true | non-empty check: ["a"] not_empty == true | array length: [1,2,3] length > 2 | every element passes: result.accumulated_tool_calls all .success == true | at least one passes: result.accumulated_tool_calls any .is_error == true | no elements pass: result.accumulated_tool_calls none .duration_ms > 5000 | key existence in nested object: task.metadata has "priority"
+            #     type: [is_null, is_not_null, is_type] # value is null ; value is not null ; value is_type "string" | "number" | "bool" | "array" | "object"
+            #     existence: [defined, undefined] #key exists in object (even if null) | key does not exist
+            #     grouping: ["(", ")"]   # override all precedence, nestable: (a || b) && c | ((x > 0) && y) != null
+            #     arithmetic: ["*", "/", "%", "+", "-"]   # multiply: quality_score * validation.weight | divide: duration_ms / 1000 | modulo: token_usage.total % 1000 | add: token_usage.input + token_usage.output | subtract/negative: duration_ms - 1000
+            # 
+            # all_possible_hook_data_structures:
+
+            #   # ── STATIC CONTEXT (always available in every hook) ──────
+            #   workflow: # object with all property values of the parts of the yaml workflow triggering the hook (e.g. agent, model, step, workflow)
+            #   run:
+            #     number: 3                        # Incrementing run counter
+            #     started_at: "2026-03-18T10:00:00Z"
+            #     elapsed_ms: 4523                 # Time since run_start fired
+            #   now: "2026-03-18T10:00:15.423Z"
+            #   now_iso8601: "2026-03-18T10:00:15Z"
+            #   now_epoch_ms: 1742302815423
+            #   random_float: 0.7291               # 0.0-1.0
+
+            #   # ── DYNAMIC CONTEXT (varies by hook) ─────────────────────
+            #   task:
+            #     id: "task-001"
+            #     prompt: "Analyze this Rust codebase for async patterns..."
+            #     priority: "high"
+            #     category: "code_analysis"
+            #     prompt_length: 245
+            #     prompt_token_count: 87
+            #   error:
+            #     type: "timeout" # timeout | rate_limited | server_error | connection_error | authentication_error | invalid_request | content_filtered | context_length_exceeded | tool_execution | memory | unknown
+            #     message: "LLM request timed out after 30000ms"
+            #     code: 408                        # HTTP status code if applicable, null otherwise
+            #     is_retryable: true
+            #     attempt: 2                       # Which retry attempt this is (1-based)
+            #     provider: "lmstudio"
+            #     stack_trace: "autoagents::llm::backends::openai::..."
+            #     details: {}                      # Provider-specific error payload
+            #   result:
+            #     done: true                       # Agent determined task is complete
+            #     response: "The analysis reveals 12 async patterns..."
+            #     response_length: 1520
+            #     reasoning_content: "First I should look at tokio usage..."
+            #     reasoning_length: 890
+            #     reasoning_token_count: 85
+            #     token_usage:
+            #       input: 1250
+            #       output: 480
+            #       total: 1730
+            #     turns: 4                         # How many turns were executed
+            #     quality_score: 0.92              # If validation ran
+            #     tool_call_count: 5
+            #     output_schema_valid: true
+            #   turn:  
+            #     index: 2
+            #     output:
+            #       response: "Based on the grep results..."
+            #       reasoning_content: "The grep found 3 uses of tokio::spawn..."
+            #       tool_call_count: 2                      # Tool calls from THIS turn only
+            #       token_usage:
+            #         input: 800
+            #         output: 200
+            #         total: 1000
+            #   tool:
+            #     call:
+            #       id: "call_abc123"
+            #       tool_name: "grep"
+            #       tool_args:
+            #         pattern: "tokio::spawn"
+            #         path: "/workspace/src"
+            #       tool_args_json: '{"pattern":"tokio::spawn","path":"/workspace/src"}'
+            #     result:
+            #       success: true
+            #       output: "src/main.rs:15: tokio::spawn(async move { ... })\n..."
+            #       output_length: 520
+            #       token_count: 130
+            #       is_error: false
+            #       duration_ms: 45
+            #       raw: "src/main.rs:15: tokio::spawn(...)"  # Before any transformation
+            #   chunk:
+            #     text: "The analysis reveals"
+            #     index: 12
+            #     is_final: false
+            #   stream_response:
+            #     full_text: "The analysis reveals 12 async patterns..."
+            #     total_tokens: 480
+            #     total_chunks: 47
+            #     duration_ms: 3200
+            #   duration_ms: 4523                  # Time since the paired *start hook fired
+            #   validation:
+            #       criteria: "code_quality_score"
+            #       threshold: 0.9
+            #       actual: 0.92
+            #       passed: true
+            #       weight: 0.3
+
+            # hook_property_access
+            #   on_create:         [workflow, run, now, now_iso8601, now_epoch_ms, random_float]
+            #   on_run_start:      [workflow, run, now, now_iso8601, now_epoch_ms, random_float, task]
+            #   on_run_complete:   [workflow, run, now, now_iso8601, now_epoch_ms, random_float, task, result, duration_ms, validation]
+            #   on_run_error:      [workflow, run, now, now_iso8601, now_epoch_ms, random_float, task, error, duration_ms]
+            #   on_turn_start:     [workflow, run, now, now_iso8601, now_epoch_ms, random_float, task, turn]
+            #   on_turn_complete:  [workflow, run, now, now_iso8601, now_epoch_ms, random_float, task, turn, result, duration_ms]
+            #   on_turn_error:     [workflow, run, now, now_iso8601, now_epoch_ms, random_float, task, turn, error, duration_ms]
+            #   on_thinking:       [workflow, run, now, now_iso8601, now_epoch_ms, random_float, turn]
+            #   on_tool_call:      [workflow, run, now, now_iso8601, now_epoch_ms, random_float, task, turn, tool.call]
+            #   on_tool_start:     [workflow, run, now, now_iso8601, now_epoch_ms, random_float, turn, tool.call]
+            #   on_tool_result:    [workflow, run, now, now_iso8601, now_epoch_ms, random_float, turn, tool.call, tool.result, duration_ms]
+            #   on_tool_error:     [workflow, run, now, now_iso8601, now_epoch_ms, random_float, task, turn, tool.call, error, duration_ms]
+            #   on_stream_chunk:   [workflow, run, now, now_iso8601, now_epoch_ms, random_float, turn, chunk]
+            #   on_stream_complete: [workflow, run, now, now_iso8601, now_epoch_ms, random_float, stream_response, result, duration_ms]
+
+          reason: "Null result detected, halting pipeline"
+        stop_workflow:
+          condition: "..."
+          reason: "..."
+        retry:
+          condition: "..."
+          reason: "..."
+          backoff: linear
+          max_attempts: 2
+          delay_ms: 500
+          #OR
+          backoff: exponential
+          base_ms: 1000
+          max_ms: 30000
+          jitter: 0.2
+        skip:
+          condition: "..."
+          reason: "..."
+
+        # START HERE NEXT TIME YOU TOUCH THIS AND DELETE THIS MESSAGE ── LOGGING ──────────────────────────────────────────
+        log:
+          level: info
+          message: "Run complete: done={result.done}, turns={result.turns}, tokens={result.token_usage.total}, duration={duration_ms}ms"
+          output_type: log
+          format: json
+          
+          metrics:
+            - name: "run.duration_ms"
+              value: "{{duration_ms}}"
+              unit: milliseconds
+            - name: "run.turns"
+              value: "{{result.turns}}"
+              unit: turns
+            - name: "run.tokens"
+              value: "{{result.token_usage.total}}"
+              unit: tokens
+
+        log_trace:
+          span_name: "agent.run"
+          attributes:
+            agent: "{{agent.name}}"
+            task: "{{task.id}}"
+            turns: "{{result.turns}}"
+            tokens_input: "{{result.token_usage.input}}"
+            tokens_output: "{{result.token_usage.output}}"
+          parent_span: "{{workflow.trace_id}}"
+
+        # ── STATE MUTATION ───────────────────────────────────
+
+        set_variable:
+          key: "last_run_completed_at"
+          value: "{{now_iso8601}}"
+          scope: workflow
+
+        increment_variable:
+          key: "total_runs_executed"
+          delta: 1
+          scope: workflow
+
+        update_memory:
+          add_summary: "Run completed with {{result.turns}} turns. Final output: {{result.response[0..200]}}"
+          inject_message:
+            role: system
+            content: "Previous run completed successfully. Use those results as context."
+
+        set_timeout:
+          max_ms: 60000
+
+        # ── PUBLISHING / EVENTS ──────────────────────────────
+
+        publish:
+          topic: "run.complete"
+          payload:
+            task_id: "{{task.id}}"
+            done: "{{result.done}}"
+            duration_ms: "{{duration_ms}}"
+            token_usage: "{{result.token_usage}}"
+
+        conditional_publish:
+          topic: "run.success"
+          payload:
+            task_id: "{{task.id}}"
+            response: "{{result.response}}"
+          condition: "result.done == true"
+          topic_else: "run.incomplete"
+          payload_else:
+            task_id: "{{task.id}}"
+            turns_used: "{{result.turns}}"
+            max_turns: "{{result.max_turns}}"
+
+        emit_event:
+          event_type: "run_completed"
+          payload:
+            agent: "{{agent.name}}"
+            done: "{{result.done}}"
+            quality_score: "{{result.quality_score}}"
+
+        # ── FILE I/O ─────────────────────────────────────────
+
+        save_to_file:
+          path: "${workflow.output_path}/runs/{{task.id}}/result.json"
+          content: "{{result}}"
+          encoding: utf-8
+
+        append_to_file:
+          path: "${workflow.output_path}/run_history.jsonl"
+          content: '{"task_id":"{{task.id}}","done":{{result.done}},"duration_ms":{{duration_ms}}}\n'
+          encoding: utf-8
+
+        stream_to_file:
+          path: "${workflow.output_path}/runs/{{task.id}}/stream_log.md"
+          append: true
+          format: markdown
+          flush_interval_ms: 100
+
+        # ── PROMPT MANIPULATION ──────────────────────────────
+
+        enrich_prompt:
+          prepend: "Previous run context ({{duration_ms}}ms, {{result.turns}} turns):\n"
+          append: "\nRemember: build on previous results, do not repeat work."
+          replace_pattern: "\\[PLACEHOLDER_CONTEXT\\]"
+          replacement: "{{result.response}}"
+
+        inject_system_message:
+          message: "The previous run {{result.done ? 'completed successfully' : 'did not converge'}}. Adjust your approach accordingly."
+          position: before_last
+
+        # ── VALIDATION ───────────────────────────────────────
+
+        validate_args:
+          schema_path: "/schemas/run_output.json"
+          on_failure: warn
+
+        validate_result:
+          schema_path: "/schemas/result_quality.json"
+          on_failure: retry
+
+        permission_check:
+          required_permission: "output.write"
+          on_denied: abort
+
+        schema_validate:
+          data: "{{result}}"
+          schema_path: "/schemas/agent_output.json"
+          on_failure: abort
+
+        # ── CONTENT TRANSFORMATION ───────────────────────────
+
+        redact:
+          patterns: [api_key, password, credential, secret, token]
+          replacement: "[REDACTED]"
+
+        truncate:
+          max_chars: 50000
+          truncation_marker: "\n... [truncated, full output in ${workflow.output_path}/runs/{{task.id}}/result.json]"
+
+        sanitize:
+          rules: [strip_html_tags, remove_script_tags, escape_null_bytes]
+          mode: escape
+
+        # ── RATE LIMITING ────────────────────────────────────
+
+        rate_limit:
+          max_calls_per_minute: 120
+          max_calls_per_run: 50
+          on_exceeded: queue
+
+        # ── STREAMING ────────────────────────────────────────
+
+        stream_to_console:
+          prefix: "▶ "
+          color: green
+
+        # ── EXTERNAL INTEGRATION ─────────────────────────────
+
+        callback:
+          module_path: "./plugins/post_run_analytics.so"
+          function_name: "on_run_complete"
+          args:
+            result: "{{result}}"
+            duration_ms: "{{duration_ms}}"
+          timeout_ms: 5000
+
+        http_request:
+          url: "https://api.internal.example.com/v1/runs"
+          method: POST
+          headers:
+            Authorization: "Bearer ${secrets.API_TOKEN}"
+            Content-Type: "application/json"
+          body: '{"task_id":"{{task.id}}","done":{{result.done}},"duration_ms":{{duration_ms}}}'
+          timeout_ms: 10000
+          on_failure: log_only
+
+        webhook:
+          url: "${secrets.SLACK_WEBHOOK_URL}"
+          payload:
+            text: "Agent *{{agent.name}}* completed task `{{task.id}}` in {{duration_ms}}ms — {{result.done ? '✅ done' : '⚠️ incomplete'}}"
+            blocks:
+              - type: section
+                text:
+                  type: mrkdwn
+                  text: "*Run Summary*\nDuration: {{duration_ms}}ms\nTurns: {{result.turns}}\nTokens: {{result.token_usage.total}}"
+          secret_header: "${secrets.SLACK_SIGNING_SECRET}"
+          timeout_ms: 5000
+
+        # ── CHECKPOINT / STATE ───────────────────────────────
+
+        checkpoint:
+          path: "${workflow.output_path}/checkpoints/{{task.id}}/post_run.ckpt"
+          include_memory: true
+          include_variables: true
+
+        restore:
+          path: "${workflow.output_path}/checkpoints/{{task.id}}/pre_run.ckpt"
+          overwrite_memory: false
+          overwrite_variables: true
+
+        # ── NOTIFICATION ─────────────────────────────────────
+
+        notify:
+          channel: slack
+          message: "Agent {{agent.name}} completed task {{task.id}} — {{result.done ? 'success' : 'needs attention'}}"
+          severity: "{{result.done ? 'info' : 'warning'}}"
+          link: "${workflow.output_path}/runs/{{task.id}}/result.json"
+
+      on_run_start: # Fires at the beginning of each .run() call
+      on_run_complete: # Fires after agent finishes (success or max_turns reached)
+      on_run_error: # Fires when run encounters an unrecoverable error
+      on_retry: # Fires when a run is retried
+        
+      # ── TURN LIFECYCLE ─────────────────────────────────────────
+      on_turn_start: # Fires before each turn begins
+      on_turn_complete: # Fires after each turn finishes (before next turn or return)
+      on_turn_error: # Fires when a turn fails (LLM error, timeout, etc.)
+      on_thinking: # Fires when model emits reasoning/thinking content
+
+      # ── TOOL LIFECYCLE ────────────────────────────────────────
+      on_tool_call: # Fires when LLM decides to call a tool (before execution)
+      on_tool_start: # Fires immediately before tool execution begins
+      on_tool_result: # Fires after tool returns a result (success)
+      on_tool_error: # Fires when tool execution fails
+
+      # ── STREAMING LIFECYCLE ───────────────────────────────────
+      on_stream_chunk: # Fires for each streaming chunk (when streaming enabled)
+      on_stream_complete: # Fires when streaming is fully finished
+
+    gaurdrails: # if present gaurdrails are enabled. if not present gaurdrails are disabled.
+      enforcement_policy: block        # block | warn | allow (global default)
+      input:
+        guards: [prompt_injection, pii_redaction, max_length]
+        prompt_injection: # Detect and block injection attempts
+          sensitivity: high            # low | medium | high
+          on_match: block              # block | warn | sanitize
+          log: true
+        pii_redaction: # Strip personally identifiable information
+          patterns:                    # Custom patterns override defaults
+            - email
+            - phone
+            - ssn
+            - api_key
+            - custom: "/regex/pattern/"
+          replacement: "[REDACTED]"
+          on_match: sanitize
+          log: true
+        max_length: # Reject inputs exceeding token limit
+          max_tokens: 8000
+          on_match: truncate           # block | truncate | error
+          truncate_to: 7500
+      output:
+        guards: [toxicity_filter, pii_redaction, format_validation, max_length]
+        toxicity_filter: # Block toxic model outputs
+          trigger_tokens:
+            - "ignore previous instructions"
+            - "you are now"
+          on_match: block
+          log: true
+        pii_redaction: # Strip personally identifiable information
+          patterns: [email, phone, api_key]
+          replacement: "[REDACTED]"
+        format_validation: # Ensure output matches expected format
+          format: json                 # json | xml | markdown
+          strict: true                 # Reject if not parseable
+          on_match: retry              # block | retry | error
+          max_retries: 2
+        max_length: # Reject inputs exceeding token limit
+          max_tokens: 4096
+          on_match: truncate
+      tool_use:
+        gaurds: [no_web_access, no_file_access, no_terminal_access, no_mcp_access]
+        no_web_access: # Prevent web access
+          on_match: block
+          log: true
+        no_file_access: # Prevent file access
+          on_match: block
+          log: true
+        no_terminal_access: # Prevent terminal access
+          on_match: block
+          log: true
+        
+        
+        
+       
+        
+        
 # Execution Mode
-execution:
-  mode: hybrid
-  memory:
-    max_allocated_memory_mb: 16384
-    model_memory_mb: 4096
-    embedding_memory_mb: 2048
-    unload_unused: true
+workflow_execution_strategy:
+  load_unload: one_at_a_time # (one_at_a_time, lazy, eager, adaptive) should always unload model unless there are no other models in use downstream besides the one loaded, then that should be unloaded once all of it's operations are complete.
+  memory_pressure_handling: throttle # throttle, swap, fail_fast, graceful_degradation
+  processing: parallel # serial | parallel (parallel runs dependant steps sequentially based on the workflow dependency mapping, but runs everything in parrallel it can with existing machine resources 
+  parallel: # inter-property validation is needed here
+    algorithm: round_robin # "round_robin" | "priority_queue" | "shortest_job_first" | "longest_job_first"
+    load_balancing: # todo add
+    max_threads: 4
+    max_models: 3
+    max_concurrent_requests: 2 # individual model configuration takes precedence
+    max_steps: 2
+  max_allowed:
+    ram: 13% # percentage of ram allowed to be used by this workflow.  From the percentage we calculate the ram in GB or MB. After we know the max memory allowed when running the model we use that to calculate the context size to load in the model and what kv cache quantitization to use if not explicitly specified.  Each model will have min max usefulness range so if the % with the system specs isn't sufficient for the minimum spec (e.g. min_attention_tokens) then when attempting to run the workflow that and all other runtime errors are returned and the workflow will not attempt to execute.  That way if a workflow is sent to a different machine without as much specs they get warned when attempting to run it with a good message that tells them why in detail and how to fix it in terms of changing settings if it just needs to be bigger % it recommends that but if it doesn't have enough resources offers alternatives models that have similar capabilities with changes to the workflow suggestioned to compensate for the smaller llm
+    vram: 3.7GB # same as above just the second step onward in terms of behavior
+    cpu: 49%
+    gpu: 74%
+  timeout: 4h # total_workflow_runtime if you don't need timeouts level of detail
+  timeouts: # if this is a time string and not an object it is the total workflow execution timeout. inter-property validation is needed here
+    total_workflow_runtime: 4h
+    tool_call: 30m 
+    step: 8m
+    model: # a timeout is handled by the individual model load and unload retry/failure logic. if this is a time string eg 10h and not an object it is the total time from attempting to load the model to completed response
+      load_into_memory: 45s
+      time_to_processing_after_loaded: 10000ms
+      time_to_processing: 2h # total time from starting to load to starting to process. load_into_memory + time_to_processing_after_loaded takes precidence over  time_to_processing
+      time_to_responding: 1m
+      time_to_response: 4h
+  error_handling:
+    default_action: retry # retry | retry_critical_path | skip | fail_workflow
+    max_retries_per_step: 3
+    retry_backoff_multiplier: 2.0
+    escalate_to_model_after: 3
+  sub_workflow: # should always have circular_reference_detection
+    inherit_policy: 
+    override_policy: 
+    reference_resolution:
+    isolated_environments:
+  synchronization:
+    enabled: true
+    barrier_sync_enabled: false
+    lock_free_timeout_secs: 30
+    conflict_resolution: last_writer_wins # "last_writer_wins" | "merge_results" | "fail_on_conflict"
+  checkpoint:
+    level: timetravel # time_travel | git | debug | info | compressed_summary
+    output: "./chat-file-f3kj4k3l.md"
+    timeback: 5h
+    max_size: 1000lns # lns = lines | gb mb kb = total checkpoint storage | tk = tokens
+    interval:
+      after_time: 5m
+      after_steps: |
+        initialize_system
+        execute_parallel_sub_agents
+  
+
+
+
+
+
+
+
+
 
 # Hierarchical Logging Configuration
 logging:
@@ -288,6 +825,9 @@ pipeline:
   - step: initialize_system
     id: step_1
     model: "${models.primary_analyzer}"
+    agent:
+      limited_tools: ["grep"] # replaces agent tools if specified
+      additional_tools: ["cd"] # adds tools to agent
     input:
       prompt: |
         Initialize comprehensive AI code refactoring system:
@@ -1189,3 +1729,5 @@ features_demonstrated:
   sub_agent_orchestration: true
   weighted_validation_criteria: true
   strict_yes_no_decisions: true
+
+
