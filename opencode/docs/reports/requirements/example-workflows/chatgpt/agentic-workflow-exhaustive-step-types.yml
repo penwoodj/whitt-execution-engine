@@ -1,0 +1,3261 @@
+apiVersion: agentic.workflow.schema/v1alpha1
+kind: Schema
+metadata:
+  name: agentic-workflow-schema
+  description: |
+    A proposed superset YAML schema for expressing low-level workflow primitives,
+    agent-native steps, composite patterns, semantic phases, and meta-orchestration/governance.
+  owner: agentic-workflow-team
+  version: v1alpha1
+
+discriminator:
+  field: kind
+  config_field: config
+
+scalar_types:
+  string: {description: UTF-8 text}
+  integer: {description: Whole number}
+  number: {description: Floating-point or integer numeric value}
+  boolean: {description: True/false}
+  object: {description: Key/value map}
+  array: {description: Ordered list}
+  expression: {description: Expression in the workflow expression language}
+  ref: {description: Reference to workflow state, step output, artifact, memory namespace, or external resource}
+  duration: {description: ISO-8601 duration or engine-supported duration string}
+  datetime: {description: ISO-8601 timestamp}
+  json_path: {description: Path into state or payload}
+  template: {description: Templated string or object rendered against current state}
+  enum: {description: One-of fixed string values}
+
+layer_model:
+  layer_1_execution_primitives:
+    description: Atomic runtime control and work steps
+    families:
+      - boundary
+      - data
+      - execution
+      - control_flow
+      - time_event
+      - delegation
+      - messaging
+      - durability
+      - queue_resource
+      - observability
+
+  layer_2_agent_primitives:
+    description: LLM/agent-specific interpretation, memory, tooling, and evaluation steps
+    families:
+      - context
+      - planning
+      - reasoning
+      - guardrails
+      - memory
+      - grounding
+      - human_in_loop
+      - multi_agent
+
+  layer_3_composite_patterns:
+    description: Named arrangements of steps
+    families:
+      - pipeline
+      - planner_executor
+      - react_loop
+      - router_specialist
+      - maker_checker
+      - map_reduce
+      - supervisor_swarm
+      - monitor_act
+
+  layer_4_semantic_phases:
+    description: Human-meaningful workflow phases
+    families:
+      - intake
+      - understand
+      - prepare_context
+      - plan
+      - execute
+      - verify
+      - refine
+      - decide
+      - deliver
+      - learn
+
+  layer_5_meta_orchestration:
+    description: System-of-systems control, governance, experimentation, budgeting, topology, and evolution
+    families:
+      - governance
+      - budgeting
+      - scheduler_control
+      - topology
+      - capability_routing
+      - evaluation_program
+      - provenance
+      - experiment
+      - optimization
+      - memory_hygiene
+
+reusable_subschemas:
+  metadata:
+    type: object
+    properties:
+      name: {type: string, description: Human-readable workflow or step name}
+      description: {type: string, description: Longer explanation for operators and UI}
+      labels: {type: object, description: Arbitrary string labels for grouping/filtering}
+      annotations: {type: object, description: Arbitrary metadata that does not affect execution}
+      owner: {type: string, description: Team/person/service owning this object}
+      version: {type: string, description: Semantic or internal version identifier}
+      tags:
+        type: array
+        description: Freeform tags
+        items: {type: string}
+      docs:
+        type: array
+        description: Links or document refs describing this object
+        items: {type: string}
+
+  ref_or_value:
+    one_of:
+      - type: ref
+      - type: string
+      - type: integer
+      - type: number
+      - type: boolean
+      - type: object
+      - type: array
+
+  input_binding:
+    type: object
+    properties:
+      from:
+        type: ref
+        description: Where the value comes from
+      as:
+        type: string
+        description: Local field name inside the step
+      required:
+        type: boolean
+        description: Whether missing input is fatal
+      default:
+        type: object
+        description: Default value if source is absent
+      transform:
+        type: expression
+        description: Optional transform before binding
+      validate:
+        type: array
+        description: Validation expressions for this binding
+        items: {type: expression}
+      redact_in_logs:
+        type: boolean
+        description: Whether to hide this field in observability output
+
+  output_binding:
+    type: object
+    properties:
+      name:
+        type: string
+        description: Logical name of the output
+      to:
+        type: ref
+        description: Where to store the output in workflow state
+      when:
+        type: expression
+        description: Conditional write
+      merge_strategy:
+        type: enum
+        values: [replace, deep_merge, append, prepend, set_if_absent, max, min]
+      ttl:
+        type: duration
+        description: Optional expiry for cached or ephemeral output
+      visibility:
+        type: enum
+        values: [internal, workflow, thread, artifact, public]
+      redact_in_logs:
+        type: boolean
+        description: Whether to suppress logging/output previews
+
+  condition_rule:
+    type: object
+    properties:
+      when:
+        type: expression
+        description: Boolean expression deciding whether this rule matches
+      description:
+        type: string
+        description: Human-readable meaning of the rule
+      priority:
+        type: integer
+        description: Higher priority can win if multiple rules match
+      confidence:
+        type: number
+        description: Optional confidence threshold or estimated confidence
+      next:
+        type: string
+        description: Next step id or branch id
+      emit:
+        type: object
+        description: Optional state patch or event on match
+      stop_after_match:
+        type: boolean
+        description: Whether evaluation short-circuits after this rule
+
+  branch_target:
+    type: object
+    properties:
+      step:
+        type: string
+        description: Destination step id
+      pass_state:
+        type: object
+        description: Optional state patch sent only to that branch
+      name:
+        type: string
+        description: Optional human name for the branch
+
+  retry_policy:
+    type: object
+    properties:
+      enabled:
+        type: boolean
+        description: Master switch for retries
+      max_attempts:
+        type: integer
+        description: Total attempts including the first attempt
+      backoff_strategy:
+        type: enum
+        values: [none, fixed, linear, exponential, exponential_jitter, custom]
+      initial_delay:
+        type: duration
+        description: Delay before first retry
+      max_delay:
+        type: duration
+        description: Upper bound for retry delay
+      multiplier:
+        type: number
+        description: Used by linear/exponential strategies
+      jitter:
+        type: number
+        description: Fractional/random jitter amount
+      retry_on:
+        type: array
+        description: Error classes/codes/categories that should retry
+        items: {type: string}
+      do_not_retry_on:
+        type: array
+        description: Explicit exclusions
+        items: {type: string}
+      retry_if:
+        type: expression
+        description: Extra predicate over error/result/state
+      budget_cap:
+        type: integer
+        description: Optional max retry budget shared across attempts
+      record_attempt_outputs:
+        type: boolean
+        description: Keep outputs from failed attempts for inspection
+
+  timeout_policy:
+    type: object
+    properties:
+      total_timeout:
+        type: duration
+        description: Hard wall-clock limit for the step
+      run_timeout:
+        type: duration
+        description: Execution-only timeout excluding queue wait if supported
+      queue_timeout:
+        type: duration
+        description: Max time waiting for capacity or approval
+      heartbeat_timeout:
+        type: duration
+        description: Max silence before considering the step stalled
+      on_timeout:
+        type: enum
+        values: [fail, cancel, retry, fallback, escalate, continue]
+      cleanup_step:
+        type: string
+        description: Optional compensating/cleanup step id
+
+  cache_policy:
+    type: object
+    properties:
+      enabled:
+        type: boolean
+        description: Master switch for result caching
+      key:
+        type: expression
+        description: Deterministic cache key expression
+      scope:
+        type: enum
+        values: [step, workflow, thread, user, namespace, global]
+      ttl:
+        type: duration
+        description: Cache time-to-live
+      mode:
+        type: enum
+        values: [read_write, read_only, write_only, bypass, refresh]
+      store:
+        type: string
+        description: Cache backend identifier
+      invalidate_on:
+        type: array
+        description: Expressions/events that invalidate the entry
+        items: {type: expression}
+      cache_errors:
+        type: boolean
+        description: Whether failures can also be cached
+
+  checkpoint_policy:
+    type: object
+    properties:
+      enabled:
+        type: boolean
+        description: Whether checkpointing is enabled for this step
+      mode:
+        type: enum
+        values: [before, after, before_and_after, superstep, manual]
+      store:
+        type: string
+        description: Checkpoint backend/store identifier
+      include_state_paths:
+        type: array
+        description: Only persist these paths if partial checkpointing is used
+        items: {type: json_path}
+      exclude_state_paths:
+        type: array
+        description: Omit secrets, bulky blobs, etc
+        items: {type: json_path}
+      capture_inputs:
+        type: boolean
+        description: Persist bound inputs
+      capture_outputs:
+        type: boolean
+        description: Persist outputs
+      capture_logs:
+        type: boolean
+        description: Persist logs alongside state
+      capture_artifacts:
+        type: boolean
+        description: Persist generated artifacts
+      resumable:
+        type: boolean
+        description: Whether runtime may resume from this checkpoint
+      forkable:
+        type: boolean
+        description: Whether alternative branches may start from this checkpoint
+
+  concurrency_policy:
+    type: object
+    properties:
+      max_parallelism:
+        type: integer
+        description: Maximum concurrent units for this step/map/parallel block
+      slot_key:
+        type: string
+        description: Name of the shared concurrency bucket or semaphore
+      slots_required:
+        type: integer
+        description: Number of slots this step consumes
+      acquire_timeout:
+        type: duration
+        description: How long to wait for slots
+      fairness:
+        type: enum
+        values: [fifo, priority, weighted_fair, custom]
+      preemptible:
+        type: boolean
+        description: Whether the step can be paused/cancelled for higher priority work
+      rate_limit:
+        type: object
+        description: Requests per interval or similar
+        properties:
+          count: {type: integer}
+          interval: {type: duration}
+          burst: {type: integer}
+      isolate_by:
+        type: array
+        description: Partition concurrency by tenant/model/tool/etc
+        items: {type: string}
+
+  budget_policy:
+    type: object
+    properties:
+      max_tokens:
+        type: integer
+        description: Hard cap on total tokens consumed
+      max_cost:
+        type: number
+        description: Hard cap on estimated/actual monetary spend
+      max_latency:
+        type: duration
+        description: Hard cap on end-to-end wall time
+      max_tool_calls:
+        type: integer
+        description: Cap on tool invocations
+      max_iterations:
+        type: integer
+        description: Cap on loop turns
+      max_parallel_branches:
+        type: integer
+        description: Upper bound on dynamic fan-out
+      soft_limits:
+        type: boolean
+        description: Whether limits warn first instead of immediately failing
+      on_exceed:
+        type: enum
+        values: [fail, fallback, degrade, summarize, escalate, stop_best_effort]
+
+  approval_policy:
+    type: object
+    properties:
+      required:
+        type: boolean
+        description: Whether approval is mandatory before proceeding
+      approvers:
+        type: array
+        description: Allowed approver identities or roles
+        items: {type: string}
+      quorum:
+        type: integer
+        description: Number of approvals required
+      timeout:
+        type: duration
+        description: Approval wait timeout
+      default_on_timeout:
+        type: enum
+        values: [reject, approve, escalate, cancel, continue_with_warning]
+      prompt:
+        type: template
+        description: Human-facing approval request body
+      include_diff:
+        type: boolean
+        description: Include structured diff/artifact preview
+      include_risk_summary:
+        type: boolean
+        description: Include side-effect/policy/cost summary
+      require_reason_on_reject:
+        type: boolean
+        description: Capture reviewer rationale
+      allowed_actions:
+        type: array
+        items:
+          type: enum
+          values: [approve, reject, edit, annotate, reroute, escalate]
+
+  security_policy:
+    type: object
+    properties:
+      sandbox:
+        type: enum
+        values: [none, restricted, container, vm, remote_worker]
+      network_access:
+        type: enum
+        values: [none, allowlist, full, custom]
+      filesystem_access:
+        type: enum
+        values: [none, read_only, workspace_only, custom, full]
+      allowed_hosts:
+        type: array
+        items: {type: string}
+      allowed_paths:
+        type: array
+        items: {type: string}
+      secrets:
+        type: array
+        description: Secret handles, never raw secret values
+        items: {type: string}
+      impersonation:
+        type: string
+        description: Identity under which the step executes, if supported
+      audit_level:
+        type: enum
+        values: [none, minimal, standard, full]
+
+  observability_policy:
+    type: object
+    properties:
+      trace:
+        type: boolean
+        description: Emit distributed trace/span events
+      logs:
+        type: boolean
+        description: Emit textual logs
+      metrics:
+        type: boolean
+        description: Emit metrics/counters/timers
+      stream:
+        type: boolean
+        description: Stream partial progress or partial outputs
+      sample_rate:
+        type: number
+        description: Sampling ratio for traces/log details
+      redact_paths:
+        type: array
+        description: Paths to hide in traces/logs
+        items: {type: json_path}
+      emit_events:
+        type: array
+        description: Custom event types to emit
+        items: {type: string}
+      artifact_preview:
+        type: boolean
+        description: Whether observability UI may preview artifacts
+      capture_input_snapshot:
+        type: boolean
+        description: Snapshot input payload for debugging
+      capture_output_snapshot:
+        type: boolean
+        description: Snapshot output payload for debugging
+
+  guardrail_policy:
+    type: object
+    properties:
+      input_checks:
+        type: array
+        description: Checks before the step runs
+        items: {type: string}
+      output_checks:
+        type: array
+        description: Checks after the step runs
+        items: {type: string}
+      tool_arg_checks:
+        type: array
+        description: Validation on generated tool args
+        items: {type: string}
+      tool_result_checks:
+        type: array
+        description: Validation on tool results
+        items: {type: string}
+      policy_checks:
+        type: array
+        description: Compliance/security/content-policy checks
+        items: {type: string}
+      grounding_checks:
+        type: array
+        description: Hallucination/provenance checks
+        items: {type: string}
+      tripwire_on_fail:
+        type: boolean
+        description: Immediately halt execution if a guard fails
+      on_fail:
+        type: enum
+        values: [fail, retry, fallback, ask_human, mask_output, continue_with_warning]
+
+  memory_policy:
+    type: object
+    properties:
+      read_namespaces:
+        type: array
+        description: Long-term memory namespaces to query
+        items: {type: string}
+      write_namespaces:
+        type: array
+        description: Namespaces to update
+        items: {type: string}
+      short_term_scope:
+        type: enum
+        values: [step, run, thread, workflow, session]
+      episodic:
+        type: boolean
+        description: Store event-like memory of what happened
+      semantic:
+        type: boolean
+        description: Store extracted facts/knowledge
+      procedural:
+        type: boolean
+        description: Store instructions/learned strategies
+      retention:
+        type: enum
+        values: [ephemeral, ttl, session, persistent, archival]
+      ttl:
+        type: duration
+        description: Used if retention is ttl
+      write_condition:
+        type: expression
+        description: Predicate controlling whether memory is written
+      compaction_strategy:
+        type: enum
+        values: [none, summarize, merge, dedupe, window, score_decay]
+      max_items:
+        type: integer
+        description: Cap on items written or retained
+
+  prompt_contract:
+    type: object
+    properties:
+      system:
+        type: template
+        description: System or developer instruction layer
+      task:
+        type: template
+        description: Task-specific instruction
+      context:
+        type: template
+        description: Context block or assembled reference block
+      examples:
+        type: array
+        description: Few-shot or exemplar prompts
+        items: {type: object}
+      output_format:
+        type: enum
+        values: [text, json, yaml, xml, markdown, code, tool_call]
+      schema_ref:
+        type: string
+        description: Ref to expected structured output schema
+      stop_conditions:
+        type: array
+        description: Expressions or textual stop rules
+        items: {type: string}
+      max_context_items:
+        type: integer
+        description: Hard cap on included context items
+      trim_strategy:
+        type: enum
+        values: [none, head, tail, middle, importance, recency, hybrid]
+      compression_strategy:
+        type: enum
+        values: [none, summary, extractive, semantic, hierarchical]
+
+  artifact_contract:
+    type: object
+    properties:
+      produce:
+        type: array
+        description: Artifact specs emitted by the step
+        items:
+          type: object
+          properties:
+            name: {type: string}
+            type: {type: string, description: e.g., report, code_patch, spreadsheet, image, trace_bundle}
+            path: {type: string}
+            media_type: {type: string}
+            required: {type: boolean}
+            publish: {type: boolean}
+            preview: {type: boolean}
+            retention:
+              type: enum
+              values: [ephemeral, run, thread, workflow, persistent]
+      consume:
+        type: array
+        description: Artifacts the step requires or may use
+        items:
+          type: object
+          properties:
+            ref: {type: ref}
+            required: {type: boolean}
+            mode:
+              type: enum
+              values: [read, append, replace, transform]
+
+  fallback_rule:
+    type: object
+    properties:
+      when:
+        type: expression
+        description: Condition for invoking fallback
+      target:
+        type: string
+        description: Step id, workflow id, model id, or tool id depending on context
+      mode:
+        type: enum
+        values: [reroute_step, rerun_with_config, switch_model, switch_tool, switch_agent, degrade]
+      patch:
+        type: object
+        description: Config/state patch applied before fallback execution
+
+  compensation_contract:
+    type: object
+    properties:
+      enabled:
+        type: boolean
+        description: Whether compensating action is defined
+      strategy:
+        type: enum
+        values: [none, manual, step, workflow, saga]
+      step:
+        type: string
+        description: Compensating step id if strategy uses a step
+      reverse_effects:
+        type: array
+        description: Logical effects to reverse if a real compensator is not available
+        items: {type: string}
+      run_on:
+        type: array
+        description: Which terminal conditions trigger compensation
+        items:
+          type: enum
+          values: [fail, cancel, timeout, approval_reject, guardrail_fail]
+      best_effort:
+        type: boolean
+        description: Whether compensation errors are ignored or surfaced
+
+  queue_policy:
+    type: object
+    properties:
+      queue:
+        type: string
+        description: Queue/work-pool/worker-pool identifier
+      priority:
+        type: integer
+        description: Lower/higher semantics are engine-defined but must be documented
+      scheduling_class:
+        type: string
+        description: Class of service, pool, or resource tier
+      dispatch_strategy:
+        type: enum
+        values: [fifo, priority, deadline, fair_share, custom]
+      worker_selector:
+        type: object
+        description: Constraints used to pick an executor
+      delay_until:
+        type: datetime
+        description: Not eligible for dispatch before this time
+      expires_at:
+        type: datetime
+        description: Do not execute after this time
+      sticky:
+        type: boolean
+        description: Prefer same worker/node/thread affinity
+      backfill:
+        type: boolean
+        description: Whether this item participates in historical catch-up
+
+  human_input_contract:
+    type: object
+    properties:
+      schema_ref:
+        type: string
+        description: Expected structured input schema
+      prompt:
+        type: template
+        description: Human-facing prompt/question
+      ui_hint:
+        type: enum
+        values: [text, form, approval, diff_review, selection, file_upload, chat]
+      timeout:
+        type: duration
+        description: How long to wait for human input
+      allow_edits:
+        type: boolean
+        description: Whether human can directly edit payload/state
+      allow_annotations:
+        type: boolean
+        description: Whether human can comment/annotate without editing
+      default_on_timeout:
+        type: enum
+        values: [cancel, escalate, continue, reject, best_effort]
+      resume_target:
+        type: string
+        description: Step id to continue at after input arrives
+
+  evaluator_contract:
+    type: object
+    properties:
+      criteria:
+        type: array
+        description: Scoring or pass/fail criteria
+        items:
+          type: object
+          properties:
+            name: {type: string}
+            weight: {type: number}
+            pass_threshold: {type: number}
+            evaluator:
+              type: enum
+              values: [rule, model, human, hybrid]
+            rule: {type: expression}
+      aggregate:
+        type: enum
+        values: [weighted_sum, all_pass, any_pass, majority, custom]
+      output_ref:
+        type: ref
+        description: Where evaluation result is written
+      on_fail:
+        type: enum
+        values: [retry, revise, fallback, ask_human, stop, accept_with_warning]
+
+  routing_contract:
+    type: object
+    properties:
+      strategy:
+        type: enum
+        values: [static, rules, classifier, llm, cost_aware, capability_aware, load_aware, hybrid]
+      candidates:
+        type: array
+        description: Candidate steps/agents/models/tools/workflows
+        items:
+          type: object
+          properties:
+            id: {type: string}
+            type:
+              type: enum
+              values: [step, agent, tool, model, workflow, queue, worker_pool]
+            weight: {type: number}
+            tags: {type: array, items: {type: string}}
+            constraints: {type: array, items: {type: expression}}
+      score_expression:
+        type: expression
+        description: Optional deterministic scoring rule
+      classifier_prompt:
+        type: template
+        description: Optional LLM/classifier prompt used for routing
+      confidence_threshold:
+        type: number
+        description: Minimum confidence before auto-route
+      default_target:
+        type: string
+        description: Fallback destination if routing is ambiguous
+
+workflow_shape:
+  type: object
+  required: [apiVersion, kind, metadata, spec]
+  properties:
+    apiVersion:
+      type: string
+      description: Schema version, e.g., agentic.workflow.schema/v1alpha1
+    kind:
+      type: enum
+      values: [Workflow, Subworkflow, PatternLibrary, PolicyBundle]
+    metadata:
+      $ref: "#/agentic_workflow_schema/reusable_subschemas/metadata"
+    spec:
+      type: object
+      properties:
+        entrypoint:
+          type: string
+          description: Id of the first executable step
+        defaults:
+          type: object
+          description: Default policies inherited by steps unless overridden
+          properties:
+            retry: {$ref: "#/agentic_workflow_schema/reusable_subschemas/retry_policy"}
+            timeout: {$ref: "#/agentic_workflow_schema/reusable_subschemas/timeout_policy"}
+            cache: {$ref: "#/agentic_workflow_schema/reusable_subschemas/cache_policy"}
+            checkpoint: {$ref: "#/agentic_workflow_schema/reusable_subschemas/checkpoint_policy"}
+            concurrency: {$ref: "#/agentic_workflow_schema/reusable_subschemas/concurrency_policy"}
+            budget: {$ref: "#/agentic_workflow_schema/reusable_subschemas/budget_policy"}
+            approval: {$ref: "#/agentic_workflow_schema/reusable_subschemas/approval_policy"}
+            security: {$ref: "#/agentic_workflow_schema/reusable_subschemas/security_policy"}
+            observability: {$ref: "#/agentic_workflow_schema/reusable_subschemas/observability_policy"}
+            guardrails: {$ref: "#/agentic_workflow_schema/reusable_subschemas/guardrail_policy"}
+            memory: {$ref: "#/agentic_workflow_schema/reusable_subschemas/memory_policy"}
+            queue: {$ref: "#/agentic_workflow_schema/reusable_subschemas/queue_policy"}
+        state_schema_ref:
+          type: string
+          description: Ref to schema describing whole workflow state
+        phases:
+          type: array
+          description: Optional semantic phase declarations for analytics/UX
+          items:
+            type: object
+            properties:
+              id: {type: string}
+              kind:
+                type: enum
+                values: [intake, understand, prepare_context, plan, execute, verify, refine, decide, deliver, learn]
+              title: {type: string}
+              starts_at: {type: array, items: {type: string}, description: Step ids beginning this phase}
+              ends_at: {type: array, items: {type: string}, description: Step ids ending this phase}
+        resources:
+          type: object
+          description: Models, tools, memory stores, queues, backends, pools
+        policies:
+          type: object
+          description: Workflow-level governance and policy bundles
+        steps:
+          type: array
+          items:
+            $ref: "#/agentic_workflow_schema/step_shape"
+        edges:
+          type: array
+          description: Optional explicit graph edges; steps may also use next/branches internally
+          items:
+            type: object
+            properties:
+              from: {type: string}
+              to: {type: string}
+              when: {type: expression}
+              label: {type: string}
+        patterns:
+          type: array
+          description: Layer-3 pattern declarations used by the workflow
+          items:
+            $ref: "#/agentic_workflow_schema/pattern_shape"
+        meta_programs:
+          type: array
+          description: Layer-5 controllers supervising this workflow
+          items:
+            $ref: "#/agentic_workflow_schema/meta_shape"
+
+step_shape:
+  type: object
+  required: [id, kind, layer, config]
+  properties:
+    id:
+      type: string
+      description: Stable unique step id
+    name:
+      type: string
+      description: Human-readable label
+    description:
+      type: string
+      description: Longer explanation for maintainers and UI
+    layer:
+      type: enum
+      values: [l1, l2, l3, l4, l5]
+      description: Which conceptual layer this step belongs to
+    family:
+      type: string
+      description: Optional family name for grouping/reporting
+    kind:
+      type: enum
+      description: Step kind determines config schema
+      values:
+        # Layer 1: boundary
+        - start
+        - pass
+        - succeed
+        - fail
+        - cancel
+        # Layer 1: data
+        - parse
+        - validate
+        - normalize
+        - transform
+        - assign
+        - merge
+        - split
+        - filter
+        - chunk
+        - summarize
+        - template
+        - serialize
+        # Layer 1: execution
+        - task
+        - model
+        - tool
+        - api
+        - db
+        - io
+        - code
+        - search
+        - retrieve
+        - generate
+        - notify
+        # Layer 1: control_flow
+        - choice
+        - route
+        - parallel
+        - map
+        - reduce
+        - loop
+        - race
+        - fallback
+        # Layer 1: time_event
+        - wait
+        - sensor
+        - await_event
+        - await_condition
+        - schedule
+        # Layer 1: delegation
+        - subworkflow
+        - child_workflow
+        - subgraph
+        - handoff
+        - agent_tool
+        - delegate
+        - escalate
+        # Layer 1: messaging
+        - signal
+        - update
+        - query
+        - callback
+        - interrupt
+        - approve
+        - review
+        - human_input
+        # Layer 1: durability
+        - checkpoint
+        - snapshot
+        - cache
+        - replay
+        - fork
+        - continue_as_new
+        # Layer 1: queue_resource
+        - enqueue
+        - dispatch
+        - acquire_slot
+        - release_slot
+        # Layer 1: observability
+        - log
+        - trace
+        - metric
+        - stream
+        - publish
+        - audit
+        # Layer 2: agent primitives
+        - intake_context
+        - intent_classify
+        - extract
+        - ambiguity_check
+        - context_pack
+        - memory_recall
+        - memory_write
+        - plan_step
+        - decompose
+        - reason
+        - reflect
+        - critique
+        - rank
+        - self_check
+        - policy_check
+        - grounding_check
+        - revise
+        - tool_select
+        - model_select
+        - agent_select
+        # Layer 3: composite patterns
+        - sequential_pattern
+        - map_reduce_pattern
+        - planner_executor_pattern
+        - react_pattern
+        - router_specialist_pattern
+        - maker_checker_pattern
+        - supervisor_swarm_pattern
+        - monitor_act_pattern
+        # Layer 4: semantic phase markers
+        - intake_phase
+        - understand_phase
+        - prepare_context_phase
+        - plan_phase
+        - execute_phase
+        - verify_phase
+        - refine_phase
+        - decide_phase
+        - deliver_phase
+        - learn_phase
+        # Layer 5: meta-orchestration
+        - governance
+        - budget_manager
+        - scheduler_controller
+        - topology_manager
+        - capability_router
+        - evaluation_program
+        - provenance_controller
+        - experiment_controller
+        - optimization_controller
+        - memory_compactor
+    enabled:
+      type: boolean
+      description: Allows a step to be disabled without deleting it
+    when:
+      type: expression
+      description: Step-level gate checked before scheduling the step
+    next:
+      type: string
+      description: Default next step id for linear flows
+    depends_on:
+      type: array
+      description: Hard dependencies that must complete before this step can run
+      items: {type: string}
+    after_any:
+      type: array
+      description: Soft dependencies; any one completion may unblock this step
+      items: {type: string}
+    before:
+      type: array
+      description: Optional forward declarations for graph readability/tools
+      items: {type: string}
+    input:
+      type: array
+      description: Bind inputs from state/artifacts/memory
+      items: {$ref: "#/agentic_workflow_schema/reusable_subschemas/input_binding"}
+    output:
+      type: array
+      description: Bind outputs into state/artifacts
+      items: {$ref: "#/agentic_workflow_schema/reusable_subschemas/output_binding"}
+    prompt:
+      $ref: "#/agentic_workflow_schema/reusable_subschemas/prompt_contract"
+    artifacts:
+      $ref: "#/agentic_workflow_schema/reusable_subschemas/artifact_contract"
+    policy:
+      type: object
+      description: Cross-cutting policy block; per-step override of workflow defaults
+      properties:
+        retry: {$ref: "#/agentic_workflow_schema/reusable_subschemas/retry_policy"}
+        timeout: {$ref: "#/agentic_workflow_schema/reusable_subschemas/timeout_policy"}
+        cache: {$ref: "#/agentic_workflow_schema/reusable_subschemas/cache_policy"}
+        checkpoint: {$ref: "#/agentic_workflow_schema/reusable_subschemas/checkpoint_policy"}
+        concurrency: {$ref: "#/agentic_workflow_schema/reusable_subschemas/concurrency_policy"}
+        budget: {$ref: "#/agentic_workflow_schema/reusable_subschemas/budget_policy"}
+        approval: {$ref: "#/agentic_workflow_schema/reusable_subschemas/approval_policy"}
+        security: {$ref: "#/agentic_workflow_schema/reusable_subschemas/security_policy"}
+        observability: {$ref: "#/agentic_workflow_schema/reusable_subschemas/observability_policy"}
+        guardrails: {$ref: "#/agentic_workflow_schema/reusable_subschemas/guardrail_policy"}
+        memory: {$ref: "#/agentic_workflow_schema/reusable_subschemas/memory_policy"}
+        queue: {$ref: "#/agentic_workflow_schema/reusable_subschemas/queue_policy"}
+        compensation: {$ref: "#/agentic_workflow_schema/reusable_subschemas/compensation_contract"}
+    config:
+      type: object
+      description: Step-specific configuration; schema determined by kind
+
+pattern_shape:
+  type: object
+  required: [id, kind, config]
+  properties:
+    id:
+      type: string
+      description: Unique pattern id
+    kind:
+      type: enum
+      values:
+        - sequential_pattern
+        - map_reduce_pattern
+        - planner_executor_pattern
+        - react_pattern
+        - router_specialist_pattern
+        - maker_checker_pattern
+        - supervisor_swarm_pattern
+        - monitor_act_pattern
+    config:
+      type: object
+      description: Pattern-specific configuration
+
+meta_shape:
+  type: object
+  required: [id, kind, config]
+  properties:
+    id:
+      type: string
+      description: Unique meta-controller id
+    kind:
+      type: enum
+      values:
+        - governance
+        - budget_manager
+        - scheduler_controller
+        - topology_manager
+        - capability_router
+        - evaluation_program
+        - provenance_controller
+        - experiment_controller
+        - optimization_controller
+        - memory_compactor
+    config:
+      type: object
+      description: Meta-controller-specific configuration
+
+step_type_catalog:
+  # Layer 1: Boundary
+  start:
+    layer: l1
+    family: boundary
+    required_config: []
+    config_schema:
+      initial_state:
+        type: object
+        description: Optional workflow state seed if no external input is provided
+      accept_external_input:
+        type: boolean
+        description: Whether caller input is merged into initial state
+      input_merge_strategy:
+        type: enum
+        values: [replace, deep_merge, external_wins, defaults_win]
+      start_event:
+        type: string
+        description: Trigger/event name recorded for audit and analytics
+
+  pass:
+    layer: l1
+    family: boundary
+    required_config: []
+    config_schema:
+      value:
+        type: object
+        description: Optional literal value to insert into state
+      result_path:
+        type: ref
+        description: Where the pass output is written
+      transform:
+        type: expression
+        description: Optional state transform without external work
+
+  succeed:
+    layer: l1
+    family: boundary
+    required_config: []
+    config_schema:
+      result:
+        type: object
+        description: Final success payload written before termination
+      summary:
+        type: template
+        description: Human-readable run summary
+      emit_metrics:
+        type: boolean
+        description: Whether to emit success completion metrics
+
+  fail:
+    layer: l1
+    family: boundary
+    required_config: []
+    config_schema:
+      error_code:
+        type: string
+        description: Stable machine-readable failure category
+      message:
+        type: template
+        description: Human-readable explanation
+      details:
+        type: object
+        description: Structured error details
+      fail_scope:
+        type: enum
+        values: [step, branch, workflow, thread]
+      retryable:
+        type: boolean
+        description: Whether upstream runtime may offer redrive/retry
+
+  cancel:
+    layer: l1
+    family: boundary
+    required_config: []
+    config_schema:
+      reason:
+        type: template
+        description: Why cancellation occurred
+      cancel_scope:
+        type: enum
+        values: [step, branch, workflow, thread]
+      propagate:
+        type: boolean
+        description: Whether descendants/upstream listeners are also cancelled
+
+  # Layer 1: Data
+  parse:
+    layer: l1
+    family: data
+    required_config: [parser]
+    config_schema:
+      parser:
+        type: enum
+        values: [json, yaml, xml, csv, markdown, regex, html, custom]
+      source:
+        type: ref
+        description: Input blob/text to parse
+      schema_ref:
+        type: string
+        description: Expected parsed schema
+      on_invalid:
+        type: enum
+        values: [fail, coerce, best_effort, ask_human]
+      custom_parser_ref:
+        type: string
+        description: Custom parser function if parser=custom
+
+  validate:
+    layer: l1
+    family: data
+    required_config: [rules]
+    config_schema:
+      source:
+        type: ref
+        description: Object/text/artifact to validate
+      schema_ref:
+        type: string
+        description: Structured schema validator target
+      rules:
+        type: array
+        description: Extra validation rules
+        items: {type: expression}
+      mode:
+        type: enum
+        values: [strict, coerce, warn, score]
+      output_ref:
+        type: ref
+        description: Where pass/fail issues are written
+
+  normalize:
+    layer: l1
+    family: data
+    required_config: [operations]
+    config_schema:
+      source:
+        type: ref
+      operations:
+        type: array
+        description: Normalization transforms in order
+        items:
+          type: object
+          properties:
+            op:
+              type: enum
+              values: [trim, lowercase, uppercase, canonicalize_enum, parse_date, unit_convert, dedupe, sort_keys, custom]
+            target: {type: json_path}
+            args: {type: object}
+      output_ref:
+        type: ref
+
+  transform:
+    layer: l1
+    family: data
+    required_config: [transform]
+    config_schema:
+      source:
+        type: ref
+        description: Source payload or state slice
+      transform:
+        type: expression
+        description: Deterministic expression or transform program
+      output_ref:
+        type: ref
+      language:
+        type: enum
+        values: [expression, jsonata, jq, jmespath, python, custom]
+
+  assign:
+    layer: l1
+    family: data
+    required_config: [assignments]
+    config_schema:
+      assignments:
+        type: array
+        items:
+          type: object
+          properties:
+            to: {type: ref, description: Destination in state}
+            value:
+              $ref: "#/agentic_workflow_schema/reusable_subschemas/ref_or_value"
+              description: Literal or ref or computed value
+            when: {type: expression, description: Conditional assignment}
+            mode:
+              type: enum
+              values: [replace, set_if_absent, append, merge]
+
+  merge:
+    layer: l1
+    family: data
+    required_config: [sources]
+    config_schema:
+      sources:
+        type: array
+        description: Source refs/objects to combine
+        items: {$ref: "#/agentic_workflow_schema/reusable_subschemas/ref_or_value"}
+      strategy:
+        type: enum
+        values: [deep_merge, shallow_merge, append_arrays, zip, custom]
+      output_ref:
+        type: ref
+
+  split:
+    layer: l1
+    family: data
+    required_config: [source, strategy]
+    config_schema:
+      source:
+        type: ref
+      strategy:
+        type: enum
+        values: [by_key, by_path, by_size, by_delimiter, by_semantics, custom]
+      args:
+        type: object
+        description: Strategy-specific parameters
+      output_ref:
+        type: ref
+        description: Usually list or map of split parts
+
+  filter:
+    layer: l1
+    family: data
+    required_config: [source, predicate]
+    config_schema:
+      source:
+        type: ref
+      predicate:
+        type: expression
+        description: Boolean filter on each item or object
+      mode:
+        type: enum
+        values: [keep_matches, drop_matches]
+      output_ref:
+        type: ref
+
+  chunk:
+    layer: l1
+    family: data
+    required_config: [source, strategy]
+    config_schema:
+      source:
+        type: ref
+      strategy:
+        type: enum
+        values: [fixed_tokens, fixed_chars, fixed_items, semantic, sentence, paragraph, custom]
+      size:
+        type: integer
+        description: Target chunk size
+      overlap:
+        type: integer
+        description: Overlap amount between chunks
+      output_ref:
+        type: ref
+
+  summarize:
+    layer: l1
+    family: data
+    required_config: [source]
+    config_schema:
+      source:
+        type: ref
+      strategy:
+        type: enum
+        values: [extractive, abstractive, hierarchical, rolling, diff, custom]
+      max_length:
+        type: integer
+        description: Tokens/chars depending on runtime convention
+      focus:
+        type: array
+        description: Aspects to emphasize
+        items: {type: string}
+      output_ref:
+        type: ref
+
+  template:
+    layer: l1
+    family: data
+    required_config: [template]
+    config_schema:
+      template:
+        type: template
+        description: String/object template rendered against state
+      variables:
+        type: object
+        description: Extra literal/ref values available to the template
+      output_ref:
+        type: ref
+
+  serialize:
+    layer: l1
+    family: data
+    required_config: [format, source]
+    config_schema:
+      format:
+        type: enum
+        values: [json, yaml, xml, csv, markdown, text, binary, custom]
+      source:
+        type: ref
+      options:
+        type: object
+        description: Pretty print, line endings, dialect, etc
+      output_ref:
+        type: ref
+
+  # Layer 1: Execution
+  task:
+    layer: l1
+    family: execution
+    required_config: [runner]
+    config_schema:
+      runner:
+        type: string
+        description: Worker/runtime/activity identifier
+      action:
+        type: string
+        description: Named operation executed by the runner
+      args:
+        type: object
+        description: Input args passed to the runner
+      deterministic:
+        type: boolean
+        description: Whether result is expected to be replay-safe/deterministic
+      side_effects:
+        type: array
+        description: Logical side effects produced
+        items: {type: string}
+      result_ref:
+        type: ref
+
+  model:
+    layer: l1
+    family: execution
+    required_config: [model]
+    config_schema:
+      model:
+        type: string
+        description: Model identifier
+      purpose:
+        type: enum
+        values: [generate, classify, extract, route, score, summarize, rewrite, judge]
+      temperature:
+        type: number
+      top_p:
+        type: number
+      max_output_tokens:
+        type: integer
+      structured_output:
+        type: boolean
+        description: Whether output must conform to a schema
+      schema_ref:
+        type: string
+        description: Structured output schema if structured_output=true
+      response_ref:
+        type: ref
+      usage_ref:
+        type: ref
+        description: Where token/cost metadata is stored
+
+  tool:
+    layer: l1
+    family: execution
+    required_config: [tool]
+    config_schema:
+      tool:
+        type: string
+        description: Registered tool identifier
+      category:
+        type: enum
+        values: [function, hosted, computer, shell, patch, agent, custom]
+        description: Logical tool class
+      args:
+        type: object
+        description: Tool arguments; may be literal or model-generated upstream
+      result_ref:
+        type: ref
+      approval_gate:
+        type: boolean
+        description: Whether to require approval before execution
+      idempotent:
+        type: boolean
+        description: Safe to replay without double side effects
+      side_effecting:
+        type: boolean
+        description: Whether tool mutates external state
+
+  api:
+    layer: l1
+    family: execution
+    required_config: [request]
+    config_schema:
+      request:
+        type: object
+        properties:
+          method:
+            type: enum
+            values: [GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS]
+          url: {type: template}
+          headers: {type: object}
+          body: {type: object}
+          query: {type: object}
+      auth_ref:
+        type: string
+        description: Secret/credential reference
+      expected_status:
+        type: array
+        description: Allowed response codes/ranges
+        items: {type: string}
+      parse_as:
+        type: enum
+        values: [json, text, binary, xml, yaml, raw]
+      response_ref:
+        type: ref
+
+  db:
+    layer: l1
+    family: execution
+    required_config: [connection, operation]
+    config_schema:
+      connection:
+        type: string
+        description: Connection/profile name
+      operation:
+        type: enum
+        values: [query, execute, transaction, bulk_load, lookup, upsert, delete]
+      statement:
+        type: template
+        description: SQL/DSL/query body
+      params:
+        type: object
+      transaction:
+        type: boolean
+        description: Whether operation executes in transaction
+      result_ref:
+        type: ref
+
+  io:
+    layer: l1
+    family: execution
+    required_config: [operation]
+    config_schema:
+      operation:
+        type: enum
+        values: [read_file, write_file, append_file, move_file, copy_file, delete_file, list_dir, stat, open_artifact]
+      path:
+        type: template
+      destination:
+        type: template
+        description: Used for copy/move
+      content_ref:
+        type: ref
+        description: Used for writes
+      encoding:
+        type: string
+      output_ref:
+        type: ref
+
+  code:
+    layer: l1
+    family: execution
+    required_config: [language]
+    config_schema:
+      language:
+        type: enum
+        values: [python, javascript, typescript, bash, rust, sql, custom]
+      source:
+        type: template
+        description: Inline code or ref to code artifact
+      entrypoint:
+        type: string
+        description: Function/module/script entry
+      args:
+        type: object
+      environment:
+        type: object
+        description: Environment vars and runtime flags
+      result_ref:
+        type: ref
+
+  search:
+    layer: l1
+    family: execution
+    required_config: [provider, query]
+    config_schema:
+      provider:
+        type: enum
+        values: [web, docs, vector, keyword, hybrid, custom]
+      query:
+        type: template
+      filters:
+        type: object
+      top_k:
+        type: integer
+      rerank:
+        type: boolean
+      result_ref:
+        type: ref
+
+  retrieve:
+    layer: l1
+    family: execution
+    required_config: [source]
+    config_schema:
+      source:
+        type: string
+        description: Memory store, vector db, artifact store, doc store, etc
+      query_ref:
+        type: ref
+        description: Usually query text or embedding input
+      strategy:
+        type: enum
+        values: [similarity, keyword, hybrid, graph, recent, by_id, custom]
+      top_k:
+        type: integer
+      score_threshold:
+        type: number
+      output_ref:
+        type: ref
+
+  generate:
+    layer: l1
+    family: execution
+    required_config: [artifact_type]
+    config_schema:
+      artifact_type:
+        type: string
+        description: "What is being generated: report, diff, image, patch, doc, etc"
+      producer:
+        type: enum
+        values: [model, tool, code, hybrid]
+      content_ref:
+        type: ref
+        description: Structured or raw content used to generate the artifact
+      format:
+        type: string
+        description: Output format
+      destination:
+        type: string
+        description: Artifact store path or logical artifact id
+      publish:
+        type: boolean
+
+  notify:
+    layer: l1
+    family: execution
+    required_config: [channel, message]
+    config_schema:
+      channel:
+        type: enum
+        values: [email, chat, webhook, sms, ticket, console, event_bus, custom]
+      recipients:
+        type: array
+        items: {type: string}
+      message:
+        type: template
+      payload:
+        type: object
+      fire_and_forget:
+        type: boolean
+        description: Whether delivery failures should be ignored
+      delivery_ref:
+        type: ref
+
+  # Layer 1: Control Flow
+  choice:
+    layer: l1
+    family: control_flow
+    required_config: [rules]
+    config_schema:
+      rules:
+        type: array
+        items: {$ref: "#/agentic_workflow_schema/reusable_subschemas/condition_rule"}
+      default_next:
+        type: string
+        description: Fallback branch if no rule matches
+      error_on_no_match:
+        type: boolean
+        description: Whether lack of match is fatal
+
+  route:
+    layer: l1
+    family: control_flow
+    required_config: [routing]
+    config_schema:
+      routing:
+        $ref: "#/agentic_workflow_schema/reusable_subschemas/routing_contract"
+      output_ref:
+        type: ref
+        description: Where routing decision and reasoning are written
+
+  parallel:
+    layer: l1
+    family: control_flow
+    required_config: [branches]
+    config_schema:
+      branches:
+        type: array
+        items: {$ref: "#/agentic_workflow_schema/reusable_subschemas/branch_target"}
+      join_mode:
+        type: enum
+        values: [all, any, quorum, first_success, custom]
+      quorum:
+        type: integer
+        description: Used if join_mode=quorum
+      result_merge:
+        type: enum
+        values: [list, map_by_branch, deep_merge, custom]
+      cancel_remaining_on_join:
+        type: boolean
+        description: Used for first_success/any
+      output_ref:
+        type: ref
+
+  map:
+    layer: l1
+    family: control_flow
+    required_config: [items, iterator]
+    config_schema:
+      items:
+        type: ref
+        description: Collection to iterate over
+      iterator:
+        type: string
+        description: Step id or subworkflow id applied to each item
+      item_name:
+        type: string
+        description: Local name for current item
+      index_name:
+        type: string
+        description: Local name for current index
+      mode:
+        type: enum
+        values: [inline, distributed, batched]
+      batch_size:
+        type: integer
+      preserve_order:
+        type: boolean
+      continue_on_item_error:
+        type: boolean
+      item_result_ref:
+        type: ref
+        description: Where each item result goes before reduction
+      output_ref:
+        type: ref
+        description: Aggregate result list/map
+
+  reduce:
+    layer: l1
+    family: control_flow
+    required_config: [items, strategy]
+    config_schema:
+      items:
+        type: ref
+        description: Usually output of map or parallel
+      strategy:
+        type: enum
+        values: [concat, merge, sum, min, max, vote, rank, custom]
+      reducer:
+        type: expression
+        description: Optional custom reducer logic
+      initial_value:
+        type: object
+      output_ref:
+        type: ref
+
+  loop:
+    layer: l1
+    family: control_flow
+    required_config: [body]
+    config_schema:
+      body:
+        type: array
+        description: Step ids run in loop body
+        items: {type: string}
+      while:
+        type: expression
+        description: Loop continues while true
+      until:
+        type: expression
+        description: Loop stops when true
+      min_iterations:
+        type: integer
+      max_iterations:
+        type: integer
+      loop_state_ref:
+        type: ref
+        description: Mutable loop-local state object
+      on_exhaustion:
+        type: enum
+        values: [fail, break, return_best_effort, escalate]
+
+  race:
+    layer: l1
+    family: control_flow
+    required_config: [branches]
+    config_schema:
+      branches:
+        type: array
+        items: {$ref: "#/agentic_workflow_schema/reusable_subschemas/branch_target"}
+      win_condition:
+        type: enum
+        values: [first_complete, first_success, best_score, custom]
+      score_expression:
+        type: expression
+        description: Used if win_condition=best_score
+      cancel_losers:
+        type: boolean
+      output_ref:
+        type: ref
+
+  fallback:
+    layer: l1
+    family: control_flow
+    required_config: [rules]
+    config_schema:
+      rules:
+        type: array
+        items: {$ref: "#/agentic_workflow_schema/reusable_subschemas/fallback_rule"}
+      default_target:
+        type: string
+        description: Final fallback destination if no rule matches
+
+  # Layer 1: Time/Event
+  wait:
+    layer: l1
+    family: time_event
+    required_config: []
+    config_schema:
+      duration:
+        type: duration
+        description: Relative wait
+      until:
+        type: datetime
+        description: Absolute wake-up time
+      jitter:
+        type: duration
+        description: Randomized perturbation to avoid thundering herds
+      wake_event:
+        type: string
+        description: Optional event emitted on wake
+
+  sensor:
+    layer: l1
+    family: time_event
+    required_config: [predicate]
+    config_schema:
+      predicate:
+        type: expression
+        description: Condition polled until it becomes true
+      poll_interval:
+        type: duration
+      mode:
+        type: enum
+        values: [blocking, deferred, event_driven]
+      timeout:
+        type: duration
+      output_ref:
+        type: ref
+
+  await_event:
+    layer: l1
+    family: time_event
+    required_config: [event_type]
+    config_schema:
+      event_type:
+        type: string
+        description: External or internal event name
+      match:
+        type: object
+        description: Correlation fields or predicates
+      timeout:
+        type: duration
+      payload_ref:
+        type: ref
+      on_timeout:
+        type: enum
+        values: [fail, cancel, continue, fallback, escalate]
+
+  await_condition:
+    layer: l1
+    family: time_event
+    required_config: [condition]
+    config_schema:
+      condition:
+        type: expression
+        description: Condition evaluated over current state/external facts
+      recheck_interval:
+        type: duration
+      timeout:
+        type: duration
+      output_ref:
+        type: ref
+
+  schedule:
+    layer: l1
+    family: time_event
+    required_config: [schedule]
+    config_schema:
+      schedule:
+        type: object
+        properties:
+          cron: {type: string}
+          interval: {type: duration}
+          rrule: {type: string}
+          timezone: {type: string}
+          start_at: {type: datetime}
+          end_at: {type: datetime}
+          catch_up: {type: boolean}
+      create_run_payload_ref:
+        type: ref
+        description: Payload used to instantiate scheduled runs
+      output_ref:
+        type: ref
+
+  # Layer 1: Delegation
+  subworkflow:
+    layer: l1
+    family: delegation
+    required_config: [workflow_ref]
+    config_schema:
+      workflow_ref:
+        type: string
+        description: Referenced subworkflow/template id
+      input_ref:
+        type: ref
+      wait_for_completion:
+        type: boolean
+      output_ref:
+        type: ref
+      isolate_state:
+        type: boolean
+        description: Whether child state is sandboxed from parent state
+      inherit_context:
+        type: boolean
+        description: Whether parent prompts/memory/policies flow downward
+
+  child_workflow:
+    layer: l1
+    family: delegation
+    required_config: [workflow_ref]
+    config_schema:
+      workflow_ref:
+        type: string
+      input_ref:
+        type: ref
+      start_mode:
+        type: enum
+        values: [immediate, signal_with_start, scheduled]
+      execution_mode:
+        type: enum
+        values: [attached, detached]
+      cancellation_policy:
+        type: enum
+        values: [none, propagate, request_cancel, wait_and_cancel]
+      parent_close_policy:
+        type: enum
+        values: [abandon, request_cancel, terminate]
+      handle_ref:
+        type: ref
+        description: Where child execution handle/id is stored
+      result_ref:
+        type: ref
+
+  subgraph:
+    layer: l1
+    family: delegation
+    required_config: [graph_ref]
+    config_schema:
+      graph_ref:
+        type: string
+        description: Nested graph identifier
+      shared_state_paths:
+        type: array
+        description: State slices shared with the subgraph
+        items: {type: json_path}
+      private_state_ref:
+        type: ref
+        description: Optional subgraph-private state root
+      output_ref:
+        type: ref
+
+  handoff:
+    layer: l1
+    family: delegation
+    required_config: [target_agent]
+    config_schema:
+      target_agent:
+        type: string
+        description: Specialist agent that takes control
+      transfer_reason:
+        type: template
+        description: Why control is being transferred
+      transfer_state_paths:
+        type: array
+        description: Which state slices are sent to the new agent
+        items: {type: json_path}
+      return_mode:
+        type: enum
+        values: [never, manual, auto_after_completion, on_request]
+      result_ref:
+        type: ref
+
+  agent_tool:
+    layer: l1
+    family: delegation
+    required_config: [agent]
+    config_schema:
+      agent:
+        type: string
+        description: Specialist agent exposed as a callable tool, not full control transfer
+      input_ref:
+        type: ref
+      output_ref:
+        type: ref
+      stream_nested:
+        type: boolean
+        description: Whether nested agent progress is surfaced
+
+  delegate:
+    layer: l1
+    family: delegation
+    required_config: [target]
+    config_schema:
+      target:
+        type: string
+        description: "Generic target: step, workflow, agent, or pool"
+      target_type:
+        type: enum
+        values: [step, workflow, agent, queue, worker_pool]
+      mode:
+        type: enum
+        values: [sync, async, fire_and_forget]
+      payload_ref:
+        type: ref
+      result_ref:
+        type: ref
+
+  escalate:
+    layer: l1
+    family: delegation
+    required_config: [target]
+    config_schema:
+      target:
+        type: string
+        description: Human owner, queue, or specialist system
+      reason:
+        type: template
+      include_state_paths:
+        type: array
+        items: {type: json_path}
+      block_until_resolved:
+        type: boolean
+      resolution_ref:
+        type: ref
+
+  # Layer 1: Messaging
+  signal:
+    layer: l1
+    family: messaging
+    required_config: [target, name]
+    config_schema:
+      target:
+        type: string
+        description: Workflow/run/agent handle receiving the signal
+      name:
+        type: string
+        description: Signal/event name
+      payload_ref:
+        type: ref
+      start_if_missing:
+        type: boolean
+        description: Lazy start semantics if runtime supports it
+
+  update:
+    layer: l1
+    family: messaging
+    required_config: [target, name]
+    config_schema:
+      target:
+        type: string
+      name:
+        type: string
+        description: Named update operation
+      payload_ref:
+        type: ref
+      wait_for_result:
+        type: boolean
+      result_ref:
+        type: ref
+
+  query:
+    layer: l1
+    family: messaging
+    required_config: [target, name]
+    config_schema:
+      target:
+        type: string
+      name:
+        type: string
+        description: Named query method
+      args:
+        type: object
+      result_ref:
+        type: ref
+
+  callback:
+    layer: l1
+    family: messaging
+    required_config: [token_ref]
+    config_schema:
+      token_ref:
+        type: ref
+        description: Correlation token/handle for callback completion
+      timeout:
+        type: duration
+      payload_ref:
+        type: ref
+      on_timeout:
+        type: enum
+        values: [fail, cancel, continue, escalate]
+
+  interrupt:
+    layer: l1
+    family: messaging
+    required_config: []
+    config_schema:
+      reason:
+        type: template
+        description: Why execution is being paused/interrupted
+      expose_state_paths:
+        type: array
+        description: State paths visible to the resumer/reviewer
+        items: {type: json_path}
+      resume_contract:
+        $ref: "#/agentic_workflow_schema/reusable_subschemas/human_input_contract"
+
+  approve:
+    layer: l1
+    family: messaging
+    required_config: [request]
+    config_schema:
+      request:
+        $ref: "#/agentic_workflow_schema/reusable_subschemas/approval_policy"
+      decision_ref:
+        type: ref
+        description: Stores approval response and metadata
+
+  review:
+    layer: l1
+    family: messaging
+    required_config: [request]
+    config_schema:
+      request:
+        type: object
+        properties:
+          prompt: {type: template}
+          artifact_ref: {type: ref}
+          diff_ref: {type: ref}
+          checklist: {type: array, items: {type: string}}
+      review_ref:
+        type: ref
+        description: Stores comments, annotations, outcome
+
+  human_input:
+    layer: l1
+    family: messaging
+    required_config: [request]
+    config_schema:
+      request:
+        $ref: "#/agentic_workflow_schema/reusable_subschemas/human_input_contract"
+      input_ref:
+        type: ref
+        description: Stores typed human response
+
+  # Layer 1: Durability
+  checkpoint:
+    layer: l1
+    family: durability
+    required_config: []
+    config_schema:
+      mode:
+        type: enum
+        values: [manual, before_continue, before_side_effect, after_side_effect]
+      state_ref:
+        type: ref
+        description: State root or subtree to checkpoint
+      checkpoint_ref:
+        type: ref
+        description: Where checkpoint metadata/id is written
+
+  snapshot:
+    layer: l1
+    family: durability
+    required_config: [state_ref]
+    config_schema:
+      state_ref:
+        type: ref
+      label:
+        type: string
+        description: Human label for this snapshot
+      immutable:
+        type: boolean
+        description: Whether later mutation is forbidden
+      snapshot_ref:
+        type: ref
+
+  cache:
+    layer: l1
+    family: durability
+    required_config: [mode]
+    config_schema:
+      mode:
+        type: enum
+        values: [get, put, invalidate]
+      key:
+        type: expression
+      value_ref:
+        type: ref
+        description: Used for put; may also receive cached value for get
+      output_ref:
+        type: ref
+
+  replay:
+    layer: l1
+    family: durability
+    required_config: [checkpoint_ref]
+    config_schema:
+      checkpoint_ref:
+        type: ref
+        description: Which historical checkpoint to replay from
+      mode:
+        type: enum
+        values: [dry_run, resume, recompute]
+      output_ref:
+        type: ref
+
+  fork:
+    layer: l1
+    family: durability
+    required_config: [checkpoint_ref]
+    config_schema:
+      checkpoint_ref:
+        type: ref
+      new_run_metadata:
+        type: object
+        description: Name/tags/labels for the forked run
+      output_ref:
+        type: ref
+        description: Handle/id of forked execution
+
+  continue_as_new:
+    layer: l1
+    family: durability
+    required_config: []
+    config_schema:
+      input_ref:
+        type: ref
+        description: State passed to the fresh run
+      reset_history:
+        type: boolean
+        description: Start fresh execution history
+      preserve_identity:
+        type: boolean
+        description: Keep logical workflow identity while rotating run id
+      output_ref:
+        type: ref
+
+  # Layer 1: Queue/Resource
+  enqueue:
+    layer: l1
+    family: queue_resource
+    required_config: [payload_ref]
+    config_schema:
+      payload_ref:
+        type: ref
+      queue:
+        type: string
+      priority:
+        type: integer
+      delay_until:
+        type: datetime
+      dedupe_key:
+        type: string
+        description: Prevent duplicate enqueues
+
+  dispatch:
+    layer: l1
+    family: queue_resource
+    required_config: [target]
+    config_schema:
+      target:
+        type: string
+        description: Worker pool/queue/runner receiving the work
+      selector:
+        type: object
+        description: Constraints or routing selectors
+      payload_ref:
+        type: ref
+      handle_ref:
+        type: ref
+
+  acquire_slot:
+    layer: l1
+    family: queue_resource
+    required_config: [slot_key]
+    config_schema:
+      slot_key:
+        type: string
+        description: Shared concurrency bucket
+      count:
+        type: integer
+        description: Number of slots to acquire
+      timeout:
+        type: duration
+      lease_ref:
+        type: ref
+
+  release_slot:
+    layer: l1
+    family: queue_resource
+    required_config: [lease_ref]
+    config_schema:
+      lease_ref:
+        type: ref
+        description: Lease or token to release
+      count:
+        type: integer
+        description: Number of slots to release if partial release supported
+
+  # Layer 1: Observability
+  log:
+    layer: l1
+    family: observability
+    required_config: [message]
+    config_schema:
+      level:
+        type: enum
+        values: [debug, info, warning, error, critical]
+      message:
+        type: template
+      fields:
+        type: object
+        description: Structured log fields
+
+  trace:
+    layer: l1
+    family: observability
+    required_config: [operation]
+    config_schema:
+      operation:
+        type: enum
+        values: [start_span, annotate_span, end_span]
+      span_name:
+        type: string
+      attributes:
+        type: object
+      span_ref:
+        type: ref
+
+  metric:
+    layer: l1
+    family: observability
+    required_config: [name, kind_metric]
+    config_schema:
+      name:
+        type: string
+      kind_metric:
+        type: enum
+        values: [counter, gauge, histogram, timer, distribution]
+      value:
+        type: number
+      labels:
+        type: object
+
+  stream:
+    layer: l1
+    family: observability
+    required_config: [source_ref]
+    config_schema:
+      source_ref:
+        type: ref
+        description: Output or event stream to forward progressively
+      stream_mode:
+        type: enum
+        values: [tokens, events, artifacts, logs, diffs, custom]
+      target:
+        type: enum
+        values: [ui, event_bus, callback, console, artifact_store]
+      throttle:
+        type: duration
+
+  publish:
+    layer: l1
+    family: observability
+    required_config: [artifact_ref]
+    config_schema:
+      artifact_ref:
+        type: ref
+      destination:
+        type: string
+        description: UI channel, bucket, report store, etc
+      visibility:
+        type: enum
+        values: [private, workflow, thread, tenant, public]
+      output_ref:
+        type: ref
+
+  audit:
+    layer: l1
+    family: observability
+    required_config: [event_type]
+    config_schema:
+      event_type:
+        type: string
+        description: Stable compliance/audit event name
+      payload_ref:
+        type: ref
+      immutable:
+        type: boolean
+        description: Whether audit entry is append-only
+
+  # Layer 2: Agent Primitives - Context
+  intake_context:
+    layer: l2
+    family: context
+    required_config: []
+    config_schema:
+      sources:
+        type: array
+        description: Which sources are pulled into working context
+        items:
+          type: enum
+          values: [user_input, attachments, thread_memory, workflow_state, retrieval, system_profile, runtime_env, budgets, policies]
+      output_ref:
+        type: ref
+
+  intent_classify:
+    layer: l2
+    family: context
+    required_config: [labels]
+    config_schema:
+      labels:
+        type: array
+        description: Candidate intents or classes
+        items: {type: string}
+      multi_label:
+        type: boolean
+      confidence_ref:
+        type: ref
+      result_ref:
+        type: ref
+
+  extract:
+    layer: l2
+    family: context
+    required_config: [schema_ref]
+    config_schema:
+      schema_ref:
+        type: string
+        description: Structured extraction target
+      source_ref:
+        type: ref
+      strict:
+        type: boolean
+      result_ref:
+        type: ref
+
+  ambiguity_check:
+    layer: l2
+    family: context
+    required_config: []
+    config_schema:
+      source_ref:
+        type: ref
+      criteria:
+        type: array
+        description: Ambiguity or missing-info checks
+        items: {type: string}
+      output_ref:
+        type: ref
+      ask_human_if_ambiguous:
+        type: boolean
+
+  context_pack:
+    layer: l2
+    family: context
+    required_config: []
+    config_schema:
+      sources:
+        type: array
+        description: Ordered refs to include in prompt/context package
+        items: {type: ref}
+      pack_strategy:
+        type: enum
+        values: [concat, rank_then_pack, hierarchical, windowed, budget_aware, custom]
+      target_budget:
+        type: integer
+        description: Token/item budget for packed context
+      output_ref:
+        type: ref
+
+  # Layer 2: Agent Primitives - Memory
+  memory_recall:
+    layer: l2
+    family: memory
+    required_config: [query_ref]
+    config_schema:
+      query_ref:
+        type: ref
+      namespaces:
+        type: array
+        items: {type: string}
+      strategy:
+        type: enum
+        values: [semantic, episodic, procedural, hybrid, recent, by_key]
+      top_k:
+        type: integer
+      output_ref:
+        type: ref
+
+  memory_write:
+    layer: l2
+    family: memory
+    required_config: [content_ref]
+    config_schema:
+      content_ref:
+        type: ref
+      write_mode:
+        type: enum
+        values: [append, upsert_fact, upsert_summary, overwrite_key, delete_key, archive]
+      namespaces:
+        type: array
+        items: {type: string}
+      score:
+        type: number
+        description: Importance/salience score
+      output_ref:
+        type: ref
+
+  # Layer 2: Agent Primitives - Planning
+  plan_step:
+    layer: l2
+    family: planning
+    required_config: []
+    config_schema:
+      objective_ref:
+        type: ref
+      constraints_ref:
+        type: ref
+      plan_style:
+        type: enum
+        values: [direct, decompose, tree, state_machine, critique_then_plan, cost_aware]
+      plan_schema_ref:
+        type: string
+        description: Structured plan schema if desired
+      output_ref:
+        type: ref
+
+  decompose:
+    layer: l2
+    family: planning
+    required_config: [objective_ref]
+    config_schema:
+      objective_ref:
+        type: ref
+      granularity:
+        type: enum
+        values: [coarse, medium, fine, adaptive]
+      dependency_model:
+        type: enum
+        values: [linear, dag, tree, hybrid]
+      output_ref:
+        type: ref
+
+  # Layer 2: Agent Primitives - Reasoning
+  reason:
+    layer: l2
+    family: reasoning
+    required_config: []
+    config_schema:
+      mode:
+        type: enum
+        values: [deliberate, compare_options, hypothesis, decision, repair, route]
+      input_ref:
+        type: ref
+      output_ref:
+        type: ref
+      externalize:
+        type: boolean
+        description: Whether reasoning is stored vs kept ephemeral/internal-to-step runtime
+
+  reflect:
+    layer: l2
+    family: reasoning
+    required_config: [subject_ref]
+    config_schema:
+      subject_ref:
+        type: ref
+        description: Output/plan/answer/tool trace being reflected upon
+      reflection_goal:
+        type: enum
+        values: [quality, safety, completeness, consistency, efficiency, strategy]
+      output_ref:
+        type: ref
+
+  critique:
+    layer: l2
+    family: reasoning
+    required_config: [subject_ref]
+    config_schema:
+      subject_ref:
+        type: ref
+      rubric_ref:
+        type: ref
+        description: Criteria/rubric used for critique
+      evaluator:
+        type: enum
+        values: [rule, model, human, hybrid]
+      output_ref:
+        type: ref
+
+  rank:
+    layer: l2
+    family: reasoning
+    required_config: [candidates_ref]
+    config_schema:
+      candidates_ref:
+        type: ref
+      strategy:
+        type: enum
+        values: [score, pairwise, vote, rerank_model, custom]
+      criteria_ref:
+        type: ref
+      output_ref:
+        type: ref
+
+  # Layer 2: Agent Primitives - Guardrails
+  self_check:
+    layer: l2
+    family: guardrails
+    required_config: [subject_ref]
+    config_schema:
+      subject_ref:
+        type: ref
+      checks:
+        type: array
+        items: {type: string}
+      output_ref:
+        type: ref
+
+  policy_check:
+    layer: l2
+    family: guardrails
+    required_config: [subject_ref]
+    config_schema:
+      subject_ref:
+        type: ref
+      policy_bundle_ref:
+        type: string
+      mode:
+        type: enum
+        values: [block, score, warn]
+      output_ref:
+        type: ref
+
+  # Layer 2: Agent Primitives - Grounding
+  grounding_check:
+    layer: l2
+    family: grounding
+    required_config: [claim_ref]
+    config_schema:
+      claim_ref:
+        type: ref
+      evidence_ref:
+        type: ref
+      strategy:
+        type: enum
+        values: [citation_match, retrieval_verify, model_judge, rule, hybrid]
+      output_ref:
+        type: ref
+
+  # Layer 2: Agent Primitives - Selection
+  tool_select:
+    layer: l2
+    family: planning
+    required_config: [candidates]
+    config_schema:
+      candidates:
+        type: array
+        items: {type: string}
+      strategy:
+        type: enum
+        values: [rule, classifier, llm, cost_aware, capability_aware, hybrid]
+      output_ref:
+        type: ref
+
+  model_select:
+    layer: l2
+    family: planning
+    required_config: [candidates]
+    config_schema:
+      candidates:
+        type: array
+        items: {type: string}
+      optimize_for:
+        type: array
+        description: Objectives like cost, latency, quality, context size
+        items: {type: string}
+      output_ref:
+        type: ref
+
+  agent_select:
+    layer: l2
+    family: planning
+    required_config: [candidates]
+    config_schema:
+      candidates:
+        type: array
+        items: {type: string}
+      routing:
+        $ref: "#/agentic_workflow_schema/reusable_subschemas/routing_contract"
+      output_ref:
+        type: ref
+
+  # Layer 3: Composite Patterns
+  sequential_pattern:
+    layer: l3
+    family: pipeline
+    required_config: [steps]
+    config_schema:
+      steps:
+        type: array
+        description: Ordered step ids
+        items: {type: string}
+      fail_fast:
+        type: boolean
+      output_ref:
+        type: ref
+
+  map_reduce_pattern:
+    layer: l3
+    family: map_reduce
+    required_config: [map_step, reduce_step]
+    config_schema:
+      split_step:
+        type: string
+        description: Optional explicit splitter
+      map_step:
+        type: string
+        description: Step or subworkflow applied per item
+      reduce_step:
+        type: string
+        description: Step aggregating mapped results
+      output_ref:
+        type: ref
+
+  planner_executor_pattern:
+    layer: l3
+    family: planner_executor
+    required_config: [planner, executor]
+    config_schema:
+      planner:
+        type: string
+        description: Step id generating of plan
+      executor:
+        type: string
+        description: Step id or subworkflow executing the plan
+      replanner:
+        type: string
+        description: Optional step id for re-planning on failure/change
+      max_replans:
+        type: integer
+      output_ref:
+        type: ref
+
+  react_pattern:
+    layer: l3
+    family: react_loop
+    required_config: [think_step, act_step, observe_step]
+    config_schema:
+      think_step:
+        type: string
+      act_step:
+        type: string
+      observe_step:
+        type: string
+      stop_condition:
+        type: expression
+      max_turns:
+        type: integer
+      output_ref:
+        type: ref
+
+  router_specialist_pattern:
+    layer: l3
+    family: router_specialist
+    required_config: [router, specialists]
+    config_schema:
+      router:
+        type: string
+        description: Step id choosing specialist
+      specialists:
+        type: array
+        items: {type: string}
+      return_to_router:
+        type: boolean
+        description: Whether specialist returns for final synthesis/reroute
+      output_ref:
+        type: ref
+
+  maker_checker_pattern:
+    layer: l3
+    family: maker_checker
+    required_config: [maker, checker]
+    config_schema:
+      maker:
+        type: string
+      checker:
+        type: string
+      reviser:
+        type: string
+        description: Optional dedicated reviser step
+      max_rounds:
+        type: integer
+      accept_threshold:
+        type: number
+      output_ref:
+        type: ref
+
+  supervisor_swarm_pattern:
+    layer: l3
+    family: supervisor_swarm
+    required_config: [supervisor, workers]
+    config_schema:
+      supervisor:
+        type: string
+      workers:
+        type: array
+        items: {type: string}
+      delegation_mode:
+        type: enum
+        values: [push, pull, market, auction, hybrid]
+      aggregation_step:
+        type: string
+      output_ref:
+        type: ref
+
+  monitor_act_pattern:
+    layer: l3
+    family: monitor_act
+    required_config: [monitor_step, decision_step, action_step]
+    config_schema:
+      monitor_step:
+        type: string
+      decision_step:
+        type: string
+      action_step:
+        type: string
+      cadence:
+        type: duration
+      stop_condition:
+        type: expression
+      output_ref:
+        type: ref
+
+  # Layer 4: Semantic Phases
+  intake_phase:
+    layer: l4
+    family: semantic_phase
+    required_config: []
+    config_schema:
+      objective:
+        type: string
+        description: What intake means in this workflow
+      start_mark:
+        type: boolean
+        description: Whether entering this phase emits a phase-start event
+      end_mark:
+        type: boolean
+        description: Whether leaving this phase emits a phase-end event
+
+  understand_phase:
+    layer: l4
+    family: semantic_phase
+    required_config: []
+    config_schema:
+      objective:
+        type: string
+      success_criteria:
+        type: array
+        items: {type: string}
+
+  prepare_context_phase:
+    layer: l4
+    family: semantic_phase
+    required_config: []
+    config_schema:
+      objective:
+        type: string
+      context_budget:
+        type: integer
+
+  plan_phase:
+    layer: l4
+    family: semantic_phase
+    required_config: []
+    config_schema:
+      objective:
+        type: string
+      deliverable:
+        type: string
+        description: What plan artifact/outcome should exist at phase end
+
+  execute_phase:
+    layer: l4
+    family: semantic_phase
+    required_config: []
+    config_schema:
+      objective:
+        type: string
+      side_effect_class:
+        type: enum
+        values: [none, internal, external_noncritical, external_critical]
+
+  verify_phase:
+    layer: l4
+    family: semantic_phase
+    required_config: []
+    config_schema:
+      objective:
+        type: string
+      evaluator:
+        $ref: "#/agentic_workflow_schema/reusable_subschemas/evaluator_contract"
+
+  refine_phase:
+    layer: l4
+    family: semantic_phase
+    required_config: []
+    config_schema:
+      objective:
+        type: string
+      max_rounds:
+        type: integer
+
+  decide_phase:
+    layer: l4
+    family: semantic_phase
+    required_config: []
+    config_schema:
+      objective:
+        type: string
+      decision_schema_ref:
+        type: string
+
+  deliver_phase:
+    layer: l4
+    family: semantic_phase
+    required_config: []
+    config_schema:
+      objective:
+        type: string
+      output_contract_ref:
+        type: string
+
+  learn_phase:
+    layer: l4
+    family: semantic_phase
+    required_config: []
+    config_schema:
+      objective:
+        type: string
+      writeback_targets:
+        type: array
+        description: Memory/provenance/evaluation stores
+        items: {type: string}
+
+  # Layer 5: Meta-Orchestration
+  governance:
+    layer: l5
+    family: meta_orchestration
+    required_config: [policy_bundle_ref]
+    config_schema:
+      policy_bundle_ref:
+        type: string
+        description: Named set of runtime policies, rules, and restrictions
+      apply_to:
+        type: array
+        description: Step ids, families, phases, or workflows governed by this policy
+        items: {type: string}
+      enforce_mode:
+        type: enum
+        values: [advisory, blocking, score, report_only]
+      findings_ref:
+        type: ref
+
+  budget_manager:
+    layer: l5
+    family: meta_orchestration
+    required_config: [budget]
+    config_schema:
+      budget:
+        $ref: "#/agentic_workflow_schema/reusable_subschemas/budget_policy"
+      apply_to:
+        type: array
+        items: {type: string}
+      rebalance_strategy:
+        type: enum
+        values: [none, shift_to_cheaper_models, reduce_parallelism, summarize_context, defer_work, ask_human]
+      decisions_ref:
+        type: ref
+
+  scheduler_controller:
+    layer: l5
+    family: meta_orchestration
+    required_config: []
+    config_schema:
+      apply_to:
+        type: array
+        items: {type: string}
+      strategy:
+        type: enum
+        values: [fifo, priority, edf, fair_share, cost_aware, sla_aware, custom]
+      reprioritize_on:
+        type: array
+        description: Events/metrics that trigger queue reprioritization
+        items: {type: string}
+      output_ref:
+        type: ref
+
+  topology_manager:
+    layer: l5
+    family: meta_orchestration
+    required_config: []
+    config_schema:
+      pools:
+        type: array
+        description: Declared worker/device/resource pools under management
+        items:
+          type: object
+          properties:
+            id: {type: string}
+            capabilities: {type: array, items: {type: string}}
+            cost_class: {type: string}
+            locality: {type: string}
+            availability_ref: {type: ref}
+      routing_strategy:
+        type: enum
+        values: [capability_first, locality_first, latency_first, cost_first, hybrid]
+      decisions_ref:
+        type: ref
+
+  capability_router:
+    layer: l5
+    family: meta_orchestration
+    required_config: [routing]
+    config_schema:
+      routing:
+        $ref: "#/agentic_workflow_schema/reusable_subschemas/routing_contract"
+      capability_index_ref:
+        type: ref
+        description: Inventory of tools/models/agents/workers and capabilities
+      output_ref:
+        type: ref
+
+  evaluation_program:
+    layer: l5
+    family: meta_orchestration
+    required_config: [evaluator]
+    config_schema:
+      evaluator:
+        $ref: "#/agentic_workflow_schema/reusable_subschemas/evaluator_contract"
+      subjects:
+        type: array
+        description: Outputs/runs/steps/artifacts to evaluate
+        items: {type: ref}
+      sampling_strategy:
+        type: enum
+        values: [all, random, stratified, errors_only, drift_based]
+      report_ref:
+        type: ref
+
+  provenance_controller:
+    layer: l5
+    family: meta_orchestration
+    required_config: []
+    config_schema:
+      collect_from:
+        type: array
+        description: Step ids/families whose evidence is tracked
+        items: {type: string}
+      evidence_types:
+        type: array
+        items:
+          type: enum
+          values: [citations, retrieval_hits, tool_outputs, human_edits, model_versions, state_diffs, artifacts]
+      output_ref:
+        type: ref
+
+  experiment_controller:
+    layer: l5
+    family: meta_orchestration
+    required_config: [variants]
+    config_schema:
+      variants:
+        type: array
+        description: Alternative configs/plans/models/tools to compare
+        items:
+          type: object
+          properties:
+            id: {type: string}
+            patch: {type: object, description: Config/workflow patch for variant}
+            weight: {type: number}
+      assignment_strategy:
+        type: enum
+        values: [manual, round_robin, weighted_random, bandit, segment_based]
+      metrics_ref:
+        type: ref
+      winner_strategy:
+        type: enum
+        values: [highest_score, lowest_cost, pareto, manual, none]
+
+  optimization_controller:
+    layer: l5
+    family: meta_orchestration
+    required_config: []
+    config_schema:
+      optimize_for:
+        type: array
+        items:
+          type: enum
+          values: [quality, latency, cost, safety, throughput, memory_use, human_time]
+      knobs:
+        type: array
+        description: Config knobs optimizer is allowed to change
+        items: {type: string}
+      guard_constraints:
+        type: array
+        description: Constraints that must remain true during optimization
+        items: {type: expression}
+      output_ref:
+        type: ref
+
+  memory_compactor:
+    layer: l5
+    family: meta_orchestration
+    required_config: [namespaces]
+    config_schema:
+      namespaces:
+        type: array
+        items: {type: string}
+      strategy:
+        type: enum
+        values: [summarize, dedupe, evict_lru, evict_low_score, merge_facts, archive_old, hybrid]
+      dry_run:
+        type: boolean
+        description: Report-only compaction without mutating storage
+      report_ref:
+        type: ref
+
+# Example minimal step instances for illustration
+examples:
+  choice_example:
+    id: route_request
+    layer: l1
+    kind: choice
+    input:
+      - from: $.request
+        as: request
+    config:
+      rules:
+        - when: request.kind == 'search'
+          next: run_search
+        - when: request.kind == 'write'
+          next: draft_answer
+      default_next: ask_for_clarification
+
+  model_example:
+    id: draft_answer
+    layer: l1
+    kind: model
+    prompt:
+      system: You are a precise assistant.
+      task: Draft an answer using available context.
+      output_format: markdown
+    config:
+      model: gpt-x
+      purpose: generate
+      temperature: 0.2
+      max_output_tokens: 1200
+      response_ref: $.draft
+
+  handoff_example:
+    id: handoff_to_research_agent
+    layer: l1
+    kind: handoff
+    config:
+      target_agent: research_agent
+      transfer_reason: The request requires specialist retrieval and synthesis.
+      transfer_state_paths:
+        - $.request
+        - $.constraints
+      return_mode: auto_after_completion
+      result_ref: $.research_result
+
+  maker_checker_pattern_example:
+    id: quality_loop
+    layer: l3
+    kind: maker_checker_pattern
+    config:
+      maker: draft_answer
+      checker: evaluate_answer
+      reviser: revise_answer
+      max_rounds: 3
+      accept_threshold: 0.9
+      output_ref: $.final_answer
