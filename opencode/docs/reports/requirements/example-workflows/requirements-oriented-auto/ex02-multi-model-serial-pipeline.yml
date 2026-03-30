@@ -3,59 +3,215 @@ workflow_id: multi_model_serial_pipeline
 name: Multi-Model Serial Pipeline
 description: Same pipeline, load/unload different model for each step
 
-# Model Configuration
+# ── MODEL CONFIGURATION ────────────────────────────────────
 models:
-  step1_model:
-    provider: llamacpp
-    model: "/models/code-specialist.gguf"
-    backend: vulkan
-    gpu_layers: 32
-    load_priority: high
+  
+  # ── GLOBAL CONFIGURATION ─────────────────────────────
+  global_config_path: ./workspace/model-config.yml  # Optional: centralized config file
+  default_model_router: automatic  # automatic | manual | smart_routing
+  
+  # ── MODEL: STEP 1 (CODE SPECIALIST) ─────────────────
+  code_specialist:
+    
+    host:
+      type: llamacpp  # lmstudio | ollama | llama_cpp_with_vulkan
+      connection_settings:
+        model_path: /models/code-specialist.Q4_K_M.gguf
+        backend: vulkan
+        gpu_layers: 32
+    
+    resource_limits:
+      max_allowed:
+        ram: 4096MB
+        vram: 4096MB
+        cpu: 100%
+        gpu: 100%
+        attention_tokens: 8192
+        concurrent_requests: 2
+      
+      min_allowed:
+        ram: 2048MB
+        vram: 2048MB
+        cpu: 50%
+        gpu: 50%
+        attention_tokens: 4096
+      
+      allocation_strategy: static  # static | dynamic | adaptive
+    
+    model_memory:
+      cache_size: min  # min | max | medium | medium-min | medium-max
+      kv_cache_quantization: auto  # auto | q4_k_m | q4_0 | q5_k_m | q5_0 | q6_k | q8_0
+      attention_context: from_max_allowed
+    
+    execution:
+      timeout:
+        load_into_memory: 10s
+        time_to_first_response: 30s
+        total_time_to_response: 2h
+      
+      max_turns: 10
+      stop_on_tool_failure: false
+      accumulate_tool_results: true
+  
+  # ── MODEL: STEP 2 MODEL (DEEPSEEK CODER) ───────────
+  deepseek_coder:
+    name: step2_model  # Variable reference name
+    
+    host:
+      type: lmstudio  # lmstudio | ollama | llama_cpp_with_vulkan
+      connection_settings:
+        model: "deepseek-coder-6.7b"
+        backend: vulkan
+        gpu_layers: 32
+    
+    resource_limits:
+      max_allowed:
+        ram: 2048MB
+        vram: 2048MB
+        cpu: 100%
+        gpu: 100%
+        attention_tokens: 4096
+        concurrent_requests: 2
+      
+      min_allowed:
+        ram: 1024MB
+        vram: 1024MB
+        cpu: 50%
+        gpu: 50%
+        attention_tokens: 2048
+      
+      allocation_strategy: dynamic  # static | dynamic | adaptive
+    
+    model_memory:
+      cache_size: min
+      kv_cache_quantization: auto
+      attention_context: from_max_allowed
+    
+    execution:
+      timeout:
+        load_into_memory: 8s
+        time_to_first_response: 20s
+        total_time_to_response: 1.5h
+      
+      max_turns: 10
+      stop_on_tool_failure: false
+      accumulate_tool_results: true
+  
+  # ── MODEL: STEP 3 MODEL (LLAMA 3.2 70B) ───────────
+  llama3_2_70b:
+    name: step3_model  # Variable reference name
+    
+    host:
+      type: ollama  # lmstudio | ollama | llama_cpp_with_vulkan
+      connection_settings:
+        model: "llama3.2:70b"
+    
+    resource_limits:
+      max_allowed:
+        ram: 8192MB
+        vram: 8192MB
+        cpu: 100%
+        gpu: 100%
+        attention_tokens: 16384
+        concurrent_requests: 2
+      
+      min_allowed:
+        ram: 4096MB
+        vram: 4096MB
+        cpu: 50%
+        gpu: 50%
+        attention_tokens: 8192
+      
+      allocation_strategy: dynamic
+    
+    model_memory:
+      cache_size: min
+      kv_cache_quantization: auto
+      attention_context: from_max_allowed
+    
+    execution:
+      timeout:
+        load_into_memory: 6s
+        time_to_first_response: 15s
+        total_time_to_response: 1h
+      
+      max_turns: 10
+      stop_on_tool_failure: false
+      accumulate_tool_results: true
 
-  step2_model:
-    provider: lmstudio
-    model: "deepseek-coder-6.7b"
-    backend: vulkan
-    gpu_layers: 32
-    load_priority: medium
-
-  step3_model:
-    provider: ollama
-    model: "llama3.2-70b"
-    load_priority: low
-
-# Execution Mode
-execution:
-  mode: serial
+# ── WORKFLOW EXECUTION STRATEGY ────────────────────────────
+workflow_execution_strategy:
+  
+  # ── MODEL LIFECYCLE ─────────────────────────────────
+  load_unload: one_at_a_time  # one_at_a_time | lazy | eager | adaptive
+  
+  # ── PROCESSING MODE ───────────────────────────────────
+  processing: serial  # parallel | serial | hybrid
+  
+  # ── MEMORY MANAGEMENT ───────────────────────────────────
   memory:
-    load_unload_strategy: one_at_a_time
-    swap_timeout_secs: 10
-    max_allocated_memory_mb: 8192
-    model_memory_mb:
-      llamacpp_code_specialist: 4096
-      lmstudio_deepseek_coder: 2048
-      ollama_llama3_2_70b: 8192
+    allocation:
+      strategy: dynamic
+      max_allowed:
+        ram: 8192MB
+        vram: 8192MB
+        cpu: 100%
+        gpu: 100%
+        attention_tokens: 16384
+        concurrent_requests: 2
+    
+    model_lifecycle:
+      load_unload_strategy: one_at_a_time
+      cache_size: min
+      swap_timeout_secs: 10
+      unload_unused: true
+  
+  # ── TIMEOUT MANAGEMENT ───────────────────────────────────
+  timeout:
+    default_timeout_secs: 120
+    timeout_strategy: continue_with_partial  # fail | continue_with_partial | retry
 
-# Logging
+# ── LOGGING CONFIGURATION ───────────────────────────────────
 logging:
-  level: debug
-  detail: high
-  output_type: stateless_direct_io
-  format: json
-  log_file: multi_model_pipeline.log
-  console: false
-  include_timestamps: true
-  include_stack_traces: false
+  
+  # ── LOG LEVELS ─────────────────────────────────────
+  level: debug  # debug | info | warning | error
+  
+  # ── LOG DETAIL ─────────────────────────────────────
+  detail: high  # low | medium | high | verbose
+  
+  # ── OUTPUT DESTINATIONS ───────────────────────────────
+  output_destinations:
+    json_file:
+      enabled: true
+      path: "${workflow.output_path}/multi_model_pipeline.json"
+      format: json
+    
+    log_file:
+      enabled: true
+      path: "${workflow.output_path}/multi_model_pipeline.log"
+      include_timestamps: true
+    
+    console:
+      enabled: false
+      include_timestamps: true
+      include_stack_traces: false
 
-# Pipeline Definition
+# ── PIPELINE DEFINITION ───────────────────────────────────
 pipeline:
-  # Step 1: Code Analysis (Code Specialist Model)
-  - step: analyze_code
-    id: step_1
-    model: "${models.step1_model}"
+  
+  # ── STEP 1: Code Analysis (Code Specialist Model) ─────────
+  step_1_analyze_code:
+    name: "Analyze Code"
+    description: "Identify async patterns with Code Specialist model"
+    type: agent  # agent | tool | sub_workflow | control | loop
+    
+    model: "${models.code_specialist}"
+    
     input:
       prompt: |
         Analyze this Rust codebase for async patterns:
+
         ${workflow.codebase_path}
 
         Focus on:
@@ -65,26 +221,53 @@ pipeline:
         4. concurrency patterns
 
         Output structured analysis.
-      codebase: "${workflow.codebase_path}"
+      
+      file_operations:
+        - operation: read
+          file_path: "${workflow.codebase_path}"
+          format: text
+          encoding: utf-8
+    
     output:
       save_to: async_patterns_analysis
       format: json
-    logging:
-      level: info
-      detail: medium
+      fields:
+        - patterns  # Async patterns identified
+        - traits  # Async trait implementations
+        - error_handling  # Error propagation strategies
+        - concurrency  # Concurrency patterns
+    
     retry:
       max_attempts: 3
-      backoff_strategy: exponential
-      delay_ms: 1000
-
-  # Step 2: Generate Improvements (DeepSeek Coder)
-  - step: generate_improvements
-    id: step_2
-    model: "${models.step2_model}"
+      backoff_strategy: exponential  # exponential | linear | fixed
+      base_delay_ms: 1000
+      max_delay_ms: 30000
+    
+    hooks:
+      on_step_start:
+        log:
+          level: info
+          message: "Step 1: Loading code specialist model"
+      
+      on_step_complete:
+        checkpoint:
+          enabled: true
+          path: "${workflow.checkpoint_path}/post_step_1.ckpt"
+          include_memory: false
+  
+  # ── STEP 2: Generate Improvements (DeepSeek Coder) ─────────
+  step_2_generate_improvements:
+    name: "Generate Improvements"
+    description: "Generate code improvements using DeepSeek Coder"
+    type: agent
+    
+    model: "${models.deepseek_coder}"
+    
     input:
       prompt: |
         Based on this async pattern analysis:
-        ${step.step_1.output}
+
+        {{step.step_1_analyze_code.output}}
 
         Generate concrete improvements:
         1. Replace manual async patterns with tokio utilities where applicable
@@ -93,29 +276,41 @@ pipeline:
         4. Recommend structured logging integration
 
         Provide code examples for each improvement.
-      analysis: "${step.step_1.output}"
+
+        Output as structured JSON.
+      
+      analysis: "${step.step_1_analyze_code.output}"
+    
     output:
       save_to: improvement_suggestions
       format: json
-    logging:
-      level: debug
-      detail: high
+      fields:
+        - suggestions  # Array of improvement suggestions
+        - priority_ranking  # Ordered by priority
+    
     retry:
       max_attempts: 3
-      backoff_strategy: linear
-      delay_ms: 2000
-
-  # Step 3: Final Review (Llama 3.2 70B)
-  - step: final_review
-    id: step_3
-    model: "${models.step3_model}"
+      backoff_strategy: linear  # Linear backoff for code generation
+      base_delay_ms: 2000
+      max_delay_ms: 30000
+  
+  # ── STEP 3: Final Review (Llama 3.2 70B) ──────────
+  step_3_final_review:
+    name: "Final Review"
+    description: "Review improvements and original analysis"
+    type: agent
+    
+    model: "${models.llama3_2_70b}"
+    
     input:
       prompt: |
         Review these improvement suggestions:
-        ${step.step_2.output}
+
+        {{step.step_2_generate_improvements.output}}
 
         And the original async analysis:
-        ${step.step_1.output}
+
+        {{step.step_1_analyze_code.output}}
 
         Provide:
         1. Quality assessment of suggestions
@@ -124,97 +319,120 @@ pipeline:
         4. Integration strategy
 
         Output as final review report.
-      improvements: "${step.step_2.output}"
-      analysis: "${step.step_1.output}"
+      
+      improvements: "${step.step_2_generate_improvements.output}"
+      analysis: "${step.step_1_analyze_code.output}"
+    
     output:
       save_to: final_review
       format: json
       path: "${workflow.output_path}/review_report.json"
-    logging:
-      level: info
-      detail: medium
+      file_output:
+        enabled: true
+        create_parent_directories: true
+    
     retry:
       max_attempts: 2
-      backoff_strategy: exponential
-      delay_ms: 3000
+      backoff_strategy: exponential  # exponential | linear | fixed
+      base_delay_ms: 3000
+      max_delay_ms: 30000
 
-# Auto Model Routing
+# ── AUTOMATIC MODEL ROUTING CONFIGURATION ──────────────────────
 auto_model_routing:
+  
+  # ── ENABLEMENT ───────────────────────────────────────
   enabled: true
+  
+  # ── FAILURE HISTORY TRACKING ────────────────────────────
   failure_history:
-    track_per_task_category: true
-    max_history_entries: 100
-
-  on_500_error:
-    action: escalate_to_next_model
-    fallback_order:
-      - "${models.step1_model}"
-      - "${models.step2_model}"
-      - "${models.step3_model}"
-
+    track_per_task_category: true  # Track failures by task category
+    max_history_entries: 100  # Maximum history entries per category
+  
+  # ── PRIORITY ADJUSTMENT ─────────────────────────────────
   priority_adjustment:
-    - model: "${models.step1_model}"
-      task_category: code_analysis
+    
+    # ── TASK CATEGORY 1: CODE ANALYSIS ──────────────
+    code_analysis:
+      model: "${models.code_specialist}"
       base_priority: 0.9
       adjust_on_failure: -0.1
       adjust_on_success: +0.01
-
-    - model: "${models.step2_model}"
-      task_category: code_generation
+    
+    # ── TASK CATEGORY 2: CODE GENERATION ───────────────
+    code_generation:
+      model: "${models.deepseek_coder}"
       base_priority: 0.85
       adjust_on_failure: -0.15
       adjust_on_success: +0.02
-
-    - model: "${models.step3_model}"
-      task_category: code_review
+    
+    # ── TASK CATEGORY 3: CODE REVIEW ────────────────────
+    code_review:
+      model: "${models.llama3_2_70b}"
       base_priority: 0.95
       adjust_on_failure: -0.05
       adjust_on_success: +0.005
 
-# Retry Configuration
+# ── RETRY CONFIGURATION ────────────────────────────────────
 retry:
+  
+  # ── DEFAULT RETRY POLICY ─────────────────────────────
   default:
     max_attempts: 3
-    backoff_strategy: exponential
-    on_failure: escalate_model
-
+    backoff_strategy: exponential  # exponential | linear | fixed
+    on_failure: escalate_model  # escalate_model | skip | fail_workflow
+  
+  # ── STEP-SPECIFIC RETRY POLICIES ───────────────────
   step_specific:
-    step_1:
+    step_1_analyze_code:
       max_attempts: 5
-      backoff_strategy: linear
+      backoff_strategy: linear  # Fast retry for analysis
       delay_ms: 500
-
-    step_2:
+    
+    step_2_generate_improvements:
       max_attempts: 3
-      backoff_strategy: exponential
-      delay_ms: 1000
-
-    step_3:
+      backoff_strategy: linear  # Linear backoff for code generation
+      delay_ms: 2000
+    
+    step_3_final_review:
       max_attempts: 2
-      backoff_strategy: exponential
+      backoff_strategy: exponential  # Exponential backoff for review
       delay_ms: 3000
 
-# Validation Loop
+# ── VALIDATION LOOP CONFIGURATION ───────────────────────────
 validation_loop:
-  type: exact_validation
+  type: exact_validation  # count | time | validation | retry | infinite
+  
   exact_criteria:
-    - json_schema_valid: true
-    - contains_field: "quality_assessment"
-    - contains_field: "priority_ranking"
-    - contains_field: "risk_assessment"
-    - all_priorities_valid: true
+    json_schema_valid: true  # Output must be valid JSON
+    contains_field: "quality_assessment"  # Must have quality assessment
+    contains_field: "priority_ranking"  # Must have priority ranking
+    all_priorities_valid: true  # All priorities must be valid
+  
   steps:
-    - review_generation: step_3
-  max_iterations: 3
+    review_generation: step_3_final_review  # Final review triggers validation
+  
+  max_iterations: 3  # Maximum validation loops
+  
   stop_on:
-    - all_criteria_met: true
+    - all_criteria_met: true  # Stop when all validation passes
 
-# Workflow Variables
+# ── WORKFLOW VARIABLES ───────────────────────────────────
 workflow:
   codebase_path: /workspace/src
   output_path: /workspace/output
-  max_memory_mb: 8192
-  task_categories:
-    - code_analysis
-    - code_generation
-    - code_review
+
+# ── TASK CATEGORIES ───────────────────────────────────────
+task_categories:
+  - code_analysis
+  - code_generation
+  - code_review
+
+# ── FEATURES DEMONSTRATED ───────────────────────────────
+features_demonstrated:
+  - multi_model_serial_pipeline
+  - automatic_model_routing
+  - model_load_unload_strategy
+  - priority_adjustment
+  - step_specific_retry_policies
+  - validation_loops
+  - failure_history_tracking

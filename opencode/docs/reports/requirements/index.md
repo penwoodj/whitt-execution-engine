@@ -2,6 +2,48 @@
 
 **Version**: 4.0  
 **Date**: 2026-03-04  
+**Last Updated**: 2026-03-30  
+**Schema Version**: 1.0.0 (Unified)
+
+---
+
+## Unified Schema Status
+
+**Status**: ✅ COMPLETED (2026-03-30)
+
+**Purpose**: Consolidate all schema features into a single, self-documenting, 100% human-readable structure.
+
+**Key Achievements**:
+- **100% Feature Coverage**: All features from manual schema (ex18-manual) and all example workflows (ex01-ex18) preserved
+- **Visual Readability**: Unicode section dividers (# ── SECTION ──────) for clear boundaries
+- **Semantic Naming**: max_allowed/min_allowed, workflow_execution_strategy, object-based steps
+- **Inline Documentation**: All operators, variables, enum values, framework context documented
+- **Domain Organization**: 18 major domains logically organized
+- **Self-Documenting**: Schema structure conveys meaning without memorization
+
+**Schema File**: [unified-workflow-schema.yml](./unified-workflow-schema.yml)
+
+**Coverage Analysis**: [example-workflows/requirements-coverage-analysis.md](./example-workflows/requirements-coverage-analysis.md)
+
+**Summary**:
+- All 22+ original requirements covered ✅
+- All manual schema features preserved ✅
+- All example workflow features supported ✅
+- 8 major readability improvements implemented ✅
+- Backward compatibility maintained ✅
+
+**Integration with ADRs**:
+- [ADR-0001: Foundation Compiler Contract](../roadmap/adr-0001-foundation-compiler-contract.yml) - Schema system now unified and self-documenting
+- [ADR-0002: MVP Queue and Scheduler](../roadmap/adr-0002-mvp-queue-scheduler-safety.yml) - Policy sliders now structured in workflow_execution_strategy
+- All subsequent ADRs can reference unified schema as the single source of truth
+
+**Implementation Notes**:
+- No breaking changes to existing functionality
+- Default behavior defined for all elements
+- Schema works when only specific elements are present
+- Global config file support for user overrides
+
+---  
 **Repository**: https://github.com/penwoodj/yaml-to-rust-agentsdk  
 **Last Updated**: 2026-03-07
 

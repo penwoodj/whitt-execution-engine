@@ -3,40 +3,151 @@ workflow_id: direct_llm_pipeline_single_model
 name: Direct LLM Pipeline (Single Model)
 description: Simple pipeline with single model, passing results between steps
 
-# Model Configuration
+# ── MODEL CONFIGURATION ────────────────────────────────────
 models:
-  primary:
-    provider: lmstudio
-    model: "llama-3.2-3b-instruct"
-    backend: vulkan
-    gpu_layers: 32
+  
+  # ── GLOBAL CONFIGURATION ─────────────────────────────
+  # global_config_path: ./workspace/model-config.yml  # Optional: centralized config file
+  
+  default_model_router: automatic  # automatic | manual | smart_routing
+  
+  # ── MODEL: PRIMARY ANALYZER ───────────────────────
+  "llama-3.2-3b-instruct":
+    name: primary  # Variable reference name
+    
+    host:
+      type: lmstudio  # lmstudio | ollama | llama_cpp_with_vulkan
+      connection_settings:
+        host: localhost
+        port: 1234
+    
+    resource_limits:
+      max_allowed:
+        ram: 4096MB
+        vram: 4096MB
+        cpu: 100%
+        gpu: 100%
+        attention_tokens: 8192
+        concurrent_requests: 2
+      
+      min_allowed:
+        ram: 2048MB
+        vram: 2048MB
+        cpu: 50%
+        gpu: 50%
+        attention_tokens: 4096
+      
+      allocation_strategy: dynamic  # static | dynamic | adaptive
+    
+    model_memory:
+      cache_size: min  # min | max | medium | medium-min | medium-max
+      kv_cache_quantization: auto  # auto | q4_k_m | q4_0 | q5_k_m | q5_0 | q6_k | q8_0
+      attention_context: auto  # auto | from_max_allowed
+    
+    execution:
+      timeout:
+        load_into_memory: 10s
+        time_to_first_response: 30s
+        total_time_to_response: 2h
+      
+      max_turns: 10
+      stop_on_tool_failure: false
+      accumulate_tool_results: true
 
-# Execution Mode
-execution:
-  mode: parallel  # parallel, serial, hybrid
+# ── WORKFLOW EXECUTION STRATEGY ────────────────────────────
+workflow_execution_strategy:
+  
+  # ── MODEL LIFECYCLE ─────────────────────────────────
+  load_unload: one_at_a_time  # one_at_a_time | lazy | eager | adaptive
+  
+  # ── PROCESSING MODE ───────────────────────────────────
+  processing: parallel  # parallel | serial | hybrid
+  
+  # ── MEMORY MANAGEMENT ───────────────────────────────────
   memory:
-    max_allocated_memory_mb: 4096
-    model_memory_mb: 4096
-    unload_unused: true
+    allocation:
+      strategy: dynamic
+      max_allowed:
+        ram: 4096MB
+        vram: 4096MB
+        cpu: 100%
+        gpu: 100%
+        attention_tokens: 8192
+        concurrent_requests: 2
+    
+    model_lifecycle:
+      load_unload_strategy: one_at_a_time
+      cache_size: min
+      swap_timeout_secs: 30
+      unload_unused: true
+  
+  # ── TIMEOUT MANAGEMENT ───────────────────────────────────
+  timeout:
+    default_timeout_secs: 120  # 2 minutes per step
+    timeout_strategy: continue_with_partial  # fail | continue_with_partial | retry
+  
+  # ── ERROR HANDLING ─────────────────────────────────────
+  error_handling:
+    default_action: retry  # retry | retry_critical_path | skip | fail_workflow
+    max_retries_per_step: 3
+    retry_backoff_multiplier: 2.0
+    escalate_to_model_after: 3
+  
+  # ── ADAPTIVE BEHAVIOR ─────────────────────────────
+  adaptive:
+    resource_monitoring:
+      enabled: true
+      interval_secs: 10
+      metrics: [cpu, memory, gpu]
 
-# Logging
+# ── LOGGING CONFIGURATION ───────────────────────────────────
 logging:
-  level: debug
-  detail: high
-  output_type: chat
-  format: json
-  console: true
-  include_timestamps: true
+  
+  # ── LOG LEVELS ─────────────────────────────────────
+  level: debug  # debug | info | warning | error
+  
+  # ── LOG DETAIL ─────────────────────────────────────
+  detail: high  # low | medium | high | verbose
+  
+  # ── OUTPUT DESTINATIONS ───────────────────────────────
+  output_destinations:
+    chat_file:
+      enabled: true
+      path: "${workflow.output_path}/chat-file.md"
+      format: markdown
+    
+    json_file:
+      enabled: true
+      path: "${workflow.output_path}/logs/execution.json"
+      format: json
+    
+    console:
+      enabled: true
+      include_timestamps: true
+  
+  # ── ERROR LOGGING ───────────────────────────────────
+  error_logging:
+    enabled: true
+    separate_file: true
+    path: "${workflow.output_path}/logs/errors.json"
+    include_stack_trace: true
+    include_context: true
 
-# Pipeline Definition
+# ── PIPELINE DEFINITION ───────────────────────────────────
 pipeline:
-  # Step 1: Initial Code Analysis
-  - step: analyze_code
-    id: step_1
+  
+  # ── STEP 1: Initial Code Analysis ─────────────────────
+  step_1_analyze_code:
+    name: "Analyze Code"
+    description: "Identify async functions, patterns, and dependencies"
+    type: agent  # agent | tool | sub_workflow | control | loop
+    
     model: "${models.primary}"
+    
     input:
       prompt: |
         Analyze the following Rust code and identify all async functions:
+
         ${workflow.codebase_path}/src/main.rs
 
         Focus on:
@@ -46,27 +157,60 @@ pipeline:
         4. Dependencies
 
         Output as structured JSON with fields: functions, summary, patterns.
-      file_path: "${workflow.codebase_path}/src/main.rs"
+      
+      file_operations:
+        - operation: read
+          file_path: "${workflow.codebase_path}/src/main.rs"
+          format: text
+          encoding: utf-8
+    
     output:
       save_to: code_analysis
       format: json
       fields:
-        - functions
-        - summary
-        - patterns
+        - functions  # List of async functions found
+        - summary  # Code structure summary
+        - patterns  # Patterns identified (async, error handling)
+      
+      console:
+        enabled: false  # Don't spam console
+        prefix: "[Step 1] "
+    
     retry:
       max_attempts: 3
-      backoff_strategy: exponential
-      delay_ms: 1000
-
-  # Step 2: Generate Optimization Suggestions
-  - step: suggest_optimizations
-    id: step_2
+      backoff_strategy: exponential  # exponential | linear | fixed
+      base_delay_ms: 1000
+      max_delay_ms: 30000
+    
+    # ── HOOKS ───────────────────────────────────────
+    hooks:
+      on_step_start:
+        log:
+          level: info
+          message: "Step 1: Analyzing code at {{workflow.codebase_path}}"
+      
+      on_step_complete:
+        metrics:
+          - name: "step_1.duration_ms"
+            value: "{{duration_ms}}"
+            unit: milliseconds
+          - name: "step_1.functions_found"
+            value: "{{output.functions.length}}"
+            unit: count
+  
+  # ── STEP 2: Generate Optimization Suggestions ──────────
+  step_2_generate_optimizations:
+    name: "Generate Optimizations"
+    description: "Generate performance and clarity improvement suggestions"
+    type: agent
+    
     model: "${models.primary}"
+    
     input:
       prompt: |
         Based on this code analysis:
-        ${step.step_1.output}
+
+        {{step.step_1_analyze_code.output}}
 
         Generate optimization suggestions for:
         1. Performance improvements
@@ -80,28 +224,38 @@ pipeline:
         - Impact assessment
 
         Output as structured JSON.
-      analysis: "${step.step_1.output}"  # Variable reference from previous step
+      
+      analysis: "${step.step_1_analyze_code.output}"  # Variable reference from previous step
+    
     output:
       save_to: optimization_suggestions
       format: json
       fields:
-        - suggestions
-        - prioritized_list
+        - suggestions  # Array of optimization suggestions
+        - prioritized_list  # Ordered by priority
+    
     retry:
       max_attempts: 3
       backoff_strategy: exponential
-      delay_ms: 1000
-
-  # Step 3: Generate Refactored Code
-  - step: generate_refactored_code
-    id: step_3
+      base_delay_ms: 1000
+      max_delay_ms: 30000
+  
+  # ── STEP 3: Generate Refactored Code ─────────────────
+  step_3_generate_refactored_code:
+    name: "Generate Refactored Code"
+    description: "Apply optimizations and refactor code"
+    type: agent
+    
     model: "${models.primary}"
+    
     input:
       prompt: |
         Using these optimization suggestions:
-        ${step.step_2.output}
+
+        {{step.step_2_generate_optimizations.output}}
 
         Refactor the following code:
+
         ${workflow.codebase_path}/src/main.rs
 
         Requirements:
@@ -110,26 +264,42 @@ pipeline:
         3. Add comments explaining changes
         4. Follow Rust best practices
 
-        Output the complete refactored code.
-      suggestions: "${step.step_2.output}"  # Variable reference
-      original_code_path: "${workflow.codebase_path}/src/main.rs"
+        Output → complete refactored code.
+      
+      suggestions: "${step.step_2_generate_optimizations.output}"  # Variable reference
+      file_operations:
+        - operation: read
+          file_path: "${workflow.codebase_path}/src/main.rs"
+          format: text
+    
     output:
       save_to: refactored_code
       format: text
-      path: "${workflow.output_path}/refactored_main.rs"
+      file_output:
+        enabled: true
+        path: "${workflow.output_path}/refactored_main.rs"
+        encoding: utf-8
+        create_parent_directories: true
+    
     retry:
       max_attempts: 3
       backoff_strategy: exponential
-      delay_ms: 1000
-
-  # Step 4: Validation Loop
-  - step: validate_refactored_code
-    id: step_4
+      base_delay_ms: 1000
+      max_delay_ms: 30000
+  
+  # ── STEP 4: Validate Refactored Code ────────────────
+  step_4_validate_refactored_code:
+    name: "Validate Refactored Code"
+    description: "Check for syntax, imports, types, and logic errors"
+    type: agent
+    
     model: "${models.primary}"
+    
     input:
       prompt: |
         Validate this refactored code:
-        ${step.step_3.output}
+
+        {{step.step_3_generate_refactored_code.output}}
 
         Check for:
         1. Syntax errors
@@ -138,49 +308,61 @@ pipeline:
         4. Logic errors
 
         Report any issues found.
-      refactored_code: "${step.step_3.output}"
+      
+      refactored_code: "${step.step_3_generate_refactored_code.output}"
+    
     output:
       save_to: validation_result
       format: json
       fields:
-        - is_valid
-        - issues
-        - errors
+        - is_valid  # Boolean: code is valid
+        - issues  # Array of issues found
+        - errors  # Array of specific errors
+    
     retry:
       max_attempts: 3
       backoff_strategy: exponential
-      delay_ms: 1000
+      base_delay_ms: 1000
+      max_delay_ms: 30000
+  
+  # ── VALIDATION LOOP: Refactoring Quality Check ─────────
+  validation_loop:
+    type: validation  # count | time | validation | retry | infinite
+    
+    abstract_criteria: improvement_detected
+    tolerance: 0.05  # 5% tolerance for quality improvement
+    
+    max_iterations: 5
+    
+    # ── LOOP STEPS ───────────────────────────────────
+    loop_steps:
+      refactored_code_generation: step_3_generate_refactored_code
+      validation: step_4_validate_refactored_code
+    
+    # ── STOP CONDITIONS ───────────────────────────────
+    stop_conditions:
+      - "validation_result.is_valid == true"  # Code is valid
+      - "validation_result.errors == []"  # No errors found
+    
+    # ── ON CONVERGENCE ───────────────────────────────
+    on_convergence: continue  # continue | exit_loop | return_best
+    
+    # ── ON MAX ITERATIONS ────────────────────────────
+    on_max_iterations: use_best_result
 
-# Validation Loop for Refactoring
-validation_loop:
-  type: validation
-  abstract_criteria: improvement_detected
-  tolerance: 0.05
-  steps:
-    - refactored_code_generation: step_3
-    - validation: step_4
-  stop_condition:
-    - validation_result.is_valid == true
-    - validation_result.errors == []
-  max_iterations: 5
-
-# Retry Configuration
-retry:
-  default:
-    max_attempts: 3
-    backoff_strategy: exponential
-    on_failure: escalate_model
-
-  escalation:
-    fallback_models:
-      - provider: ollama
-        model: "llama3.2"
-      - provider: llamacpp
-        model: "/models/llama-3.2-3b.Q4_K_M.gguf"
-        backend: vulkan
-
-# Workflow Variables
+# ── WORKFLOW VARIABLES ───────────────────────────────────
 workflow:
   codebase_path: /workspace/src
   output_path: /workspace/output
-  max_memory_mb: 4096
+
+# ── FEATURES DEMONSTRATED ───────────────────────────────
+features_demonstrated:
+  - single_model_execution
+  - sequential_pipeline
+  - variable_interpolation
+  - retry_logic
+  - validation_loops
+  - memory_management
+  - logging_configuration
+  - error_handling
+  - adaptive_behavior
