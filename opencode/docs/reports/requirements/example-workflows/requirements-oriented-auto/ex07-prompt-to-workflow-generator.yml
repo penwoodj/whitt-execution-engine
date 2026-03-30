@@ -3,452 +3,438 @@ workflow_id: prompt_to_workflow_generator
 name: Prompt to Workflow Generator
 description: Meta-workflow that breaks down prompts into executable agentic workflows using policy sliders
 
-# Model Configuration
-model:
-  primary: unsloth/Qwen2.5-Coder-1.5B-Instruct
-  embedding: jinaai/ReaderLM-v2
-  fallback_models:
-    - ibm-granite/granite-3.1.2b-instruct
-    - unsloth/Llama-3.1-Nemotron-Nano-4B-v1.1
-
-# Policy Sliders (Input to this workflow)
-policy_sliders:
-  runtime:
-    value: "${workflow.input.runtime}"
-    options:
-      - name: short
-        duration_secs: 60
-        description: Quick 1-minute workflow for simple tasks
-      - name: medium
-        duration_secs: 300
-        description: 5-minute workflow for moderate tasks
-      - name: long
-        duration_secs: 1800
-        description: 30-minute workflow for complex tasks
-      - name: extended
-        duration_secs: 3600
-        description: 1-hour workflow for very complex tasks
-
-  review:
-    value: "${workflow.input.review}"
-    options:
-      - name: none
-        confirm_before: []
-        confirm_after: []
-        description: No human confirmation required
-      - name: critical
-        confirm_before: [file_delete, network_request]
-        confirm_after: [all_changes]
-        description: Confirm before destructive actions, review all changes
-      - name: standard
-        confirm_before: [file_write, model_switch]
-        confirm_after: [code_generation, tool_invocation]
-        description: Confirm before code changes, review generated code and tool calls
-
-  rigor:
-    value: "${workflow.input.rigor}"
-    options:
-      - name: low
-        validation_strictness: minimal
-        retry_attempts: 1
-        error_tolerance: high
-        description: Fast, loose validation, minimal retries
-      - name: balanced
-        validation_strictness: standard
-        retry_attempts: 3
-        error_tolerance: medium
-        description: Balanced approach with standard validation and retries
-      - name: high
-        validation_strictness: strict
-        retry_attempts: 5
-        error_tolerance: low
-        description: Thorough validation with multiple retries, strict error handling
-      - name: production
-        validation_strictness: very_strict
-        retry_attempts: 10
-        error_tolerance: very_low
-        description: Production-grade with exhaustive validation and retry logic
-
-  scope:
-    value: "${workflow.input.scope}"
-    options:
-      - name: minimal
-        allowed_files: ./input/*
-        allowed_directories: ./workspace/*
-        description: Only access input and workspace directories
-      - name: focused
-        allowed_files: ./workspace/src/**/*.rs
-        allowed_directories: ./workspace/src
-        description: Focus on source code in src directory
-      - name: project_wide
-        allowed_files: ./*
-        allowed_directories: ./*
-        description: Access entire project with appropriate restrictions
-      - name: sandboxed
-        allowed_files: ./sandbox/*
-        allowed_directories: ./sandbox/*
-        deny_files: [..*, .git/*, .env]
-        description: Isolated sandbox environment with strict deny list
-
-  concurrency:
-    value: "${workflow.input.concurrency}"
-    options:
-      - name: serial
-        max_parallel_steps: 1
-        max_parallel_sub_agents: 1
-        max_parallel_model_instances: 1
-        description: Execute everything sequentially, one thing at a time
-      - name: limited_parallel
-        max_parallel_steps: 3
-        max_parallel_sub_agents: 2
-        max_parallel_model_instances: 2
-        description: Limited parallelism with resource constraints
-      - name: high_parallel
-        max_parallel_steps: 10
-        max_parallel_sub_agents: 5
-        max_parallel_model_instances: 3
-        description: High parallelism for CPU-bound workloads
-      - name: aggressive
-        max_parallel_steps: 20
-        max_parallel_sub_agents: 10
-        max_parallel_model_instances: 5
-        description: Maximum parallelism for I/O-bound workloads
-
-  efficiency:
-    value: "${workflow.input.efficiency}"
-    options:
-      - name: speed
-        model_selection: lowest_latency
-        caching: none
-        description: Prioritize speed, use fastest model, skip caching
-      - name: balanced
-        model_selection: cost_optimized
-        caching: moderate
-        description: Balance speed and cost, use cost-effective models with caching
-      - name: quality
-        model_selection: highest_quality
-        caching: aggressive
-        description: Prioritize quality, use best models with aggressive caching
-      - name: adaptive
-        model_selection: dynamic
-        caching: adaptive
-        description: Adapt selection and caching based on task characteristics
-
-  logging:
-    value: "${workflow.input.logging}"
-    options:
-      - name: silent
-        level: error
-        detail: minimal
-        output_type: none
-        description: Only errors, no detailed logging
-      - name: minimal
-        level: warn
-        detail: low
-        output_type: log
-        description: Warnings and errors only
-      - name: standard
-        level: info
-        detail: medium
-        output_type: log
-        description: Standard information flow
-      - name: verbose
-        level: debug
-        detail: high
-        output_type: log
-        description: Detailed execution information
-      - name: trace
-        level: trace
-        detail: maximum
-        output_type: log
-        description: Maximum debugging information, all operations logged
-
-  context_budget:
-    value: "${workflow.input.context_budget}"
-    options:
-      - name: minimal
-        max_tokens: 4096
-        max_memory_mb: 2048
-        description: Minimal context for simple tasks
-      - name: standard
-        max_tokens: 8192
-        max_memory_mb: 4096
-        description: Standard context for most tasks
-      - name: generous
-        max_tokens: 16384
-        max_memory_mb: 8192
-        description: Generous context for complex reasoning
-      - name: unlimited
-        max_tokens: null
-        max_memory_mb: null
-        description: No artificial limits, use full model capacity
-
-# Execution Mode
-execution:
-  mode: hybrid
-
-  memory:
-    load_unload_strategy: adaptive
-    max_allocated_memory_mb: 8192
-    model_memory_mb:
-      unsloth_Qwen2.5_Coder: 4096
-      jinaai_ReaderLM_v2: 2048
-      ibm_granite_3.1.2b: 2048
-    gc_interval_secs: 300
-
-# Logging
-logging:
-  level: debug
-  detail: high
-  output_type: log
-  format: json
-  console: true
-  log_file: workflow_generator.log
-
-  scopes:
+# ── MODEL CONFIGURATION ────────────────────────────────
+models:
+  
+  # ── GLOBAL CONFIGURATION FILE ─────────────────────
+  # global_config_path: ./workspace/model-config.yml  # Optional: centralized config file
+  
+  default_model_router: automatic  # automatic | manual | smart_routing
+  
+  # ── MODEL: PRIMARY MODEL ─────────────────────────────
+  primary_model:
+    name: primary  # Variable reference name
+    
+    host:
+      type: lmstudio  # lmstudio | ollama | llama_cpp_with_vulkan
+      connection_settings:
+        host: localhost
+        port: 1234
+    
+    resource_limits:
+      max_allowed:
+        ram: 13%
+        vram: 3.7GB
+        cpu: 49%
+        gpu: 74%
+        attention_tokens: 150000
+        concurrent_requests: 2
+      
+      min_allowed:
+        ram: 9%
+        vram: 2.4GB
+        cpu: 49%
+        gpu: 74%
+        attention_tokens: 73500
+      
+      allocation_strategy: dynamic  # static | dynamic | adaptive
+    
+    model_memory:
+      cache_size: max  # min | max | medium | medium-min | medium-max
+      kv_cache_quantization: auto  # auto | q4_k_m | q4_0 | q5_k_m | q5_0 | q6_k | q8_0
+      attention_context: auto  # auto | from_max_allowed
+    
     execution:
-      level: debug
-      detail: high
-    model:
-      level: info
-      detail: medium
-    planning:
-      level: debug
-      detail: high
-    validation:
-      level: info
-      detail: medium
+      timeout:
+        load_into_memory: 45s
+        time_to_first_response: 1m
+        total_time_to_response: 4h
+      
+      max_turns: 10
+      stop_on_tool_failure: false
+      accumulate_tool_results: true
+    
+    hooks:
+      # ── RUN LIFECYCLE ─────────────────────────
+      on_create: {}
+      on_run_start: {}
+      on_run_complete: {}
+      on_run_error: {}
+      on_retry: {}
+      
+      # ── TURN LIFECYCLE ───────────────────────────
+      on_turn_start: {}
+      on_turn_complete: {}
+      on_turn_error: {}
+      on_thinking: {}
+      
+      # ── TOOL LIFECYCLE ─────────────────────────────
+      on_tool_call: {}
+      on_tool_start: {}
+      on_tool_result: {}
+      on_tool_error: {}
+      
+      # ── STREAMING LIFECYCLE ──────────────────────────
+      on_stream_chunk: {}
+      on_stream_complete: {}
+  
+  # ── MODEL: EMBEDDING MODEL ───────────────────────────────
+  embedding_model:
+    name: embedding  # Variable reference name
+    
+    host:
+      type: ollama
+      model: "jinaai/ReaderLM-v2"
+      base_url: http://localhost:11434
+    
+    resource_limits:
+      max_allowed:
+        ram: 4GB
+        vram: 4GB
+        cpu: 50%
+        gpu: 80%
+        attention_tokens: 8192
+        concurrent_requests: 3
+      
+      min_allowed:
+        ram: 2GB
+        vram: 2GB
+        cpu: 30%
+        gpu: 60%
+        attention_tokens: 4096
+        concurrent_requests: 1
+      
+      allocation_strategy: dynamic
+    
+    model_memory:
+      cache_size: min
+      kv_cache_quantization: auto
+      attention_context: auto
+    
+    execution:
+      timeout:
+        load_into_memory: 10s
+        time_to_first_response: 30s
+        total_time_to_response: 2h
+      
+      max_turns: 10
+      stop_on_tool_failure: false
+      accumulate_tool_results: true
+    
+    hooks:
+      on_create: {}
+      on_run_start: {}
+      on_turn_start: {}
+  
+  # ── FALLBACK MODELS ────────────────────────────────────────
+  fallback_models:
+    - name: ibm_granite_granite
+      provider: lmstudio
+      model: "ibm-granite/granite-3.1.2b-instruct"
+    
+    - name: unsloth_llama_nemotron
+      provider: lmstudio
+      model: "unsloth/Llama-3.1-Nemotron-Nano-4B-v1.1"
 
-# Pipeline Definition
+# ── WORKFLOW EXECUTION STRATEGY ───────────────────────────
+workflow_execution_strategy:
+  
+  # ── MODEL LIFECYCLE ────────────────────────────────
+  load_unload: one_at_a_time  # one_at_a_time | lazy | eager | adaptive
+  
+  # ── PROCESSING MODE ───────────────────────────────────
+  processing: parallel  # serial | parallel | hybrid
+  
+  # ── PARALLELIZATION CONFIGURATION ─────────────────────────
+  parallel:
+    enabled: true
+    algorithm: round_robin  # round_robin | priority_queue | shortest_job_first | longest_job_first
+    
+    load_balancing:
+      strategy: least_loaded  # random | least_loaded | ip_hash
+      worker_selection_timeout_secs: 10
+    
+    max_threads: 4
+    max_models: 3
+    max_concurrent_requests: 2
+    max_steps: 2
+    max_sub_agents: 3
+  
+  # ── MEMORY MANAGEMENT ─────────────────────────────────────
+  memory:
+    allocation:
+      strategy: dynamic
+      max_allowed:
+        ram: 12288MB
+        vram: 12288MB
+        cpu: 100%
+        gpu: 100%
+        attention_tokens: 150000
+        concurrent_requests: 3
+    
+    model_lifecycle:
+      load_unload_strategy: one_at_a_time
+      cache_size: min
+      swap_timeout_secs: 30
+      unload_unused: true
+    
+    pressure_handling:
+      strategy: throttle  # throttle | swap | fail_fast | graceful_degradation
+      memory_threshold_percent: 85
+      throttle_factor: 0.5
+      on_oom: swap
+  
+  # ── TIMEOUT MANAGEMENT ───────────────────────────────────
+  timeout:
+    total: 4h
+    tool_call: 30m
+    step: 8m
+    operation_timeout_secs: 30
+    sub_workflow_timeout_secs: 300
+    time_to_first_result_secs: 120
+    timeout_strategy: continue_with_partial  # fail | continue_with_partial | retry
+    
+    model:
+      load_into_memory: 45s
+      time_to_processing_after_loaded: 10000ms
+      time_to_processing: 2h
+      time_to_responding: 1m
+      time_to_response: 4h
+  
+  # ── ERROR HANDLING ────────────────────────────────────────
+  error_handling:
+    default_action: retry  # retry | retry_critical_path | skip | fail_workflow
+    max_retries_per_step: 3
+    retry_backoff_multiplier: 2.0
+    escalate_to_model_after: 3
+
+# ── WORKFLOW VARIABLES ────────────────────────────────────
+workflow:
+  codebase_path: /workspace
+  output_path: /workspace/output
+  checkpoint_path: /workspace/checkpoints
+  state_path: /workspace/state
+  logs_path: /workspace/logs
+
+# ── PIPELINE DEFINITION ────────────────────────────────────
 pipeline:
-  # Step 1: Analyze User Prompt and Categorize
-  - step: analyze_prompt
-    model: "${model.primary}"
+  
+  # ── STEP 1: Parse Input Prompt ─────────────────────
+  step_1_parse_input_prompt:
+    name: Parse Input Prompt
+    description: Parse and validate the user's input prompt
+    
+    model: "${models.primary_model}"
+    
     input:
       prompt: |
-        Analyze this user prompt and determine:
-
-        1. Primary task category (from specialization categories)
-        2. Task complexity (simple, moderate, complex, very complex)
-        3. Required tools and capabilities
-        4. Estimated subtasks (1-3, 4-7, 8-15, 16+)
-        5. Risk level (low, medium, high, very high)
-
-        User prompt:
-        ${workflow.input.user_prompt}
-
-        Categorize into one of these:
-        - Code generation (requirement_to_executable_rust_code_from_scratch)
-        - Code editing (requirement_to_edit_existing_rust_code)
-        - Agentic planning (specialization_agentic_planning_and_workflow_decomposition)
-        - Command synthesis (specialization_command_query_and_tool_invocation)
-        - Research (specialization_search_synthesis_and_scrape_planning)
-        - Debugging (specialization_debugging_and_failure_analysis)
-        - Summarization (specialization_summarization_rewriting_and_format_transformation)
-        - Reasoning (specialization_reasoning_dialogue_and_decision_support)
-        - Prompt to tool planning (specialization_prompt_to_local_tool_agentic_task_breakdown)
-        - Natural language to structured JSON (specialization_natural_language_to_correct_parsable_json)
-        - Natural language to structured YAML (specialization_natural_language_to_correct_parsable_yaml_no_comments)
-
-        Based on category, complexity, and risk, recommend:
-        - Optimal model routing (top1_model, top2_model, top3_model)
-        - Required specialization rows from model routing CSV
-        - Suggested policy slider values
-        - Estimated execution time and resource usage
-
-        Output as structured JSON.
-      user_prompt: "${workflow.input.user_prompt}"
+        Parse and validate the user's input prompt:
+        
+        ${workflow.input.prompt}
+        
+        Analyze for:
+        1. Primary task or goal
+        2. Required outputs (files, data structures, etc.)
+        3. Complexity estimation
+        4. Resource requirements
+        
+        Return structured JSON with:
+        - task_type: string
+        - requirements: array of strings
+        - estimated_complexity: low|medium|high
+        - suggested_execution_mode: serial|parallel|hybrid
+        - resource_needs: object
+      
+      variables:
+        prompt_text: "${workflow.input.prompt}"
+    
     output:
-      save_to: prompt_analysis
+      save_to: parsed_prompt
       format: json
       fields:
-        - task_category
-        - complexity
-        - estimated_subtasks
-        - risk_level
-        - recommended_models
-        - suggested_policy_values
-        - estimated_execution_time_secs
+        - task_type
+        - requirements
+        - estimated_complexity
+        - suggested_execution_mode
+        - resource_needs
+      console:
+        enabled: false
+    
     retry:
       max_attempts: 3
       backoff_strategy: exponential
-
-  # Step 2: Generate Workflow Skeleton
-  - step: generate_workflow_skeleton
-    model: "${model.primary}"
+      base_delay_ms: 1000
+  
+  # ── STEP 2: Determine Execution Mode ─────────────────
+  step_2_determine_execution_mode:
+    name: Determine Execution Mode
+    description: Select execution mode based on complexity and policy sliders
+    
+    model: "${models.primary_model}"
+    
     input:
       prompt: |
-        Based on the prompt analysis:
-        ${step.analyze_prompt.output}
-
-        Generate a YAML workflow skeleton that:
-
-        1. Uses the recommended models
-        2. Applies the suggested policy slider values
-        3. Decomposes the task into executable subtasks
-        4. Specifies step dependencies and execution order
-        5. Includes appropriate tools and permissions
-        6. Defines logging and context budget
-        7. Includes retry logic and validation criteria
-
-        Requirements for generated workflow:
-        - Must be parsable YAML (valid syntax, no comments)
-        - Must be transpilable to working Rust code
-        - Must be verifiable (can be validated against schema)
-        - Must be executable with local models
-        - Must use specialization models referenced from model routing CSV:
-          * jinaai/ReaderLM-v2
-          * LiquidAI/LFM2-1.2B-Extract
-          * google/gemma-3-4b-it-qat-int4-unquantized
-          * ibm-granite/granite-3.1.2b-instruct
-          * unsloth/Llama-3.1-Nemotron-Nano-4B-v1.1
-          * unsloth/Qwen2.5-Coder-1.5B-Instruct
-          * microsoft/Phi-4-mini-instruct
-          * slava177/Llama-3.2-3B-Instruct
-          * Menlo/Jan-nano-128k
-
-        Output the workflow as valid YAML text.
-      prompt_analysis: "${step.analyze_prompt.output}"
+        Based on this analysis:
+        
+        ${step.step_1_parse_input_prompt.output}
+        
+        And these policy slider settings:
+        Runtime: ${workflow.input.policy_sliders.runtime.value}
+        Review: ${workflow.input.policy_sliders.review.value}
+        Rigor: ${workflow.input.policy_sliders.rigor.value}
+        Scope: ${workflow.input.policy_sliders.scope.value}
+        
+        Determine the appropriate execution mode:
+        - Serial: For high rigor, simple tasks
+        - Parallel: For balanced efficiency, low-medium complexity
+        - Hybrid: For complex tasks requiring both serial and parallel phases
+        
+        Return selected mode with reasoning.
+      
+      variables:
+        parsed_analysis: "${step.step_1_parse_input_prompt.output}"
+        policy_runtime: "${workflow.input.policy_sliders.runtime.value}"
+        policy_review: "${workflow.input.policy_sliders.review.value}"
+        policy_rigor: "${workflow.input.policy_sliders.rigor.value}"
+        policy_scope: "${workflow.input.policy_sliders.scope.value}"
+    
     output:
-      save_to: workflow_skeleton
+      save_to: execution_mode
+      format: json
+      fields:
+        - selected_mode
+        - reasoning
+      console:
+        enabled: true
+    
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+  
+  # ── STEP 3: Generate Workflow ────────────────────────
+  step_3_generate_workflow:
+    name: Generate Workflow
+    description: Generate executable workflow YAML based on execution mode and analysis
+    
+    model: "${models.primary_model}"
+    
+    input:
+      prompt: |
+        Generate a complete, executable workflow YAML file:
+        
+        Analysis: ${step.step_2_determine_execution_mode.output}
+        Execution Mode: ${step.step_2_determine_execution_mode.output.selected_mode}
+        
+        Include these sections:
+        1. Workflow metadata (id, name, description)
+        2. Model configuration (primary model, optional embeddings)
+        3. Workflow execution strategy (based on execution mode)
+        4. Pipeline steps (appropriate for the task complexity)
+        5. Logging configuration (based on logging slider)
+        6. Tool permissions (based on scope slider)
+        
+        Ensure the workflow is:
+        - Complete and executable
+        - Well-structured and readable
+        - Compatible with the execution mode
+        - Self-documenting (clear naming, inline documentation)
+        
+        Output the complete YAML as a string.
+      
+      variables:
+        execution_mode: "${step.step_2_determine_execution_mode.output.selected_mode}"
+        analysis: "${step.step_1_parse_input_prompt.output}"
+    
+    output:
+      save_to: generated_workflow
       format: yaml
       path: "${workflow.output_path}/generated_workflow.yml"
-    retry:
-      max_attempts: 5
-      backoff_strategy: exponential
-
-  # Step 3: Validate Generated Workflow
-  - step: validate_workflow
-    model: "${model.primary}"
-    tool:
-      type: yaml_validator
-      config_path: /schemas/workflow_schema.json
-    input:
-      prompt: |
-        Validate this generated workflow:
-        ${workflow.output_path}/generated_workflow.yml
-
-        Check for:
-        1. YAML syntax validity
-        2. Required fields presence
-        3. Model URIs valid and exist in model router CSV
-        4. Tool definitions are supported
-        5. Permissions are well-formed
-        6. Variable references are valid
-        7. Loop structures are correct
-        8. Retry logic is properly configured
-
-        Report any validation errors with:
-        - Error type (syntax, missing, invalid, reference)
-        - Location in YAML (line/column)
-        - Suggested fix
-        - Severity (error, warning, info)
-
-        If workflow is valid, mark as verified.
-      workflow_path: "${workflow.output_path}/generated_workflow.yml"
-    output:
-      save_to: validation_result
-      format: json
-      fields:
-        - is_valid
-        - errors
-        - warnings
-        - verified_at
+      console:
+        enabled: true
+    
     retry:
       max_attempts: 3
       backoff_strategy: exponential
 
-  # Step 4: Output Final Result
-  - step: output_result
-    input:
-      prompt: |
-        Based on the validation result:
-        ${step.validate_workflow.output}
-
-        If workflow is valid:
-        - Confirm workflow path
-        - Summarize generated workflow structure
-        - List all steps and their purposes
-        - Show policy slider values applied
-        - Show models used
-
-        If workflow has errors:
-        - Report all validation errors
-        - Suggest corrections
-        - Offer to regenerate with different settings
-
-        Provide clear next steps.
-      validation_result: "${step.validate_workflow.output}"
-      workflow_skeleton: "${workflow.output_path}/generated_workflow.yml"
-      prompt_analysis: "${step.analyze_prompt.output}"
-    output:
-      save_to: final_result
+# ── LOGGING CONFIGURATION ────────────────────────────────────
+logging:
+  
+  # ── LOG LEVELS ────────────────────────────────────────
+  level: info  # debug | info | warning | error | trace
+  
+  # ── LOG DETAIL ────────────────────────────────────────
+  detail: medium  # low | medium | high | verbose
+  
+  # ── OUTPUT DESTINATIONS ──────────────────────────────────
+  output_destinations:
+    chat_file:
+      enabled: true
+      path: "${workflow.output_path}/prompt-generator-workflow.md"
+      format: markdown
+    
+    json_file:
+      enabled: true
+      path: "${workflow.output_path}/logs/execution.json"
       format: json
-      path: "${workflow.output_path}/result.json"
-      console: true
+    
+    console:
+      enabled: true
+      include_timestamps: true
+  
+  # ── ERROR LOGGING ────────────────────────────────────────
+  error_logging:
+    enabled: true
+    separate_file: true
+    path: "${workflow.output_path}/logs/errors.json"
+    include_stack_trace: true
+    include_context: true
 
-# Validation
-validation:
-  workflow_skeleton:
-    - required_fields:
-        - name
-        - description
-        - models
-        - execution
-        - logging
-        - pipeline
-    - valid_model_uris:
-        - jinaai/ReaderLM-v2
-        - LiquidAI/LFM2-1.2B-Extract
-        - google/gemma-3-4b-it-qat-int4-unquantized
-        - ibm-granite/granite-3.1.2b-instruct
-        - unsloth/Llama-3.1-Nemotron-Nano-4B-v1.1
-        - unsloth/Qwen2.5-Coder-1.5B-Instruct
-        - microsoft/Phi-4-mini-instruct
-        - slava177/Llama-3.2-3B-Instruct
-        - Menlo/Jan-nano-128k
+# ── TOOL PERMISSIONS ────────────────────────────────────────
+tool_permissions:
+  
+  # ── FILE OPERATIONS ────────────────────────────────────────
+  file_operations:
+    read:
+      enabled: true
+      require_confirmation: false
+      allowed_paths:
+        - /workspace/input
+        - /workspace/config
+      allowed_patterns:
+        - "*.md"
+        - "*.txt"
+      forbidden_paths:
+        - /workspace/output
+        - /workspace/checkpoints
+      max_file_size_mb: 50
+    
+    write:
+      enabled: true
+      require_confirmation: true
+      allowed_paths:
+        - /workspace/output
+      allowed_patterns:
+        - "*.yml"
+        - "*.yaml"
+      forbidden_paths:
+        - /workspace/src
+        - /workspace/tests
+      max_file_size_mb: 100
+      backup_existing: true
+      create_parent_directories: true
 
-# Workflow Variables
-workflow:
-  input:
-    user_prompt: ""
-    runtime: ""
-    review: ""
-    rigor: ""
-    scope: ""
-    concurrency: ""
-    efficiency: ""
-    logging: ""
-    context_budget: ""
-
-  output_path: /workspace/workflow_generator_output
-
-  model_router_csv_path: /opencode/docs/reports/requirements/model-router/model_routing_data.csv
-
-# Tools
-tools:
-  - name: yaml_validator
-    type: script
-    script: /scripts/validate_workflow_yaml.py
-    timeout_secs: 60
-    description: Validates YAML workflow against schema
-
-  - name: schema_reader
-    type: file_read
-    description: Reads workflow schema for validation
-
-# Retry Configuration
-retry:
-  default:
-    max_attempts: 3
-    backoff_strategy: exponential
-    delay_ms: 1000
-    on_failure: escalate_model
-
-  step_specific:
-    analyze_prompt:
-      max_attempts: 3
-    generate_workflow_skeleton:
-      max_attempts: 5
-    validate_workflow:
-      max_attempts: 3
+# ── FEATURES DEMONSTRATED ────────────────────────────────────
+features_demonstrated:
+  - policy_slider_integration
+  - execution_mode_selection
+  - model_routing
+  - embedding_model_usage
+  - structured_output_generation
+  - workflow_yaml_generation
+  - file_operations
+  - logging_configuration
+  - tool_permissions
+  - retry_logic
+  - timeout_management
+  - memory_management
+  - workflow_execution_strategy
