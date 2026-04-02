@@ -60,7 +60,7 @@ models:
     host:
       type: lmstudio  # lmstudio | ollama | llama_cpp_with_vulkan
       connection_settings:
-        model: "deepseek-coder-6.7b"
+        generative_entity: "deepseek-coder-6.7b"
         backend: vulkan
         gpu_layers: 32
     
@@ -104,7 +104,7 @@ models:
     host:
       type: ollama  # lmstudio | ollama | llama_cpp_with_vulkan
       connection_settings:
-        model: "llama3.2:70b"
+        generative_entity: "llama3.2:70b"
     
     resource_limits:
       max_allowed:
@@ -198,7 +198,14 @@ logging:
       include_stack_traces: false
 
 # ── PIPELINE DEFINITION ───────────────────────────────────
-pipeline:
+agentic_workflow:
+  hardcoded_values:
+    var_asdf: foo
+    var_fdsa:
+        - bar: 1
+          baz: false
+  
+  steps:
   
   # ── STEP 1: Code Analysis (Code Specialist Model) ─────────
   step_1_analyze_code:
@@ -206,10 +213,9 @@ pipeline:
     description: "Identify async patterns with Code Specialist model"
     type: agent  # agent | tool | sub_workflow | control | loop
     
-    model: "${models.code_specialist}"
+    generative_entity: "${models.code_specialist}"
     
-    input:
-      prompt: |
+    prompt: |
         Analyze this Rust codebase for async patterns:
 
         ${workflow.codebase_path}
@@ -239,9 +245,7 @@ pipeline:
     
     retry:
       max_attempts: 3
-      backoff_strategy: exponential  # exponential | linear | fixed
-      base_delay_ms: 1000
-      max_delay_ms: 30000
+      backoff: exponential  # exponential | linear | fixed
     
     hooks:
       on_step_start:
@@ -261,10 +265,9 @@ pipeline:
     description: "Generate code improvements using DeepSeek Coder"
     type: agent
     
-    model: "${models.deepseek_coder}"
+    generative_entity: "${models.deepseek_coder}"
     
-    input:
-      prompt: |
+    prompt: |
         Based on this async pattern analysis:
 
         {{step.step_1_analyze_code.output}}
@@ -290,9 +293,7 @@ pipeline:
     
     retry:
       max_attempts: 3
-      backoff_strategy: linear  # Linear backoff for code generation
-      base_delay_ms: 2000
-      max_delay_ms: 30000
+      backoff: linear  # Linear backoff for code generation
   
   # ── STEP 3: Final Review (Llama 3.2 70B) ──────────
   step_3_final_review:
@@ -300,10 +301,9 @@ pipeline:
     description: "Review improvements and original analysis"
     type: agent
     
-    model: "${models.llama3_2_70b}"
+    generative_entity: "${models.llama3_2_70b}"
     
-    input:
-      prompt: |
+    prompt: |
         Review these improvement suggestions:
 
         {{step.step_2_generate_improvements.output}}
@@ -333,9 +333,7 @@ pipeline:
     
     retry:
       max_attempts: 2
-      backoff_strategy: exponential  # exponential | linear | fixed
-      base_delay_ms: 3000
-      max_delay_ms: 30000
+      backoff: exponential  # exponential | linear | fixed
 
 # ── AUTOMATIC MODEL ROUTING CONFIGURATION ──────────────────────
 auto_model_routing:
@@ -353,21 +351,21 @@ auto_model_routing:
     
     # ── TASK CATEGORY 1: CODE ANALYSIS ──────────────
     code_analysis:
-      model: "${models.code_specialist}"
+      generative_entity: "${models.code_specialist}"
       base_priority: 0.9
       adjust_on_failure: -0.1
       adjust_on_success: +0.01
     
     # ── TASK CATEGORY 2: CODE GENERATION ───────────────
     code_generation:
-      model: "${models.deepseek_coder}"
+      generative_entity: "${models.deepseek_coder}"
       base_priority: 0.85
       adjust_on_failure: -0.15
       adjust_on_success: +0.02
     
     # ── TASK CATEGORY 3: CODE REVIEW ────────────────────
     code_review:
-      model: "${models.llama3_2_70b}"
+      generative_entity: "${models.llama3_2_70b}"
       base_priority: 0.95
       adjust_on_failure: -0.05
       adjust_on_success: +0.005
@@ -378,24 +376,24 @@ retry:
   # ── DEFAULT RETRY POLICY ─────────────────────────────
   default:
     max_attempts: 3
-    backoff_strategy: exponential  # exponential | linear | fixed
+    backoff: exponential  # exponential | linear | fixed
     on_failure: escalate_model  # escalate_model | skip | fail_workflow
   
   # ── STEP-SPECIFIC RETRY POLICIES ───────────────────
   step_specific:
     step_1_analyze_code:
       max_attempts: 5
-      backoff_strategy: linear  # Fast retry for analysis
+      backoff: linear  # Fast retry for analysis
       delay_ms: 500
     
     step_2_generate_improvements:
       max_attempts: 3
-      backoff_strategy: linear  # Linear backoff for code generation
+      backoff: linear  # Linear backoff for code generation
       delay_ms: 2000
     
     step_3_final_review:
       max_attempts: 2
-      backoff_strategy: exponential  # Exponential backoff for review
+      backoff: exponential  # Exponential backoff for review
       delay_ms: 3000
 
 # ── VALIDATION LOOP CONFIGURATION ───────────────────────────
@@ -404,8 +402,9 @@ validation_loop:
   
   exact_criteria:
     json_schema_valid: true  # Output must be valid JSON
-    contains_field: "quality_assessment"  # Must have quality assessment
-    contains_field: "priority_ranking"  # Must have priority ranking
+    fields:
+      - name: "quality_assessment"  # Must have quality assessment
+      - name: "priority_ranking"  # Must have priority ranking
     all_priorities_valid: true  # All priorities must be valid
   
   steps:

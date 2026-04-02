@@ -27,12 +27,12 @@ models:
       
       allocation_strategy: dynamic  # static | dynamic | adaptive
 
-# ── WORKFLOW EXECUTION STRATEGY ────────────────────────────
-workflow_execution_strategy:
-  
+  # ── WORKFLOW EXECUTION STRATEGY ────────────────────────────
+  workflow_execution_strategy:
+   
   # ── PROCESSING MODE ───────────────────────────────────
   processing: parallel  # parallel | serial | hybrid
-  
+   
   # ── MEMORY MANAGEMENT ───────────────────────────────────
   memory:
     allocation:
@@ -42,20 +42,21 @@ workflow_execution_strategy:
         vram: 4096MB
         cpu: 100%
         gpu: 100%
+        attention_tokens: 8192
     
     model_lifecycle:
       load_unload_strategy: one_at_a_time  # one_at_a_time | lazy | eager | adaptive
       unload_unused: true
-
-# ── LOGGING CONFIGURATION ───────────────────────────────────
-logging:
   
+  # ── LOGGING CONFIGURATION ───────────────────────────────────
+  logging:
+   
   # ── LOG LEVELS ─────────────────────────────────────
   level: info  # debug | info | warning | error
-  
+   
   # ── LOG DETAIL ─────────────────────────────────────
   detail: medium  # low | medium | high | verbose
-  
+   
   # ── OUTPUT DESTINATIONS ───────────────────────────────
   output_destinations:
     console:
@@ -66,20 +67,18 @@ logging:
       enabled: true
       path: "${workflow.output_path}/logs/execution.json"
       format: json
-
-# ── PIPELINE DEFINITION ───────────────────────────────────
-pipeline:
   
-  # ── STEP 1: Analyze Code (Read-Only) ─────────────
-  step_1_analyze_code:
-    name: "Analyze Code"
-    description: "Identify error handling patterns"
-    type: agent  # agent | tool | sub_workflow | control | loop
+  # ── PIPELINE DEFINITION ───────────────────────────────────
+  agentic_workflow:
+    hardcoded_values:
+      var_asdf: foo
+      var_fdsa:
+        - bar: 1
+          baz: false
+  
+  steps:
     
-    model: "${models.primary}"
-    
-    input:
-      prompt: |
+    prompt: |
         Analyze the codebase at:
 
         ${workflow.codebase_path}
@@ -108,26 +107,24 @@ pipeline:
     
     retry:
       max_attempts: 3
-      backoff_strategy: exponential  # exponential | linear | fixed
-      base_delay_ms: 1000
-      max_delay_ms: 30000
+      backoff: exponential  # exponential | linear | fixed
   
   # ── STEP 2: Generate Fixes (Read-Only, NO WRITE) ─────
-  step_2_generate_fixes:
+    name: "Generate Fixes"
     name: "Generate Fixes"
     description: "Create fix suggestions"
     type: agent
     
-    model: "${models.primary}"
+    generative_entity: "${models.primary}"
     
-    input:
-      prompt: |
-        Generate fixes for these issues:
+    prompt: |
+      Generate fixes for these issues:
 
-        {{step.step_1_analyze_code.output}}
+      {{step.step_1_analyze_code.output}}
 
-        Output fixes as structured JSON.
-      
+      Output fixes as structured JSON.
+    
+    input_variables:
       analysis: "${step.step_1_analyze_code.output}"
     
     output:
@@ -139,26 +136,24 @@ pipeline:
     
     retry:
       max_attempts: 3
-      backoff_strategy: exponential
-      base_delay_ms: 1000
-      max_delay_ms: 30000
+      backoff: exponential
   
-  # ── STEP 3: Apply Fixes (Write to Output, NOT to Source) ─
+  # ── STEP3: Apply Fixes (Write to Output, NOT to Source) ─
   step_3_write_fixes_report:
     name: "Write Fixes Report"
     description: "Generate report of changes"
     type: agent
     
-    model: "${models.primary}"
+    generative_entity: "${models.primary}"
     
-    input:
-      prompt: |
-        Generate a report of these fixes:
+    prompt: |
+      Generate a report of these fixes:
 
-        {{step.step_2_generate_fixes.output}}
+      {{step.step_2_generate_fixes.output}}
 
-        Explain what would be changed and why.
-      
+      Explain what would be changed and why.
+    
+    input_variables:
       fixes: "${step.step_2_generate_fixes.output}"
     
     output:
@@ -171,9 +166,7 @@ pipeline:
     
     retry:
       max_attempts: 3
-      backoff_strategy: exponential
-      base_delay_ms: 1000
-      max_delay_ms: 30000
+      backoff: exponential
   
   # ── STEP 4: Run Tests (Shell Execute: cargo test) ──────
   step_4_run_tests:
@@ -190,8 +183,7 @@ pipeline:
         working_dir: "${workflow.codebase_path}"
         timeout_secs: 300
     
-    input:
-      prompt: "Run test suite and collect results"
+    prompt: "Run test suite and collect results"
     
     output:
       save_to: test_results
@@ -233,7 +225,7 @@ tool_permissions:
         shell_exec: *
     
     # ── STEP 2: Generate Fixes ───────────────────────────
-    step_2_generate_fixes:
+      allow:
       allow:
         file_read: /workspace/src/*
         file_write: /workspace/output/*
