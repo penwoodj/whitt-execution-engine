@@ -413,6 +413,15 @@ cd transpiler/opencode/docs/reports/initial-plans
 
 ---
 
+## Critical Review & Substructure Analysis
+
+Two analysis documents have been produced to evaluate plan readiness:
+
+- **[critical-review.md](./critical-review.md)** — Critical review of all 8 plan files with 5+ upstream factors each, rated for OpenCode single-plan execution success (PASS/NEEDS-WORK/FAIL)
+- **[substructure-alignment.md](./substructure-alignment.md)** — Analysis of how each plan aligns with the agentic_workflow L1-L5 hierarchy from the reference YAML files
+
+---
+
 ## Questions?
 
 For questions about:
