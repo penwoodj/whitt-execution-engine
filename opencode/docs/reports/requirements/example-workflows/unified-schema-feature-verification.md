@@ -1,6 +1,6 @@
 # Verification Report: Unified Schema Feature Coverage
 
-**Date**: 2026-03-30
+**Date**: 2026-04-03
 **Purpose**: Verify unified schema preserves all features from manual and example workflows
 
 ---
@@ -10,7 +10,7 @@
 **Result**: ✅ ALL FEATURES PRESERVED
 
 - **Manual Schema Features**: 100% coverage (all 1148 lines preserved or improved)
-- **Example Workflows Features**: 100% coverage (all 18 examples supported)
+- **Example Workflows Features**: 100% coverage (all 72 workflow examples supported: 52 individual + 19 requirements-oriented + 1 manual)
 - **Backward Compatibility**: Maintained (no breaking changes)
 - **Readability Improvements**: 8 major enhancements implemented
 

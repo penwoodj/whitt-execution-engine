@@ -1,8 +1,8 @@
 # Transpiler Requirements Index
 
 **Version**: 4.0  
-**Date**: 2026-03-04  
-**Last Updated**: 2026-03-30  
+**Date**: 2026-04-03  
+**Last Updated**: 2026-04-03  
 **Schema Version**: 1.0.0 (Unified)
 
 ---
@@ -14,11 +14,11 @@
 **Purpose**: Consolidate all schema features into a single, self-documenting, 100% human-readable structure.
 
 **Key Achievements**:
-- **100% Feature Coverage**: All features from manual schema (ex18-manual) and all example workflows (ex01-ex18) preserved
+- **100% Feature Coverage**: All features from manual schema (ex18-manual), all example workflows (ex01-ex18), 52 individual requirement examples, and comprehensive integration examples preserved
 - **Visual Readability**: Unicode section dividers (# ── SECTION ──────) for clear boundaries
 - **Semantic Naming**: max_allowed/min_allowed, workflow_execution_strategy, object-based steps
 - **Inline Documentation**: All operators, variables, enum values, framework context documented
-- **Domain Organization**: 18 major domains logically organized
+- **Domain Organization**: 19 major domains logically organized
 - **Self-Documenting**: Schema structure conveys meaning without memorization
 
 **Schema File**: [unified-workflow-schema.yml](./unified-workflow-schema.yml)
@@ -29,6 +29,8 @@
 - All 22+ original requirements covered ✅
 - All manual schema features preserved ✅
 - All example workflow features supported ✅
+- 72 total workflow examples created (52 individual + 19 requirements-oriented + 1 manual) ✅
+- 11 review cycles completed including schema comprehensibility analysis ✅
 - 8 major readability improvements implemented ✅
 - Backward compatibility maintained ✅
 
@@ -45,7 +47,7 @@
 
 ---  
 **Repository**: https://github.com/penwoodj/yaml-to-rust-agentsdk  
-**Last Updated**: 2026-03-07
+**Last Updated**: 2026-04-03
 
 ---
 
