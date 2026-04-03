@@ -1,17 +1,8 @@
 # YAML to Rust AgentSDK Framework
 
 A declarative workflow engine for defining, executing, and optimizing AI-powered workflows with local LLMs.
-
----
-
-## What It Is
-
-The YAML to Rust AgentSDK Framework is a **local agentic workflow execution system** with two execution modes:
-
-1. **Direct Execution Mode**: Execute YAML workflows directly for development and iteration
-2. **Code Generation Mode**: Compile YAML workflows to reusable Rust executables for production
-
-You define **workflows in YAML**, and the framework:
+  
+  You define **workflows in YAML** using the `agentic_workflow` syntax, and the framework:
 - Validates your workflow structure
 - Orchestrates execution (parallel, serial, hybrid)
 - Manages agents and sub-agents
@@ -120,7 +111,7 @@ logging:
     format: json
     console: true
 
-pipeline:
+agentic_workflow:
   - step: analyze_code
     id: step_1
     model: "${models.primary}"
@@ -167,7 +158,7 @@ pipeline:
 When you run the workflow, the framework validates:
 
 1. **Structure Validation**:
-   - All required sections present (models, execution, pipeline)
+   - All required sections present (models, execution, agentic_workflow)
    - YAML syntax is valid
    - No circular references in nested workflows
 
@@ -190,7 +181,7 @@ For development and iteration, use direct execution:
 1. Load YAML workflow
 2. Validate schema
 3. Initialize execution context
-4. Execute pipeline steps
+4. Execute agentic_workflow steps
    a. Load model
    b. Execute prompt
    c. Capture output
@@ -330,7 +321,7 @@ Both execution modes enable a powerful workflow improvement cycle:
 Define what you want done, not how to do it:
 
 ```yaml
-pipeline:
+agentic_workflow:
   - step: analyze_code
     model: "${models.primary}"
     input:
@@ -482,7 +473,7 @@ validation_loop:
 Event-based execution with strict yes/no decisions:
 
 ```yaml
-pipeline:
+agentic_workflow:
   - step: assess_and_branch
     input:
       prompt: |
@@ -650,7 +641,7 @@ models:
     model: "llama-3.2-3b-instruct"
 execution:
   mode: serial
-pipeline:
+agentic_workflow:
   - step: analyze
     id: step_1
     model: "${models.primary}"
@@ -673,7 +664,7 @@ models:
     model: "llama3.2"
 execution:
   mode: parallel
-pipeline:
+agentic_workflow:
   - step: parallel_validation
     parallel_group: validators
     max_parallel: 3
@@ -692,7 +683,7 @@ workflow_id: conditional_branching
 name: "Conditional Branching Workflow"
 execution:
   mode: serial
-pipeline:
+agentic_workflow:
   - step: assess_and_branch
     input:
       prompt: |
@@ -729,7 +720,7 @@ sub_workflows:
   - workflow_id: validation
     path: ./workflows/validation.yml
 
-pipeline:
+agentic_workflow:
   - step: execute_analyzer
     model: "${models.primary}"
     input:
@@ -856,7 +847,7 @@ models:
 execution:
   mode: serial
 
-pipeline:
+agentic_workflow:
   - step: analyze
     id: step_1
     model: "${models.primary}"

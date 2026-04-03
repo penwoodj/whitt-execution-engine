@@ -10,7 +10,7 @@
 **Result**: ✅ ALL FEATURES PRESERVED
 
 - **Manual Schema Features**: 100% coverage (all 1148 lines preserved or improved)
-- **Example Workflows Features**: 100% coverage (all 72 workflow examples supported: 52 individual + 19 requirements-oriented + 1 manual)
+- **Example Workflows Features**: 100% coverage (all 53 workflow examples supported: 52 categorized + 1 manual brainstorm)
 - **Backward Compatibility**: Maintained (no breaking changes)
 - **Readability Improvements**: 8 major enhancements implemented
 

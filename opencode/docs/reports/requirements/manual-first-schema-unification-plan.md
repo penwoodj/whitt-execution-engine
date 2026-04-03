@@ -54,7 +54,7 @@
 | `execution.timeout_secs` | `workflow_execution_strategy.timeout.total` | Manual has granular timeouts |
 | `retry.default.max_attempts` | `workflow_execution_strategy.error_handling.max_retries_per_step` | Manual nests under error_handling |
 | `logging.global.level` | Need to add full logging section to manual | Manual doesn't show this section |
-| `pipeline: - step:` | `agentic_workflow.steps: { step_name: ... }` | Manual uses object, examples use array |
+| `agentic_workflow: - step:` (legacy: `pipeline:`) | `agentic_workflow.steps: { step_name: ... }` | Manual uses object, examples use array |
 
 ### 2.2 Feature Addition Matrix
 
@@ -597,12 +597,12 @@ metrics:
     path: /workspace/output/workflow_performance.json
     format: json
 
-# ─── Pipeline (Manual Structure) ─────────────
+# ─── Agentic Workflow (Manual Structure) ─────────────
 # Note: Manual uses `agentic_workflow.steps: { step_name: ... }`
-# Examples use `pipeline: [ - step: step_name ... ]`
+# Examples use `agentic_workflow: [ - step: step_name ... ]` (legacy: pipeline:)
 # Both should be supported for backward compatibility
 
-pipeline:
+agentic_workflow:
   # Step structure as shown in manual with optional array syntax
   # Supports all step types: simple, parallel, branching, looping, sub-workflow
   # Includes all advanced features from manual (branches, sub_agents, event_handling)
@@ -618,7 +618,7 @@ pipeline:
 
 **Rationale:**
 - Manual uses `agentic_workflow.steps: { step_name: ... }` (object)
-- Examples use `pipeline: [ - step: step_name ... ]` (array)
+- Examples use `agentic_workflow: [ - step: step_name ... ]` (array, legacy: `pipeline:`)
 - Both serve the same purpose
 
 **Implementation:**
@@ -722,7 +722,7 @@ pipeline:
 **Tasks:**
 1. [ ] Implement YAML parser with both syntaxes
    - Parse `agentic_workflow.steps: { ... }`
-   - Parse `pipeline: [ - step: ... ]`
+   - Parse `agentic_workflow: [ - step: ... ]` (legacy: `pipeline:`)
    - Normalize to internal representation
 
 2. [ ] Implement model configuration parser

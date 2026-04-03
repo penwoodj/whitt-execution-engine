@@ -77,7 +77,7 @@
 
 | Feature | Manual Schema | Example Workflows | Gap Analysis |
 |----------|---------------|-------------------|----------------|
-| **Step definition** | `agentic_workflow.steps.initialize_system` (nested under `agentic_workflow`) | `pipeline: - step: initialize_system` (flat array) | Manual nests steps under `agentic_workflow`; examples use flat `pipeline` array |
+| **Step definition** | `agentic_workflow.steps.initialize_system` (nested under `agentic_workflow`) | `agentic_workflow: - step: initialize_system` (flat array, legacy: `pipeline:`) | Manual nests steps under `agentic_workflow`; examples use flat array |
 | **Agent/model reference** | `generative_entity: "${models.primary_analyzer}"` | `model: "${models.primary}"` | Manual uses `generative_entity`; examples use `model` |
 | **Prompt passing** | Nested as multi-line string under `prompt: \|` | Same structure | **Compatible** |
 | **Output schema** | `output.save_to: system_output`, `output.format: json`, `output.fields: [...]` | Same structure | **Compatible** |
@@ -88,7 +88,7 @@
 | **Event handling** | `event_handling.on_validation_result`, `event_handling.on_interdependent_failure`, `event_handling.on_checkpoint` | Not shown (implied in orchestration sections) | Manual adds explicit event hooks |
 | **Orchestration config** | `orchestration_config: "${orchestration}"` | Not shown in steps (separate `orchestration` section) | Manual references top-level orchestration |
 
-**Resolution**: Keep examples' flat `pipeline` structure for compatibility, add manual's advanced features (branches, sub_agents in steps, event_handling) as optional extensions.
+**Resolution**: Keep examples' flat `agentic_workflow` structure for compatibility (legacy: `pipeline`), add manual's advanced features (branches, sub_agents in steps, event_handling) as optional extensions.
 
 ---
 

@@ -14,7 +14,7 @@
 **Purpose**: Consolidate all schema features into a single, self-documenting, 100% human-readable structure.
 
 **Key Achievements**:
-- **100% Feature Coverage**: All features from manual schema (ex18-manual), all example workflows (ex01-ex18), 52 individual requirement examples, and comprehensive integration examples preserved
+- **100% Feature Coverage**: All features from manual schema, 52 categorized requirement examples, and comprehensive integration examples preserved
 - **Visual Readability**: Unicode section dividers (# ── SECTION ──────) for clear boundaries
 - **Semantic Naming**: max_allowed/min_allowed, workflow_execution_strategy, object-based steps
 - **Inline Documentation**: All operators, variables, enum values, framework context documented
@@ -29,7 +29,7 @@
 - All 22+ original requirements covered ✅
 - All manual schema features preserved ✅
 - All example workflow features supported ✅
-- 72 total workflow examples created (52 individual + 19 requirements-oriented + 1 manual) ✅
+- 53 total workflow examples across 19 categories (52 categorized + 1 manual brainstorm) ✅
 - 11 review cycles completed including schema comprehensibility analysis ✅
 - 8 major readability improvements implemented ✅
 - Backward compatibility maintained ✅
