@@ -1,0 +1,458 @@
+---
+# Workflow: Basic Model Selection and Provider Configuration
+# Category: Model Configuration & Lifecycle
+# Focus: Provider types (claude, openai, local), model selection, backend configuration
+#
+# This workflow demonstrates:
+# - Multiple provider configurations (LM Studio, Ollama, llama.cpp, OpenAI-compatible)
+# - Model selection and switching
+# - Backend configuration (Vulkan, CUDA, CPU)
+# - Connection settings and timeouts
+# - Automatic model routing
+
+workflow_id: basic_model_selection_providers
+name: Basic Model Selection and Provider Configuration
+description: Workflow demonstrating multi-provider model configuration with automatic routing and fallback strategies
+version: "1.0.0"
+author: "AgentSDK Examples"
+tags:
+  - model-configuration
+  - provider-selection
+  - multi-provider
+  - auto-routing
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODEL CONFIGURATION
+# Demonstrates multiple provider types and model selection strategies
+# ─────────────────────────────────────────────────────────────────────────────
+models:
+  # ── GLOBAL CONFIGURATION FILE ─────────────────────────────────
+  # Optional: Centralized model configuration for default values
+  global_config_path: "./config/model-defaults.yml"
+
+  # ── AUTOMATIC ROUTING ─────────────────────────────────────────
+  # Default behavior when model not specified on a step
+  default_router: smart_routing  # automatic | manual | smart_routing
+
+  # ── PROVIDER 1: LM Studio (Local GUI-based Server) ───────────
+  primary_analyzer:
+    name: "Primary Code Analyzer"
+    
+    # Host configuration for local LM Studio server
+    host:
+      type: lmstudio
+      
+      # Connection settings specific to LM Studio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+        connection_timeout_secs: 30
+        use_ssl: false
+        retry_on_connection_failure: true
+        max_connection_retries: 3
+    
+    # Model identification
+    generative_entity: "llama-3.2-3b-instruct"
+    
+    # Backend selection for acceleration
+    backend: vulkan
+    
+    # GPU configuration (for Vulkan/CUDA backends)
+    gpu_layers: 32
+
+  # ── PROVIDER 2: Ollama (Local CLI-based Server) ──────────────
+  secondary_validator:
+    name: "Secondary Validation Model"
+    
+    host:
+      type: ollama
+      
+      connection_settings:
+        base_url: "http://localhost:11434"
+        timeout_secs: 60
+        keep_alive: "10m"  # Keep model loaded for 10 minutes
+        stream: true
+    
+    generative_entity: "llama3.2"
+    backend: cpu
+
+  # ── PROVIDER 3: llama.cpp Direct Loading ──────────────────────
+  fallback_model:
+    name: "Fallback Local Model"
+    
+    host:
+      type: llama_cpp_with_vulkan
+      
+      connection_settings:
+        model_path: "/models/llama-3.2-3b.Q4_K_M.gguf"
+        n_gpu_layers: 35
+        n_ctx: 8192
+        n_batch: 512
+        seed: -1  # Random seed
+        f16_kv: true
+        use_mmap: true
+        use_mlock: false
+    
+    generative_entity: "/models/llama-3.2-3b.Q4_K_M.gguf"
+    backend: vulkan
+
+  # ── PROVIDER 4: OpenAI-Compatible API ─────────────────────────
+  cloud_fallback:
+    name: "Cloud API Fallback"
+    
+    host:
+      type: openai_compatible
+      
+      connection_settings:
+        api_base: "https://api.openai.com/v1"
+        api_key_env: "OPENAI_API_KEY"  # Read from environment variable
+        organization: ""  # Optional organization ID
+        timeout_secs: 120
+        max_retries: 3
+    
+    generative_entity: "gpt-4o-mini"
+    
+    # Resource limits for cloud API
+    max_allowed:
+      concurrent_requests: 5
+
+  # ── PROVIDER 5: Custom Local Server ───────────────────────────
+  custom_server:
+    name: "Custom Local Inference Server"
+    
+    host:
+      type: custom
+      
+      connection_settings:
+        endpoint: "http://localhost:8080/inference"
+        auth_header: "X-API-Key"
+        auth_key_env: "CUSTOM_SERVER_KEY"
+        timeout_secs: 90
+        health_check_endpoint: "/health"
+        health_check_interval_secs: 30
+    
+    generative_entity: "custom-model-v1"
+
+  # ── MODEL SELECTION RULES ─────────────────────────────────────
+  # Automatic routing configuration
+  routing_rules:
+    # Route by task type
+    by_task_type:
+      code_analysis: primary_analyzer
+      validation: secondary_validator
+      generation: primary_analyzer
+      summarization: secondary_validator
+    
+    # Route by complexity
+    by_complexity:
+      simple: secondary_validator
+      moderate: primary_analyzer
+      complex: cloud_fallback
+    
+    # Route by estimated tokens
+    by_token_count:
+      small: secondary_validator      # < 1000 tokens
+      medium: primary_analyzer        # 1000-8000 tokens
+      large: cloud_fallback           # > 8000 tokens
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXECUTION MODE
+# ─────────────────────────────────────────────────────────────────────────────
+execution:
+  mode: hybrid
+  
+  memory:
+    max_allocated_memory_mb: 16384
+    model_memory_mb: 4096
+    unload_unused: true
+    gc_interval_secs: 300
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOGGING
+# ─────────────────────────────────────────────────────────────────────────────
+logging:
+  global:
+    level: info
+    detail: medium
+    output_type: chat
+    format: json
+    console: true
+    file: true
+    log_file: /workspace/logs/model_selection.log
+
+  models:
+    level: debug
+    detail: high
+    include_load_unload: true
+    include_connection_events: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PIPELINE DEFINITION
+# ─────────────────────────────────────────────────────────────────────────────
+agentic_workflow:
+  steps:
+    # ── STEP 1: Provider Health Check ───────────────────────────
+    - step: check_provider_availability
+      id: step_1
+      generative_entity: "${models.primary_analyzer}"
+      type: agent
+      
+      prompt: |
+        Check availability of all configured model providers:
+        
+        Providers to check:
+        1. LM Studio (localhost:1234)
+        2. Ollama (localhost:11434)
+        3. llama.cpp (local file)
+        4. Cloud API (api.openai.com)
+        5. Custom Server (localhost:8080)
+        
+        For each provider, verify:
+        - Connection reachable
+        - Model loaded/available
+        - Response latency acceptable
+        - Resource availability
+        
+        Output:
+        - provider_status: {provider_name: "available"|"unavailable"|"degraded"}
+        - latency_ms: {provider_name: latency_in_ms}
+        - recommended_primary: best_available_provider
+        - recommended_fallback: backup_provider
+
+      output:
+        save_to: provider_health_check
+        format: json
+        fields:
+          - provider_status
+          - latency_ms
+          - recommended_primary
+          - recommended_fallback
+
+      retry:
+        max_attempts: 2
+        backoff: fixed
+        delay_ms: 1000
+
+    # ── STEP 2: Select Optimal Model ────────────────────────────
+    - step: select_optimal_model
+      id: step_2
+      generative_entity: "${models.primary_analyzer}"
+      type: agent
+      
+      prompt: |
+        Based on provider health check, select optimal model configuration:
+        
+        Provider health results:
+        ${step.step_1.output}
+        
+        Task requirements:
+        - Task type: code_analysis
+        - Estimated complexity: moderate
+        - Estimated tokens: 2000-5000
+        
+        Routing rules:
+        ${models.routing_rules}
+        
+        Select model based on:
+        1. Provider availability
+        2. Task routing rules
+        3. Current system load
+        4. Estimated latency
+        
+        Output:
+        - selected_model: model_identifier
+        - selected_provider: provider_type
+        - selection_reason: explanation
+        - fallback_chain: [backup_models]
+
+      provider_health: "${step.step_1.output}"
+      routing_rules: "${models.routing_rules}"
+
+      output:
+        save_to: model_selection
+        format: json
+        fields:
+          - selected_model
+          - selected_provider
+          - selection_reason
+          - fallback_chain
+
+    # ── STEP 3: Code Analysis with Selected Model ───────────────
+    - step: analyze_codebase
+      id: step_3
+      generative_entity: "${step.step_2.output.selected_model}"
+      type: agent
+      
+      prompt: |
+        Perform code analysis using the selected model:
+        
+        Selected model: ${step.step_2.output.selected_model}
+        Provider: ${step.step_2.output.selected_provider}
+        
+        Analysis tasks:
+        1. Scan source files in /workspace/src
+        2. Identify code patterns and structures
+        3. Detect potential issues
+        4. Generate improvement suggestions
+        
+        Output structured analysis with:
+        - file_count: number of files analyzed
+        - patterns_found: list of detected patterns
+        - issues: list of potential issues
+        - suggestions: list of improvement suggestions
+
+      code_path: /workspace/src
+
+      output:
+        save_to: code_analysis
+        format: json
+        fields:
+          - file_count
+          - patterns_found
+          - issues
+          - suggestions
+          - model_used
+
+      retry:
+        max_attempts: 3
+        backoff: exponential
+        delay_ms: 2000
+        
+        # Fallback to backup model on failure
+        on_failure: fallback_model
+        fallback_chain:
+          - "${models.secondary_validator}"
+          - "${models.fallback_model}"
+
+    # ── STEP 4: Validation with Different Provider ──────────────
+    - step: validate_analysis
+      id: step_4
+      generative_entity: "${models.secondary_validator}"
+      type: agent
+      
+      prompt: |
+        Validate the code analysis results using a different provider:
+        
+        Analysis results to validate:
+        ${step.step_3.output}
+        
+        Validation tasks:
+        1. Cross-check identified patterns
+        2. Verify issue severity ratings
+        3. Validate suggestion feasibility
+        4. Add any missed issues
+        
+        Using different provider (Ollama) for independent validation.
+        
+        Output:
+        - validation_passed: boolean
+        - corrections: any corrections to analysis
+        - additional_issues: any missed issues
+        - confidence_score: 0.0-1.0
+
+      analysis_results: "${step.step_3.output}"
+
+      output:
+        save_to: validation_results
+        format: json
+        fields:
+          - validation_passed
+          - corrections
+          - additional_issues
+          - confidence_score
+          - validator_model
+
+    # ── STEP 5: Generate Report ─────────────────────────────────
+    - step: generate_final_report
+      id: step_5
+      generative_entity: "${models.primary_analyzer}"
+      type: agent
+      
+      prompt: |
+        Generate comprehensive report of model selection and analysis:
+        
+        Provider health check:
+        ${step.step_1.output}
+        
+        Model selection:
+        ${step.step_2.output}
+        
+        Code analysis:
+        ${step.step_3.output}
+        
+        Validation results:
+        ${step.step_4.output}
+        
+        Generate report including:
+        1. Provider selection summary
+        2. Model performance metrics
+        3. Analysis findings
+        4. Validation summary
+        5. Recommendations
+
+      output:
+        save_to: final_report
+        format: markdown
+        file_output:
+          enabled: true
+          path: /workspace/output/model_selection_report.md
+          encoding: utf-8
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RETRY CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+retry:
+  default:
+    max_attempts: 3
+    backoff: exponential
+    on_failure: escalate_model
+
+  # Fallback model chain
+  escalation:
+    strategy: provider_fallback
+    fallback_chain:
+      - provider: ollama
+        generative_entity: "llama3.2"
+      - provider: llamacpp
+        generative_entity: "/models/llama-3.2-3b.Q4_K_M.gguf"
+        backend: vulkan
+      - provider: openai_compatible
+        generative_entity: "gpt-4o-mini"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# METRICS
+# ─────────────────────────────────────────────────────────────────────────────
+metrics:
+  enabled: true
+  collect:
+    - provider_connection_time_ms
+    - model_selection_time_ms
+    - model_inference_time_ms
+    - provider_availability_rate
+    - fallback_usage_count
+    - total_tokens_processed
+  output:
+    path: /workspace/metrics/model_selection_metrics.json
+    format: json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FEATURE SUMMARY
+# ─────────────────────────────────────────────────────────────────────────────
+features_demonstrated:
+  - multiple_providers: true
+    providers: [lmstudio, ollama, llama_cpp, openai_compatible, custom]
+  
+  - model_selection: true
+    strategies: [automatic, manual, smart_routing]
+  
+  - provider_configuration: true
+    settings: [connection, timeout, retry, ssl]
+  
+  - backend_selection: true
+    backends: [vulkan, cuda, cpu]
+  
+  - fallback_strategies: true
+    types: [provider_fallback, model_fallback]
+  
+  - health_checking: true
+    checks: [connection, latency, availability]

@@ -1,0 +1,330 @@
+---
+workflow_id: event_based_branching
+name: Event-Based Branching with Validation Results
+description: Demonstrates event-driven branching based on validation results, code quality metrics, test outcomes, and user decisions
+version: "1.0.0"
+author: "AgentSDK Examples"
+tags:
+  - conditional-branching
+  - event-driven
+  - validation-results
+  - branching-logic
+
+models:
+  branching_agent:
+    name: "Branching Agent"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+    generative_entity: "llama-3.2-3b-instruct"
+    backend: vulkan
+
+workflow_execution_strategy:
+  load_unload: lazy
+  processing: serial
+
+agentic_workflow:
+  step_1_analyze_code_quality:
+    name: "Analyze Code Quality"
+    type: agent
+    model: "${models.branching_agent}"
+
+    input:
+      prompt: |
+        Analyze code quality for the workspace.
+
+        Analysis tasks:
+        1. Check for code complexity (cyclomatic complexity)
+        2. Identify code smells (duplicated code, long methods)
+        3. Check for anti-patterns (magic numbers, deep nesting)
+        4. Evaluate test coverage requirements
+        5. Assess documentation quality
+
+        Branching decision:
+        IF overall_quality_score >= 0.85 AND critical_issues == 0:
+          THEN proceed_branch
+          Answer: "Decision: proceed"
+
+        ELSE IF overall_quality_score >= 0.70 AND critical_issues == 0:
+          THEN review_branch
+          Answer: "Decision: review"
+
+        ELSE:
+          THEN refactor_branch
+          Answer: "Decision: refactor"
+
+        Strict yes/no required: true
+
+        Return detailed quality analysis with branch decision.
+
+    output:
+      save_to: quality_analysis
+      format: json
+
+  step_2_proceed_branch_success:
+    name: "Proceed with Success"
+    type: agent
+    model: "${models.branching_agent}"
+
+    input:
+      enabled_by:
+        condition: "step_1_analyze_code_quality.decision == 'proceed'"
+        description: "Code quality meets requirements - proceed to deployment"
+
+      prompt: |
+        Code quality passed threshold. Proceed with deployment.
+
+        Deployment tasks:
+        1. Prepare deployment manifest
+        2. Validate deployment configuration
+        3. Generate deployment checklist
+        4. Create rollback plan
+
+        Quality score from analysis:
+        {{quality_analysis.overall_quality_score}}
+
+        Proceed to production deployment pipeline.
+
+    output:
+      save_to: deployment_plan
+      format: json
+
+  step_3_review_branch_feedback:
+    name: "Review Branch - Needs Feedback"
+    type: agent
+    model: "${models.branching_agent}"
+
+    input:
+      enabled_by:
+        condition: "step_1_analyze_code_quality.decision == 'review'"
+        description: "Code quality needs manual review"
+
+      prompt: |
+        Code quality requires manual review before proceeding.
+
+        Review requirements:
+        1. Identify specific quality issues
+        2. Document code smells found
+        3. Suggest specific improvements
+        4. Create review checklist
+
+        Quality concerns:
+        {{quality_analysis.issues_found}}
+
+        After review completion:
+        IF all_issues_addressed == true:
+          THEN proceed_branch
+          Answer: "Decision: proceed"
+
+        ELSE:
+          THEN refactor_branch
+          Answer: "Decision: refactor"
+
+        Return review checklist and decision.
+
+    output:
+      save_to: review_feedback
+      format: json
+
+  step_4_refactor_branch_improvement:
+    name: "Refactor Branch - Code Improvement"
+    type: agent
+    model: "${models.branching_agent}"
+
+    input:
+      enabled_by:
+        condition: "step_1_analyze_code_quality.decision == 'refactor' OR step_3_review_branch_feedback.decision == 'refactor'"
+        description: "Code needs refactoring"
+
+      prompt: |
+        Perform code refactoring based on quality analysis.
+
+        Refactoring tasks:
+        1. Fix identified code smells
+        2. Reduce code complexity
+        3. Remove anti-patterns
+        4. Improve test coverage
+        5. Add missing documentation
+
+        Quality issues to address:
+        {{quality_analysis.issues_found}}
+
+        After refactoring:
+        1. Re-analyze code quality
+        2. Check if threshold met (>= 0.85)
+
+        IF new_quality_score >= 0.85:
+          THEN proceed_branch
+          Answer: "Decision: proceed"
+
+        ELSE:
+          THEN refactor_branch (recursive)
+          Answer: "Decision: refactor"
+
+        Limit refactor iterations to maximum 3.
+
+    output:
+      save_to: refactor_results
+      format: json
+
+  step_5_deployment_decision:
+    name: "Deployment Decision Point"
+    type: agent
+    model: "${models.branching_agent}"
+
+    input:
+      enabled_by:
+        condition: "step_2_proceed_branch_success.completed == true OR step_3_review_branch_feedback.decision == 'proceed' OR step_4_refactor_branch_improvement.decision == 'proceed'"
+        description: "Ready for deployment - make final decision"
+
+      prompt: |
+        All branches ready for deployment decision.
+
+        Branch results:
+        - Proceed: {{deployment_plan}}
+        - Review: {{review_feedback}}
+        - Refactor: {{refactor_results}}
+
+        Final deployment decision logic:
+        1. Check if any branch failed
+        2. Validate all required outputs exist
+        3. Confirm quality scores >= 0.85
+        4. Verify test coverage adequate
+
+        IF all_checks_passed == true:
+          THEN deploy_workflow
+          Answer: "Decision: deploy"
+
+        ELSE IF critical_failure == true:
+          THEN halt_workflow
+          Answer: "Decision: halt"
+
+        ELSE:
+          THEN retry_workflow
+          Answer: "Decision: retry"
+
+        Strict yes/no required: true.
+
+        Return final deployment decision with rationale.
+
+    output:
+      save_to: deployment_decision
+      format: json
+
+  step_6_deploy_workflow:
+    name: "Deploy Workflow"
+    type: agent
+    model: "${models.branching_agent}"
+
+    input:
+      enabled_by:
+        condition: "step_5_deployment_decision.decision == 'deploy'"
+        description: "Execute deployment workflow"
+
+      prompt: |
+        Execute deployment to production.
+
+        Deployment steps:
+        1. Build production artifacts
+        2. Run deployment checklist
+        3. Execute deployment commands
+        4. Verify deployment success
+        5. Create deployment report
+
+        Deployment artifacts:
+        - Binary builds
+        - Configuration files
+        - Documentation packages
+        - Rollback scripts
+
+        Return deployment status and artifact locations.
+
+    output:
+      save_to: deployment_result
+      format: json
+
+  step_7_halt_workflow_error:
+    name: "Halt Workflow on Error"
+    type: agent
+    model: "${models.branching_agent}"
+
+    input:
+      enabled_by:
+        condition: "step_5_deployment_decision.decision == 'halt'"
+        description: "Critical failure - halt workflow"
+
+      prompt: |
+        Workflow halted due to critical failure.
+
+        Halt reasons:
+        1. Quality thresholds not met after maximum retries
+        2. Critical issues found that cannot be auto-fixed
+        3. Resource constraints preventing continuation
+        4. User cancellation
+
+        Actions on halt:
+        1. Save current state
+        2. Generate error report
+        3. Log all partial results
+        4. Notify stakeholders
+
+        Return halt summary and recommendations.
+
+    output:
+      save_to: halt_report
+      format: json
+
+  step_8_retry_workflow:
+    name: "Retry Workflow"
+    type: agent
+    model: "${models.branching_agent}"
+
+    input:
+      enabled_by:
+        condition: "step_5_deployment_decision.decision == 'retry'"
+        description: "Retry workflow with adjusted parameters"
+
+      prompt: |
+        Retry workflow execution with adjustments.
+
+        Retry adjustments:
+        1. Lower quality threshold to 0.75 (more lenient)
+        2. Increase retry limit to 5 iterations
+        3. Add timeout buffers
+        4. Enable partial acceptance
+
+        Quality threshold: 0.75 (was 0.85)
+
+        Restart from analysis step with relaxed criteria.
+
+        Return retry plan and updated parameters.
+
+    output:
+      save_to: retry_plan
+      format: json
+
+logging:
+  enabled: true
+
+  levels:
+    default: info
+    workflow_execution: debug
+
+  scopes:
+    workflow_execution:
+      enabled: true
+      include_branch_decisions: true
+      include_enabled_by_conditions: true
+
+    execution:
+      enabled: true
+
+  output:
+    console:
+      enabled: true
+
+    file:
+      enabled: true
+      path: /workspace/logs/event-branching.log

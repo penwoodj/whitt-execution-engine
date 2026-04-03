@@ -1,0 +1,417 @@
+---
+# Workflow: Tool Allow/Deny Lists and Permission Scopes
+# Category: Tool Permissions
+# Focus: Global permission configuration, allowlists, denylists, and permission scopes
+
+#
+# Demonstrates: Global allowlists, denylists, scopes, inheritance, audit, constraints
+
+workflow_id: tool_allow_deny_lists_scopes
+name: Tool Allow/Deny Lists and Permission Scopes
+description: Workflow demonstrating comprehensive tool permission management with allowlists, denylists, and scope-based access control
+version: "1.0.0"
+author: "AgentSDK Examples"
+tags:
+  - tool-permissions
+  - allowlist
+  - denylist
+  - permission-scopes
+
+tool_permissions:
+  mode: explicit_allow
+  default_action: deny
+  
+  allowlist:
+    - tool: file_read
+      scope: read
+      constraints:
+        allowed_paths:
+          - "/workspace/input/**"
+          - "/workspace/data/**"
+          - "/workspace/config/**"
+        max_file_size_mb: 50
+        allowed_extensions:
+          - ".yaml"
+          - ".json"
+          - ".txt"
+          - ".md"
+    
+    - tool: file_write
+      scope: write
+      constraints:
+        allowed_paths:
+          - "/workspace/output/**"
+          - "/workspace/temp/**"
+        max_file_size_mb: 10
+        prevent_overwrite: true
+        require_backup: true
+    
+    - tool: web_fetch
+      scope: network
+      constraints:
+        allowed_domains:
+          - "api.internal.company.com"
+          - "docs.internal.company.com"
+        timeout_secs: 30
+        max_response_size_mb: 5
+    
+    - tool: shell_execute
+      scope: execute
+      constraints:
+        allowed_commands:
+          - "git status"
+          - "git log"
+          - "ls"
+          - "cat"
+        blocked_flags:
+          - "--force"
+          - "-rf"
+          - "sudo"
+        working_directory: "/workspace"
+    
+    - tool: code_execute
+      scope: execute
+      constraints:
+        languages:
+          - python
+          - javascript
+        sandbox: true
+        max_execution_time_secs: 60
+        max_memory_mb: 512
+
+  denylist:
+    - tool: file_delete
+      reason: "File deletion not allowed"
+      severity: critical
+    - tool: file_move
+      reason: "File moves may cause data loss"
+      severity: high
+    - tool: system_exec
+      reason: "System commands require elevated privileges"
+      severity: critical
+    - tool: process_kill
+      reason: "Process management not permitted"
+      severity: critical
+    - tool: web_request
+      reason: "Use web_fetch with domain whitelist"
+      severity: high
+    - tool: database_write
+      reason: "Database writes require approval"
+      severity: critical
+
+  scopes:
+    read:
+      description: "Read-only access to resources"
+      allowed_tools: [file_read, web_fetch, database_query]
+      audit_level: low
+    write:
+      description: "Write access to output resources"
+      allowed_tools: [file_write, file_append]
+      audit_level: medium
+    execute:
+      description: "Execute approved commands"
+      allowed_tools: [shell_execute, code_execute]
+      requires_approval: true
+      audit_level: high
+    network:
+      description: "Network access to approved endpoints"
+      allowed_tools: [web_fetch, api_call]
+      allowed_domains:
+        - "api.internal.company.com"
+
+  categories:
+    file_operations:
+      description: "File system operations"
+      tools: [file_read, file_write, file_append, file_delete, file_move]
+      default_scope: read
+    web_operations:
+      description: "Web operations"
+      tools: [web_fetch, web_request, api_call]
+      default_scope: network
+    code_operations:
+      description: "Code execution"
+      tools: [code_execute, code_compile, code_test]
+      default_scope: execute
+
+  inheritance:
+    enabled: true
+    strategy: merge
+    enforce_workflow_permissions: true
+    allow_step_restrictions: true
+    allow_step_expansions: false
+
+  audit:
+    enabled: true
+    log_all_access: true
+    log_denied_access: true
+    events_to_log: [tool_access_granted, tool_access_denied]
+    retention_days: 90
+
+models:
+  primary_analyzer:
+    host:
+      type: lmstudio
+      connection_settings:
+        host: localhost
+        port: 1234
+    generative_entity: "llama-3.2-3b-instruct"
+    backend: vulkan
+
+  secondary_validator:
+    host:
+      type: ollama
+      connection_settings:
+        base_url: "http://localhost:11434"
+    generative_entity: "llama3.2"
+    backend: cpu
+
+execution:
+  mode: hybrid
+  security:
+    enforce_tool_permissions: true
+    sandbox_mode: partial
+
+logging:
+  global:
+    level: info
+    detail: medium
+    format: json
+    console: true
+    file: true
+    log_file: /workspace/logs/tool_permissions.log
+
+agentic_workflow:
+  steps:
+    - step: verify_permissions
+      id: step_1
+      generative_entity: "${models.primary_analyzer}"
+      type: agent
+      prompt: |
+        Verify permission configuration:
+        Mode: ${tool_permissions.mode}
+        Default action: ${tool_permissions.default_action}
+        
+        Tasks:
+        1. List all tools from allowlist
+        2. Identify conflicting permission rules
+        3. Verify scope definitions
+        
+        Output:
+        - allowed_tools_count: number
+        - denied_tools_count: number
+        - conflicts: list
+        - scope_coverage: percentage
+
+      output:
+        save_to: permission_verification
+        format: json
+
+    - step: read_input_files
+      id: step_2
+      generative_entity: "${models.primary_analyzer}"
+      type: agent
+      prompt: |
+        Read input files from allowed directories:
+        Paths: /workspace/input/, /workspace/data/, /workspace/config/
+        Extensions: .yaml, .json, .txt, .md
+        
+        Tasks:
+        1. List readable files
+        2. Read configuration files
+        3. Parse data files
+        
+        Output:
+        - files_read: list
+        - total_size_mb: size
+        - content_summary: summary
+
+      output:
+        save_to: input_analysis
+        format: json
+
+    - step: fetch_external_data
+      id: step_3
+      generative_entity: "${models.primary_analyzer}"
+      type: agent
+      prompt: |
+        Fetch data from approved endpoints:
+        Domains: api.internal.company.com, docs.internal.company.com
+        Timeout: 30 seconds
+        
+        Tasks:
+        1. Fetch API status
+        2. Fetch documentation
+        3. Parse responses
+        
+        Output:
+        - api_status: status object
+        - documentation: docs
+        - fetch_timestamp: timestamp
+
+      output:
+        save_to: external_data
+        format: json
+
+    - step: execute_commands
+      id: step_4
+      generative_entity: "${models.primary_analyzer}"
+      type: agent
+      prompt: |
+        Execute approved shell commands:
+        Commands: git status, git log, ls, cat
+        Working directory: /workspace
+        
+        Tasks:
+        1. Check git status
+        2. Get commit history
+        3. List repository structure
+        
+        Output:
+        - git_status: status
+        - recent_commits: commits
+        - directory_structure: file tree
+
+      output:
+        save_to: command_results
+        format: json
+
+    - step: process_data
+      id: step_5
+      generative_entity: "${models.primary_analyzer}"
+      type: agent
+      prompt: |
+        Process data with sandboxed execution:
+        Languages: Python, JavaScript
+        Sandbox: enabled
+        
+        Input:
+        - Input analysis: ${step.step_2.output}
+        - External data: ${step.step_3.output}
+        - Command results: ${step.step_4.output}
+        
+        Tasks:
+        1. Validate and clean data
+        2. Perform statistical analysis
+        3. Generate summary
+        
+        Output:
+        - processed_data: dataset
+        - statistics: summary
+        - execution_time_ms: time
+
+      output:
+        save_to: processed_data
+        format: json
+
+    - step: write_output_files
+      id: step_6
+      generative_entity: "${models.primary_analyzer}"
+      type: agent
+      prompt: |
+        Write results to approved output directories:
+        Paths: /workspace/output/, /workspace/temp/
+        Max size: 10 MB
+        
+        Data to write:
+        - Processed data: ${step.step_5.output}
+        - Statistics: ${step.step_5.output.statistics}
+        
+        Tasks:
+        1. Create output directory
+        2. Write results to results.json
+        3. Write statistics to statistics.json
+        
+        Output:
+        - files_written: list
+        - total_size_bytes: size
+        - backup_location: backup paths
+
+      output:
+        save_to: output_results
+        format: json
+
+    - step: validate_compliance
+      id: step_7
+      generative_entity: "${models.secondary_validator}"
+      type: agent
+      prompt: |
+        Validate operations complied with permission rules:
+        Operations:
+        1. File reads: ${step.step_2.output.files_read}
+        2. Web fetches: ${step.step_3.output}
+        3. Commands: ${step.step_4.output}
+        4. Code execution: ${step.step_5.output}
+        5. File writes: ${step.step_6.output.files_written}
+        
+        Tasks:
+        1. Verify file access within allowed paths
+        2. Confirm domains are whitelisted
+        3. Check command compliance
+        4. Validate sandbox usage
+        
+        Output:
+        - compliance_score: 0.0-1.0
+        - violations: list
+        - audit_summary: summary
+
+      output:
+        save_to: compliance_validation
+        format: json
+
+    - step: generate_permission_report
+      id: step_8
+      generative_entity: "${models.primary_analyzer}"
+      type: agent
+      prompt: |
+        Generate permission usage report:
+        Config: ${tool_permissions}
+        Verification: ${step.step_1.output}
+        Operations:
+        - File reads: ${step.step_2.output}
+        - Web fetches: ${step.step_3.output}
+        - Commands: ${step.step_4.output}
+        - Code execution: ${step.step_5.output}
+        - File writes: ${step.step_6.output}
+        Compliance: ${step.step_7.output}
+        
+        Report sections:
+        1. Permission configuration summary
+        2. Tool usage statistics
+        3. Scope utilization breakdown
+        4. Compliance summary
+
+      output:
+        save_to: permission_report
+        format: markdown
+        file_output:
+          enabled: true
+          path: /workspace/output/permission_usage_report.md
+          encoding: utf-8
+
+metrics:
+  enabled: true
+  collect:
+    - tool_access_count
+    - tool_denied_count
+    - permission_check_time_ms
+    - scope_utilization
+    - compliance_score
+  output:
+    path: /workspace/metrics/permission_metrics.json
+    format: json
+
+features_demonstrated:
+  allowlist_configuration:
+    tools: [file_read, file_write, web_fetch, shell_execute, code_execute]
+  denylist_configuration:
+    tools: [file_delete, file_move, system_exec, process_kill, database_write]
+  permission_scopes:
+    scopes: [read, write, execute, network]
+  tool_categories:
+    categories: [file_operations, web_operations, code_operations]
+  permission_inheritance:
+    strategy: merge
+  audit_logging:
+    events: [tool_access_granted, tool_access_denied]
+  constraint_enforcement:
+    types: [path_restrictions, size_limits, domain_whitelists, command_restrictions]

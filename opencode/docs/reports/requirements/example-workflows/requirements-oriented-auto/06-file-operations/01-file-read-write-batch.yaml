@@ -1,0 +1,317 @@
+---
+# Workflow: File Read, Write, and Batch Operations
+# Category: File Operations
+# Focus: Reading, writing, and batch processing of files
+#
+# This workflow demonstrates:
+# - File read operations with format handling
+# - File write operations with encoding and backup
+# - Batch processing multiple files
+# - File path patterns and wildcards
+# - Format conversion (YAML, JSON, text)
+
+workflow_id: file_read_write_batch
+name: File Read, Write, and Batch Operations
+description: Comprehensive workflow demonstrating file read/write operations, batch processing, format handling, and file management patterns
+version: "1.0.0"
+author: "AgentSDK Examples"
+tags:
+  - file-operations
+  - batch-processing
+  - file-io
+  - format-conversion
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODEL CONFIGURATION
+# Simple model for file processing tasks
+# ─────────────────────────────────────────────────────────────────────────────
+models:
+  primary_processor:
+    name: "File Processor"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+    generative_entity: "llama-3.2-3b-instruct"
+    backend: vulkan
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WORKFLOW EXECUTION STRATEGY
+# Serial execution for file I/O operations
+# ─────────────────────────────────────────────────────────────────────────────
+workflow_execution_strategy:
+  load_unload: one_at_a_time
+  processing: serial
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOL PERMISSIONS
+# File operation permissions and constraints
+# ─────────────────────────────────────────────────────────────────────────────
+tool_permissions:
+  file_operations:
+    read:
+      enabled: true
+      require_confirmation: false
+      allowed_paths:
+        - /workspace/input/**/*
+        - /workspace/config/**/*
+      forbidden_paths:
+        - /etc
+        - /root
+        - /workspace/secrets
+      max_file_size_mb: 100
+
+    write:
+      enabled: true
+      require_confirmation: false
+      allowed_paths:
+        - /workspace/output/**/*
+        - /workspace/temp/**/*
+      backup_existing: true
+      max_file_size_mb: 500
+      create_parent_directories: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AGENTIC WORKFLOW
+# Multi-step file processing pipeline
+# ─────────────────────────────────────────────────────────────────────────────
+agentic_workflow:
+  # ── STEP 1: List and Discover Input Files ────────────────
+  step_1_discover_files:
+    name: "Discover Input Files"
+    description: "List all input files in the workspace for batch processing"
+    type: tool
+
+    tool:
+      type: shell
+      command: "find /workspace/input -type f -name '*.yaml' -o -name '*.json' -o -name '*.txt' | head -20"
+
+    output:
+      save_to: input_files_list
+      format: text
+
+  # ── STEP 2: Read Configuration File (YAML Format) ────────
+  step_2_read_config:
+    name: "Read Configuration File"
+    description: "Read the main configuration file in YAML format"
+    type: agent
+    model: "${models.primary_processor}"
+
+    input:
+      file_operations:
+        - operation: read
+          file_path: /workspace/config/app-config.yml
+          format: yaml
+          encoding: utf-8
+
+      prompt: |
+        Read the configuration file and extract the following:
+        - Application name and version
+        - Processing parameters
+        - Output directory settings
+        - Batch size configuration
+
+        Provide the extracted configuration as structured JSON.
+
+    output:
+      save_to: app_config
+      format: json
+      file_output:
+        enabled: true
+        path: /workspace/temp/01-config-extracted.json
+
+  # ── STEP 3: Read Batch Input Files (JSON Format) ───────
+  step_3_read_batch_inputs:
+    name: "Read Batch Input Files"
+    description: "Read multiple input files in batch processing mode"
+    type: agent
+    model: "${models.primary_processor}"
+
+    input:
+      variables:
+        input_files: "${step.step_1_discover_files.output}"
+        config: "${step.step_2_read_config.output}"
+
+      prompt: |
+        Process the following input files from the list:
+        {{input_files}}
+
+        Use the configuration:
+        {{config}}
+
+        Read each file and extract:
+        - File name
+        - Content type
+        - Key data points
+        - Processing requirements
+
+        Batch size from config: {{config.batch_size}}
+
+    output:
+      save_to: batch_input_data
+      format: json
+
+  # ── STEP 4: Transform and Process Data ─────────────────────
+  step_4_transform_data:
+    name: "Transform Data"
+    description: "Transform and process the batch input data according to configuration"
+    type: agent
+    model: "${models.primary_processor}"
+
+    input:
+      variables:
+        input_data: "${step.step_3_read_batch_inputs.output}"
+        config: "${step.step_2_read_config.output}"
+
+      prompt: |
+        Transform the input data according to processing rules:
+
+        Input data:
+        {{input_data}}
+
+        Configuration:
+        {{config}}
+
+        Apply transformations:
+        - Normalize field names
+        - Convert date formats
+        - Validate data ranges
+        - Enrich with computed fields
+
+        Output transformed data ready for writing.
+
+    output:
+      save_to: transformed_data
+      format: json
+      fields:
+        - original_file
+        - transformed_records
+        - validation_status
+        - processing_metadata
+
+  # ── STEP 5: Write Individual Output Files ──────────────────
+  step_5_write_outputs:
+    name: "Write Individual Output Files"
+    description: "Write processed data to individual output files"
+    type: agent
+    model: "${models.primary_processor}"
+
+    input:
+      variables:
+        transformed: "${step.step_4_transform_data.output}"
+        config: "${step.step_2_read_config.output}"
+
+      prompt: |
+        Write the transformed data to individual output files.
+
+        Use configuration:
+        {{config}}
+
+        For each transformed record, create a separate output file in:
+        {{config.output_directory}}
+
+        File naming pattern: processed_{original_file}_{timestamp}.json
+
+        Include file operations in your response.
+
+    output:
+      save_to: write_results
+      format: json
+
+  # ── STEP 6: Write Summary Report (Text Format) ─────────────
+  step_6_write_summary:
+    name: "Write Summary Report"
+    description: "Generate and write a comprehensive summary report"
+    type: agent
+    model: "${models.primary_processor}"
+
+    input:
+      variables:
+        input_files: "${step.step_1_discover_files.output}"
+        transform_results: "${step.step_5_write_outputs.output}"
+
+      prompt: |
+        Generate a comprehensive summary report covering:
+
+        Files processed:
+        {{input_files}}
+
+        Transformation results:
+        {{transform_results}}
+
+        Report sections:
+        1. Processing Summary (counts, success/failure)
+        2. Data Quality Metrics
+        3. Performance Statistics
+        4. Error Summary (if any)
+        5. Output File Locations
+
+        Write the report as plain text to:
+        /workspace/output/processing-summary.txt
+
+    output:
+      save_to: summary_report
+      format: text
+      file_output:
+        enabled: true
+        path: /workspace/output/processing-summary.txt
+
+  # ── STEP 7: Format Conversion (YAML to JSON) ───────────────
+  step_7_format_conversion:
+    name: "Convert Configuration Format"
+    description: "Convert YAML configuration to JSON for downstream consumption"
+    type: agent
+    model: "${models.primary_processor}"
+
+    input:
+      prompt: |
+        Read the configuration file:
+        /workspace/config/app-config.yml
+
+        Convert it from YAML format to JSON format while preserving:
+        - All field names and values
+        - Nested structure
+        - Comments (as documentation fields)
+        - Data types
+
+        Write the JSON to:
+        /workspace/output/app-config.json
+
+    output:
+      save_to: converted_config
+      format: json
+      file_output:
+        enabled: true
+        path: /workspace/output/app-config.json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOGGING CONFIGURATION
+# Track all file operations
+# ─────────────────────────────────────────────────────────────────────────────
+logging:
+  enabled: true
+
+  levels:
+    default: info
+    file_operations: debug
+    execution: info
+
+  scopes:
+    file_operations:
+      enabled: true
+      include_file_paths: true
+      include_operation_types: true
+
+    execution:
+      enabled: true
+      include_metrics: true
+
+  output:
+    console:
+      enabled: true
+      color: true
+
+    file:
+      enabled: true
+      path: /workspace/logs/file-operations.log

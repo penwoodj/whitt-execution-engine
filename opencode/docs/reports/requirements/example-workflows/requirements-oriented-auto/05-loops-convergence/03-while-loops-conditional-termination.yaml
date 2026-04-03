@@ -1,0 +1,708 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# WORKFLOW: While Loops with Conditional Termination
+# ─────────────────────────────────────────────────────────────────────────────
+# Demonstrates: while loops that continue until a boolean condition becomes false,
+#               polling patterns, timeout limits, and conditional exit strategies
+# ─────────────────────────────────────────────────────────────────────────────
+
+workflow_id: while_loops_conditional_termination
+name: "While Loops with Conditional Termination"
+description: |
+  Demonstrates while-loop patterns with conditional termination,
+  polling mechanisms, timeout controls, and state-based exit strategies.
+version: "1.0.0"
+author: "AgentSDK Team"
+tags:
+  - loops
+  - while
+  - conditional
+  - polling
+  - state-monitoring
+
+# ── MODEL CONFIGURATION ──────────────────────────────────────────────────────
+models:
+  condition_monitor:
+    name: condition_monitor
+    host:
+      type: lmstudio
+      connection_settings:
+        host: localhost
+        port: 1234
+        connection_timeout_secs: 30
+
+    max_allowed:
+      ram: 20%
+      vram: 4GB
+      cpu: 50%
+      attention_tokens: 100000
+      concurrent_requests: 2
+
+    min_allowed:
+      ram: 10%
+      vram: 2GB
+      cpu: 25%
+      attention_tokens: 16000
+
+    allocation_strategy: dynamic
+
+    model_memory:
+      cache_size: medium
+      kv_cache_quantization: auto
+      attention_context: auto
+
+    execution:
+      timeout:
+        load_into_memory: 30s
+        time_to_first_response: 45s
+        total_time_to_response: 2h
+      max_turns: 15
+      stop_on_tool_failure: false
+      accumulate_tool_results: true
+
+    thinking:
+      budget_tokens: 4096
+      capture_in_output: true
+      capture_in_events: true
+      stream_to_log: false
+
+    tools:
+      default_permissions:
+        web_access: trust
+        file_read: trust
+        file_write: ask
+        shell_exec: ask
+      allowed_tools: [grep, file_read, file_write]
+      forbidden_tools: []
+
+    framework:
+      type: agentsdk
+
+# ── HARDCODED VALUES ──────────────────────────────────────────────────────────
+agentic_workflow:
+  hardcoded_values:
+    monitoring_config:
+      max_polling_iterations: 50
+      polling_interval_ms: 5000
+      timeout_seconds: 300
+
+    thresholds:
+      cpu_threshold: 80
+      memory_threshold: 90
+      error_rate_threshold: 5
+      response_time_threshold: 5000
+
+    initial_state:
+      is_healthy: true
+      pending_tasks: 10
+      error_count: 0
+      consecutive_failures: 0
+      max_consecutive_failures: 3
+
+  steps:
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 1: Basic While Loop - Continue Until False
+    # ═══════════════════════════════════════════════════════════════════════
+    step_1_basic_while_loop:
+      name: "Basic While Loop - Process Until Complete"
+      description: |
+        Process items while pending_tasks > 0.
+        Demonstrates fundamental while loop with simple condition.
+      type: loop
+
+      generative_entity: "${models.condition_monitor}"
+
+      loop:
+        type: while
+
+        while_config:
+          condition: "${workflow.pending_tasks} > 0"
+
+          # Maximum iterations for safety
+          max_iterations: 20
+
+          # Iteration variable for tracking
+          iteration_variable: while_iter
+
+          # Delay between iterations
+          delay_ms: 1000
+
+          # Checkpoint every 5 iterations
+          checkpoint_interval: 5
+
+      prompt: |
+        Iteration {{loop.while_iter}} - Processing pending tasks.
+
+        Current State:
+        - Pending tasks: {{workflow.pending_tasks}}
+        - Iteration: {{loop.while_iter}} / {{loop.max_iterations}}
+
+        Tasks for this iteration:
+        1. Check current system state
+        2. Process one pending task
+        3. Decrement pending task counter
+        4. Report processing result
+
+        Condition check: Continue while pending_tasks > 0
+
+        Output:
+        ```json
+        {
+          "iteration": {{loop.while_iter}},
+          "tasks_remaining": {{workflow.pending_tasks}},
+          "processed_task": "task_id_here",
+          "result": "success/failure",
+          "tasks_after": {{workflow.pending_tasks | minus: 1}}
+        }
+        ```
+
+      output:
+        save_to: basic_while_results
+        format: json
+        fields:
+          - iterations_executed
+          - tasks_processed
+          - final_task_count
+          - processing_log
+
+      retry:
+        max_attempts: 2
+        backoff: exponential
+        delay_ms: 500
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 2: While Loop with Complex Condition
+    # ═══════════════════════════════════════════════════════════════════════
+    step_2_complex_condition_while:
+      name: "While Loop with Multiple Conditions"
+      description: |
+        Continue while (is_healthy AND error_count < threshold)
+        Demonstrates compound boolean conditions.
+      type: loop
+
+      generative_entity: "${models.condition_monitor}"
+
+      loop:
+        type: while
+
+        while_config:
+          # Compound condition: healthy AND below error threshold
+          condition: "${workflow.is_healthy} == true AND ${workflow.error_count} < ${hardcoded_values.thresholds.error_rate_threshold}"
+
+          max_iterations: 30
+
+          iteration_variable: health_check_iter
+
+          delay_ms: 2000
+
+          # Log every iteration
+          log_interval: 1
+
+      prompt: |
+        Health Check Iteration {{loop.health_check_iter}}
+
+        System State:
+        - Is Healthy: {{workflow.is_healthy}}
+        - Error Count: {{workflow.error_count}}
+        - Error Threshold: {{hardcoded_values.thresholds.error_rate_threshold}}
+
+        Condition: Continue while (is_healthy AND error_count < threshold)
+
+        Monitoring tasks:
+        1. Check system health indicators
+        2. Scan for new errors
+        3. Compare against thresholds
+        4. Determine if should continue
+
+        Health metrics to check:
+        - Response time < {{hardcoded_values.thresholds.response_time_threshold}}ms
+        - CPU usage < {{hardcoded_values.thresholds.cpu_threshold}}%
+        - Memory usage < {{hardcoded_values.thresholds.memory_threshold}}%
+
+        Output:
+        ```json
+        {
+          "iteration": {{loop.health_check_iter}},
+          "system_healthy": {{workflow.is_healthy}},
+          "error_count": {{workflow.error_count}},
+          "threshold": {{hardcoded_values.thresholds.error_rate_threshold}},
+          "should_continue": true/false,
+          "health_metrics": {
+            "response_time_ms": 0,
+            "cpu_percent": 0,
+            "memory_percent": 0
+          }
+        }
+        ```
+
+      output:
+        save_to: complex_condition_results
+        format: json
+        fields:
+          - total_checks
+          - health_status_history
+          - errors_detected
+          - termination_reason
+
+      depends_on:
+        - step_1_basic_while_loop
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 3: While Loop with Timeout
+    # ═══════════════════════════════════════════════════════════════════════
+    step_3_timeout_while_loop:
+      name: "While Loop with Timeout Protection"
+      description: |
+        Continue while condition is true, but exit if timeout exceeded.
+        Demonstrates time-bounded while loops.
+      type: loop
+
+      generative_entity: "${models.condition_monitor}"
+
+      loop:
+        type: while
+
+        while_config:
+          condition: "${workflow.operation_in_progress} == true"
+
+          # Timeout configuration
+          timeout_seconds: 60
+          start_time: "${workflow.loop_start_time}"
+
+          # Check timeout condition
+          timeout_condition: "${loop.elapsed_seconds} >= ${loop.timeout_seconds}"
+
+          max_iterations: 100
+
+          iteration_variable: timeout_iter
+
+          delay_ms: 500
+
+      prompt: |
+        Timeout-Protected Iteration {{loop.timeout_iter}}
+
+        Time Status:
+        - Start Time: {{workflow.loop_start_time}}
+        - Current Time: {{loop.current_time}}
+        - Elapsed: {{loop.elapsed_seconds}}s
+        - Timeout: {{loop.timeout_seconds}}s
+
+        Operation State:
+        - In Progress: {{workflow.operation_in_progress}}
+        - Progress: {{loop.progress_percent}}%
+
+        Conditions:
+        - Continue while: operation_in_progress == true
+        - Exit if: elapsed_seconds >= timeout_seconds
+
+        Tasks:
+        1. Check operation status
+        2. Monitor elapsed time
+        3. If timeout reached, signal completion
+        4. Otherwise, continue processing
+
+        Output:
+        ```json
+        {
+          "iteration": {{loop.timeout_iter}},
+          "elapsed_seconds": {{loop.elapsed_seconds}},
+          "timeout_seconds": {{loop.timeout_seconds}},
+          "operation_status": "in_progress/timeout/completed",
+          "timeout_exceeded": {{loop.elapsed_seconds >= loop.timeout_seconds}}
+        }
+        ```
+
+      output:
+        save_to: timeout_while_results
+        format: json
+        fields:
+          - iterations_before_timeout
+          - total_elapsed_time
+          - timeout_hit
+          - operation_result
+
+      depends_on:
+        - step_2_complex_condition_while
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 4: While Loop with Consecutive Failure Limit
+    # ═══════════════════════════════════════════════════════════════════════
+    step_4_consecutive_failure_while:
+      name: "While Loop with Failure Limit"
+      description: |
+        Continue while condition is true, but exit if consecutive failures exceed limit.
+        Demonstrates failure-bounded while loops.
+      type: loop
+
+      generative_entity: "${models.condition_monitor}"
+
+      loop:
+        type: while
+
+        while_config:
+          condition: "${workflow.should_retry} == true"
+
+          # Failure tracking
+          track_failures: true
+          consecutive_failure_limit: "${hardcoded_values.initial_state.max_consecutive_failures}"
+
+          # Exit condition: too many consecutive failures
+          exit_condition: "${loop.consecutive_failures} >= ${loop.consecutive_failure_limit}"
+
+          max_iterations: 15
+
+          iteration_variable: retry_iter
+
+          # Reset consecutive failures on success
+          reset_on_success: true
+
+      prompt: |
+        Retry Iteration {{loop.retry_iter}}
+
+        Failure Tracking:
+        - Consecutive Failures: {{loop.consecutive_failures}}
+        - Max Allowed: {{loop.consecutive_failure_limit}}
+        - Total Failures: {{loop.total_failures}}
+
+        Conditions:
+        - Continue while: should_retry == true
+        - Exit if: consecutive_failures >= max_consecutive_failures
+
+        Retry Strategy:
+        1. Attempt the operation
+        2. If success: reset consecutive failure counter
+        3. If failure: increment consecutive failure counter
+        4. Check exit condition
+
+        Output:
+        ```json
+        {
+          "iteration": {{loop.retry_iter}},
+          "attempt_result": "success/failure",
+          "consecutive_failures": {{loop.consecutive_failures}},
+          "limit_reached": {{loop.consecutive_failures >= loop.consecutive_failure_limit}},
+          "should_continue": true/false
+        }
+        ```
+
+      output:
+        save_to: failure_limit_results
+        format: json
+        fields:
+          - total_attempts
+          - successes
+          - failures
+          - consecutive_failure_limit_reached
+          - final_status
+
+      depends_on:
+        - step_3_timeout_while_loop
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 5: Polling While Loop with Interval
+    # ═══════════════════════════════════════════════════════════════════════
+    step_5_polling_while_loop:
+      name: "Polling While Loop with Fixed Interval"
+      description: |
+        Poll an endpoint/resource at fixed intervals while condition is true.
+        Demonstrates polling patterns common in monitoring systems.
+      type: loop
+
+      generative_entity: "${models.condition_monitor}"
+
+      loop:
+        type: while
+
+        while_config:
+          condition: "${workflow.resource_not_ready} == true"
+
+          # Polling configuration
+          polling_interval_ms: 3000
+          max_polls: 20
+
+          iteration_variable: poll_count
+
+          # Track polling history
+          track_history: true
+
+      prompt: |
+        Poll Iteration {{loop.poll_count}}
+
+        Polling Configuration:
+        - Interval: {{loop.polling_interval_ms}}ms
+        - Max Polls: {{loop.max_polls}}
+
+        Resource Status:
+        - Resource Ready: {{workflow.resource_not_ready}}
+        - Polls Remaining: {{loop.remaining_polls}}
+
+        Condition: Continue while resource_not_ready == true
+
+        Polling Tasks:
+        1. Check resource status
+        2. If ready: signal completion
+        3. If not ready: wait for interval
+        4. Record poll result
+
+        Output:
+        ```json
+        {
+          "poll_number": {{loop.poll_count}},
+          "resource_status": "ready/not_ready",
+          "time_waited_ms": {{loop.polling_interval_ms}},
+          "poll_history": []
+        }
+        ```
+
+      output:
+        save_to: polling_results
+        format: json
+        fields:
+          - total_polls
+          - poll_history
+          - resource_became_ready
+          - total_wait_time_ms
+
+      depends_on:
+        - step_4_consecutive_failure_while
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 6: While Loop with State Machine
+    # ═══════════════════════════════════════════════════════════════════════
+    step_6_state_machine_while:
+      name: "While Loop with State Transitions"
+      description: |
+        While loop that transitions between states until terminal state reached.
+        Demonstrates state machine pattern with while loop.
+      type: loop
+
+      generative_entity: "${models.condition_monitor}"
+
+      loop:
+        type: while
+
+        while_config:
+          # Continue while not in terminal state
+          condition: "${workflow.current_state} != 'completed' AND ${workflow.current_state} != 'failed'"
+
+          # State tracking
+          track_state_transitions: true
+          initial_state: "initialized"
+
+          # Valid states
+          valid_states:
+            - initialized
+            - loading
+            - processing
+            - validating
+            - completed
+            - failed
+
+          max_iterations: 25
+
+          iteration_variable: state_transition
+
+      prompt: |
+        State Machine Iteration {{loop.state_transition}}
+
+        Current State: {{workflow.current_state}}
+
+        Valid Transitions:
+        - initialized -> loading
+        - loading -> processing
+        - processing -> validating
+        - validating -> completed (or failed)
+        - Any state -> failed (on error)
+
+        Condition: Continue while state != 'completed' AND state != 'failed'
+
+        State Transition Tasks:
+        1. Identify current state
+        2. Determine next state based on conditions
+        3. Execute transition logic
+        4. Update current state
+        5. Check termination condition
+
+        Output:
+        ```json
+        {
+          "iteration": {{loop.state_transition}},
+          "previous_state": "{{workflow.previous_state}}",
+          "current_state": "{{workflow.current_state}}",
+          "next_state": "{{workflow.next_state}}",
+          "transition_successful": true,
+          "state_history": []
+        }
+        ```
+
+      output:
+        save_to: state_machine_results
+        format: json
+        fields:
+          - total_transitions
+          - state_history
+          - final_state
+          - transition_log
+
+      depends_on:
+        - step_5_polling_while_loop
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 7: Aggregate While Loop Results
+    # ═══════════════════════════════════════════════════════════════════════
+    step_7_aggregate_while_results:
+      name: "Aggregate While Loop Results"
+      description: |
+        Combine results from all while loop patterns into comprehensive summary.
+      type: agent
+
+      generative_entity: "${models.condition_monitor}"
+
+      prompt: |
+        Aggregate all while loop pattern results:
+
+        1. Basic While Loop (pending tasks):
+        {{step.step_1_basic_while_loop.output}}
+
+        2. Complex Condition While (health checks):
+        {{step.step_2_complex_condition_while.output}}
+
+        3. Timeout While Loop:
+        {{step.step_3_timeout_while_loop.output}}
+
+        4. Consecutive Failure While:
+        {{step.step_4_consecutive_failure_while.output}}
+
+        5. Polling While Loop:
+        {{step.step_5_polling_while_loop.output}}
+
+        6. State Machine While:
+        {{step.step_6_state_machine_while.output}}
+
+        Generate comprehensive summary including:
+        - Total iterations across all patterns
+        - Termination reasons breakdown
+        - Performance metrics
+        - Best practices identified
+        - Recommendations for while loop usage
+
+      input_variables:
+        basic_results: "${step.step_1_basic_while_loop.output}"
+        complex_results: "${step.step_2_complex_condition_while.output}"
+        timeout_results: "${step.step_3_timeout_while_loop.output}"
+        failure_results: "${step.step_4_consecutive_failure_while.output}"
+        polling_results: "${step.step_5_polling_while_loop.output}"
+        state_results: "${step.step_6_state_machine_while.output}"
+
+      output:
+        save_to: final_while_aggregation
+        format: json
+        file_output:
+          enabled: true
+          path: /workspace/output/while_loops_summary.json
+          format: json
+          encoding: utf-8
+
+      depends_on:
+        - step_6_state_machine_while
+
+# ── WORKFLOW EXECUTION STRATEGY ───────────────────────────────────────────────
+workflow_execution_strategy:
+  load_unload: lazy
+  processing: serial
+
+  parallel:
+    enabled: false
+
+  memory:
+    allocation:
+      strategy: dynamic
+    model_lifecycle:
+      load_unload_strategy: lazy
+      unload_unused: true
+
+  timeout:
+    total: 90m
+    per_operation:
+      step: 20m
+      tool_call: 5m
+
+  error_handling:
+    default_action:
+      type: retry
+      reason: "Retry while loop on transient failures"
+
+    retry:
+      max_attempts_per_step: 3
+      backoff_strategy:
+        type: exponential
+        base_delay_ms: 2000
+        max_delay_ms: 30000
+
+  checkpointing:
+    enabled: true
+    configuration:
+      level: info
+      output_path: "/workspace/checkpoints/while_loops_checkpoint.json"
+    triggers:
+      interval:
+        steps: [step_3_timeout_while_loop, step_7_aggregate_while_results]
+
+# ── LOGGING CONFIGURATION ─────────────────────────────────────────────────────
+logging:
+  enabled: true
+  levels:
+    default: info
+    workflow: debug
+    pipeline: debug
+
+  output:
+    console:
+      enabled: true
+      color: true
+      timestamps: true
+      format: text
+
+    file:
+      enabled: true
+      path: /workspace/logs/while_loops_workflow.log
+      format: json
+      rotation:
+        enabled: true
+        max_size_mb: 50
+        max_files: 5
+
+# ── METRICS COLLECTION ────────────────────────────────────────────────────────
+metrics:
+  enabled: true
+  collection:
+    step_level:
+      - execution_time_secs
+      - memory_peak_mb
+      - iteration_count
+    custom_metrics:
+      - name: total_while_iterations
+        description: "Sum of all while loop iterations"
+      - name: average_condition_checks
+        description: "Mean condition evaluation count"
+      - name: termination_reasons
+        description: "Breakdown of why loops terminated"
+
+  output:
+    path: /workspace/metrics/while_loops_metrics.json
+    format: json
+    include_timestamps: true
+
+# ── FEATURES DEMONSTRATED ─────────────────────────────────────────────────────
+features_demonstrated:
+  - while_loops
+  - conditional_termination
+  - compound_conditions
+  - timeout_protection
+  - failure_tracking
+  - polling_patterns
+  - state_machines
+  - consecutive_failure_limits
+  - iteration_tracking
+  - condition_evaluation

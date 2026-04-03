@@ -1,0 +1,606 @@
+---
+# Workflow: Context Injection and Previous Step Outputs
+# Category: Data Flow
+# Focus: Context injection, previous step outputs, context window management
+#
+# This workflow demonstrates:
+# - context.include_previous_outputs for including previous step outputs
+# - context.include_system_context for system information injection
+# - context.include_tool_results for tool execution result inclusion
+# - Context window management and budget optimization
+# - Selective output inclusion for memory efficiency
+# - Chain-of-thought pattern with progressive context building
+
+workflow_id: context_injection_chain_of_thought
+name: Context Injection - Chain of Thought Workflow
+description: |
+  Demonstrates advanced context injection patterns where each step builds on
+  previous context. Shows how to manage context windows, selectively include
+  outputs, and optimize memory usage through careful context budgeting.
+version: "1.0.0"
+author: "AgentSDK Examples"
+tags:
+  - data-flow
+  - context-injection
+  - chain-of-thought
+  - context-window
+  - memory-optimization
+
+models:
+  reasoner:
+    name: "Chain-of-Thought Reasoner"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+        connection_timeout_secs: 30
+    generative_entity: "llama-3.2-3b-instruct"
+    backend: vulkan
+    execution:
+      timeout:
+        time_to_first_response: 15s
+        total_time_to_response: 120s
+      max_turns: 10
+    thinking:
+      budget_tokens: 4096
+      capture_in_output: true
+      capture_in_events: true
+
+  synthesizer:
+    name: "Context Synthesizer"
+    host:
+      type: ollama
+      connection_settings:
+        base_url: "http://localhost:11434"
+        timeout_secs: 90
+    generative_entity: "llama3.2"
+
+  validator:
+    name: "Logic Validator"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+    generative_entity: "llama-3.2-3b-instruct"
+    backend: vulkan
+
+workflow_execution_strategy:
+  load_unload: one_at_a_time
+  processing: serial
+  timeout:
+    total: 45m
+  error_handling:
+    default_action:
+      type: retry
+      reason: "Context processing failed, retrying"
+    retry:
+      max_attempts_per_step: 3
+      backoff_strategy:
+        type: exponential
+        base_delay_ms: 1000
+        max_delay_ms: 30000
+        jitter_factor: 0.2
+
+logging:
+  enabled: true
+  levels:
+    default: info
+    workflow: debug
+    pipeline: debug
+    models: debug
+    tools: debug
+    execution: debug
+  scopes:
+    workflow:
+      enabled: true
+      include_timestamps: true
+      include_execution_id: true
+      include_context_size: true
+    pipeline:
+      enabled: true
+      include_step_transitions: true
+      include_context_injection: true
+    tools:
+      enabled: true
+      include_tool_calls: true
+      include_tool_results: true
+  output:
+    console:
+      enabled: true
+      color: true
+      timestamps: true
+      format: text
+    file:
+      enabled: true
+      path: /workspace/logs/context_injection.log
+      format: json
+
+agentic_workflow:
+  hardcoded_values:
+    context:
+      max_context_tokens: 150000
+      budget_per_step: 8000
+      include_previous_limit: 3
+      truncation_strategy: "smart"
+    reasoning:
+      max_depth: 5
+      confidence_threshold: 0.85
+      require_justification: true
+    synthesis:
+      aggregation_method: "weighted"
+      prioritize_recency: true
+      include_confidence_scores: true
+    validation:
+      check_logical_consistency: true
+      check_factual_accuracy: true
+      cross_reference_previous: true
+
+  steps:
+    step_1_initial_analysis:
+      name: "Initial Problem Analysis"
+      description: |
+        First step in chain-of-thought: Analyze the problem statement and
+        identify key components. Uses minimal context (no previous outputs).
+      type: agent
+      generative_entity: "${models.reasoner}"
+      prompt: |
+        Analyze the following problem statement and provide an initial breakdown.
+
+        Problem Statement:
+        {{user_inputs.problem_statement}}
+
+        Analysis Framework:
+        1. Identify the core question or goal
+        2. Break down into sub-problems or components
+        3. Identify known information and gaps
+        4. Outline potential approaches
+
+        Return JSON with:
+        - core_problem: the main question or goal
+        - sub_problems: list of component problems
+        - known_information: facts we have
+        - information_gaps: what we need to find
+        - suggested_approaches: initial solution paths
+        - confidence: your confidence in this analysis (0-1)
+
+      input_variables:
+        problem_statement: "{{user_inputs.problem_statement}}"
+        max_depth: "{{workflow.reasoning.max_depth}}"
+
+      context:
+        include_previous_outputs: false
+        include_system_context: true
+        include_tool_results: false
+
+      output:
+        save_to: initial_analysis
+        format: json
+        fields:
+          - core_problem
+          - sub_problems
+          - known_information
+          - information_gaps
+          - suggested_approaches
+          - confidence
+        file_output:
+          enabled: true
+          path: "/workspace/output/step1_initial_analysis.json"
+          format: json
+        console:
+          enabled: true
+          prefix: "[Step 1] "
+
+    step_2_gather_context:
+      name: "Gather Additional Context"
+      description: |
+        Second step: Gather relevant information based on initial analysis.
+        Includes previous output and system context for informed reasoning.
+      type: agent
+      generative_entity: "${models.reasoner}"
+      prompt: |
+        Based on the initial analysis, gather additional context and information.
+
+        Previous Analysis:
+        {{step.step_1_initial_analysis.output}}
+
+        Information Gaps Identified:
+        {{step.step_1_initial_analysis.output.information_gaps}}
+
+        Research Tasks:
+        1. Search for relevant facts or data
+        2. Identify supporting evidence
+        3. Note any conflicting information
+        4. Update confidence levels
+
+        Context Budget: {{workflow.context.budget_per_step}} tokens
+        Include Previous Limit: Last {{workflow.context.include_previous_limit}} step(s)
+
+        Return JSON with:
+        - gathered_facts: new information discovered
+        - supporting_evidence: evidence for each fact
+        - conflicts: any contradictory information
+        - confidence_updates: updated confidence for each sub-problem
+        - new_gaps: additional gaps discovered during research
+
+      input_variables:
+        previous_analysis: "${step.step_1_initial_analysis.output}"
+        information_gaps: "${step.step_1_initial_analysis.output.information_gaps}"
+        context_budget: "{{workflow.context.budget_per_step}}"
+
+      context:
+        include_previous_outputs: true
+        include_system_context: true
+        include_tool_results: true
+
+      file_operations:
+        - operation: read
+          file_path: "/workspace/data/knowledge_base.json"
+          format: json
+
+      output:
+        save_to: gathered_context
+        format: json
+        fields:
+          - gathered_facts
+          - supporting_evidence
+          - conflicts
+          - confidence_updates
+          - new_gaps
+        file_output:
+          enabled: true
+          path: "/workspace/output/step2_gathered_context.json"
+          format: json
+        console:
+          enabled: true
+          prefix: "[Step 2] "
+
+    step_3_deep_reasoning:
+      name: "Deep Reasoning and Analysis"
+      description: |
+        Third step: Perform deep reasoning on gathered context.
+        Chains together previous reasoning with new information.
+      type: agent
+      generative_entity: "${models.reasoner}"
+      prompt: |
+        Perform deep reasoning combining all gathered context.
+
+        Chain of Reasoning:
+        1. Initial Analysis:
+        {{step.step_1_initial_analysis.output.core_problem}}
+
+        2. Sub-problems from Step 1:
+        {{step.step_1_initial_analysis.output.sub_problems}}
+
+        3. Newly Gathered Facts:
+        {{step.step_2_gather_context.output.gathered_facts}}
+
+        4. Conflicts Identified:
+        {{step.step_2_gather_context.output.conflicts}}
+
+        Reasoning Requirements:
+        - Max Depth: {{workflow.reasoning.max_depth}}
+        - Require Justification: {{workflow.reasoning.require_justification}}
+        - Confidence Threshold: {{workflow.reasoning.confidence_threshold}}
+
+        Reasoning Tasks:
+        1. Connect facts to sub-problems
+        2. Resolve any conflicts
+        3. Generate intermediate conclusions
+        4. Identify logical chains
+        5. Flag areas of uncertainty
+
+        Return JSON with:
+        - reasoning_chains: list of logical chains with justification
+        - intermediate_conclusions: conclusions reached
+        - resolved_conflicts: how conflicts were resolved
+        - uncertainties: areas with low confidence
+        - chain_confidence: confidence in each chain (0-1)
+
+      input_variables:
+        initial_analysis: "${step.step_1_initial_analysis.output}"
+        gathered_context: "${step.step_2_gather_context.output}"
+        max_depth: "{{workflow.reasoning.max_depth}}"
+        require_justification: "{{workflow.reasoning.require_justification}}"
+        confidence_threshold: "{{workflow.reasoning.confidence_threshold}}"
+
+      context:
+        include_previous_outputs: true
+        include_system_context: true
+        include_tool_results: false
+
+      output:
+        save_to: deep_reasoning
+        format: json
+        fields:
+          - reasoning_chains
+          - intermediate_conclusions
+          - resolved_conflicts
+          - uncertainties
+          - chain_confidence
+        file_output:
+          enabled: true
+          path: "/workspace/output/step3_deep_reasoning.json"
+          format: json
+        console:
+          enabled: true
+          prefix: "[Step 3] "
+
+    step_4_synthesize_conclusions:
+      name: "Synthesize Conclusions"
+      description: |
+        Fourth step: Synthesize all reasoning into coherent conclusions.
+        Combines all previous steps with weighted aggregation.
+      type: agent
+      generative_entity: "${models.synthesizer}"
+      prompt: |
+        Synthesize all reasoning into final conclusions.
+
+        Aggregation Method: {{workflow.synthesis.aggregation_method}}
+        Prioritize Recency: {{workflow.synthesis.prioritize_recency}}
+        Include Confidence Scores: {{workflow.synthesis.include_confidence_scores}}
+
+        Full Chain of Thought:
+        
+        Step 1 - Initial Analysis:
+        {{step.step_1_initial_analysis.output}}
+
+        Step 2 - Gathered Context:
+        {{step.step_2_gather_context.output}}
+
+        Step 3 - Deep Reasoning:
+        {{step.step_3_deep_reasoning.output}}
+
+        Synthesis Tasks:
+        1. Weight conclusions by confidence
+        2. Prioritize recent conclusions if configured
+        3. Combine related conclusions
+        4. Identify primary conclusions
+        5. Generate actionable recommendations
+
+        Return JSON with:
+        - primary_conclusions: main conclusions ranked by strength
+        - supporting_evidence: evidence for each conclusion
+        - confidence_scores: confidence in each conclusion (0-1)
+        - recommendations: actionable recommendations
+        - synthesis_quality: overall quality of synthesis (0-1)
+
+      input_variables:
+        step1_output: "${step.step_1_initial_analysis.output}"
+        step2_output: "${step.step_2_gather_context.output}"
+        step3_output: "${step.step_3_deep_reasoning.output}"
+        aggregation_method: "{{workflow.synthesis.aggregation_method}}"
+        prioritize_recency: "{{workflow.synthesis.prioritize_recency}}"
+        include_confidence: "{{workflow.synthesis.include_confidence_scores}}"
+
+      context:
+        include_previous_outputs: true
+        include_system_context: true
+        include_tool_results: false
+
+      output:
+        save_to: synthesized_conclusions
+        format: json
+        fields:
+          - primary_conclusions
+          - supporting_evidence
+          - confidence_scores
+          - recommendations
+          - synthesis_quality
+        file_output:
+          enabled: true
+          path: "/workspace/output/step4_synthesized.json"
+          format: json
+        console:
+          enabled: true
+          prefix: "[Step 4] "
+
+    step_5_validate_conclusions:
+      name: "Validate Conclusions"
+      description: |
+        Fifth step: Validate synthesized conclusions for logical consistency
+        and factual accuracy. Cross-references all previous steps.
+      type: agent
+      generative_entity: "${models.validator}"
+      prompt: |
+        Validate the synthesized conclusions for logical consistency and accuracy.
+
+        Validation Checks:
+        - Check Logical Consistency: {{workflow.validation.check_logical_consistency}}
+        - Check Factual Accuracy: {{workflow.validation.check_factual_accuracy}}
+        - Cross-Reference Previous: {{workflow.validation.cross_reference_previous}}
+
+        Conclusions to Validate:
+        {{step.step_4_synthesize_conclusions.output.primary_conclusions}}
+
+        Supporting Evidence:
+        {{step.step_4_synthesize_conclusions.output.supporting_evidence}}
+
+        Full Context Chain:
+        1. Initial Analysis: {{step.step_1_initial_analysis.output}}
+        2. Gathered Context: {{step.step_2_gather_context.output}}
+        3. Deep Reasoning: {{step.step_3_deep_reasoning.output}}
+
+        Validation Tasks:
+        1. Check logical consistency between conclusions
+        2. Verify facts against evidence
+        3. Cross-reference with initial analysis
+        4. Identify any remaining uncertainties
+        5. Suggest refinements if needed
+
+        Return JSON with:
+        - validation_results: pass/fail for each check
+        - inconsistencies: any logical inconsistencies found
+        - accuracy_score: factual accuracy score (0-1)
+        - refinement_suggestions: suggestions for improving conclusions
+        - final_status: "validated", "needs_review", or "failed"
+        - validated_conclusions: conclusions that passed validation
+
+      input_variables:
+        conclusions: "${step.step_4_synthesize_conclusions.output}"
+        check_consistency: "{{workflow.validation.check_logical_consistency}}"
+        check_accuracy: "{{workflow.validation.check_factual_accuracy}}"
+        cross_reference: "{{workflow.validation.cross_reference_previous}}"
+
+      context:
+        include_previous_outputs: true
+        include_system_context: true
+        include_tool_results: false
+
+      output:
+        save_to: validation_results
+        format: json
+        fields:
+          - validation_results
+          - inconsistencies
+          - accuracy_score
+          - refinement_suggestions
+          - final_status
+          - validated_conclusions
+        file_output:
+          enabled: true
+          path: "/workspace/output/step5_validation.json"
+          format: json
+        console:
+          enabled: true
+          prefix: "[Step 5] "
+
+    step_6_final_report:
+      name: "Generate Final Report"
+      description: |
+        Final step: Generate comprehensive report with full chain-of-thought
+        documentation and validated conclusions.
+      type: agent
+      generative_entity: "${models.synthesizer}"
+      prompt: |
+        Generate a comprehensive final report documenting the entire chain-of-thought.
+
+        Report Requirements:
+        - Include full chain of reasoning
+        - Document all steps and outputs
+        - Present validated conclusions
+        - Provide actionable recommendations
+
+        Step Outputs Summary:
+
+        1. Initial Analysis:
+        {{step.step_1_initial_analysis.output}}
+
+        2. Gathered Context:
+        {{step.step_2_gather_context.output}}
+
+        3. Deep Reasoning:
+        {{step.step_3_deep_reasoning.output}}
+
+        4. Synthesized Conclusions:
+        {{step.step_4_synthesize_conclusions.output}}
+
+        5. Validation Results:
+        {{step.step_5_validate_conclusions.output}}
+
+        Report Structure:
+        1. Executive Summary
+        2. Chain of Thought Documentation
+        3. Validated Conclusions
+        4. Recommendations
+        5. Limitations and Uncertainties
+
+        Return as comprehensive JSON with:
+        - executive_summary: brief overview
+        - chain_of_thought: full reasoning chain
+        - validated_conclusions: final conclusions
+        - recommendations: actionable recommendations
+        - limitations: known limitations
+        - context_stats: statistics about context usage
+
+      input_variables:
+        all_steps_included: true
+        include_context_stats: true
+
+      context:
+        include_previous_outputs: true
+        include_system_context: true
+        include_tool_results: true
+
+      file_operations:
+        - operation: write
+          file_path: "/workspace/output/final_chain_of_thought_report.json"
+          format: json
+        - operation: write
+          file_path: "/workspace/output/final_report.md"
+          format: markdown
+
+      output:
+        save_to: final_report
+        format: json
+        fields:
+          - executive_summary
+          - chain_of_thought
+          - validated_conclusions
+          - recommendations
+          - limitations
+          - context_stats
+        file_output:
+          enabled: true
+          path: "/workspace/output/final_chain_of_thought_report.json"
+          format: json
+        console:
+          enabled: true
+          prefix: "[Final] "
+          color: green
+
+user_inputs:
+  execution_mode: interactive
+  workflow_level:
+    ask_at_start: true
+    inputs:
+      - id: problem_statement
+        type: text_area
+        label: "Problem Statement"
+        placeholder: "Enter the problem or question to analyze..."
+        default_value: "Analyze the factors contributing to system performance degradation and recommend optimization strategies."
+        multiline: true
+        validation:
+          required: true
+          min_length: 50
+          error_message: "Problem statement must be at least 50 characters"
+
+      - id: include_intermediate_steps
+        type: confirm
+        label: "Include Intermediate Steps in Report"
+        default_value: true
+
+      - id: generate_visualization
+        type: confirm
+        label: "Generate Chain Visualization"
+        default_value: true
+
+metrics:
+  enabled: true
+  collection:
+    pipeline_level:
+      - total_duration_secs
+      - context_tokens_used
+      - context_efficiency
+    step_level:
+      - execution_time_secs
+      - context_size_per_step
+      - reasoning_depth_achieved
+    model_level:
+      - inference_time_ms
+      - tokens_processed
+  output:
+    path: /workspace/metrics/context_injection_metrics.json
+    format: json
+
+validation:
+  workflow_schema:
+    enabled: true
+    required_fields:
+      - workflow_id
+      - name
+      - models
+  step_outputs:
+    enabled: true
+    validate_format: json

@@ -1,0 +1,1119 @@
+---
+workflow_id: resource_concurrency_control
+name: Parallel Execution with Resource Limits and Concurrency Control
+description: |
+  Demonstrates advanced parallel execution patterns with fine-grained resource
+  management, per-group concurrency limits, resource quotas, distributed resource
+  allocation, and comprehensive concurrency control mechanisms including rate limiting,
+  throttling, and priority-based scheduling.
+
+  
+models:
+  primary_processor:
+    name: "Primary Processing Agent"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: localhost
+        port: 1234
+    resource_limits:
+      max_allowed:
+        ram: 12GB
+        vram: 6GB
+        cpu: 60%
+        gpu: 60%
+        attention_tokens: 8192
+        concurrent_requests: 3
+      min_allowed:
+        ram: 6GB
+        vram: 3GB
+        cpu: 30%
+        gpu: 30%
+        attention_tokens: 4096
+      allocation_strategy: dynamic
+    
+    execution:
+      timeout:
+        load_into_memory: 40s
+        time_to_first_response: 60s
+        total_time_to_response: 20m
+      max_turns: 8
+      stop_on_tool_failure: false
+      accumulate_tool_results: true
+    
+    model_memory:
+      cache_size: medium
+      kv_cache_quantization: auto
+      attention_context: auto
+    
+    thinking:
+      budget_tokens: 4096
+      capture_in_output: true
+      capture_in_events: true
+    
+    tools:
+      default_permissions:
+        web_access: ask
+        file_read: trust
+        file_write: ask
+        shell_exec: ask
+      
+      allowed_tools: [grep, file_read, file_write, bash]
+      forbidden_tools: []
+      
+    hooks:
+      enabled: true
+      on_run_start:
+        log:
+          message: "Starting primary processing agent"
+          level: info
+      on_run_complete:
+        log:
+          message: "Completed primary processing agent"
+          level: info
+  
+  secondary_processor:
+    name: "Secondary Processing Agent"
+    host:
+      type: ollama
+      connection_settings:
+        base_url: http://localhost:11434
+    resource_limits:
+      max_allowed:
+        ram: 8GB
+        vram: 4GB
+        cpu: 40%
+        gpu: 40%
+        attention_tokens: 6144
+        concurrent_requests: 2
+      min_allowed:
+        ram: 4GB
+        vram: 2GB
+        cpu: 20%
+        gpu: 20%
+        attention_tokens: 3072
+      allocation_strategy: dynamic
+    
+    execution:
+      timeout:
+        load_into_memory: 30s
+        time_to_first_response: 45s
+        total_time_to_response: 15m
+      max_turns: 6
+      stop_on_tool_failure: false
+    
+    model_memory:
+      cache_size: medium
+      kv_cache_quantization: auto
+      attention_context: auto
+  
+  coordinator:
+    name: "Resource Coordinator Agent"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: localhost
+        port: 1235
+    resource_limits:
+      max_allowed:
+        ram: 6GB
+        vram: 3GB
+        cpu: 40%
+        gpu: 40%
+        attention_tokens: 4096
+        concurrent_requests: 2
+      min_allowed:
+        ram: 3GB
+        vram: 1.5GB
+        cpu: 20%
+        gpu: 20%
+        attention_tokens: 2048
+      allocation_strategy: adaptive
+    
+    execution:
+      timeout:
+        load_into_memory: 25s
+        time_to_first_response: 40s
+        total_time_to_response: 12m
+      max_turns: 5
+      stop_on_tool_failure: false
+    
+    model_memory:
+      cache_size: min
+      kv_cache_quantization: auto
+      attention_context: auto
+
+workflow_execution_strategy:
+  # Model lifecycle management
+  load_unload: adaptive
+  # adaptive = Load/unload based on usage patterns and resource pressure
+  
+  processing: parallel
+  # Parallel execution with resource-aware scheduling
+  
+  # Parallelization configuration
+  parallel:
+    enabled: true
+    algorithm: priority_queue
+    # Priority queue considers task priority and resource requirements
+    
+    load_balancing:
+      strategy: least_loaded
+      # Assign work to workers with lowest current load
+      worker_selection_timeout_secs: 15
+      enabled: true
+    
+    max_threads: 8
+    max_models: 3
+    max_concurrent_requests: 4
+    max_steps: 6
+    max_sub_agents: 3
+    parallel_group_timeout_secs: 600
+  
+  # Resource allocation with quotas
+  resource_allocation:
+    strategy: adaptive
+    # Dynamic allocation based on current resource pressure
+    
+    cpu_reservation_percent: 75
+    gpu_reservation_mb: 8192
+    network_bandwidth_reservation_mbps: 100
+    pre_allocation_enabled: true
+    
+    allocation_policy:
+      memory: balanced
+      cpu: balanced
+      gpu: greedy
+  
+  # Concurrency limits per resource type
+  concurrency_limits:
+    model_loading: 2
+    # Max 2 models loading concurrently
+    tool_execution: 8
+    # Max 8 tool calls executing in parallel
+    file_operations: 5
+    # Max 5 file operations concurrently
+    api_requests: 4
+    # Max 4 API requests concurrently
+    sub_agent_spawning: 3
+    # Max 3 sub-agents spawning concurrently
+    workflow_execution: 2
+    # Max 2 sub-workflows executing in parallel
+  
+  # Memory management with pressure handling
+  memory:
+    allocation:
+      strategy: adaptive
+      max_allowed:
+        ram: 60%
+        vram: 12GB
+        cpu: 80%
+        gpu: 80%
+      min_allowed:
+        ram: 30%
+        vram: 4GB
+        cpu: 40%
+        gpu: 40%
+    
+    model_lifecycle:
+      load_unload_strategy: adaptive
+      cache_size: medium
+      swap_timeout_secs: 30
+      unload_unused: true
+      gc_interval_secs: 300
+    
+    pressure_handling:
+      trigger_threshold_percent: 80
+      # Trigger throttling at 80% usage
+      strategy: throttle
+      # Throttle incoming requests when under pressure
+      throttle_factor: 0.5
+      # Reduce processing rate by 50%
+      on_oom: swap
+      # Swap out models to disk when OOM occurs
+  
+  # Timeout management
+  timeout:
+    total: 60m
+    per_operation:
+      tool_call: 5m
+      step: 15m
+      sub_workflow: 20m
+      time_to_first_result_secs: 120
+    timeout_strategy: continue_with_partial
+    # Continue with partial results on timeout
+  
+  # Error handling
+  error_handling:
+    default_action:
+      type: retry
+      reason: "Automatic recovery with resource-aware retries"
+    
+    retry:
+      max_attempts_per_step: 3
+      max_attempts_per_workflow: 8
+      backoff_strategy:
+        type: exponential
+        base_delay_ms: 2000
+        max_delay_ms: 60000
+        jitter_factor: 0.25
+      
+      retry_on_timeout: true
+      retry_on_rate_limit: true
+      rate_limit_backoff_strategy: exponential
+      
+      resource_aware_retry:
+        # Adjust retry strategy based on resource availability
+        enabled: true
+        check_resources_before_retry: true
+        skip_retry_if_low_memory: true
+        memory_threshold_percent: 85
+        # Skip retry if memory usage > 85%
+        delay_on_low_memory_ms: 5000
+        # Wait 5 seconds before retry when low on memory
+  
+  # Dependency resolution
+  dependency_resolution:
+    strategy: wait_for_all
+    timeout_secs: 300
+    propagate_failure_to_dependents: true
+    max_wait_for_dependencies_secs: 600
+    on_dependency_failure: use_fallback
+  
+  # Step prioritization based on resource requirements
+  step_prioritization:
+    enabled: true
+    strategy: resource_optimized
+    # Prioritize steps based on resource efficiency
+    
+    priority_levels:
+      - name: critical
+        weight: 10
+        description: "Must complete regardless of resources"
+      - name: high
+        weight: 7
+        description: "High priority, execute when resources available"
+      - name: medium
+        weight: 5
+        description: "Normal priority, resource-aware scheduling"
+      - name: low
+        weight: 2
+        description: "Execute only when resources are abundant"
+  
+  # Performance optimization
+  performance_optimization:
+    enabled: true
+    cache:
+      enabled: true
+      ttl_seconds: 1800
+      max_size_mb: 512
+      eviction_policy: lru
+      cache_intermediate_results: true
+    
+    batching:
+      enabled: true
+      batch_similar_operations: true
+      batch_size: 5
+      batch_timeout_secs: 3
+    
+    prefetching:
+      enabled: false
+      # Disable prefetching under resource pressure
+      prefetch_next_steps: false
+      prefetch_lookahead: 0
+  
+  # Adaptive behavior for resource management
+  adaptive:
+    resource_monitoring:
+      enabled: true
+      interval_secs: 10
+      metrics: [cpu, memory, gpu, io, network]
+    
+    memory_pressure_handling:
+      strategy: throttle
+      memory_threshold_percent: 80
+      throttle_factor: 0.5
+      on_oom: swap
+    
+    concurrency_adjustment:
+      enabled: true
+      strategy: scale_up_down
+      adjustment_interval_secs: 30
+      max_parallel_adjustment: 3
+      scale_up_threshold_percent: 60
+      # Scale up when usage < 60%
+      scale_down_threshold_percent: 85
+      # Scale down when usage > 85%
+
+logging:
+  enabled: true
+  levels:
+    default: info
+    workflow: info
+    pipeline: debug
+    models: warning
+    execution: debug
+    resources: debug
+    concurrency: debug
+  
+  scopes:
+    workflow:
+      enabled: true
+      include_timestamps: true
+    pipeline:
+      enabled: true
+      include_step_transitions: true
+    models:
+      enabled: true
+      include_load_unload: true
+      include_resource_usage: true
+    execution:
+      enabled: true
+      include_metrics: true
+      include_resource_monitoring: true
+    resources:
+      enabled: true
+      include_allocation_events: true
+      include_pressure_events: true
+      include_throttling_events: true
+    concurrency:
+      enabled: true
+      include_limit_events: true
+      include_queue_events: true
+  
+  output:
+    console:
+      enabled: true
+      color: true
+      timestamps: true
+    file:
+      enabled: true
+      path: /workspace/logs/resource-concurrency-control.log
+      format: json
+      rotation:
+        enabled: true
+        max_size_mb: 50
+        max_files: 10
+
+metrics:
+  enabled: true
+  collection:
+    pipeline_level:
+      - total_duration_secs
+      - parallelism_efficiency
+      - resource_utilization_percent
+      - throttling_events_count
+      - oom_events_count
+    step_level:
+      - execution_time_secs
+      - memory_peak_mb
+      - cpu_usage_percent
+      - resource_wait_time_ms
+    model_level:
+      - inference_time_ms
+      - load_time_ms
+      - memory_usage_mb
+      - eviction_count
+    concurrency_level:
+      - concurrent_steps_count
+      - queue_length
+      - avg_wait_time_ms
+      - limit_enforcement_count
+  
+  output:
+    path: /workspace/metrics/resource-concurrency-metrics.json
+    format: json
+    include_timestamps: true
+
+workflow:
+  input_path: /workspace/input
+  output_path: /workspace/output
+  temp_path: /workspace/temp
+  checkpoint_path: /workspace/checkpoints
+
+pipeline:
+  # Phase 1: Resource assessment and allocation
+  - step: assess_resources
+    id: step_1
+    name: "Assess System Resources"
+    description: "Evaluate available system resources and set initial quotas"
+    type: agent
+    model: "${models.coordinator}"
+    priority: critical
+    
+    input:
+      prompt: |
+        Assess current system resources:
+        
+        1. Check available RAM (total, used, free)
+        2. Check GPU memory (VRAM availability)
+        3. Check CPU cores and usage
+        4. Check disk I/O capacity
+        5. Check network bandwidth
+        
+        Calculate initial resource quotas for parallel execution:
+        - Max memory per parallel group: 40% of total
+        - Max concurrent models: 3
+        - Max concurrent steps: 6
+        - Reserve capacity for critical tasks: 20%
+        
+        Output resource assessment and quota configuration.
+    
+    output:
+      save_to: resource_assessment
+      format: json
+      fields:
+        - total_ram_gb
+        - available_ram_gb
+        - total_vram_gb
+        - available_vram_gb
+        - cpu_cores
+        - cpu_usage_percent
+        - disk_io_capacity_mbps
+        - network_bandwidth_mbps
+        - max_memory_per_group_percent
+        - max_concurrent_models
+        - max_concurrent_steps
+        - critical_capacity_reserve_percent
+    
+    retry:
+      max_attempts: 2
+      backoff_strategy: exponential
+
+  # Phase 2: Parallel execution with group-based resource limits
+  - step: parallel_group_1_cpu_intensive
+    id: step_2a
+    name: "CPU-Intensive Analysis (Group 1)"
+    description: "Execute CPU-intensive tasks with resource limits"
+    type: agent
+    model: "${models.primary_processor}"
+    parallel_group: cpu_intensive
+    max_parallel: 3
+    depends_on:
+      - step_1
+    timeout_secs: 600
+    
+    resource_quota:
+      # Resource quota for this group
+      cpu: 40%
+      # Use up to 40% CPU
+      ram: 20%
+      # Use up to 20% RAM
+      gpu: 10%
+      # Minimal GPU usage
+      max_concurrent: 3
+      # Max 3 concurrent executions in this group
+    
+    input:
+      prompt: |
+        Execute CPU-intensive analysis tasks:
+        
+        Available resources for this group:
+        - CPU quota: 40%
+        - RAM quota: 20%
+        - Max concurrent: 3
+        
+        Tasks:
+        1. Compile and analyze code patterns
+        2. Run static analysis tools
+        3. Calculate complexity metrics
+        4. Generate analysis reports
+        
+        Execute within resource constraints and report utilization.
+      
+      variables:
+        cpu_quota: "40%"
+        ram_quota: "20%"
+        max_concurrent: 3
+    
+    output:
+      save_to: group1_results
+      format: json
+      fields:
+        - tasks_completed
+        - cpu_time_ms
+        - peak_cpu_usage_percent
+        - avg_concurrent_tasks
+        - resource_utilization
+    
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+
+  - step: parallel_group_1_gpu_intensive
+    id: step_2b
+    name: "GPU-Intensive Processing (Group 1)"
+    description: "Execute GPU-intensive tasks with resource limits"
+    type: agent
+    model: "${models.primary_processor}"
+    parallel_group: cpu_intensive
+    max_parallel: 2
+    depends_on:
+      - step_1
+    timeout_secs: 600
+    
+    resource_quota:
+      # Resource quota for this group
+      cpu: 10%
+      # Minimal CPU usage
+      ram: 15%
+      # Moderate RAM usage
+      gpu: 50%
+      # Use up to 50% GPU
+      max_concurrent: 2
+      # Max 2 concurrent executions in this group
+    
+    input:
+      prompt: |
+        Execute GPU-intensive processing tasks:
+        
+        Available resources for this group:
+        - GPU quota: 50%
+        - RAM quota: 15%
+        - Max concurrent: 2
+        
+        Tasks:
+        1. Run neural network inference
+        2. Process large datasets with GPU
+        3. Execute parallel batch operations
+        4. Generate GPU-accelerated results
+        
+        Execute within resource constraints and report utilization.
+      
+      variables:
+        gpu_quota: "50%"
+        ram_quota: "15%"
+        max_concurrent: 2
+    
+    output:
+      save_to: group1_gpu_results
+      format: json
+      fields:
+        - tasks_completed
+        - gpu_time_ms
+        - peak_gpu_usage_percent
+        - avg_concurrent_tasks
+        - memory_usage_mb
+    
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+
+  - step: parallel_group_2_io_intensive
+    id: step_2c
+    name: "IO-Intensive Operations (Group 2)"
+    description: "Execute I/O-intensive tasks with resource limits"
+    type: agent
+    model: "${models.secondary_processor}"
+    parallel_group: io_intensive
+    max_parallel: 4
+    depends_on:
+      - step_1
+    timeout_secs: 600
+    
+    resource_quota:
+      # Resource quota for this group
+      cpu: 20%
+      # Moderate CPU usage
+      ram: 30%
+      # High RAM for caching
+      gpu: 5%
+      # Minimal GPU usage
+      max_concurrent: 4
+      # Max 4 concurrent executions in this group
+    
+    input:
+      prompt: |
+        Execute I/O-intensive operations:
+        
+        Available resources for this group:
+        - RAM quota: 30%
+        - Max concurrent: 4
+        
+        Tasks:
+        1. Read and process large files
+        2. Execute database queries
+        3. Perform web scraping
+        4. Cache intermediate results
+        
+        Execute within resource constraints and report utilization.
+      
+      variables:
+        ram_quota: "30%"
+        max_concurrent: 4
+    
+    output:
+      save_to: group2_results
+      format: json
+      fields:
+        - tasks_completed
+        - io_operations_count
+        - data_processed_mb
+        - cache_hit_rate
+        - avg_concurrent_tasks
+    
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+
+  - step: parallel_group_2_memory_intensive
+    id: step_2d
+    name: "Memory-Intensive Processing (Group 2)"
+    description: "Execute memory-intensive tasks with resource limits"
+    type: agent
+    model: "${models.secondary_processor}"
+    parallel_group: io_intensive
+    max_parallel: 2
+    depends_on:
+      - step_1
+    timeout_secs: 600
+    
+    resource_quota:
+      # Resource quota for this group
+      cpu: 15%
+      # Moderate CPU usage
+      ram: 50%
+      # Use up to 50% RAM
+      gpu: 10%
+      # Minimal GPU usage
+      max_concurrent: 2
+      # Max 2 concurrent executions in this group
+    
+    input:
+      prompt: |
+        Execute memory-intensive processing tasks:
+        
+        Available resources for this group:
+        - RAM quota: 50%
+        - Max concurrent: 2
+        
+        Tasks:
+        1. Build in-memory search indexes
+        2. Cache frequently accessed data
+        3. Maintain large lookup tables
+        4. Execute in-memory analytics
+        
+        Execute within resource constraints and report utilization.
+      
+      variables:
+        ram_quota: "50%"
+        max_concurrent: 2
+    
+    output:
+      save_to: group2_memory_results
+      format: json
+      fields:
+        - tasks_completed
+        - memory_allocated_mb
+        - peak_memory_usage_percent
+        - cache_efficiency
+        - avg_concurrent_tasks
+    
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+
+  # Phase 3: Resource coordination and rebalancing
+  - step: coordinate_resources
+    id: step_3
+    name: "Coordinate Resources"
+    description: "Monitor resource usage and rebalance quotas if needed"
+    type: agent
+    model: "${models.coordinator}"
+    depends_on:
+      - step_2a
+      - step_2b
+      - step_2c
+      - step_2d
+    priority: high
+    
+    input:
+      prompt: |
+        Coordinate resources based on parallel execution results:
+        
+        Group 1 (CPU-Intensive) Results: {{step.step_2a.output.group1_results}}
+        Group 1 (GPU-Intensive) Results: {{step.step_2b.output.group1_gpu_results}}
+        Group 2 (IO-Intensive) Results: {{step.step_2c.output.group2_results}}
+        Group 2 (Memory-Intensive) Results: {{step.step_2d.output.group2_memory_results}}
+        
+        Tasks:
+        1. Analyze resource utilization across all groups
+        2. Identify resource bottlenecks or imbalances
+        3. Calculate resource efficiency metrics
+        4. Determine if quota rebalancing is needed
+        5. Generate rebalancing recommendations
+        
+        If throttling occurred, identify which groups were affected.
+        If any group hit resource limits, document the impact.
+        
+        Output coordination analysis and recommendations.
+      
+      variables:
+        group1_cpu: "${step.step_2a.output.group1_results}"
+        group1_gpu: "${step.step_2b.output.group1_gpu_results}"
+        group2_io: "${step.step_2c.output.group2_results}"
+        group2_mem: "${step.step_2d.output.group2_memory_results}"
+    
+    output:
+      save_to: coordination_report
+      format: json
+      fields:
+        - resource_utilization_summary
+        - bottlenecks_identified
+        - throttling_events
+        - limit_enforcements
+        - rebalancing_recommendations
+        - efficiency_metrics
+    
+    retry:
+      max_attempts: 2
+      backoff_strategy: exponential
+
+  # Phase 4: Adaptive execution with dynamic resource allocation
+  - step: adaptive_parallel_execution
+    id: step_4a
+    name: "Adaptive Parallel Execution"
+    description: "Execute tasks with dynamic resource allocation based on current system state"
+    type: agent
+    model: "${models.primary_processor}"
+    parallel_group: adaptive
+    max_parallel: 4
+    depends_on:
+      - step_3
+    timeout_secs: 480
+    
+    input:
+      prompt: |
+        Execute tasks with adaptive resource allocation:
+        
+        Current system state from coordination report: {{step.step_3.output.coordination_report}}
+        
+        Available resources:
+        - Current resource pressure: determined dynamically
+        - Adaptive strategy: scale concurrency based on usage
+        
+        Tasks:
+        1. Monitor resource pressure in real-time
+        2. Adjust concurrency based on current usage
+        3. Prioritize tasks based on resource requirements
+        4. Execute tasks when resources are available
+        5. Queue tasks when resources are constrained
+        
+        Apply adaptive behavior:
+        - If usage < 60%: scale up concurrency
+        - If usage > 85%: scale down concurrency
+        - If low memory: reduce parallel tasks
+        - If high memory: increase parallel tasks
+        
+        Report adaptive execution behavior and resource utilization.
+      
+      variables:
+        coordination: "${step.step_3.output.coordination_report}"
+    
+    output:
+      save_to: adaptive_results
+      format: json
+      fields:
+        - tasks_completed
+        - scaling_events
+        - avg_concurrency
+        - resource_efficiency
+        - adaptive_decisions
+    
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+
+  - step: adaptive_memory_management
+    id: step_4b
+    name: "Adaptive Memory Management"
+    description: "Manage memory with dynamic allocation and eviction"
+    type: agent
+    model: "${models.secondary_processor}"
+    parallel_group: adaptive
+    max_parallel: 3
+    depends_on:
+      - step_3
+    timeout_secs: 480
+    
+    input:
+      prompt: |
+        Execute adaptive memory management:
+        
+        Current system state from coordination report: {{step.step_3.output.coordination_report}}
+        
+        Tasks:
+        1. Monitor memory pressure continuously
+        2. Identify memory-intensive tasks
+        3. Apply LRU eviction when needed
+        4. Implement tiered caching
+        5. Optimize memory allocation
+        
+        Memory management strategies:
+        - Proactive eviction: evict unused models before OOM
+        - Tiered caching: hot/warm/cold cache levels
+        - Memory compaction: defragment memory when fragmented
+        - Dynamic allocation: adjust based on task requirements
+        
+        Report memory management behavior and efficiency.
+      
+      variables:
+        coordination: "${step.step_3.output.coordination_report}"
+    
+    output:
+      save_to: memory_management_results
+      format: json
+      fields:
+        - memory_utilization_percent
+        - eviction_events
+        - cache_efficiency
+        - allocation_changes
+        - oom_prevention_count
+    
+    retry:
+      max_attempts: 3
+      backoff_strategy: exponential
+
+  # Phase 5: Resource limit enforcement demonstration
+  - step: test_concurrency_limits
+    id: step_5a
+    name: "Test Concurrency Limits"
+    description: "Demonstrate concurrency limit enforcement across different resource types"
+    type: agent
+    model: "${models.coordinator}"
+    depends_on:
+      - step_4a
+      - step_4b
+    priority: high
+    
+    input:
+      prompt: |
+        Test concurrency limit enforcement:
+        
+        Test the following limits:
+        1. Model loading limit (max 2 concurrent)
+        2. Tool execution limit (max 8 concurrent)
+        3. File operations limit (max 5 concurrent)
+        4. API requests limit (max 4 concurrent)
+        5. Sub-agent spawning limit (max 3 concurrent)
+        
+        For each limit:
+        - Document current concurrent operations
+        - Test if limit is properly enforced
+        - Record any violations or queueing
+        - Measure wait times when limit is reached
+        
+        Report concurrency limit enforcement behavior.
+      
+    output:
+      save_to: concurrency_limit_test
+      format: json
+      fields:
+        - model_loading_limit_status
+        - tool_execution_limit_status
+        - file_operations_limit_status
+        - api_requests_limit_status
+        - sub_agent_limit_status
+        - limit_enforcement_success
+    
+    retry:
+      max_attempts: 2
+      backoff_strategy: exponential
+
+  - step: test_resource_quotas
+    id: step_5b
+    name: "Test Resource Quotas"
+    description: "Demonstrate resource quota enforcement for parallel groups"
+    type: agent
+    model: "${models.coordinator}"
+    depends_on:
+      - step_4a
+      - step_4b
+    priority: high
+    
+    input:
+      prompt: |
+        Test resource quota enforcement:
+        
+        Group 1 Resource Quotas:
+        - CPU quota: 40% (was enforced during step_2a)
+        - GPU quota: 50% (was enforced during step_2b)
+        
+        Group 2 Resource Quotas:
+        - RAM quota: 30% for I/O, 50% for memory-intensive (was enforced during step_2c/2d)
+        
+        For each quota:
+        - Document if quota was respected
+        - Record any quota violations
+        - Measure actual usage vs quota
+        - Identify throttling behavior when quota approached
+        
+        Report resource quota enforcement behavior.
+      
+    output:
+      save_to: resource_quota_test
+      format: json
+      fields:
+        - group1_cpu_quota_status
+        - group1_gpu_quota_status
+        - group2_io_quota_status
+        - group2_memory_quota_status
+        - quota_enforcement_success
+    
+    retry:
+      max_attempts: 2
+      backoff_strategy: exponential
+
+  - step: test_throttling_behavior
+    id: step_5c
+    name: "Test Throttling Behavior"
+    description: "Demonstrate throttling mechanism when resource pressure is high"
+    type: agent
+    model: "${models.coordinator}"
+    depends_on:
+      - step_5a
+      - step_5b
+    priority: high
+    
+    input:
+      prompt: |
+        Test throttling behavior:
+        
+        Throttling configuration:
+        - Trigger threshold: 80%
+        - Strategy: throttle (reduce concurrency)
+        - Throttle factor: 0.5 (reduce by 50%)
+        
+        Test scenarios:
+        1. Simulate high resource pressure (>85% usage)
+        2. Verify throttling is triggered
+        3. Document concurrency reduction
+        4. Measure impact on throughput
+        5. Verify system remains stable
+        
+        Report throttling behavior and effectiveness.
+      
+    output:
+      save_to: throttling_test
+      format: json
+      fields:
+        - throttling_triggered
+        - trigger_threshold_percent
+        - concurrency_before_throttling
+        - concurrency_after.throttling
+        - throughput_impact
+        - system_stability
+    
+    retry:
+      max_attempts: 2
+      backoff_strategy: exponential
+
+  # Phase 6: Generate comprehensive report
+  - step: generate_report
+    id: step_6
+    name: "Generate Resource Management Report"
+    description: "Generate comprehensive report on resource limits and concurrency control"
+    type: agent
+    model: "${models.coordinator}"
+    depends_on:
+      - step_5a
+      - step_5b
+      - step_5c
+    priority: critical
+    
+    input:
+      prompt: |
+        Generate comprehensive resource management report:
+        
+        Test Results:
+        - Concurrency limits: {{step.step_5a.output.concurrency_limit_test}}
+        - Resource quotas: {{step.step_5b.output.resource_quota_test}}
+        - Throttling behavior: {{step.step_5c.output.throttling_test}}
+        
+        Adaptive Execution:
+        - Adaptive parallel execution: {{step.step_4a.output.adaptive_results}}
+        - Adaptive memory management: {{step.step_4b.output.memory_management_results}}
+        
+        Include in report:
+        1. Executive summary
+ resource management effectiveness
+        2. Concurrency limit enforcement analysis
+        3. Resource quota enforcement analysis
+        4. Throttling mechanism effectiveness
+        5. Adaptive behavior analysis
+        6. Recommendations for optimization
+        
+        Output comprehensive resource management report.
+      
+      variables:
+        concurrency: "${step.step_5a.output.concurrency_limit_test}"
+        quotas: "${step.step_5b.output.resource_quota_test}"
+        throttling: "${step.step_5c.output.throttling_test}"
+        adaptive_exec: "${step.step_4a.output.adaptive_results}"
+        adaptive_mem: "${step.step_4b.output.memory_management_results}"
+    
+    output:
+      save_to: resource_management_report
+      format: json
+      file_output:
+        enabled: true
+        path: "${workflow.output_path}/resource-concurrency-control-report.json"
+        format: json
+      fields:
+        - executive_summary
+        - concurrency_limit_analysis
+        - resource_quota_analysis
+        - throttling_effectiveness
+        - adaptive_behavior_analysis
+        - recommendations
+    
+    retry:
+      max_attempts: 2
+      backoff_strategy: exponential
+
+features_demonstrated:
+  - per_group_resource_quotas
+  - parallel_group_resource_limits
+  - max_concurrent_per_group
+  - resource_quota_cpu_ram_gpu
+  - concurrency_limits_model_loading
+  - concurrency_limits_tool_execution
+  - concurrency_limits_file_operations
+  - concurrency_limits_api_requests
+  - concurrency_limits_sub_agent_spawning
+  - concurrency_limits_workflow_execution
+  - adaptive_resource_allocation
+  - dynamic_resource_rebalancing
+  - resource_pressure_monitoring
+  - memory_pressure_handling_throttle
+  - memory_pressure_handling_on_oom_swap
+  - concurrency_adjustment_scale_up_down
+  - throttling_mechanism_trigger_threshold
+  - throttling_mechanism_strategy_throttle
+  - throttling_mechanism_throttle_factor
+  - step_prioritization_resource_optimized
+  - priority_queue_algorithm
+  - least_loaded_load_balancing
+  - worker_selection_timeout
+  - performance_optimization_disabled_prefetching
+  - caching_intermediate_results
+  - batching_similar_operations
+  - resource_monitoring_metrics
+  - adaptive_memory_management
+  - lru_eviction_strategy
+  - tiered_caching
+  - memory_compaction
+  - dynamic_allocation_adjustment
+  - oom_handling_swap_strategy
+  - graceful_degradation_on_resource_pressure
+  - continue_with_partial_on_timeout
+  - retry_with_resource_awareness
+  - skip_retry_if_low_memory
+  - delay_on_low_memory
+  - multiple_model_configurations
+  - model_selection_by_resource_requirements
+  - per_step_resource_quota
+  - group_based_resource_partitioning
+  - resource_efficiency_monitoring
+  - bottleneck_identification
+  - comprehensive_resource_management_report

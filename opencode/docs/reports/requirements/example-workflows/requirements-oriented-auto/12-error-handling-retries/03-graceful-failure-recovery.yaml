@@ -1,0 +1,357 @@
+---
+workflow_id: graceful_failure_recovery
+name: Graceful Failure Handling and Recovery Patterns
+description: Demonstrates graceful failure handling, partial result continuation, rollback mechanisms, and cleanup on failure
+version: "1.0.0"
+author: "AgentSDK Examples"
+tags:
+  - error-handling
+  - graceful-failure
+  - recovery-patterns
+  - cleanup-operations
+
+models:
+  recovery_agent:
+    name: "Recovery Agent"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+    generative_entity: "llama-3.2-3b-instruct"
+    backend: vulkan
+
+workflow_execution_strategy:
+  load_unload: lazy
+  processing: serial
+
+error_handling:
+  default_action:
+    type: continue_with_partial
+    reason: "Continue workflow with partial results on failure"
+
+  handling_by_type:
+    transient_failures:
+      action: retry_with_exponential_backoff
+      notify_level: warning
+      message: "Transient failure - will retry"
+
+    permanent_failures:
+      action: log_and_continue
+      notify_level: error
+      message: "Permanent failure - logging and continuing"
+
+    user_errors:
+      action: escalate_immediately
+      notify_level: critical
+      message: "User error - requires intervention"
+
+    system_errors:
+      action: fail_workflow
+      notify_level: critical
+      message: "System error - workflow cannot continue"
+
+agentic_workflow:
+  step_1_primary_operation_with_rollback:
+    name: "Primary Operation with Rollback Capability"
+    type: agent
+    model: "${models.recovery_agent}"
+
+    input:
+      prompt: |
+        Perform operation with automatic rollback on failure.
+
+        Operation:
+        - Target: /workspace/production/config.yml
+        - Action: Update configuration
+        - Backup before modify: yes
+        - Rollback on failure: yes
+
+        Operation steps:
+        1. Read current configuration
+        2. Create backup: /workspace/backup/config-backup-{{timestamp}}.yml
+        3. Attempt modification
+        4. Verify modification success
+
+        Failure scenarios:
+        - Modification fails: restore from backup
+        - Validation error: keep original, report error
+        - Partial success: log what succeeded, what failed
+
+        Graceful handling:
+        - Never leave system in broken state
+        - Always have rollback plan
+        - Log all failure points
+        - Preserve as much as possible
+
+        Return operation result with backup/rollback status.
+
+    output:
+      save_to: primary_operation_result
+      format: json
+
+  step_2_secondary_operation_with_partial:
+    name: "Secondary Operation with Partial Success Handling"
+    type: agent
+    model: "${models.recovery_agent}"
+
+    input:
+      prompt: |
+        Process multiple items where some may fail.
+
+        Batch operation:
+        - Process 10 data items
+        - Each item: independent operation
+        - Expected: some items succeed, some fail
+        - Goal: continue with partial success
+
+        For each item:
+        1. Attempt operation
+        2. Record success/failure
+        3. Save successful results
+        4. Log failed items
+        5. Continue to next item regardless
+
+        Partial success handling:
+        - Save all successful results
+        - Record all failures separately
+        - Generate summary of success/failure rates
+        - Continue processing remaining items
+        - Do not fail entire batch on single failure
+
+        Return batch processing results with partial success metrics.
+
+    output:
+      save_to: partial_success_result
+      format: json
+
+  step_3_cleanup_on_failure:
+    name: "Cleanup Resources on Failure"
+    type: agent
+    model: "${models.recovery_agent}"
+
+    input:
+      prompt: |
+        Perform cleanup operations when workflow fails.
+
+        Failure context:
+        - Workflow aborted or failed
+        - Resources allocated but not cleaned
+        - Temporary files created
+        - Locks or reservations held
+
+        Cleanup operations:
+        1. Remove temporary files: /workspace/temp/**
+        2. Release file locks if held
+        3. Rollback any partial modifications
+        4. Delete incomplete output files
+        5. Clear caches: /workspace/cache/**
+
+        Cleanup verification:
+        - Verify all temporary files removed
+        - Check no locks remain
+        - Confirm no orphaned processes
+        - Validate production files intact
+
+        Return cleanup status and system state.
+
+    output:
+      save_to: cleanup_result
+      format: json
+
+  step_4_state_preservation:
+    name: "Preserve State on Graceful Failure"
+    type: agent
+    model: "${models.recovery_agent}"
+
+    input:
+      prompt: |
+        Save workflow state before critical failure.
+
+        State preservation:
+        - Save all intermediate results
+        - Save execution progress
+        - Save configuration state
+        - Generate failure report
+        - Mark checkpoints for potential resume
+
+        State to preserve:
+        - Successful step outputs
+        - Partial batch results
+        - Error logs and context
+        - Metrics and performance data
+        - Workflow execution status
+
+        Failure report:
+        - Which steps completed successfully
+        - Which steps failed and why
+        - Partial results achieved
+        - Recovery recommendations
+
+        Save state to: /workspace/failure-state/workflow-state-{{timestamp}}.json
+
+        Return preservation status and state file location.
+
+    output:
+      save_to: state_preservation_result
+      format: json
+
+  step_5_alternative_path_execution:
+    name: "Execute Alternative Recovery Path"
+    type: agent
+    model: "${models.recovery_agent}"
+
+    input:
+      variables:
+        primary_result: "${step.step_1_primary_operation_with_rollback.output}"
+        partial_result: "${step.step_2_secondary_operation_with_partial.output}"
+
+      prompt: |
+        Execute alternative recovery path after failures.
+
+        Failure summary:
+        - Primary: {{primary_result}}
+        - Secondary: {{partial_result}}
+
+        Alternative path options:
+        1. Use fallback configuration if available
+        2. Apply degraded functionality mode
+        3. Switch to alternative data source
+        4. Use cached results if recent
+        5. Skip non-critical operations
+
+        Decision logic:
+        IF primary_failed AND secondary_partial:
+          THEN degraded_mode
+          Execute minimal viable workflow
+        ELSE IF primary_failed:
+          THEN try_alternative_data_source
+          Use backup or cached data
+        ELSE:
+          THEN complete_with_partial
+          Accept partial results as final
+
+        Return alternative path execution with success/failure status.
+
+    output:
+      save_to: alternative_path_result
+      format: json
+
+  step_6_notification_on_failure:
+    name: "Send Notifications on Failure"
+    type: agent
+    model: "${models.recovery_agent}"
+
+    input:
+      variables:
+        all_results:
+          - "${step.step_1_primary_operation_with_rollback.output}"
+          - "${step.step_2_secondary_operation_with_partial.output}"
+          - "${step.step_3_cleanup_on_failure.output}"
+          - "${step.step_4_state_preservation.output}"
+          - "${step.step_5_alternative_path_execution.output}"
+
+      prompt: |
+        Generate and send failure notifications.
+
+        Results summary:
+        - Primary operation: {{step.step_1_primary_operation_with_rollback.output}}
+        - Secondary operation: {{step.step_2_secondary_operation_with_partial.output}}
+        - Cleanup: {{step.step_3_cleanup_on_failure.output}}
+        - State preservation: {{step.step_4_state_preservation.output}}
+        - Alternative path: {{step.step_5_alternative_path_execution.output}}
+
+        Notification details:
+        - Workflow ID: graceful_failure_recovery
+        - Timestamp: {{now}}
+        - Overall status: partial_success
+        - Steps succeeded: X of Y
+        - Steps failed: Z of Y
+        - Recovery path taken
+        - Estimated impact
+
+        Send notifications to:
+        - Email: admin@example.com
+        - Slack: #alerts channel
+        - Logging: /workspace/logs/failure-alerts.log
+
+        Notification content:
+        1. Workflow failed with partial success
+        2. X steps completed, Y steps failed
+        3. Recovery actions taken
+        4. State preserved at: /workspace/failure-state/
+        5. Recommended next steps
+
+        Return notification status and delivery confirmation.
+
+    output:
+      save_to: notification_result
+      format: json
+
+  step_7_generate_recovery_report:
+    name: "Generate Graceful Recovery Report"
+    type: agent
+    model: "${models.recovery_agent}"
+
+    input:
+      variables:
+        primary: "${step.step_1_primary_operation_with_rollback.output}"
+        secondary: "${step.step_2_secondary_operation_with_partial.output}"
+        cleanup: "${step.step_3_cleanup_on_failure.output}"
+        state: "${step.step_4_state_preservation.output}"
+        alternative: "${step.step_5_alternative_path_execution.output}"
+        notification: "${step.step_6_notification_on_failure.output}"
+
+      prompt: |
+        Generate comprehensive graceful recovery report.
+
+        All recovery actions:
+        - Primary with rollback: {{primary}}
+        - Partial success: {{secondary}}
+        - Cleanup: {{cleanup}}
+        - State preservation: {{state}}
+        - Alternative path: {{alternative}}
+        - Notifications: {{notification}}
+
+        Report sections:
+        1. Failure scenario and impact
+        2. Recovery mechanisms employed
+        3. Effectiveness analysis
+        4. System state after recovery
+        5. Rollback success verification
+        6. Lessons learned
+        7. Recommendations for improvement
+
+        Write report to: /workspace/output/graceful-recovery-report.md
+
+    output:
+      save_to: recovery_report
+      format: markdown
+      file_output:
+        enabled: true
+        path: /workspace/output/graceful-recovery-report.md
+
+logging:
+  enabled: true
+
+  levels:
+    default: info
+    workflow_execution: debug
+    error_handling: debug
+
+  scopes:
+    error_handling:
+      enabled: true
+      include_rollback_operations: true
+      include_partial_success: true
+
+    execution:
+      enabled: true
+
+  output:
+    console:
+      enabled: true
+
+    file:
+      enabled: true
+      path: /workspace/logs/graceful-recovery.log

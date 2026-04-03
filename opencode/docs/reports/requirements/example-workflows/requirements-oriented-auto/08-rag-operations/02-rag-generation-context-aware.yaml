@@ -1,0 +1,723 @@
+---
+# Workflow: RAG Generation with Context-Aware LLM Responses
+# Category: RAG Operations
+# Focus: Context-aware generation, prompt augmentation, citation, and response synthesis
+#
+# This workflow demonstrates:
+# - Query analysis and reformulation
+# - Context retrieval and augmentation
+# - Prompt engineering for RAG
+# - Context window management
+# - Citation and source attribution
+# - Response quality validation
+# - Multi-turn conversation support
+
+workflow_id: rag_generation_context_aware
+name: RAG Generation with Context-Aware Responses
+description: |
+  End-to-end RAG generation workflow demonstrating context-aware LLM responses.
+  Includes query understanding, context retrieval, prompt augmentation, response
+  generation with citations, and quality validation loops.
+version: "1.0.0"
+author: "AgentSDK Examples"
+tags:
+  - rag-operations
+  - context-aware-generation
+  - retrieval-augmented
+  - prompt-augmentation
+  - citations
+  - response-synthesis
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODEL CONFIGURATION
+# Models for embedding, retrieval, and generation
+# ─────────────────────────────────────────────────────────────────────────────
+models:
+  # Query embedding model
+  query_embedder:
+    name: "Query Embedder"
+    host:
+      type: ollama
+      connection_settings:
+        base_url: "http://localhost:11434"
+        timeout_secs: 30
+    generative_entity: "nomic-embed-text"
+
+  # Main generation model with large context
+  generator:
+    name: "Response Generator"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+        connection_timeout_secs: 30
+    generative_entity: "llama-3.2-3b-instruct"
+    backend: vulkan
+    
+    # Context window configuration
+    max_allowed:
+      attention_tokens: 32768
+    
+    # Generation parameters
+    execution:
+      max_turns: 5
+      timeout:
+        time_to_first_response: 10s
+        total_time_to_response: 120s
+    
+    # Thinking configuration for reasoning
+    thinking:
+      budget_tokens: 2048
+      capture_in_output: true
+
+  # Query analyzer for understanding intent
+  query_analyzer:
+    name: "Query Analyzer"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+    generative_entity: "llama-3.2-3b-instruct"
+    backend: vulkan
+
+  # Response validator
+  validator:
+    name: "Response Validator"
+    host:
+      type: ollama
+      connection_settings:
+        base_url: "http://localhost:11434"
+    generative_entity: "llama3.2"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RAG GENERATION CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+rag_generation:
+  # Context window management
+  context_window:
+    max_context_tokens: 8192
+    system_prompt_tokens: 500
+    query_tokens: 200
+    response_tokens_reserve: 2048
+    context_tokens_available: 5492  # calculated: max - system - query - reserve
+    
+  # Context selection strategy
+  context_selection:
+    strategy: relevance_filtered  # top_k | relevance_filtered | diverse | recent
+    max_chunks: 15
+    min_relevance_score: 0.65
+    diversity_threshold: 0.85  # avoid similar chunks
+    
+  # Prompt augmentation
+  prompt_augmentation:
+    include_system_prompt: true
+    include_conversation_history: true
+    max_history_turns: 5
+    include_context_metadata: true
+    citation_format: inline  # inline | endnotes | footnotes
+    
+  # Response generation
+  response_generation:
+    temperature: 0.7
+    max_tokens: 2048
+    require_citations: true
+    fallback_on_no_context: true
+    no_context_message: "I don't have sufficient information to answer this question based on the available documents."
+
+  # Quality validation
+  quality_validation:
+    enabled: true
+    criteria:
+      - name: citation_accuracy
+        threshold: 0.9
+        description: "Citations must reference actual context chunks"
+      - name: relevance
+        threshold: 0.8
+        description: "Response must address the query"
+      - name: coherence
+        threshold: 0.85
+        description: "Response must be coherent and well-structured"
+      - name: completeness
+        threshold: 0.75
+        description: "Response should cover key aspects of the query"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MEMORY HOOKS (RAG-specific lifecycle)
+# ─────────────────────────────────────────────────────────────────────────────
+models:
+  generator:
+    hooks:
+      on_memory_recall:
+        log:
+          message: "Context retrieved from vector store"
+          level: debug
+        metrics:
+          collect: [recall_latency_ms, chunks_retrieved, relevance_scores]
+      
+      on_memory_store:
+        log:
+          message: "Conversation turn stored"
+          level: debug
+        checkpoint:
+          enabled: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXECUTION MODE
+# ─────────────────────────────────────────────────────────────────────────────
+execution:
+  mode: serial
+  memory:
+    max_allocated_memory_mb: 16384
+    model_memory_mb: 8192
+    unload_unused: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOGGING
+# ─────────────────────────────────────────────────────────────────────────────
+logging:
+  global:
+    level: info
+    detail: medium
+    output_type: chat
+    format: json
+    console: true
+
+  rag_operations:
+    level: debug
+    detail: very_high
+    include_context_chunks: true
+    include_relevance_scores: true
+    include_citation_mapping: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOOL PERMISSIONS
+# ─────────────────────────────────────────────────────────────────────────────
+tool_permissions:
+  file_operations:
+    read:
+      enabled: true
+      allowed_paths:
+        - /workspace/documents
+        - /workspace/vectors
+        - /workspace/config
+    write:
+      enabled: true
+      allowed_paths:
+        - /workspace/output
+        - /workspace/conversations
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WORKFLOW STEPS
+# ─────────────────────────────────────────────────────────────────────────────
+agentic_workflow:
+  steps:
+    # ── STEP 1: Analyze Query Intent ──────────────────────────────────
+    - step: analyze_query_intent
+      id: step_1
+      type: agent
+      generative_entity: "${models.query_analyzer}"
+      
+      prompt: |
+        Analyze the user query to understand intent and optimize retrieval.
+        
+        User query:
+        "{{workflow.user_query}}"
+        
+        Analysis tasks:
+        1. Identify query type (question, command, clarification, follow-up)
+        2. Extract key entities and concepts
+        3. Identify temporal constraints (recent, specific dates)
+        4. Determine required information granularity
+        5. Generate 2-3 reformulated queries for broader retrieval
+        
+        Output JSON:
+        {
+          "original_query": "the original query",
+          "query_type": "question|command|clarification|follow-up",
+          "entities": ["entity1", "entity2"],
+          "concepts": ["concept1", "concept2"],
+          "temporal_constraints": {"timeframe": "recent|specific|none"},
+          "granularity": "detailed|summary|overview",
+          "reformulated_queries": ["query1", "query2", "query3"],
+          "search_keywords": ["keyword1", "keyword2"]
+        }
+
+      input_variables:
+        user_query: "{{workflow.user_query}}"
+
+      output:
+        save_to: query_analysis
+        format: json
+        fields:
+          - query_type
+          - entities
+          - concepts
+          - reformulated_queries
+          - search_keywords
+
+    # ── STEP 2: Retrieve Context ─────────────────────────────────────
+    - step: retrieve_context
+      id: step_2
+      type: agent
+      generative_entity: "${models.query_embedder}"
+      
+      prompt: |
+        Retrieve relevant context from the vector store.
+        
+        Query analysis:
+        ${step.step_1.output}
+        
+        Retrieval configuration:
+        - Max chunks: 15
+        - Min relevance score: 0.65
+        - Use reformulated queries for broader coverage
+        
+        Tasks:
+        1. Embed the original query
+        2. Embed each reformulated query
+        3. Perform hybrid retrieval (dense + sparse)
+        4. Merge and deduplicate results
+        5. Apply relevance filtering
+        6. Calculate context token usage
+        
+        Output:
+        {
+          "retrieved_chunks": [
+            {
+              "chunk_id": "unique_id",
+              "document_id": "parent_doc_id",
+              "text": "chunk content",
+              "relevance_score": 0.85,
+              "source_metadata": {"title": "...", "path": "..."}
+            }
+          ],
+          "total_chunks": 12,
+          "avg_relevance": 0.78,
+          "context_tokens": 4500,
+          "retrieval_latency_ms": 150
+        }
+
+      input_variables:
+        query_analysis: "${step.step_1.output}"
+        retrieval_config: "${rag_generation.context_selection}"
+
+      output:
+        save_to: retrieved_context
+        format: json
+
+      retry:
+        max_attempts: 2
+        backoff: fixed
+        delay_ms: 500
+
+    # ── STEP 3: Augment Prompt ───────────────────────────────────────
+    - step: augment_prompt
+      id: step_3
+      type: agent
+      generative_entity: "${models.query_analyzer}"
+      
+      prompt: |
+        Build the augmented prompt for RAG generation.
+        
+        Query analysis:
+        ${step.step_1.output}
+        
+        Retrieved context:
+        ${step.step_2.output}
+        
+        Conversation history (if any):
+        ${workflow.conversation_history}
+        
+        Prompt augmentation rules:
+        1. System prompt defines RAG behavior and citation requirements
+        2. Include all relevant context chunks with clear markers
+        3. Add conversation history for continuity
+        4. Format query clearly
+        5. Include citation instructions
+        
+        Build the final prompt structure:
+        
+        [SYSTEM]
+        You are a helpful assistant that answers questions based on provided context.
+        Always cite your sources using [Source N] format.
+        If the context doesn't contain relevant information, say so.
+        
+        [CONTEXT]
+        --- Source 1 (relevance: 0.92) ---
+        Document: example.md
+        Content: ...
+        
+        --- Source 2 (relevance: 0.85) ---
+        Document: guide.md
+        Content: ...
+        
+        [CONVERSATION HISTORY]
+        User: Previous question
+        Assistant: Previous response
+        
+        [USER QUERY]
+        The user's question
+        
+        Output:
+        {
+          "augmented_prompt": "the complete prompt",
+          "context_sources": [{"id": 1, "document": "example.md", "chunk_id": "abc123"}],
+          "prompt_tokens": 5200,
+          "context_tokens_used": 4500
+        }
+
+      input_variables:
+        query_analysis: "${step.step_1.output}"
+        retrieved_context: "${step.step_2.output}"
+        conversation_history: "${workflow.conversation_history}"
+
+      output:
+        save_to: augmented_prompt
+        format: json
+
+    # ── STEP 4: Generate Response ────────────────────────────────────
+    - step: generate_response
+      id: step_4
+      type: agent
+      generative_entity: "${models.generator}"
+      
+      prompt: |
+        {{step.step_3.output.augmented_prompt}}
+        
+        Generate a comprehensive response that:
+        1. Directly addresses the user's query
+        2. Uses information from the provided context
+        3. Includes citations in [Source N] format
+        4. Acknowledges uncertainty when context is insufficient
+        5. Maintains a helpful and professional tone
+
+      input_variables:
+        augmented_prompt: "${step.step_3.output.augmented_prompt}"
+
+      output:
+        save_to: generated_response
+        format: text
+        
+        file_output:
+          enabled: true
+          path: /workspace/output/response.txt
+
+      retry:
+        max_attempts: 2
+        backoff: exponential
+        delay_ms: 1000
+
+    # ── STEP 5: Extract Citations ────────────────────────────────────
+    - step: extract_citations
+      id: step_5
+      type: agent
+      generative_entity: "${models.validator}"
+      
+      prompt: |
+        Extract and validate citations from the generated response.
+        
+        Generated response:
+        ${step.step_4.output}
+        
+        Context sources used:
+        ${step.step_3.output.context_sources}
+        
+        Tasks:
+        1. Find all [Source N] citations in the response
+        2. Map each citation to the actual source document
+        3. Verify that cited information exists in the source
+        4. Flag any hallucinated citations
+        
+        Output:
+        {
+          "citations": [
+            {
+              "marker": "[Source 1]",
+              "document_id": "example.md",
+              "chunk_id": "abc123",
+              "cited_text_snippet": "quoted or paraphrased content",
+              "validation_status": "verified|partial|mismatch"
+            }
+          ],
+          "total_citations": 5,
+          "verified_citations": 4,
+          "validation_score": 0.8,
+          "issues": ["Source 3 citation references content not in chunk"]
+        }
+
+      input_variables:
+        response: "${step.step_4.output}"
+        context_sources: "${step.step_3.output.context_sources}"
+
+      output:
+        save_to: citation_validation
+        format: json
+
+    # ── STEP 6: Validate Response Quality ────────────────────────────
+    - step: validate_response_quality
+      id: step_6
+      type: agent
+      generative_entity: "${models.validator}"
+      
+      prompt: |
+        Validate the quality of the generated response.
+        
+        Original query:
+        ${step.step_1.output.original_query}
+        
+        Generated response:
+        ${step.step_4.output}
+        
+        Citation validation:
+        ${step.step_5.output}
+        
+        Quality criteria to evaluate:
+        
+        1. CITATION ACCURACY (threshold: 0.9)
+           - Are citations correctly formatted?
+           - Do they reference actual context chunks?
+           - Current score: {{step.step_5.output.validation_score}}
+        
+        2. RELEVANCE (threshold: 0.8)
+           - Does the response address the query?
+           - Is the information useful?
+        
+        3. COHERENCE (threshold: 0.85)
+           - Is the response well-structured?
+           - Does it flow logically?
+        
+        4. COMPLETENESS (threshold: 0.75)
+           - Does it cover key aspects?
+           - Are there obvious gaps?
+        
+        Output:
+        {
+          "overall_score": 0.82,
+          "passed": true,
+          "criteria_scores": {
+            "citation_accuracy": 0.9,
+            "relevance": 0.85,
+            "coherence": 0.9,
+            "completeness": 0.7
+          },
+          "issues": ["Response could be more complete"],
+          "recommendations": ["Consider adding more detail on X"]
+        }
+
+      input_variables:
+        query: "${step.step_1.output.original_query}"
+        response: "${step.step_4.output}"
+        citation_validation: "${step.step_5.output}"
+
+      output:
+        save_to: quality_validation
+        format: json
+
+    # ── STEP 7: Branch on Quality ────────────────────────────────────
+    - step: decide_quality_action
+      id: step_7
+      type: agent
+      generative_entity: "${models.validator}"
+      
+      prompt: |
+        Based on quality validation, decide the next action.
+        
+        Quality validation results:
+        ${step.step_6.output}
+        
+        Decision rules:
+        - IF overall_score >= 0.8 AND passed == true:
+          THEN accept_response
+          Answer: "Decision: accept"
+        
+        - IF overall_score >= 0.7 AND issues are minor:
+          THEN accept_with_notes
+          Answer: "Decision: accept_with_notes"
+        
+        - IF overall_score < 0.7 OR citation issues exist:
+          THEN regenerate_with_feedback
+          Answer: "Decision: regenerate"
+        
+        strict_yes_no_required: true
+
+      input_variables:
+        quality_validation: "${step.step_6.output}"
+
+      output:
+        save_to: quality_decision
+        format: json
+        fields:
+          - decision
+          - reason
+
+      branches:
+        - branch_id: accept_response
+          enabled_by: "step.step_7.output.decision == 'accept'"
+          next_step: step_8_final_response
+          
+        - branch_id: accept_with_notes
+          enabled_by: "step.step_7.output.decision == 'accept_with_notes'"
+          next_step: step_8_final_response
+          
+        - branch_id: regenerate
+          enabled_by: "step.step_7.output.decision == 'regenerate'"
+          next_step: step_4_generate_response
+
+    # ── STEP 8: Final Response Assembly ──────────────────────────────
+    - step: final_response_assembly
+      id: step_8
+      type: agent
+      generative_entity: "${models.generator}"
+      
+      prompt: |
+        Assemble the final response with all metadata.
+        
+        Generated response:
+        ${step.step_4.output}
+        
+        Citation details:
+        ${step.step_5.output.citations}
+        
+        Quality notes:
+        ${step.step_6.output.recommendations}
+        
+        Assemble:
+        1. Clean response text
+        2. Add formatted citation list at end
+        3. Include quality metadata
+        4. Generate conversation turn for history
+        
+        Output:
+        {
+          "response_text": "the response",
+          "citations": [{"number": 1, "source": "doc.md", "excerpt": "..."}],
+          "quality_score": 0.85,
+          "conversation_turn": {
+            "role": "assistant",
+            "content": "response",
+            "metadata": {"sources_used": 5, "quality_score": 0.85}
+          }
+        }
+
+      input_variables:
+        response: "${step.step_4.output}"
+        citations: "${step.step_5.output.citations}"
+        quality_notes: "${step.step_6.output.recommendations}"
+
+      output:
+        save_to: final_response
+        format: json
+        file_output:
+          enabled: true
+          path: /workspace/output/rag_response.json
+
+    # ── STEP 9: Update Conversation History ──────────────────────────
+    - step: update_conversation_history
+      id: step_9
+      type: agent
+      generative_entity: "${models.generator}"
+      
+      prompt: |
+        Update the conversation history with this turn.
+        
+        Previous history:
+        ${workflow.conversation_history}
+        
+        New turn:
+        User: ${workflow.user_query}
+        Assistant: ${step.step_8.output.response_text}
+        
+        Tasks:
+        1. Append new turn to history
+        2. Enforce max history turns (5)
+        3. Summarize older turns if needed
+        4. Store for next query
+        
+        Output:
+        {
+          "updated_history": [...],
+          "history_length": 3,
+          "summarized": false
+        }
+
+      input_variables:
+        conversation_history: "${workflow.conversation_history}"
+        user_query: "${workflow.user_query}"
+        response: "${step.step_8.output.response_text}"
+
+      output:
+        save_to: updated_history
+        format: json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VALIDATION LOOP
+# ─────────────────────────────────────────────────────────────────────────────
+validation_loop:
+  type: validation
+  exact_criteria: true
+  tolerance: 0.05
+  max_iterations: 3
+  stop_conditions:
+    - condition: "${step.step_6.output.overall_score} >= 0.8"
+      reason: "Response quality threshold met"
+    - condition: "${step.step_6.output.passed} == true"
+      reason: "All quality criteria passed"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RETRY CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+retry:
+  default:
+    max_attempts: 3
+    backoff: exponential
+    delay_ms: 1000
+    on_failure: regenerate_with_feedback
+
+# ─────────────────────────────────────────────────────────────────────────────
+# METRICS
+# ─────────────────────────────────────────────────────────────────────────────
+metrics:
+  enabled: true
+  collect:
+    - query_analysis_time_ms
+    - context_retrieval_time_ms
+    - context_chunks_used
+    - prompt_tokens
+    - response_tokens
+    - generation_time_ms
+    - quality_score
+    - citation_count
+    - conversation_turn_number
+  output:
+    path: /workspace/metrics/rag_generation_metrics.json
+    format: json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FEATURE SUMMARY
+# ─────────────────────────────────────────────────────────────────────────────
+features_demonstrated:
+  - query_analysis: true
+    capabilities: [intent_detection, entity_extraction, query_reformulation]
+  
+  - context_retrieval: true
+    methods: [dense, sparse, hybrid, multi_query]
+  
+  - prompt_augmentation: true
+    components: [system_prompt, context_chunks, conversation_history, citations]
+  
+  - context_window_management: true
+    strategies: [token_budgeting, relevance_filtering, diversity_selection]
+  
+  - response_generation: true
+    features: [citation_requirements, fallback_handling, temperature_control]
+  
+  - citation_extraction: true
+    validation: [source_mapping, content_verification, hallucination_detection]
+  
+  - quality_validation: true
+    criteria: [citation_accuracy, relevance, coherence, completeness]
+  
+  - conversation_support: true
+    features: [history_management, turn_limiting, summarization]

@@ -1,0 +1,537 @@
+---
+workflow_id: model_lifecycle_management
+name: Model Lifecycle and Memory Management
+description: Workflow demonstrating model warmup, cooldown, loading/unloading strategies, and multi-model switching with resource optimization
+version: "1.0.0"
+author: "AgentSDK Examples"
+tags:
+  - model-lifecycle
+  - warmup
+  - cooldown
+  - memory-management
+  - model-switching
+  - resource-optimization
+
+models:
+  primary_model:
+    name: "Primary Processing Model"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+        connection_timeout_secs: 45
+    generative_entity: "llama-3.2-3b-instruct"
+    backend: vulkan
+    gpu_layers: 32
+    
+    max_allowed:
+      ram: 25%
+      vram: 4GB
+      cpu: 50%
+      gpu: 80%
+      attention_tokens: 8192
+      concurrent_requests: 2
+    
+    min_allowed:
+      ram: 15%
+      vram: 2GB
+      cpu: 30%
+      gpu: 50%
+      attention_tokens: 4096
+    
+    allocation_strategy: dynamic
+    
+    model_memory:
+      cache_size: medium
+      kv_cache_quantization: auto
+      attention_context: auto
+    
+    execution:
+      timeout:
+        load_into_memory: 60s
+        time_to_first_response: 30s
+        total_time_to_response: 2h
+      max_turns: 15
+      stop_on_tool_failure: false
+      accumulate_tool_results: true
+    
+    hooks:
+      enabled: true
+      on_create:
+        action: log
+        message: "Model instance created"
+      on_run_start:
+        action: warmup
+        preload_cache: true
+      on_run_complete:
+        action: cooldown_check
+        idle_timeout_secs: 300
+      on_run_error:
+        action: cleanup
+        force_unload: false
+      on_turn_start:
+        action: check_memory
+      on_turn_complete:
+        action: update_metrics
+
+  secondary_model:
+    name: "Secondary Validation Model"
+    host:
+      type: ollama
+      connection_settings:
+        base_url: "http://localhost:11434"
+        timeout_secs: 60
+    generative_entity: "llama3.2"
+    backend: cpu
+    
+    max_allowed:
+      ram: 20%
+      cpu: 40%
+      attention_tokens: 4096
+    
+    min_allowed:
+      ram: 10%
+      cpu: 20%
+      attention_tokens: 2048
+    
+    allocation_strategy: static
+    
+    model_memory:
+      cache_size: min
+      attention_context: from_max_allowed
+    
+    hooks:
+      enabled: true
+      on_create:
+        action: log
+      on_run_start:
+        action: verify_loaded
+      on_run_complete:
+        action: keep_loaded
+        duration_secs: 600
+
+  lightweight_model:
+    name: "Lightweight Quick-Response Model"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+    generative_entity: "phi-3-mini"
+    backend: vulkan
+    gpu_layers: 20
+    
+    max_allowed:
+      ram: 10%
+      vram: 1GB
+      cpu: 25%
+      attention_tokens: 2048
+    
+    allocation_strategy: dynamic
+    
+    hooks:
+      enabled: true
+      on_run_complete:
+        action: immediate_unload
+
+workflow_execution_strategy:
+  model_lifecycle:
+    load_unload: adaptive
+    cache_size: medium
+    swap_timeout_secs: 30
+    unload_unused: true
+    gc_interval_secs: 180
+    
+  memory:
+    allocation:
+      strategy: adaptive
+      max_allowed:
+        ram: 50%
+        vram: 6GB
+        cpu: 75%
+        gpu: 90%
+      min_allowed:
+        ram: 20%
+        vram: 3GB
+        cpu: 40%
+        gpu: 60%
+    
+    model_lifecycle:
+      load_unload_strategy: adaptive
+      cache_size: medium
+      swap_timeout_secs: 30
+      unload_unused: true
+      gc_interval_secs: 300
+    
+    pressure_handling:
+      trigger_threshold_percent: 85
+      strategy: throttle
+      throttle_factor: 0.5
+      on_oom: swap
+
+  adaptive:
+    resource_monitoring:
+      enabled: true
+      interval_secs: 5
+      metrics:
+        - cpu
+        - memory
+        - gpu
+        - vram
+    
+    memory_pressure_handling:
+      strategy: graceful_degradation
+      memory_threshold_percent: 80
+      throttle_factor: 0.7
+      on_oom: swap
+
+execution:
+  mode: hybrid
+  memory:
+    max_allocated_memory_mb: 16384
+    model_memory_mb: 4096
+    unload_unused: true
+    gc_interval_secs: 180
+
+logging:
+  global:
+    level: debug
+    detail: very_high
+    output_type: chat
+    format: json
+    console: true
+    file: true
+    log_file: /workspace/logs/model_lifecycle.log
+  
+  models:
+    level: debug
+    detail: very_high
+    include_load_unload: true
+    include_resource_usage: true
+    include_lifecycle_events: true
+
+agentic_workflow:
+  steps:
+    - step: model_warmup_phase
+      id: step_1_warmup
+      generative_entity: "${models.primary_model}"
+      type: agent
+      
+      prompt: |
+        Execute model warmup sequence:
+        
+        Warmup tasks:
+        1. Pre-load model into memory
+        2. Initialize KV cache
+        3. Run inference warmup prompt
+        4. Verify model responsiveness
+        5. Record warmup metrics
+        
+        Warmup prompt: "Hello, please confirm you are ready to process requests."
+        
+        Expected output:
+        - warmup_complete: boolean
+        - load_time_ms: milliseconds
+        - first_token_time_ms: milliseconds
+        - memory_allocated_mb: megabytes
+        - cache_initialized: boolean
+
+      hooks:
+        pre_execution:
+          - log_state: "starting_warmup"
+          - check_resources: true
+        post_execution:
+          - log_state: "warmup_complete"
+          - record_metrics: true
+
+      output:
+        save_to: warmup_results
+        format: json
+        fields:
+          - warmup_complete
+          - load_time_ms
+          - first_token_time_ms
+          - memory_allocated_mb
+          - cache_initialized
+
+    - step: primary_processing_task
+      id: step_2_primary
+      generative_entity: "${models.primary_model}"
+      type: agent
+      
+      prompt: |
+        Process the main analysis task using the primary model:
+        
+        Task: Analyze the following codebase structure and provide recommendations
+        
+        Code path: /workspace/src
+        
+        Requirements:
+        1. Scan directory structure
+        2. Identify main components
+        3. Analyze code organization
+        4. Provide improvement recommendations
+        
+        Model lifecycle considerations:
+        - Model should remain loaded during processing
+        - Monitor memory usage
+        - Track resource consumption
+
+      code_path: /workspace/src
+      
+      hooks:
+        pre_execution:
+          - verify_model_loaded: "${models.primary_model}"
+          - check_memory_available: 4096
+        post_execution:
+          - update_model_metrics: true
+          - check_cooldown_threshold: 300
+
+      output:
+        save_to: primary_analysis
+        format: json
+        fields:
+          - components_found
+          - organization_score
+          - recommendations
+          - memory_used_mb
+          - processing_time_ms
+
+    - step: switch_to_secondary_model
+      id: step_3_switch
+      generative_entity: "${models.secondary_model}"
+      type: agent
+      
+      prompt: |
+        Validate the primary analysis using the secondary model:
+        
+        Primary analysis results:
+        ${step.step_2_primary.output}
+        
+        Validation tasks:
+        1. Cross-check component identification
+        2. Verify organization score
+        3. Assess recommendation quality
+        4. Add any missed findings
+        
+        Model switching behavior:
+        - Primary model may be unloaded if memory pressure detected
+        - Secondary model loads with static allocation
+        - Monitor resource transitions
+
+      primary_results: "${step.step_2_primary.output}"
+      
+      model_switch_config:
+        unload_primary_on_switch: auto
+        keep_primary_cached: true
+        preload_secondary: true
+
+      output:
+        save_to: validation_results
+        format: json
+        fields:
+          - validation_passed
+          - cross_check_score
+          - additional_findings
+          - model_switch_time_ms
+
+    - step: quick_response_task
+      id: step_4_quick
+      generative_entity: "${models.lightweight_model}"
+      type: agent
+      
+      prompt: |
+        Generate a quick summary using the lightweight model:
+        
+        Input data:
+        - Primary analysis: ${step.step_2_primary.output}
+        - Validation results: ${step.step_3_switch.output}
+        
+        Generate a concise summary (100-200 words) of the findings.
+        
+        Lightweight model behavior:
+        - Fast loading and unloading
+        - Minimal memory footprint
+        - Quick response time expected
+
+      analysis_data: "${step.step_2_primary.output}"
+      validation_data: "${step.step_3_switch.output}"
+
+      output:
+        save_to: quick_summary
+        format: text
+
+    - step: multi_model_parallel_task
+      id: step_5_parallel
+      type: agent
+      parallel_group: multi_model_analysis
+      max_parallel: 2
+      
+      prompt: |
+        Execute parallel analysis using multiple models simultaneously:
+        
+        Run two parallel tasks:
+        1. Primary model: Detailed technical analysis
+        2. Secondary model: Independent validation
+        
+        Memory management during parallel execution:
+        - Monitor combined memory usage
+        - Implement graceful degradation if needed
+        - Track per-model resource consumption
+
+      sub_tasks:
+        - task_id: detailed_analysis
+          generative_entity: "${models.primary_model}"
+          prompt: "Perform detailed technical analysis of the codebase patterns"
+        
+        - task_id: independent_validation
+          generative_entity: "${models.secondary_model}"
+          prompt: "Perform independent validation of the analysis approach"
+
+      parallel_config:
+        memory_limit_mb: 12288
+        load_strategy: staggered
+        stagger_delay_ms: 500
+
+      output:
+        save_to: parallel_results
+        format: json
+        fields:
+          - detailed_analysis_result
+          - independent_validation_result
+          - peak_memory_usage_mb
+          - parallel_execution_time_ms
+
+    - step: model_cooldown_phase
+      id: step_6_cooldown
+      generative_entity: "${models.primary_model}"
+      type: agent
+      
+      prompt: |
+        Execute model cooldown and cleanup sequence:
+        
+        Cooldown tasks:
+        1. Complete pending operations
+        2. Flush caches if needed
+        3. Record final metrics
+        4. Prepare for potential unload
+        5. Generate lifecycle report
+        
+        Generate lifecycle report including:
+        - Total model uptime
+        - Memory usage patterns
+        - Request count
+        - Average response time
+        - Resource efficiency score
+
+      hooks:
+        pre_execution:
+          - flush_pending_operations: true
+          - prepare_cooldown_metrics: true
+        post_execution:
+          - record_final_metrics: true
+          - evaluate_unload_decision: true
+          - cleanup_temporary_resources: true
+
+      output:
+        save_to: cooldown_report
+        format: json
+        file_output:
+          enabled: true
+          path: /workspace/output/lifecycle_report.json
+        fields:
+          - total_uptime_secs
+          - peak_memory_mb
+          - request_count
+          - avg_response_time_ms
+          - efficiency_score
+          - unload_recommendation
+
+retry:
+  default:
+    max_attempts: 3
+    backoff: exponential
+    on_failure: escalate_model
+  
+  model_failure:
+    strategy: switch_model
+    fallback_order:
+      - "${models.secondary_model}"
+      - "${models.lightweight_model}"
+
+metrics:
+  enabled: true
+  collect:
+    - model_load_time_ms
+    - model_unload_time_ms
+    - model_uptime_secs
+    - memory_peak_mb
+    - memory_average_mb
+    - cache_hit_rate
+    - model_switch_count
+    - gc_collections
+    - oom_events
+    - throttle_events
+  output:
+    path: /workspace/metrics/lifecycle_metrics.json
+    format: json
+
+lifecycle_configuration:
+  warmup:
+    enabled: true
+    preload_cache: true
+    warmup_prompt: "Hello, please confirm readiness."
+    timeout_secs: 60
+  
+  cooldown:
+    enabled: true
+    idle_threshold_secs: 300
+    cache_flush_on_cooldown: false
+    metrics_collection: true
+  
+  switching:
+    strategy: adaptive
+    memory_check_before_switch: true
+    unload_previous_model: auto
+    cache_previous_model: true
+  
+  memory_management:
+    gc_interval_secs: 180
+    pressure_threshold_percent: 85
+    swap_enabled: true
+    oom_recovery: graceful_degradation
+
+features_demonstrated:
+  model_warmup:
+    enabled: true
+    cache_prewarming: true
+    connection_preestablishment: true
+  
+  model_cooldown:
+    enabled: true
+    idle_detection: true
+    resource_cleanup: true
+  
+  model_switching:
+    multi_model: true
+    parallel_execution: true
+    memory_aware: true
+  
+  memory_management:
+    allocation_strategies: [static, dynamic, adaptive]
+    pressure_handling: true
+    gc_integration: true
+  
+  lifecycle_hooks:
+    on_create: true
+    on_run_start: true
+    on_run_complete: true
+    on_run_error: true
+    on_turn_start: true
+    on_turn_complete: true
+  
+  resource_optimization:
+    adaptive_allocation: true
+    memory_monitoring: true
+    performance_tracking: true

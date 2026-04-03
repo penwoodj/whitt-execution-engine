@@ -1,0 +1,496 @@
+---
+workflow_id: error_handling_hooks
+name: Error Handling Hooks
+description: Demonstrates hooks for error handling and recovery workflows
+
+# ── MODEL CONFIGURATION ────────────────────────────────────
+models:
+  
+  default_model_router: automatic
+  
+  # ── MODEL: RECOVERY_AGENT ─────────────────────────────
+  "llama-3.2-3b-instruct":
+    name: recovery_agent
+    
+    host:
+      type: lmstudio
+      connection_settings:
+        host: localhost
+        port: 1234
+    
+    resource_limits:
+      max_allowed:
+        ram: 2048MB
+        vram: 2048MB
+        cpu: 80%
+        gpu: 80%
+        attention_tokens: 8192
+        concurrent_requests: 1
+      
+      min_allowed:
+        ram: 1024MB
+        vram: 1024MB
+        cpu: 40%
+        gpu: 40%
+        attention_tokens: 4096
+      
+      allocation_strategy: dynamic
+    
+    execution:
+      timeout:
+        load_into_memory: 10s
+        time_to_first_response: 30s
+        total_time_to_response: 10m
+      
+      max_turns: 5
+      stop_on_tool_failure: false
+      accumulate_tool_results: true
+
+# ── WORKFLOW EXECUTION STRATEGY ────────────────────────────
+workflow_execution_strategy:
+  
+  load_unload: lazy
+  
+  processing: serial
+  
+  memory:
+    allocation:
+      strategy: dynamic
+      max_allowed:
+        ram: 2048MB
+        vram: 2048MB
+        cpu: 80%
+        gpu: 80%
+        attention_tokens: 8192
+    
+    model_lifecycle:
+      load_unload_strategy: lazy
+      cache_size: medium
+      swap_timeout_secs: 30
+      unload_unused: true
+  
+  timeout:
+    total: 20m
+    timeout_strategy: fail
+  
+  error_handling:
+    default_action: retry
+    max_retries_per_step: 3
+    retry_backoff_multiplier: 2.0
+
+# ── LOGGING CONFIGURATION ────────────────────────────────────
+logging:
+  
+  level: info
+  
+  output_destinations:
+    console:
+      enabled: true
+      include_timestamps: true
+
+# ── PIPELINE DEFINITION ───────────────────────────────────
+agentic_workflow:
+  
+  steps:
+    
+    # ── STEP 1: Attempt Risky Operation ─────────────────
+    step_1_risky_operation:
+      name: "Attempt Risky Operation"
+      description: "Demonstrates error handling with hooks"
+      type: agent
+      
+      generative_entity: "${models.recovery_agent}"
+      
+      prompt: |
+        Attempt to read a file that may not exist.
+        
+        Path: ${workspace.nonexistent_file}
+        
+        This will intentionally fail to demonstrate error handling.
+        
+        If the file doesn't exist, this should trigger error hooks.
+      
+      # ── PRE-EXECUTION HOOKS ─────────────────────────────
+      pre_hooks:
+        validate_operation:
+          check_file_exists: true
+          
+        notify_before_operation:
+          enabled: true
+          notification_type: console
+          message: "Attempting potentially risky operation..."
+          
+        setup_recovery:
+          create_backup_location: "${workspace.backups}/"
+          enable_rollback: true
+      
+      output:
+        save_to: attempt_result
+        format: structured
+        fields:
+          - success              # Operation succeeded
+          - error               # Error object if failed
+          
+        console:
+          enabled: true
+          prefix: "[Attempt] "
+    
+    # ── STEP 2: Branch Based on Error ─────────────────────
+    step_2_error_branch:
+      name: "Branch on Error"
+      description: "Route based on whether step 1 succeeded or failed"
+      type: control
+      
+      depends_on:
+        - step_1_risky_operation
+      
+      branches:
+        
+        # Branch: Operation succeeded - proceed normally
+        branch_success:
+          name: "Proceed Normally"
+          description: "No error occurred, continue workflow"
+          
+          enabled_by: "step_1_risky_operation.output.success == true"
+          
+          next_step: step_3_log_success
+        
+        # Branch: Operation failed - enter recovery
+        branch_error:
+          name: "Enter Error Recovery"
+          description: "Error occurred, trigger recovery workflow"
+          
+          enabled_by: "step_1_risky_operation.output.success == false"
+          
+          next_step: step_3_error_recovery
+    
+    # ── STEP 3A: Log Success ─────────────────────────
+    step_3_log_success:
+      name: "Log Successful Operation"
+      description: "Log that operation succeeded without errors"
+      type: agent
+      
+      depends_on:
+        - step_2_error_branch
+      condition: "step_1_risky_operation.output.success == true"
+      
+      generative_entity: "${models.recovery_agent}"
+      
+      prompt: |
+        Log the successful operation result.
+        
+        Operation result:
+        {{step_1_risky_operation.output.attempt_result}}
+        
+        Create a log entry with:
+        1. Timestamp
+        2. Operation performed
+        3. Success indicator
+        4. Any warnings
+        
+        Save to workflow log file.
+      
+      output:
+        save_to: success_log
+        format: text
+        
+        file_output:
+          enabled: true
+          path: "${workspace.logs}/operations.log"
+          
+        console:
+          enabled: true
+          prefix: "[Success] "
+    
+    # ── STEP 3B: Error Recovery Workflow ─────────────────
+    step_3_error_recovery:
+      name: "Error Recovery"
+      description: "Handle and recover from previous step error"
+      type: agent
+      
+      depends_on:
+        - step_2_error_branch
+      condition: "step_1_risky_operation.output.success == false"
+      
+      generative_entity: "${models.recovery_agent}"
+      
+      prompt: |
+        Recover from the following error:
+        
+        Error details:
+        {{step_1_risky_operation.output.error}}
+        
+        Recovery actions:
+        1. Analyze the error type and severity
+        2. Determine appropriate recovery strategy
+        3. Attempt automated recovery if possible
+        4. Provide alternative approaches if recovery fails
+        
+        Recovery strategies:
+        - File not found: Provide template or create file
+        - Permission denied: Suggest checking permissions
+        - Timeout: Retry with backoff
+        - Resource exhausted: Suggest alternatives or cleanup
+        
+        Generate a recovery plan with:
+        - Error classification
+        - Recommended recovery action
+        - Alternative options
+        - Expected recovery time
+      
+      # ── ERROR HANDLING HOOKS ─────────────────────────────
+      on_error:
+        
+        log_error:
+          level: error
+          message: "Error detected in step 1"
+          include_stack_trace: true
+          
+        classify_error:
+          enabled: true
+          categorization:
+            - severity: critical | high | medium | low
+            - type: transient | permanent | recoverable
+            - scope: local | remote | system
+            
+        save_error_state:
+          enabled: true
+          path: "${workspace.state}/error-state.json"
+          
+        notify_on_error:
+          enabled: true
+          notification_type: webhook
+          webhook_url: "https://api.example.com/errors"
+          include_details: true
+      
+      output:
+        save_to: recovery_plan
+        format: structured
+        fields:
+          - error_classification # Error type and severity
+          - recovery_action     # Recommended recovery approach
+          - alternatives         # Alternative options
+          - expected_time       # Time estimate for recovery
+          
+        console:
+          enabled: true
+          prefix: "[Recovery] "
+    
+    # ── STEP 4: Execute Recovery ───────────────────────────
+    step_4_execute_recovery:
+      name: "Execute Recovery Action"
+      description: "Perform the recovery action determined in step 3"
+      type: control
+      
+      depends_on:
+        - step_3_error_recovery
+      
+      branches:
+        
+        # Branch: Automatic recovery possible - execute it
+        branch_auto:
+          name: "Execute Automatic Recovery"
+          description: "Run automated recovery actions"
+          
+          enabled_by: "step_3_error_recovery.output.recovery_action == 'automatic'"
+          
+          next_step: step_5_apply_recovery
+        
+        # Branch: Manual recovery needed - pause for input
+        branch_manual:
+          name: "Request Manual Recovery"
+          description: "Wait for user to provide recovery guidance"
+          
+          enabled_by: "step_3_error_recovery.output.recovery_action == 'manual'"
+          
+          next_step: step_6_manual_recovery_prompt
+        
+        # Branch: Alternative approach - suggest alternative
+        branch_alternative:
+          name: "Suggest Alternative"
+          description: "Offer alternative approaches to user"
+          
+          enabled_by: "step_3_error_recovery.output.recovery_action == 'alternative'"
+          
+          next_step: step_7_suggest_alternative
+    
+    # ── STEP 5: Apply Recovery ───────────────────────────
+    step_5_apply_recovery:
+      name: "Apply Recovery"
+      description: "Execute the automatic recovery action"
+      type: agent
+      
+      depends_on:
+        - step_4_execute_recovery
+      condition: "step_3_error_recovery.output.recovery_action == 'automatic'"
+      
+      generative_entity: "${models.recovery_agent}"
+      
+      prompt: |
+        Apply the following recovery action:
+        
+        Recovery plan:
+        {{step_3_error_recovery.output.recovery_plan}}
+        
+        Execute the recovery:
+        - Create missing resources
+        - Fix permission issues
+        - Retry failed operations
+        - Roll back if needed
+        
+        After recovery:
+        1. Verify the fix worked
+        2. Resume workflow execution
+        3. Log recovery success
+        
+        Report recovery result.
+      
+      output:
+        save_to: recovery_result
+        format: structured
+        fields:
+          - recovery_success    # Whether recovery succeeded
+          - actions_taken       # List of recovery actions
+          - workflow_resumed    # Whether workflow can continue
+          
+        console:
+          enabled: true
+          prefix: "[Recovery] "
+    
+    # ── STEP 6: Manual Recovery Prompt ─────────────────────
+    step_6_manual_recovery_prompt:
+      name: "Request Manual Recovery"
+      description: "Ask user for manual recovery guidance"
+      type: agent
+      
+      depends_on:
+        - step_4_execute_recovery
+      condition: "step_3_error_recovery.output.recovery_action == 'manual'"
+      
+      generative_entity: "${models.recovery_agent}"
+      
+      prompt: |
+        Present error to user and request guidance:
+        
+        Original error:
+        {{step_1_risky_operation.output.error}}
+        
+        Recovery analysis:
+        {{step_3_error_recovery.output.recovery_plan}}
+        
+        Create a clear message:
+        1. Explain what went wrong
+        2. Show recommended recovery steps
+        3. Ask user to choose an action
+        4. Provide estimated time for recovery
+        
+        Options to present:
+        - Retry operation with adjustments
+        - Skip this step and continue
+        - Provide manual fix and resume
+        - Abort workflow with error details
+        
+        Format as a user-friendly prompt.
+      
+      output:
+        save_to: user_prompt
+        format: text
+        
+        console:
+          enabled: true
+          prefix: "[Manual] "
+    
+    # ── STEP 7: Suggest Alternative ───────────────────────
+    step_7_suggest_alternative:
+      name: "Suggest Alternative Approaches"
+      description: "Propose alternative methods to user"
+      type: agent
+      
+      depends_on:
+        - step_4_execute_recovery
+      condition: "step_3_error_recovery.output.recovery_action == 'alternative'"
+      
+      generative_entity: "${models.recovery_agent}"
+      
+      prompt: |
+        Suggest alternative approaches for the failed operation:
+        
+        Original goal:
+        Achieve the original task objective
+        
+        Failed operation:
+        {{step_1_risky_operation.output.error}}
+        
+        Alternatives to propose:
+        1. Use different tools or methods
+        2. Break task into smaller steps
+        3. Request additional resources or permissions
+        4. Defer to later with checkpoint
+        
+        For each alternative:
+        - Describe the approach
+        - List pros and cons
+        - Estimate time and effort
+        - Recommend best option
+        
+        Present options clearly with trade-offs.
+      
+      output:
+        save_to: alternatives
+        format: structured
+        fields:
+          - alternative_1        # First alternative option
+          - alternative_2        # Second alternative option
+          - alternative_3        # Third alternative option
+          - recommendation       # Recommended alternative
+          
+        console:
+          enabled: true
+          prefix: "[Alternative] "
+  
+  # ── MODEL-LEVEL ERROR HANDLING HOOKS ───────────────────
+  models:
+    
+    "llama-3.2-3b-instruct":
+      
+      # ── MODEL ERROR HANDLING HOOKS ─────────────────────
+      hooks:
+        enabled: true
+        
+        on_run_error:
+          # Fires when agent run encounters unrecoverable error
+          log:
+            level: error
+            message: "Model run error occurred"
+            include_error_details: true
+            include_context: true
+            
+          notify:
+            enabled: true
+            notification_type: email
+            recipients: ["admin@example.com"]
+            subject: "Workflow Model Error"
+            
+          save_state:
+            enabled: true
+            path: "${workspace.state}/model-error-state.json"
+            
+          escalate:
+            enabled: true
+            escalate_to: "oracle"
+            escalation_criteria: "3_consecutive_failures"
+            
+        on_retry:
+          # Fires when a run is being retried
+          log:
+            level: warning
+            message: "Retrying model operation"
+            include_attempt_number: true
+            
+          adjust_backoff:
+            enabled: true
+            strategy: increase_delay
+            multiplier: 1.5
+            
+          notify:
+            enabled: false

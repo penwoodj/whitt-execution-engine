@@ -1,0 +1,207 @@
+---
+workflow_id: web_fetch_scrape
+name: Web Fetch and Scrape Operations
+description: Demonstrates basic web fetching, page scraping, data extraction, robots.txt compliance, and timeout handling
+version: "1.0.0"
+author: "AgentSDK Examples"
+tags:
+  - web-operations
+  - web-fetch
+  - web-scrape
+  - data-extraction
+
+models:
+  web_agent:
+    name: "Web Operations Agent"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+    generative_entity: "llama-3.2-3b-instruct"
+    backend: vulkan
+
+workflow_execution_strategy:
+  load_unload: lazy
+  processing: serial
+
+tool_permissions:
+  web_operations:
+    fetch:
+      enabled: true
+      require_confirmation: false
+      timeout_secs: 30
+      max_concurrent_requests: 5
+      follow_redirects: true
+      validate_ssl: true
+      allowed_domains:
+        - docs.rs
+        - api.github.com
+        - example.com
+      forbidden_domains:
+        - "*.local"
+
+    scrape:
+      enabled: true
+      require_confirmation: false
+      respect_robots_txt: true
+      max_pages_per_domain: 100
+      follow_links:
+        enabled: false
+        max_depth: 2
+
+agentic_workflow:
+  step_1_fetch_documentation:
+    name: "Fetch Documentation Page"
+    type: agent
+    model: "${models.web_agent}"
+
+    input:
+      prompt: |
+        Fetch the main documentation page from:
+        https://docs.rs/rust-workflows
+
+        Requirements:
+        1. Use HTTP GET request
+        2. Follow redirects (max 5)
+        3. Respect robots.txt
+        4. Timeout after 30 seconds
+        5. Validate SSL certificate
+
+        Extract:
+        - Page title
+        - Main sections
+        - Code examples
+        - Link URLs
+
+        Return structured JSON with extracted content.
+
+    output:
+      save_to: fetched_doc
+      format: json
+
+  step_2_scrape_api_docs:
+    name: "Scrape API Documentation"
+    type: agent
+    model: "${models.web_agent}"
+
+    input:
+      variables:
+        base_url: "https://api.github.com"
+
+      prompt: |
+        Scrape API documentation from GitHub API:
+        Base URL: {{base_url}}
+
+        Scrape requirements:
+        1. Check robots.txt first
+        2. Max 50 pages from this domain
+        3. Extract API endpoint descriptions
+        4. Capture request/response examples
+        5. Document authentication methods
+
+        Scrape depth: 1 (landing page + linked pages)
+
+        Return structured API documentation.
+
+    output:
+      save_to: api_docs
+      format: json
+
+  step_3_extract_structured_data:
+    name: "Extract Structured Data"
+    type: agent
+    model: "${models.web_agent}"
+
+    input:
+      variables:
+        doc_content: "${step.step_1_fetch_documentation.output}"
+        api_content: "${step.step_2_scrape_api_docs.output}"
+
+      prompt: |
+        Extract structured data from:
+
+        Documentation:
+        {{doc_content}}
+
+        API docs:
+        {{api_content}}
+
+        Extract:
+        1. Feature lists (with descriptions)
+        2. Code example blocks
+        3. Configuration parameters
+        4. Supported formats
+        5. Integration examples
+
+        Format output as structured JSON for downstream processing.
+
+    output:
+      save_to: extracted_data
+      format: json
+      file_output:
+        enabled: true
+        path: /workspace/output/extracted-data.json
+
+  step_4_generate_summary:
+    name: "Generate Scrape Summary"
+    type: agent
+    model: "${models.web_agent}"
+
+    input:
+      variables:
+        fetch_result: "${step.step_1_fetch_documentation.output}"
+        scrape_result: "${step.step_2_scrape_api_docs.output}"
+        extraction_result: "${step.step_3_extract_structured_data.output}"
+
+      prompt: |
+        Generate comprehensive summary:
+
+        Fetch results:
+        {{fetch_result}}
+
+        Scrape results:
+        {{scrape_result}}
+
+        Extraction results:
+        {{extraction_result}}
+
+        Summary sections:
+        1. Pages processed (count, URLs)
+        2. Data extraction success rate
+        3. Errors encountered
+        4. Robots.txt compliance status
+        5. Recommendations for improvement
+
+        Write summary to: /workspace/output/scrape-summary.txt
+
+    output:
+      save_to: scrape_summary
+      format: text
+      file_output:
+        enabled: true
+        path: /workspace/output/scrape-summary.txt
+
+logging:
+  enabled: true
+
+  levels:
+    default: info
+    web_operations: debug
+
+  scopes:
+    web_operations:
+      enabled: true
+      include_urls: true
+      include_response_codes: true
+
+    execution:
+      enabled: true
+
+  output:
+    console:
+      enabled: true
+
+    file:
+      enabled: true
+      path: /workspace/logs/web-operations.log

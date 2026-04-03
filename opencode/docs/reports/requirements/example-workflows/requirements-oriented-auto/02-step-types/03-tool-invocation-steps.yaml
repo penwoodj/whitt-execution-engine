@@ -1,0 +1,409 @@
+---
+workflow_id: tool_invocation_steps
+name: Tool Invocation Steps
+description: Demonstrates different tool invocation types including file operations, web requests, and system commands
+
+# ── MODEL CONFIGURATION ────────────────────────────────────
+models:
+  
+  default_model_router: automatic
+  
+  # ── MODEL: WORKER ───────────────────────────────
+  "llama-3.2-3b-instruct":
+    name: worker
+    
+    host:
+      type: lmstudio
+      connection_settings:
+        host: localhost
+        port: 1234
+    
+    resource_limits:
+      max_allowed:
+        ram: 2048MB
+        vram: 2048MB
+        cpu: 80%
+        gpu: 80%
+        attention_tokens: 8192
+        concurrent_requests: 2
+      
+      min_allowed:
+        ram: 1024MB
+        vram: 1024MB
+        cpu: 40%
+        gpu: 40%
+        attention_tokens: 4096
+      
+      allocation_strategy: dynamic
+    
+    execution:
+      timeout:
+        load_into_memory: 10s
+        time_to_first_response: 30s
+        total_time_to_response: 30m
+      
+      max_turns: 5
+      stop_on_tool_failure: false
+      accumulate_tool_results: true
+
+# ── WORKFLOW EXECUTION STRATEGY ────────────────────────────
+workflow_execution_strategy:
+  
+  load_unload: lazy
+  
+  processing: serial
+  
+  memory:
+    allocation:
+      strategy: dynamic
+      max_allowed:
+        ram: 2048MB
+        vram: 2048MB
+        cpu: 80%
+        gpu: 80%
+        attention_tokens: 8192
+    
+    model_lifecycle:
+      load_unload_strategy: lazy
+      cache_size: medium
+      swap_timeout_secs: 30
+      unload_unused: true
+  
+  timeout:
+    total: 30m
+    timeout_strategy: continue_with_partial
+  
+  error_handling:
+    default_action: retry
+    max_retries_per_step: 2
+    retry_backoff_multiplier: 1.5
+
+# ── LOGGING CONFIGURATION ────────────────────────────────────
+logging:
+  
+  level: info
+  
+  output_destinations:
+    console:
+      enabled: true
+      include_timestamps: true
+    
+    file:
+      enabled: true
+      path: /workspace/logs/tool-invocation.log
+
+# ── PIPELINE DEFINITION ───────────────────────────────────
+agentic_workflow:
+  
+  steps:
+    
+    # ── STEP 1: File Read Tool ─────────────────────
+    step_1_read_config:
+      name: "Read Configuration File"
+      description: "Read and parse workflow configuration"
+      type: tool
+      
+      generative_entity: "${models.worker}"
+      
+      prompt: |
+        Read the configuration file and extract key settings:
+        
+        ${workflow.config_path}
+        
+        Extract:
+        - Model name
+        - Timeout settings
+        - Resource limits
+        - Output paths
+      
+      tool:
+        type: file_read
+        
+        parameters:
+          file_path: "${workflow.config_path}"
+          # Required: Path to file to read
+          
+          encoding: utf-8
+          # Required: Text encoding (utf-8, ascii, etc.)
+          
+          format: yaml
+          # Optional: Parse as specific format (yaml, json, text, auto)
+          
+          chunk_size: 1024
+          # Optional: Read in chunks for large files (bytes)
+          
+          include_metadata: true
+          # Optional: Include file stats in output
+      
+      output:
+        save_to: config_data
+        format: structured
+        fields:
+          - raw_content      # Original file content
+          - parsed_config    # Parsed YAML/JSON structure
+          - file_size_bytes   # File size in bytes
+          - last_modified     # File modification timestamp
+          
+        console:
+          enabled: false
+      
+      retry:
+        max_attempts: 3
+        backoff: linear
+        delay_ms: 500
+    
+    # ── STEP 2: Web Fetch Tool ─────────────────────
+    step_2_fetch_data:
+      name: "Fetch Data from API"
+      description: "Retrieve data from external API endpoint"
+      type: tool
+      depends_on:
+        - step_1_read_config
+      
+      generative_entity: "${models.worker}"
+      
+      prompt: |
+        Fetch data from the API endpoint configured in step 1.
+        
+        Use the endpoint: {{step.step_1_read_config.output.parsed_config.api_endpoint}}
+        
+        Expect JSON response with:
+        - status
+        - data array
+        - metadata
+      
+      tool:
+        type: web_fetch
+        
+        parameters:
+          url: "{{step.step_1_read_config.output.parsed_config.api_endpoint}}"
+            # Required: Full URL to fetch
+            
+          method: GET
+            # Required: HTTP method (GET, POST, PUT, DELETE, PATCH)
+            
+          timeout_secs: 30
+            # Optional: Request timeout
+            
+          follow_redirects: true
+            # Optional: Follow HTTP redirects
+            
+          validate_ssl: true
+            # Optional: Validate SSL certificates
+            
+          headers:
+            # Optional: Custom HTTP headers
+            User-Agent: "AgentSDK Workflow/1.0"
+            Accept: "application/json"
+            Authorization: "Bearer {{workflow.api_token}}"
+          
+          query_params:
+            # Optional: URL query parameters
+            limit: 100
+            format: json
+            
+          response_handling:
+            # Optional: Response processing options
+            save_to_file: "${workflow.output_path}/api-response.json"
+            format: json
+            max_size_mb: 10
+      
+      output:
+        save_to: api_response
+        format: structured
+        fields:
+          - status_code      # HTTP status code
+          - response_body    # Parsed response body
+          - headers          # Response headers
+          - request_time_ms  # Request duration
+          - saved_file       # Path to saved response file
+          
+        console:
+          enabled: false
+      
+      retry:
+        max_attempts: 3
+        backoff: exponential
+        delay_ms: 1000
+    
+    # ── STEP 3: System Command Tool ────────────────────
+    step_3_run_tests:
+      name: "Run Test Suite"
+      description: "Execute test suite and capture results"
+      type: tool
+      depends_on:
+        - step_1_read_config
+      
+      generative_entity: "${models.worker}"
+      
+      prompt: |
+        Run the test suite using the command from configuration.
+        
+        Execute: {{step.step_1_read_config.output.parsed_config.test_command}}
+        
+        Working directory: ${workspace.test_path}
+        
+        Capture:
+        - Exit code
+        - Standard output
+        - Error output
+        - Execution time
+      
+      tool:
+        type: cli_run
+        
+        parameters:
+          command: "cargo test -- --nocapture --test-threads=1"
+            # Required: Command to execute
+            
+          working_directory: "${workspace.test_path}"
+            # Optional: Working directory for command
+            
+          timeout_secs: 120
+            # Optional: Command timeout
+            
+          environment:
+            # Optional: Environment variables for command
+            RUST_BACKTRACE: 1
+            RUST_LOG: info
+            
+          capture_output:
+            # Optional: Output capture options
+            enabled: true
+            save_to_file: "${workflow.output_path}/test-results.log"
+            format: text
+            
+          error_handling:
+            # Optional: Error handling behavior
+            continue_on_error: false
+            save_error_log: true
+            error_log_path: "${workflow.output_path}/test-errors.log"
+            
+          resource_limits:
+            # Optional: Resource limits for command
+            max_memory_mb: 512
+            max_cpu_percent: 80
+      
+      output:
+        save_to: test_results
+        format: structured
+        fields:
+          - exit_code        # Process exit code
+          - stdout            # Standard output (captured)
+          - stderr            # Standard error (captured)
+          - execution_time_ms  # Command duration
+          - output_file       # Path to saved output
+          - error_file        # Path to saved error log
+          
+        console:
+          enabled: false
+      
+      retry:
+        max_attempts: 1
+        backoff: fixed
+        delay_ms: 0
+    
+    # ── STEP 4: File Write Tool ─────────────────────
+    step_4_write_report:
+      name: "Generate Analysis Report"
+      description: "Create comprehensive analysis report from tool outputs"
+      type: agent
+      depends_on:
+        - step_2_fetch_data
+        - step_3_run_tests
+      
+      generative_entity: "${models.worker}"
+      
+      prompt: |
+        Create a comprehensive analysis report based on:
+        
+        1. Configuration data: {{step.step_1_read_config.output.parsed_config}}
+        2. API response: {{step.step_2_fetch_data.output.response_body}}
+        3. Test results: {{step.step_3_run_tests.output.stdout}}
+        
+        Generate a markdown report with sections:
+        - Executive Summary
+        - Configuration Analysis
+        - API Integration Results
+        - Test Execution Summary
+        - Recommendations
+        
+        Format the report with:
+        - Headers (##, ###)
+        - Tables for structured data
+        - Code blocks for JSON snippets
+        - Bullet points for recommendations
+      
+      output:
+        save_to: analysis_report
+        format: markdown
+        
+        file_output:
+          enabled: true
+          path: "${workflow.output_path}/analysis-report.md"
+          format: markdown
+          encoding: utf-8
+          
+        console:
+          enabled: true
+          prefix: "[Report] "
+    
+    # ── STEP 5: File Write Tool (Save Report) ─────────
+    step_5_save_report:
+      name: "Save Report File"
+      description: "Write the generated report to file"
+      type: tool
+      depends_on:
+        - step_4_write_report
+      
+      generative_entity: "${models.worker}"
+      
+      prompt: |
+        Save the analysis report generated in step 4 to the output directory.
+      
+      tool:
+        type: file_write
+        
+        parameters:
+          file_path: "${workflow.output_path}/analysis-report.md"
+            # Required: Path to file to write
+            
+          content: "{{step.step_4_write_report.output.analysis_report}}"
+            # Required: Content to write
+            
+          encoding: utf-8
+            # Required: Text encoding
+            
+          create_directories: true
+            # Optional: Create parent directories if they don't exist
+            
+          backup_existing: true
+            # Optional: Backup existing file before overwriting
+            backup_path: "${workflow.output_path}/backups/"
+            backup_suffix: ".bak"
+            
+          permissions:
+            # Optional: File permissions (octal)
+            mode: 0644
+            
+          atomic_write: true
+            # Optional: Write atomically (write to temp, then rename)
+      
+      output:
+        save_to: report_save_result
+        format: structured
+        fields:
+          - success              # Write operation succeeded
+          - bytes_written        # Number of bytes written
+          - file_path           # Path to written file
+          - backup_path         # Path to backup (if created)
+          - write_time_ms       # Write operation duration
+          
+        console:
+          enabled: true
+          prefix: "[Save] "
+      
+      retry:
+        max_attempts: 2
+        backoff: linear
+        delay_ms: 500

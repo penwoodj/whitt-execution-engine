@@ -1,0 +1,324 @@
+---
+workflow_id: retry_strategies_backoff
+name: Retry Strategies and Backoff Algorithms
+description: Demonstrates retry strategies with exponential, linear, and fixed backoff algorithms, jitter for thundering herd prevention, and escalation mechanisms
+version: "1.0.0"
+author: "AgentSDK Examples"
+tags:
+  - error-handling
+  - retry-strategies
+  - backoff-algorithms
+  - escalation
+
+models:
+  retry_agent:
+    name: "Retry Strategy Agent"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+    generative_entity: "llama-3.2-3b-instruct"
+    backend: vulkan
+
+workflow_execution_strategy:
+  load_unload: lazy
+  processing: serial
+
+error_handling:
+  default_action:
+    type: retry_with_backoff
+    reason: "Transient failures require retry with backoff"
+
+  retry:
+    max_attempts_per_step: 5
+    max_attempts_per_workflow: 10
+
+    backoff_strategy:
+      type: exponential
+      base_delay_ms: 1000
+      max_delay_ms: 30000
+      jitter_factor: 0.2
+
+    retry_on_timeout: true
+    retry_on_rate_limit: true
+
+    rate_limit_backoff_strategy:
+      type: exponential
+      base_delay_ms: 5000
+      max_delay_ms: 60000
+
+  escalation:
+    escalate_to_model_after: 3
+    escalate_to_oracle_after: 5
+    notify_on_failure: true
+
+agentic_workflow:
+  step_1_transient_failure:
+    name: "Handle Transient Failure with Exponential Backoff"
+    type: agent
+    model: "${models.retry_agent}"
+
+    input:
+      prompt: |
+        Simulate transient failure and demonstrate retry.
+
+        Attempt a transient operation:
+        - Read from: /workspace/input/unstable-resource.json
+        - Resource may be temporarily unavailable
+        - Expected to fail first 2 attempts
+        - Succeeds on attempt 3
+
+        Retry configuration:
+        - Max attempts: 5
+        - Backoff: exponential (1s, 2s, 4s, 8s, 16s)
+        - Jitter: 0.2 (add randomness to prevent thundering herd)
+        - Total timeout: 31 seconds
+
+        For each attempt:
+        1. Record attempt number and delay
+        2. Execute operation
+        3. Capture result or error
+        4. If transient error, apply backoff and retry
+        5. If success, return result
+
+        Return retry timeline with success on attempt 3.
+
+    output:
+      save_to: transient_retry_result
+      format: json
+
+  step_2_linear_backoff:
+    name: "Linear Backoff for Rate Limited Operations"
+    type: agent
+    model: "${models.retry_agent}"
+
+    input:
+      prompt: |
+        Demonstrate linear backoff for rate limiting.
+
+        Scenario:
+        - API endpoint with rate limit: 100 requests/hour
+        - Attempt to make 10 rapid requests
+        - Expect HTTP 429 after exceeding limit
+
+        Linear backoff configuration:
+        - Initial delay: 1 second
+        - Increment: +1 second per retry
+        - Max delay: 10 seconds
+        - Jitter: 0.2
+
+        For each request:
+        1. Make API call
+        2. Check response code
+        3. If 429 (rate limit), wait with linear backoff
+        4. Apply jitter (0.2 * delay) to randomize retry times
+        5. Retry request
+        6. On success, continue next request
+
+        Return request timeline with rate limiting behavior.
+
+    output:
+      save_to: linear_backoff_result
+      format: json
+
+  step_3_fixed_backoff:
+    name: "Fixed Backoff for Predictable Retries"
+    type: agent
+    model: "${models.retry_agent}"
+
+    input:
+      prompt: |
+        Demonstrate fixed backoff for predictable retries.
+
+        Scenario:
+        - Service with known recovery time: 15 seconds
+        - Initial failure guaranteed
+        - All retries should use fixed delay
+        - Success expected after recovery period
+
+        Fixed backoff configuration:
+        - Fixed delay: 15 seconds
+        - Max attempts: 3
+        - No jitter (deterministic)
+        - No exponential growth
+
+        For each attempt:
+        1. Attempt operation
+        2. Wait fixed 15 seconds on failure
+        3. Retry with exact same delay
+        4. Stop after 3 attempts regardless of outcome
+
+        Return fixed backoff timeline.
+
+    output:
+      save_to: fixed_backoff_result
+      format: json
+
+  step_4_jitter_prevention:
+    name: "Jitter for Thundering Herd Prevention"
+    type: agent
+    model: "${models.retry_agent}"
+
+    input:
+      prompt: |
+        Demonstrate jitter for preventing thundering herd.
+
+        Scenario:
+        - 10 parallel clients all hit same service failure
+        - All retrying simultaneously
+        - Without jitter, all retry at exact same time
+        - Causes thundering herd and overwhelms service
+
+        Jitter configuration:
+        - Base backoff: 1 second, 2 seconds, 4 seconds
+        - Jitter factor: 0.2 (20% variation)
+        - Max delay: base + (base * 0.2)
+        - Random variation: Gaussian distribution around base delay
+
+        For parallel clients 1-10:
+        1. All fail simultaneously
+        2. Each calculates backoff: 1s, 2s, 4s
+        3. Apply jitter: randomize within ±20%
+        4. Retry at staggered times
+        5. Prevent synchronized retries
+
+        Return staggered retry timeline showing effective thundering herd prevention.
+
+    output:
+      save_to: jitter_timeline
+      format: json
+
+  step_5_escalation_trigger:
+    name: "Trigger Escalation to Higher Level"
+    type: agent
+    model: "${models.retry_agent}"
+
+    input:
+      prompt: |
+        Demonstrate escalation after max retry attempts.
+
+        Escalation configuration:
+        - Max attempts per step: 3
+        - Escalate to model after: 3 failed attempts
+        - Escalate to oracle after: 5 failed attempts total
+
+        Simulate persistent failure:
+        1. Attempt operation
+        2. Fail (simulated)
+        3. Retry with backoff: fail again
+        4. After 3 attempts: escalate to model
+        5. Model still fails: escalate to oracle
+        6. Oracle fails: workflow aborts
+
+        Escalation triggers:
+        - 3 consecutive failures → escalate to model
+        - 5 total failures → escalate to oracle
+        - Oracle failure → abort workflow
+
+        Return escalation timeline and final decision.
+
+    output:
+      save_to: escalation_result
+      format: json
+
+  step_6_combined_strategy:
+    name: "Combined Retry Strategy"
+    type: agent
+    model: "${models.retry_agent}"
+
+    input:
+      prompt: |
+        Combine multiple retry strategies for complex scenarios.
+
+        Combined configuration:
+        - First 2 attempts: exponential backoff (1s, 2s)
+        - Next 2 attempts: linear backoff (3s, 4s)
+        - Final attempt: fixed delay (10s)
+        - Total: 5 attempts max
+        - Jitter on all backoffs: 0.3
+
+        Scenario:
+        - Service with mixed failure modes
+        - Sometimes transient (exponential helps)
+        - Sometimes rate limited (linear helps)
+        - Sometimes needs fixed recovery window
+
+        Apply combined strategy:
+        1. Start with exponential (rapid recovery)
+        2. Switch to linear if rate limiting detected
+        3. Use fixed for final attempt
+        4. Apply jitter throughout
+
+        Return combined retry timeline with strategy transitions.
+
+    output:
+      save_to: combined_result
+      format: json
+
+  step_7_generate_retry_report:
+    name: "Generate Retry Strategy Report"
+    type: agent
+    model: "${models.retry_agent}"
+
+    input:
+      variables:
+        transient: "${step.step_1_transient_failure.output}"
+        linear: "${step.step_2_linear_backoff.output}"
+        fixed: "${step.step_3_fixed_backoff.output}"
+        jitter: "${step.step_4_jitter_prevention.output}"
+        escalation: "${step.step_5_escalation_trigger.output}"
+        combined: "${step.step_6_combined_strategy.output}"
+
+      prompt: |
+        Generate comprehensive retry strategy report.
+
+        All strategies:
+        - Transient: {{transient}}
+        - Linear: {{linear}}
+        - Fixed: {{fixed}}
+        - Jitter: {{jitter}}
+        - Escalation: {{escalation}}
+        - Combined: {{combined}}
+
+        Report sections:
+        1. Strategy comparison and use cases
+        2. Backoff algorithm effectiveness
+        3. Jitter impact analysis
+        4. Escalation trigger accuracy
+        5. Combined strategy complexity
+        6. Recommendations for production
+
+        Write report to: /workspace/output/retry-strategy-report.md
+
+    output:
+      save_to: retry_report
+      format: markdown
+      file_output:
+        enabled: true
+        path: /workspace/output/retry-strategy-report.md
+
+logging:
+  enabled: true
+
+  levels:
+    default: info
+    workflow_execution: info
+    error_handling: debug
+
+  scopes:
+    error_handling:
+      enabled: true
+      include_retry_attempts: true
+      include_backoff_delays: true
+
+    execution:
+      enabled: true
+
+  output:
+    console:
+      enabled: true
+
+    file:
+      enabled: true
+      path: /workspace/logs/retry-strategies.log

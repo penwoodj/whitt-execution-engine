@@ -1,0 +1,515 @@
+---
+workflow_id: interactive_user_feedback
+name: Interactive User Feedback Loops
+description: Demonstrates workflows with user feedback and iterative refinement
+
+# ── MODEL CONFIGURATION ────────────────────────────────────
+models:
+  
+  default_model_router: automatic
+  
+  # ── MODEL: REFINEMENT_ASSISTANT ─────────────────────
+  "llama-3.2-3b-instruct":
+    name: refinement_assistant
+    
+    host:
+      type: lmstudio
+      connection_settings:
+        host: localhost
+        port: 1234
+    
+    resource_limits:
+      max_allowed:
+        ram: 2048MB
+        vram: 2048MB
+        cpu: 70%
+        gpu: 70%
+        attention_tokens: 8192
+        concurrent_requests: 1
+      
+      min_allowed:
+        ram: 1024MB
+        vram: 1024MB
+        cpu: 40%
+        gpu: 40%
+        attention_tokens: 4096
+      
+      allocation_strategy: dynamic
+    
+    execution:
+      timeout:
+        load_into_memory: 10s
+        time_to_first_response: 30s
+        total_time_to_response: 5m
+      
+      max_turns: 5
+      stop_on_tool_failure: false
+      accumulate_tool_results: true
+
+# ── WORKFLOW EXECUTION STRATEGY ────────────────────────────
+workflow_execution_strategy:
+  
+  load_unload: lazy
+  
+  processing: serial
+  
+  memory:
+    allocation:
+      strategy: dynamic
+      max_allowed:
+        ram: 2048MB
+        vram: 2048MB
+        cpu: 70%
+        gpu: 70%
+        attention_tokens: 8192
+    
+    model_lifecycle:
+      load_unload_strategy: lazy
+      cache_size: medium
+      swap_timeout_secs: 30
+      unload_unused: true
+  
+  timeout:
+    total: 45m
+    timeout_strategy: continue_with_partial
+  
+  error_handling:
+    default_action: retry
+    max_retries_per_step: 2
+    retry_backoff_multiplier: 1.5
+
+# ── LOGGING CONFIGURATION ────────────────────────────────────
+logging:
+  
+  level: info
+  
+  output_destinations:
+    console:
+      enabled: true
+      include_timestamps: true
+
+# ── PIPELINE DEFINITION ───────────────────────────────────
+agentic_workflow:
+  
+  user_inputs:
+    
+    execution_mode: hybrid
+    
+    workflow_level:
+      
+      ask_at_start: true
+      
+      inputs:
+        
+        # Input 1: Initial task description
+        - id: task_description
+          type: text_area
+          label: "Task Description"
+          placeholder: "Describe what you want to accomplish..."
+          default_value: ""
+          multiline: true
+          required: true
+          max_length: 1000
+          
+          validation:
+            required: true
+            min_length: 10
+            error_message: "Please provide at least 10 characters"
+          
+          help_text: "Describe the task or problem you want to solve"
+        
+        # Input 2: Max iterations
+        - id: max_iterations
+          type: select
+          label: "Maximum Feedback Cycles"
+          default_value: "3"
+          required: true
+          
+          options:
+            - value: 1
+              label: "1 Cycle"
+              description: "One analysis pass"
+            - value: 3
+              label: "3 Cycles"
+              description: "Up to three refinements"
+            - value: 5
+              label: "5 Cycles"
+              description: "Thorough iterative refinement"
+          
+          help_text: "How many times to iterate with user feedback"
+        
+        # Input 3: Auto-proceed threshold
+        - id: satisfaction_threshold
+          type: select
+          label: "Auto-Proceed When"
+          default_value: "satisfied"
+          required: true
+          
+          options:
+            - value: satisfied
+              label: "User Satisfied"
+              description: "Wait for explicit approval"
+            - value: quality_above_85
+              label: "Quality > 85%"
+              description: "Auto-proceed if quality score exceeds 85%"
+            - value: all_complete
+              label: "All Done"
+              description: "Auto-proceed only after all iterations"
+          
+          help_text: "When should workflow proceed automatically?"
+    
+    step_level:
+      
+      ask_at_step_start: true
+      
+      inputs_by_step:
+        
+        # Step 3 input: Feedback request
+        step_3_feedback_loop:
+          - id: user_feedback
+            type: text_area
+            label: "Your Feedback"
+            placeholder: "What would you like to improve or change?"
+            default_value: ""
+            multiline: true
+            required: true
+            min_length: 5
+            max_length: 500
+          
+          help_text: "Provide feedback on the current analysis results"
+        
+        # Step 4 input: Quality check
+        step_4_quality_check:
+          - id: quality_rating
+            type: select
+            label: "Quality Rating"
+            default_value: "needs_work"
+            required: true
+            
+            options:
+              - value: excellent
+                label: "Excellent ✓"
+                description: "Perfect, no changes needed"
+              - value: good
+                label: "Good ✓"
+                description: "Acceptable, minor improvements possible"
+              - value: needs_work
+                label: "Needs Work ⚠"
+                description: "Significant improvements needed"
+              - value: poor
+                label: "Poor ✗"
+                description: "Major issues, needs revision"
+            
+            help_text: "Rate the quality of the analysis"
+        
+        # Step 5 input: Continue decision
+        step_5_continue_decision:
+          - id: proceed_choice
+            type: select
+            label: "Next Action"
+            default_value: "refine"
+            required: true
+            
+            options:
+              - value: refine
+                label: "Refine with Feedback"
+                description: "Apply feedback and improve"
+              - value: accept
+                label: "Accept Results"
+                description: "Use current results as-is"
+              - value: restart
+                label: "Restart with New Input"
+                description: "Start over with different requirements"
+            
+            help_text: "What would you like to do next?"
+    
+    ui_configuration:
+      
+      layout: vertical
+      
+      panels:
+        - id: task
+          label: "Task Setup"
+          inputs: [task_description, max_iterations, satisfaction_threshold]
+          
+        - id: feedback
+          label: "Feedback Loop"
+          inputs: [user_feedback, quality_rating]
+          
+        - id: actions
+          label: "Actions"
+          inputs: [proceed_choice]
+      
+      notifications:
+        enabled: true
+        sound: true
+        position: top_right
+  
+  steps:
+    
+    # ── STEP 1: Analyze Initial Request ─────────────────
+    step_1_initial_analysis:
+      name: "Initial Task Analysis"
+      description: "Analyze the user's initial task description"
+      type: agent
+      
+      generative_entity: "${models.refinement_assistant}"
+      
+      prompt: |
+        Analyze the following task:
+        
+        {{user_inputs.task_description}}
+        
+        Break down the task into:
+        1. Primary objectives
+        2. Required actions
+        3. Potential challenges
+        4. Success criteria
+        
+        Create an initial plan with clear, actionable steps.
+      
+      output:
+        save_to: initial_plan
+        format: structured
+        fields:
+          - objectives          # Main goals
+          - required_actions    # Steps to take
+          - challenges          # Anticipated issues
+          - success_criteria   # How to measure success
+          
+        console:
+          enabled: true
+          prefix: "[Plan] "
+    
+    # ── STEP 2: Present Plan to User ────────────────────
+    step_2_present_plan:
+      name: "Present Initial Plan"
+      description: "Show the initial plan and get approval"
+      type: agent
+      
+      generative_entity: "${models.refinement_assistant}"
+      
+      prompt: |
+        Present the following plan to the user clearly:
+        
+        {{step_1_initial_analysis.output.initial_plan}}
+        
+        Format as:
+        1. Clear heading with task title
+        2. Bulleted list of objectives
+        3. Numbered action steps
+        4. Success criteria in a separate section
+        
+        Ask the user: "Does this plan address your needs? (Yes/No/Changes needed)"
+      
+      output:
+        save_to: presented_plan
+        format: markdown
+        
+        console:
+          enabled: true
+          prefix: "[Plan] "
+    
+    # ── STEP 3: Collect User Feedback ───────────────────────
+    step_3_collect_feedback:
+      name: "Collect User Feedback"
+      description: "Gather user's feedback on the current iteration"
+      type: control
+      
+      depends_on:
+        - step_2_present_plan
+      
+      branches:
+        
+        # Branch: Proceed with feedback
+        branch_with_feedback:
+          name: "With User Feedback"
+          description: "User provided feedback for refinement"
+          
+          next_step: step_4_apply_feedback
+        
+        # Branch: Auto-proceed based on quality
+        branch_auto_proceed:
+          name: "Auto-Proceed"
+          description: "Quality threshold met, continue automatically"
+          
+          enabled_by: "workflow.auto_proceed_condition == true"
+          
+          next_step: step_5_generate_final
+    
+    # ── STEP 4: Apply User Feedback ────────────────────
+    step_4_apply_feedback:
+      name: "Refine Based on Feedback"
+      description: "Improve the plan based on user feedback"
+      type: agent
+      
+      generative_entity: "${models.refinement_assistant}"
+      
+      prompt: |
+        Refine the plan based on user feedback:
+        
+        Original plan:
+        {{step_1_initial_analysis.output.initial_plan}}
+        
+        User feedback:
+        {{user_inputs.user_feedback}}
+        
+        Quality rating: {{user_inputs.quality_rating}}
+        
+        Refinement instructions:
+        1. Address all feedback points
+        2. Improve weak areas identified by rating
+        3. Maintain what works well
+        4. Add more detail where needed
+        
+        Generate an updated plan that:
+        - Incorporates all feedback
+        - Is clearer and more detailed
+        - Addresses quality issues
+        - Adds success metrics
+        
+        Return the refined plan.
+      
+      output:
+        save_to: refined_plan
+        format: structured
+        fields:
+          - original_plan       # Plan before refinement
+          - applied_feedback     # What feedback was incorporated
+          - improvements         # What was improved
+          - new_plan            # Refined plan
+          
+        console:
+          enabled: true
+          prefix: "[Refine] "
+    
+    # ── STEP 5: Generate Final Output ────────────────────
+    step_5_generate_final:
+      name: "Generate Final Results"
+      description: "Create final output based on all iterations"
+      type: agent
+      
+      depends_on:
+        - step_4_apply_feedback
+      condition: "user_inputs.proceed_choice == 'accept'"
+      
+      generative_entity: "${models.refinement_assistant}"
+      
+      prompt: |
+        Generate a comprehensive final output based on all iterations:
+        
+        Initial analysis:
+        {{step_1_initial_analysis.output.initial_plan}}
+        
+        Refinements applied:
+        {{step_4_apply_feedback.output.new_plan}}
+        
+        User satisfaction: {{user_inputs.quality_rating}}
+        
+        Create final deliverable with:
+        1. Complete task description
+        2. Detailed action plan
+        3. Success criteria and metrics
+        4. Implementation notes
+        5. Next steps
+        
+        Format as a professional document ready for execution.
+      
+      output:
+        save_to: final_deliverable
+        format: markdown
+        
+        file_output:
+          enabled: true
+          path: "${workflow.output_path}/final-task-plan.md"
+          format: markdown
+          
+        console:
+          enabled: true
+          prefix: "[Final] "
+    
+    # ── STEP 6: Check Iteration Limit ───────────────────
+    step_6_iteration_check:
+      name: "Check Iteration Limit"
+      description: "Determine if more feedback cycles are needed"
+      type: control
+      
+      depends_on:
+        - step_4_apply_feedback
+      
+      branches:
+        
+        # Branch: Continue feedback loop
+        branch_continue:
+          name: "Continue Feedback Loop"
+          description: "More iterations allowed, return to feedback collection"
+          
+          enabled_by: "workflow.current_iteration < workflow.max_iterations"
+          
+          next_step: step_3_collect_feedback
+          
+          on_entry:
+            log:
+              level: info
+              message: "Iteration {{workflow.current_iteration}} of {{workflow.max_iterations}}"
+        
+        # Branch: Max iterations reached - present options
+        branch_max_reached:
+          name: "Max Iterations Reached"
+          description: "User has reached maximum feedback cycles"
+          
+          enabled_by: "workflow.current_iteration >= workflow.max_iterations"
+          
+          next_step: step_7_present_options
+        
+        # Branch: User satisfied - complete
+        branch_satisfied:
+          name: "User Satisfied"
+          description: "User is happy with current results"
+          
+          enabled_by: "user_inputs.proceed_choice == 'accept'"
+          
+          next_step: step_5_generate_final
+    
+    # ── STEP 7: Present Completion Options ────────────────
+    step_7_present_options:
+      name: "Present Completion Options"
+      description: "Show options after max iterations or user request"
+      type: agent
+      
+      generative_entity: "${models.refinement_assistant}"
+      
+      prompt: |
+        The feedback process has completed.
+        
+        Current iteration: {{workflow.current_iteration}}
+        Max iterations: {{workflow.max_iterations}}
+        
+        User satisfaction: {{user_inputs.quality_rating}}
+        
+        Present the user with clear options:
+        
+        Option 1: Accept Current Results
+        - Use the latest refined plan
+        - Proceed to execution
+        - Export to file
+        
+        Option 2: Request More Iterations
+        - Provide additional feedback
+        - Continue the refinement cycle
+        - Note: This exceeds original limit
+        
+        Option 3: Start Over
+        - Begin with new task description
+        - Reset the iteration counter
+        - Start fresh
+        
+        Ask the user: "Which option would you like to choose?"
+      
+      output:
+        save_to: completion_options
+        format: markdown
+        
+        console:
+          enabled: true
+          prefix: "[Options] "

@@ -1,0 +1,358 @@
+---
+workflow_id: step_level_hooks
+name: Step-Level Hooks
+description: Demonstrates pre and post execution hooks at the step level
+
+# ── MODEL CONFIGURATION ────────────────────────────────────
+models:
+  
+  default_model_router: automatic
+  
+  # ── MODEL: WORKER ───────────────────────────────
+  "llama-3.2-3b-instruct":
+    name: worker
+    
+    host:
+      type: lmstudio
+      connection_settings:
+        host: localhost
+        port: 1234
+    
+    resource_limits:
+      max_allowed:
+        ram: 2048MB
+        vram: 2048MB
+        cpu: 80%
+        gpu: 80%
+        attention_tokens: 8192
+        concurrent_requests: 1
+      
+      min_allowed:
+        ram: 1024MB
+        vram: 1024MB
+        cpu: 40%
+        gpu: 40%
+        attention_tokens: 4096
+      
+      allocation_strategy: dynamic
+    
+    execution:
+      timeout:
+        load_into_memory: 10s
+        time_to_first_response: 30s
+        total_time_to_response: 10m
+      
+      max_turns: 5
+      stop_on_tool_failure: false
+      accumulate_tool_results: true
+
+# ── WORKFLOW EXECUTION STRATEGY ────────────────────────────
+workflow_execution_strategy:
+  
+  load_unload: lazy
+  
+  processing: serial
+  
+  memory:
+    allocation:
+      strategy: dynamic
+      max_allowed:
+        ram: 2048MB
+        vram: 2048MB
+        cpu: 80%
+        gpu: 80%
+        attention_tokens: 8192
+    
+    model_lifecycle:
+      load_unload_strategy: lazy
+      cache_size: medium
+      swap_timeout_secs: 30
+      unload_unused: true
+  
+  timeout:
+    total: 25m
+    timeout_strategy: continue_with_partial
+  
+  error_handling:
+    default_action: retry
+    max_retries_per_step: 2
+    retry_backoff_multiplier: 1.5
+
+# ── LOGGING CONFIGURATION ────────────────────────────────────
+logging:
+  
+  level: info
+  
+  output_destinations:
+    console:
+      enabled: true
+      include_timestamps: true
+
+# ── PIPELINE DEFINITION ───────────────────────────────────
+agentic_workflow:
+  
+  steps:
+    
+    # ── STEP 1: Pre-Validation Hook Example ────────────────
+    step_1_pre_validation:
+      name: "Validate Inputs with Pre-Hooks"
+      description: "Shows step-level pre-execution hooks"
+      type: agent
+      
+      generative_entity: "${models.worker}"
+      
+      prompt: |
+        Validate the codebase path and prepare for analysis.
+        
+        Path: ${workspace.codebase_path}
+        
+        Validation checks:
+        1. Path exists and is accessible
+        2. Is a directory, not a file
+        3. Contains Rust source files
+        
+        Return validation status.
+      
+      # ── PRE-EXECUTION HOOKS ─────────────────────────────
+      pre_hooks:
+        
+        validate_resources:
+          check_memory: true
+          min_required_mb: 512
+          
+        validate_dependencies:
+          check_workspace_path: true
+          check_write_permissions: true
+          
+        log_start:
+          level: info
+          message: "Starting validation step"
+          include_timestamp: true
+          
+        notify_start:
+          enabled: true
+          notification_type: console
+          message: "Validating codebase path..."
+          
+        prepare_environment:
+          create_temp_dir: true
+          set_working_directory: "${workspace.codebase_path}"
+          
+        backup_state:
+          enabled: false
+      
+      output:
+        save_to: validation_output
+        format: structured
+        fields:
+          - path_valid         # Whether path is valid
+          - is_directory        # Whether path is a directory
+          - contains_rs_files    # Whether .rs files were found
+          - temp_dir_created     # Path to temp directory
+          
+        console:
+          enabled: true
+          prefix: "[Validate] "
+    
+    # ── STEP 2: Step Execution with Hooks ──────────────────
+    step_2_with_hooks:
+      name: "Execute with Both Pre/Post Hooks"
+      description: "Demonstrates comprehensive step-level hooks"
+      type: agent
+      
+      depends_on:
+        - step_1_pre_validation
+      
+      generative_entity: "${models.worker}"
+      
+      prompt: |
+        Analyze the codebase structure.
+        
+        Path: {{step.step_1_pre_validation.output.validation_output.path_valid}}
+        
+        Perform code analysis:
+        1. List all modules
+        2. Identify public APIs
+        3. Find main entry points
+        4. Check for patterns
+        
+        Return structured analysis.
+      
+      # ── PRE-EXECUTION HOOKS ─────────────────────────────
+      pre_hooks:
+        
+        validate_inputs:
+          check_required_fields: [prompt, generative_entity]
+          
+        log_start:
+          level: debug
+          message: "Step 2: Starting codebase analysis"
+          
+        initialize_variables:
+          set_start_time: "{{now}}"
+          
+        prepare_outputs:
+          create_output_dir: "${workspace.output_path}/step2"
+          
+        notify_start:
+          enabled: true
+          notification_type: slack
+          channel: "#workflows"
+          message: "Starting codebase analysis step"
+          
+        setup_monitoring:
+          track_memory_usage: true
+          track_execution_time: true
+          sample_rate_ms: 1000
+      
+      # ── POST-EXECUTION HOOKS ─────────────────────────────
+      post_hooks:
+        
+        log_completion:
+          level: info
+          message: "Step 2 completed"
+          include_duration: true
+          include_metrics: true
+          
+        save_output:
+          save_to_file: "${workspace.output_path}/step2/results.json"
+          include_metadata: true
+          
+        checkpoint:
+          enabled: true
+          reason: "Checkpoint after step completion"
+          
+        cleanup:
+          remove_temp_files: false
+          
+        notify_completion:
+          enabled: true
+          notification_type: email
+          recipients: ["team@example.com"]
+          include_summary: true
+          
+        collect_metrics:
+          enabled: true
+          metrics:
+            - execution_time_ms
+            - peak_memory_mb
+            - output_tokens
+            - tool_call_count
+          save_to: "${workspace.output_path}/step2/metrics.json"
+          
+        validate_output:
+          check_not_empty: true
+          check_schema: true
+          
+        propagate_results:
+          pass_to_next_step: true
+          update_workflow_state: true
+      
+      output:
+        save_to: analysis_output
+        format: json
+        fields:
+          - modules            # List of modules found
+          - public_apis        # Public API list
+          - entry_points       # Main entry points
+          - patterns           # Patterns identified
+          
+        console:
+          enabled: true
+          prefix: "[Analysis] "
+    
+    # ── STEP 3: Post-Hook Cleanup Example ─────────────────
+    step_3_cleanup:
+      name: "Finalize with Cleanup Hooks"
+      description: "Shows step-level hooks for cleanup and finalization"
+      type: agent
+      
+      depends_on:
+        - step_2_with_hooks
+      
+      generative_entity: "${models.worker}"
+      
+      prompt: |
+        Finalize the analysis and perform cleanup.
+        
+        Previous results:
+        {{step.step_2_with_hooks.output.analysis_output}}
+        
+        Finalization tasks:
+        1. Generate summary report
+        2. Clean up temporary resources
+        3. Archive results
+        4. Update workflow state
+        
+        Create final summary document.
+      
+      # ── PRE-EXECUTION HOOKS ─────────────────────────────
+      pre_hooks:
+        
+        validate_prerequisites:
+          check_step_dependencies: true
+          verify_outputs_exist: true
+          
+        log_start:
+          level: info
+          message: "Starting finalization step"
+          
+        prepare_cleanup:
+          identify_temp_files: true
+          identify_temp_dirs: true
+          
+        notify_start:
+          enabled: false
+      
+      # ── POST-EXECUTION HOOKS ─────────────────────────────
+      post_hooks:
+        
+        log_completion:
+          level: info
+          message: "Workflow finalization complete"
+          
+        save_output:
+          save_to_file: "${workspace.output_path}/final-summary.md"
+          
+        cleanup:
+          remove_temp_files: true
+          remove_temp_dirs: true
+          release_memory: true
+          
+        archive:
+          enabled: true
+          archive_format: tar.gz
+          compress_output: true
+          archive_path: "${workspace.output_path}/archives/"
+          
+        finalize_state:
+          update_workflow_completion_time: "{{now}}"
+          set_workflow_status: "completed"
+          
+        notify_completion:
+          enabled: true
+          notification_type: webhook
+          webhook_url: "https://api.example.com/workflow/completion"
+          include_status: true
+          
+        export_metrics:
+          enabled: true
+          export_format: json
+          export_path: "${workspace.output_path}/workflow-metrics.json"
+          
+        validate_final_state:
+          check_all_outputs_saved: true
+          verify_cleanup_complete: true
+      
+      output:
+        save_to: final_summary
+        format: markdown
+        
+        file_output:
+          enabled: true
+          path: "${workspace.output_path}/final-summary.md"
+          format: markdown
+          
+        console:
+          enabled: true
+          prefix: "[Finalize] "

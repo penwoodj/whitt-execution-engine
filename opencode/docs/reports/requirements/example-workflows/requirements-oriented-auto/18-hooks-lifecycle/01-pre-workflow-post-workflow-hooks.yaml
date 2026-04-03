@@ -1,0 +1,407 @@
+---
+workflow_id: pre_post_workflow_hooks
+name: Pre and Post Workflow Hooks
+description: Demonstrates workflow-level lifecycle hooks before and after execution
+
+# ── MODEL CONFIGURATION ────────────────────────────────────
+models:
+  
+  default_model_router: automatic
+  
+  # ── MODEL: EXECUTOR ───────────────────────────────
+  "llama-3.2-3b-instruct":
+    name: executor
+    
+    host:
+      type: lmstudio
+      connection_settings:
+        host: localhost
+        port: 1234
+    
+    resource_limits:
+      max_allowed:
+        ram: 2048MB
+        vram: 2048MB
+        cpu: 80%
+        gpu: 80%
+        attention_tokens: 8192
+        concurrent_requests: 1
+      
+      min_allowed:
+        ram: 1024MB
+        vram: 1024MB
+        cpu: 40%
+        gpu: 40%
+        attention_tokens: 4096
+      
+      allocation_strategy: dynamic
+    
+    execution:
+      timeout:
+        load_into_memory: 10s
+        time_to_first_response: 30s
+        total_time_to_response: 10m
+      
+      max_turns: 5
+      stop_on_tool_failure: false
+      accumulate_tool_results: true
+    
+    # ── MODEL LIFECYCLE HOOKS ─────────────────────────
+    hooks:
+      enabled: true
+      
+      # ── RUN LIFECYCLE ─────────────────────────
+      on_create: {}
+      on_run_start: {}
+      on_run_complete: {}
+      on_run_error: {}
+      on_retry: {}
+      
+      # ── TURN LIFECYCLE ───────────────────────────
+      on_turn_start: {}
+      on_turn_complete: {}
+      on_turn_error: {}
+      on_thinking: {}
+      
+      # ── TOOL LIFECYCLE ─────────────────────────────
+      on_tool_call: {}
+      on_tool_start: {}
+      on_tool_result: {}
+      on_tool_error: {}
+      
+      # ── STREAMING LIFECYCLE ───────────────────────────────
+      on_stream_chunk: {}
+      on_stream_complete: {}
+
+# ── WORKFLOW EXECUTION STRATEGY ────────────────────────────
+workflow_execution_strategy:
+  
+  load_unload: lazy
+  
+  processing: serial
+  
+  memory:
+    allocation:
+      strategy: dynamic
+      max_allowed:
+        ram: 2048MB
+        vram: 2048MB
+        cpu: 80%
+        gpu: 80%
+        attention_tokens: 8192
+    
+    model_lifecycle:
+      load_unload_strategy: lazy
+      cache_size: medium
+      swap_timeout_secs: 30
+      unload_unused: true
+  
+  timeout:
+    total: 20m
+    timeout_strategy: continue_with_partial
+  
+  error_handling:
+    default_action: retry
+    max_retries_per_step: 2
+    retry_backoff_multiplier: 1.5
+
+# ── LOGGING CONFIGURATION ────────────────────────────────────
+logging:
+  
+  level: info
+  
+  output_destinations:
+    console:
+      enabled: true
+      include_timestamps: true
+
+# ── PIPELINE DEFINITION ───────────────────────────────────
+agentic_workflow:
+  
+  hardcoded_values:
+    workspace_path: /workspace
+    output_path: /workspace/output
+    workflow_start_time: "{{now}}"
+  
+  steps:
+    
+    # ── STEP 1: Initialize Environment ─────────────────────
+    step_1_initialize:
+      name: "Initialize Environment"
+      description: "Set up workspace and prepare for analysis"
+      type: agent
+      
+      generative_entity: "${models.executor}"
+      
+      prompt: |
+        Initialize the analysis environment.
+        
+        Workspace: ${workspace_path}
+        Output directory: ${output_path}
+        
+        Perform the following initialization:
+        1. Verify workspace exists and is accessible
+        2. Create output directory if it doesn't exist
+        3. Check for required tools and dependencies
+        4. Set up any initial state variables
+        
+        Return initialization status as:
+        {
+          "workspace_ready": true|false,
+          "output_created": true|false,
+          "available_space_mb": <number>,
+          "required_tools": ["list", "of", "tools"],
+          "initial_state": {...}
+        }
+      
+      # ── PRE-EXECUTION HOOKS ─────────────────────────────
+      pre_hooks:
+        validate_resources:
+          check_memory: true
+          check_dependencies: true
+          
+        log_start:
+          level: info
+          message: "Initializing workspace at {{now}}"
+          
+        setup_state:
+          include_workspace_info: true
+          include_system_info: true
+      
+      output:
+        save_to: init_status
+        format: json
+        fields:
+          - workspace_ready     # Whether workspace is ready
+          - output_created      # Whether output dir was created
+          - available_space_mb # Available disk space
+          - required_tools     # List of required tools
+          
+        console:
+          enabled: false
+    
+    # ── STEP 2: Read Configuration ───────────────────────
+    step_2_read_config:
+      name: "Read Configuration"
+      description: "Load workflow configuration files"
+      type: tool
+      
+      depends_on:
+        - step_1_initialize
+      
+      generative_entity: "${models.executor}"
+      
+      prompt: |
+        Read the configuration file from the workspace.
+      
+      tool:
+        type: file_read
+        
+        parameters:
+          file_path: "${workspace_path}/config.yml"
+          encoding: utf-8
+          format: yaml
+      
+      output:
+        save_to: config_data
+        format: structured
+        fields:
+          - raw_content    # File content as string
+          - parsed_config  # Parsed YAML structure
+          - settings        # Configuration settings object
+          
+        console:
+          enabled: false
+    
+    # ── STEP 3: Analyze Codebase ────────────────────────
+    step_3_analyze:
+      name: "Analyze Codebase"
+      description: "Perform analysis on the codebase"
+      type: agent
+      
+      depends_on:
+        - step_2_read_config
+      
+      generative_entity: "${models.executor}"
+      
+      prompt: |
+        Analyze the codebase based on configuration.
+        
+        Configuration: {{step.step_2_read_config.output.parsed_config}}
+        
+        Perform analysis including:
+        1. Code structure
+        2. Dependencies
+        3. Quality metrics
+        4. Potential issues
+        
+        Return comprehensive analysis results.
+      
+      output:
+        save_to: analysis_results
+        format: json
+        fields:
+          - structure          # Code structure findings
+          - dependencies      # Dependency analysis
+          - quality_metrics   # Quality scores
+          - issues           # List of issues
+          
+        console:
+          enabled: true
+          prefix: "[Analyze] "
+      
+      # ── POST-EXECUTION HOOKS ─────────────────────────────
+      post_hooks:
+        checkpoint:
+          enabled: true
+          reason: "Checkpoint after analysis"
+          
+        save_state:
+          include_partial_results: true
+          
+        log_completion:
+          level: info
+          message: "Analysis completed in {{step.execution_time_ms}}ms"
+          
+        collect_metrics:
+          enabled: true
+          metrics:
+            - step_duration_ms
+            - memory_usage_mb
+            - output_tokens
+    
+    # ── STEP 4: Generate Report ─────────────────────────
+    step_4_generate_report:
+      name: "Generate Analysis Report"
+      description: "Create final analysis report"
+      type: agent
+      
+      depends_on:
+        - step_3_analyze
+      
+      generative_entity: "${models.executor}"
+      
+      prompt: |
+        Generate a comprehensive analysis report.
+        
+        Analysis results:
+        {{step.step_3_analyze.output.analysis_results}}
+        
+        Configuration used:
+        {{step.step_2_read_config.output.parsed_config}}
+        
+        Create markdown report with:
+        1. Executive summary
+        2. Detailed findings
+        3. Recommendations
+        4. Configuration summary
+        
+        Include tables for structured data.
+      
+      output:
+        save_to: report_content
+        format: markdown
+        
+        console:
+          enabled: true
+          prefix: "[Report] "
+  
+  # ── WORKFLOW-LEVEL PRE-HOOKS ────────────────────────────
+  workflow_pre_hooks:
+    
+    on_workflow_start:
+      log:
+        level: info
+        message: "Workflow starting at {{now}}"
+        context:
+          workspace: "${workspace_path}"
+          output: "${output_path}"
+      
+      validate_inputs:
+        check_workspace_exists: true
+        check_write_permissions: true
+        verify_dependencies: true
+      
+      initialize_state:
+        set_start_time: "{{now}}"
+        create_temp_dir: true
+      
+      notify_stakeholders:
+        enabled: true
+        notification_type: email
+        recipients: ["admin@example.com"]
+        message: "Workflow analysis starting"
+  
+  # ── WORKFLOW-LEVEL POST-HOOKS ───────────────────────────
+  workflow_post_hooks:
+    
+    on_workflow_complete:
+      log:
+        level: info
+        message: "Workflow completed successfully"
+        details:
+          total_duration: "${workflow.total_duration_secs}}s"
+          steps_executed: "${workflow.steps_executed}}"
+          output_location: "${output_path}"
+      
+      aggregate_metrics:
+        collect_all_step_metrics: true
+        calculate_workflow_totals: true
+        save_to_file: "${output_path}/workflow-metrics.json"
+      
+      generate_summary:
+        include_execution_stats: true
+        include_resource_usage: true
+        include_output_summary: true
+      
+      cleanup:
+        remove_temp_files: true
+        release_resources: true
+        archive_logs: true
+      
+      notify_stakeholders:
+        enabled: true
+        notification_type: email
+        recipients: ["admin@example.com"]
+        message: "Workflow analysis completed"
+        include_summary_attachment: true
+    
+    on_workflow_failure:
+      log:
+        level: error
+        message: "Workflow failed"
+        details:
+          failure_point: "${workflow.failed_at_step}}"
+          error_message: "${workflow.error_message}}"
+          partial_results: true
+      
+      save_error_state:
+        include_partial_outputs: true
+        save_to_file: "${output_path}/error-state.json"
+      
+      notify_on_failure:
+        enabled: true
+        notification_type: email
+        recipients: ["admin@example.com", "ops@example.com"]
+        urgency: high
+        include_error_details: true
+      
+      escalate_on_failure:
+        enabled: true
+        escalation_targets: ["oracle", "admin"]
+        escalation_delay_minutes: 5
+    
+    on_workflow_timeout:
+      log:
+        level: warning
+        message: "Workflow timed out after {{workflow.timeout}}}"
+      
+      save_timeout_state:
+        include_progress_so_far: true
+        save_to_file: "${output_path}/timeout-state.json"
+      
+      notify_on_timeout:
+        enabled: true
+        notification_type: slack
+        channel: "#alerts"
+        message: "Workflow exceeded timeout limit"

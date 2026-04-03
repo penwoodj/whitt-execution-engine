@@ -1,0 +1,362 @@
+---
+workflow_id: nested_workflow_references
+name: Nested Workflow References and Invocation
+description: Demonstrates nested workflow invocation, reference resolution, parameter passing, output capture, and workflow orchestration
+version: "1.0.0"
+author: "AgentSDK Examples"
+tags:
+  - subworkflows
+  - nested-invocation
+  - reference-resolution
+  - parameter-passing
+
+models:
+  main_coordinator:
+    name: "Main Workflow Coordinator"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+    generative_entity: "llama-3.2-3b-instruct"
+    backend: vulkan
+
+workflow_execution_strategy:
+  load_unload: lazy
+  processing: serial
+
+sub_workflows:
+  - workflow_id: analysis_subworkflow
+    path: ./subworkflows/analysis-workflow.yml
+    description: "Code analysis and issue detection"
+    enabled: true
+
+  - workflow_id: validation_subworkflow
+    path: ./subworkflows/validation-workflow.yml
+    description: "Code quality validation and testing"
+    enabled: true
+
+  - workflow_id: deployment_subworkflow
+    path: ./subworkflows/deployment-workflow.yml
+    description: "Build and deployment automation"
+    enabled: true
+
+orchestration:
+  sub_agent_relationships:
+    - agent_id: analyzer_sub
+      dependencies: []
+      dependents: [validator_sub, deployer_sub]
+      interdependent_validations:
+        - depends_on: [validator_sub]
+          validation_criteria:
+            metric: analysis_quality
+            operator: ">="
+            target: 0.85
+          on_failure: relax_criteria
+          relaxation_factor: 0.10
+
+    - agent_id: validator_sub
+      dependencies: [analyzer_sub]
+      dependents: [deployer_sub]
+      interdependent_validations:
+        - depends_on: [analyzer_sub]
+          validation_criteria:
+            metric: test_coverage
+            operator: ">="
+            target: 0.80
+          on_failure: fail_workflow
+
+    - agent_id: deployer_sub
+      dependencies: [validator_sub]
+      dependents: []
+
+agentic_workflow:
+  step_1_invoke_analysis:
+    name: "Invoke Analysis Subworkflow"
+    type: sub_workflow
+    workflow_ref: analysis_subworkflow
+
+    input:
+      variables:
+        source_directory: /workspace/src
+        output_directory: /workspace/output/analysis
+
+      parameters:
+        analysis_type: comprehensive
+        include_tests: true
+        min_quality_score: 0.70
+
+    output:
+      save_to: analysis_results
+      format: json
+
+  step_2_validate_results:
+    name: "Validate Analysis Results"
+    type: sub_workflow
+    workflow_ref: validation_subworkflow
+
+    input:
+      variables:
+        analysis_data: "${step.step_1_invoke_analysis.output}"
+
+      parameters:
+        validation_mode: strict
+        check_compilation: true
+        run_tests: true
+
+    output:
+      save_to: validation_results
+      format: json
+
+  step_3_check_validation_threshold:
+    name: "Check Validation Threshold"
+    type: agent
+    model: "${models.main_coordinator}"
+
+    input:
+      variables:
+        validation: "${step.step_2_validate_results.output}"
+
+      prompt: |
+        Check validation results against threshold.
+
+        Validation data:
+        {{validation}}
+
+        Threshold requirements:
+        - Analysis quality: >= 0.85
+        - Test coverage: >= 0.80
+        - No critical errors
+        - Warnings under 10
+
+        Decision logic:
+        1. If all thresholds met: proceed to deployment
+        2. If analysis quality < 0.85 but >= 0.70: warn and proceed
+        3. If test coverage < 0.80: fail with reason
+        4. If critical errors found: fail immediately
+
+        Return decision with rationale.
+
+    output:
+      save_to: threshold_decision
+      format: json
+
+  step_4_handle_validation_failure:
+    name: "Handle Validation Failure"
+    type: agent
+    model: "${models.main_coordinator}"
+
+    input:
+      variables:
+        decision: "${step.step_3_check_validation_threshold.output}"
+        validation: "${step.step_2_validate_results.output}"
+
+      prompt: |
+        Handle validation failure scenario.
+
+        Decision: {{decision}}
+        Validation results: {{validation}}
+
+        Recovery options:
+        1. Relax validation criteria
+        2. Re-run with lower thresholds
+        3. Mark warnings and proceed
+        4. Fail workflow with detailed error report
+
+        For validation failure:
+        - Generate error report
+        - Suggest fixes
+        - Propose revised thresholds
+        - Document impact of continuing
+
+        Return recommended action.
+
+    output:
+      save_to: failure_handling
+      format: json
+
+  step_5_invoke_deployment:
+    name: "Invoke Deployment Subworkflow"
+    type: sub_workflow
+    workflow_ref: deployment_subworkflow
+
+    input:
+      condition: "step_3_check_validation_threshold.decision == 'proceed'"
+
+      variables:
+        analysis: "${step.step_1_invoke_analysis.output}"
+        validation: "${step.step_2_validate_results.output}"
+
+      parameters:
+        build_mode: release
+        deployment_target: staging
+        rollback_on_failure: true
+
+    output:
+      save_to: deployment_results
+      format: json
+
+  step_6_aggregate_results:
+    name: "Aggregate All Results"
+    type: agent
+    model: "${models.main_coordinator}"
+
+    input:
+      variables:
+        analysis: "${step.step_1_invoke_analysis.output}"
+        validation: "${step.step_2_validate_results.output}"
+        decision: "${step.step_3_check_validation_threshold.output}"
+        deployment: "${step.step_5_invoke_deployment.output}"
+
+      prompt: |
+        Aggregate results from all subworkflows.
+
+        Results:
+        - Analysis: {{analysis}}
+        - Validation: {{validation}}
+        - Decision: {{decision}}
+        - Deployment: {{deployment}}
+
+        Aggregation report:
+        1. Overall success/failure status
+        2. Quality metrics汇总
+        3. Performance statistics
+        4. Interdependent validation results
+        5. Deployment status
+        6. Issues encountered and resolutions
+        7. Recommendations for improvement
+
+        Generate consolidated report.
+
+    output:
+      save_to: aggregated_results
+      format: json
+      file_output:
+        enabled: true
+        path: /workspace/output/workflow-aggregation-report.json
+
+logging:
+  enabled: true
+
+  levels:
+    default: info
+    workflow_execution: debug
+    sub_workflow: info
+
+  scopes:
+    workflow_execution:
+      enabled: true
+      include_sub_workflow_calls: true
+      include_parameter_passing: true
+
+    sub_workflow:
+      enabled: true
+      include_execution_time: true
+      include_sub_workflow_output: true
+
+    execution:
+      enabled: true
+
+  output:
+    console:
+      enabled: true
+
+    file:
+      enabled: true
+      path: /workspace/logs/nested-workflows.log
+
+error_handling:
+  default_action:
+    type: fail_workflow
+    reason: "Nested workflow failures fail parent"
+
+  sub_workflow:
+    reference_resolution:
+      strategy: hierarchical
+      validation:
+        enabled: true
+
+    circular_reference_detection:
+      enabled: true
+      max_depth: 3
+      on_circular_reference:
+        action: fail_workflow
+        log_error: true
+        notify_user: true
+
+    environment_isolation:
+      enabled: false
+
+    event_handling:
+      on_validation_result:
+        aggregate_at_top_level: true
+        propagate_to_dependents: true
+        log_result: true
+
+            on_sub_workflow_complete:
+              checkpoint: true
+              notify_parent: true
+      
+      # ── METRICS COLLECTION ─────────────────────────────────────────────────────
+      metrics:
+        enabled: true
+        collection:
+          workflow_level:
+            - total_execution_time_secs
+            - subworkflow_count
+            - parallel_efficiency
+            - success_rate
+          step_level:
+            - execution_time_secs
+            - memory_peak_mb
+            - cache_hit_rate
+          sub_workflow_level:
+            - invocation_count
+            - parameter_passing_time_ms
+            - output_capture_size_bytes
+            - reference_resolution_time_ms
+          custom_metrics:
+            - name: nested_depth
+              description: "Maximum depth of workflow nesting"
+            - name: cross_workflow_references
+              description: "Number of cross-workflow data references"
+            - name: parameter_passing_chain_length
+              description: "Length of parameter passing chains"
+      
+      # ── VALIDATION CONFIGURATION ─────────────────────────────────────────────────
+      validation:
+        workflow_schema:
+          enabled: true
+          required_fields:
+            - workflow_id
+            - name
+            - sub_workflows
+            - agentic_workflow
+      
+        sub_workflow_references:
+          enabled: true
+          validate_paths: true
+          validate_parameters: true
+          validate_outputs: true
+      
+        reference_validation:
+          enabled: true
+          validate_circular: true
+          validate_hierarchy: true
+          max_reference_depth: 5
+      
+      # ── FEATURES DEMONSTRATED ────────────────────────────────────────────────────
+      features_demonstrated:
+        - nested_workflow_invocation
+        - hierarchical_parameter_passing
+        - output_capture_configuration
+        - reference_resolution_hierarchical
+        - cross_workflow_data_passing
+        - result_aggregation_patterns
+        - sub_workflow_timeout_handling
+        - policy_inheritance_parent_child
+        - circular_reference_detection
+        - isolated_environment_configuration
+        - interdependent_validation_chains
+        - workflow_dependency_graph
+        - parallel_sub_workflow_execution

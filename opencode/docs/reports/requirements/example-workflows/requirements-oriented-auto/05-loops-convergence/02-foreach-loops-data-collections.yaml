@@ -1,0 +1,755 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# WORKFLOW: Foreach Loops with Data Collection Iteration
+# ─────────────────────────────────────────────────────────────────────────────
+# Demonstrates: foreach loops iterating over arrays, objects, files,
+#               and structured data collections with item processing
+# ─────────────────────────────────────────────────────────────────────────────
+
+workflow_id: foreach_loops_data_collections
+name: "Foreach Loops with Data Collections"
+description: |
+  Demonstrates foreach-loop patterns for iterating over data collections
+  including arrays, objects, file lists, and nested data structures.
+version: "1.0.0"
+author: "AgentSDK Team"
+tags:
+  - loops
+  - foreach
+  - iteration
+  - data-collections
+  - batch-processing
+
+# ── MODEL CONFIGURATION ──────────────────────────────────────────────────────
+models:
+  data_processor:
+    name: data_processor
+    host:
+      type: ollama
+      connection_settings:
+        base_url: http://localhost:11434
+        timeout_secs: 120
+
+    max_allowed:
+      ram: 30%
+      vram: 6GB
+      cpu: 70%
+      attention_tokens: 100000
+      concurrent_requests: 3
+
+    min_allowed:
+      ram: 15%
+      vram: 3GB
+      cpu: 35%
+      attention_tokens: 20000
+
+    allocation_strategy: dynamic
+
+    model_memory:
+      cache_size: medium-max
+      kv_cache_quantization: q4_k_m
+      attention_context: auto
+
+    execution:
+      timeout:
+        load_into_memory: 60s
+        time_to_first_response: 45s
+        total_time_to_response: 3h
+      max_turns: 20
+      stop_on_tool_failure: false
+      accumulate_tool_results: true
+
+    thinking:
+      budget_tokens: 6144
+      capture_in_output: true
+      capture_in_events: false
+      stream_to_log: true
+
+    tools:
+      default_permissions:
+        web_access: trust
+        file_read: trust
+        file_write: ask
+        shell_exec: block
+      allowed_tools: [grep, file_read, file_write]
+      forbidden_tools: []
+
+    framework:
+      type: agentsdk
+
+# ── HARDCODED VALUES (Data Collections) ───────────────────────────────────────
+agentic_workflow:
+  hardcoded_values:
+    # Sample data collections for iteration
+    code_files:
+      - path: /workspace/src/main.rs
+        type: rust
+        priority: high
+      - path: /workspace/src/lib.rs
+        type: rust
+        priority: high
+      - path: /workspace/src/utils/mod.rs
+        type: rust
+        priority: medium
+      - path: /workspace/src/utils/parser.rs
+        type: rust
+        priority: medium
+      - path: /workspace/src/utils/validator.rs
+        type: rust
+        priority: low
+      - path: /workspace/tests/integration.rs
+        type: rust
+        priority: low
+      - path: /workspace/benches/performance.rs
+        type: rust
+        priority: low
+
+    config_files:
+      - name: Cargo.toml
+        format: toml
+        critical: true
+      - name: rustfmt.toml
+        format: toml
+        critical: false
+      - name: clippy.toml
+        format: toml
+        critical: false
+      - name: .clippy.toml
+        format: toml
+        critical: false
+
+    # Key-value collection
+    environment_vars:
+      RUST_BACKTRACE: "1"
+      RUST_LOG: "debug"
+      CARGO_BUILD_JOBS: "4"
+      RUSTFLAGS: "-D warnings"
+      CARGO_INCREMENTAL: "1"
+
+    # Nested data structure
+    modules:
+      core:
+        files: ["main.rs", "lib.rs"]
+        priority: critical
+        tests: 15
+      utils:
+        files: ["mod.rs", "parser.rs", "validator.rs"]
+        priority: high
+        tests: 8
+      testing:
+        files: ["integration.rs", "unit.rs"]
+        priority: medium
+        tests: 25
+
+    # Processing configuration
+    processing_config:
+      batch_size: 3
+      parallel_files: 2
+      timeout_per_file: 60
+
+  # ── WORKFLOW STEPS ────────────────────────────────────────────────────────
+  steps:
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 1: Foreach Loop over File Array
+    # ═══════════════════════════════════════════════════════════════════════
+    step_1_foreach_file_array:
+      name: "Foreach: Process Code Files"
+      description: |
+        Iterate over an array of code files, processing each file
+        with analysis, validation, and metrics collection.
+      type: loop
+
+      generative_entity: "${models.data_processor}"
+
+      loop:
+        type: foreach
+
+        foreach_config:
+          # Collection to iterate over
+          collection: "${hardcoded_values.code_files}"
+
+          # Current item variable name
+          item_variable: file_item
+
+          # Index variable (optional)
+          index_variable: file_index
+
+          # Access pattern for nested properties
+          property_access:
+            path: "${loop.file_item.path}"
+            type: "${loop.file_item.type}"
+            priority: "${loop.file_item.priority}"
+
+          # Maximum iterations (safety limit)
+          max_iterations: 10
+
+          # Process in batches
+          batch_size: "${hardcoded_values.processing_config.batch_size}"
+
+      prompt: |
+        Process code file {{loop.file_index}} of {{loop.total_items}}.
+
+        File Details:
+        - Path: {{loop.file_item.path}}
+        - Type: {{loop.file_item.type}}
+        - Priority: {{loop.file_item.priority}}
+
+        Tasks:
+        1. Read file contents from {{loop.file_item.path}}
+        2. Analyze code structure and complexity
+        3. Check for common issues and anti-patterns
+        4. Generate quality score (0-100)
+        5. Provide improvement suggestions
+
+        Output format:
+        ```json
+        {
+          "file_path": "{{loop.file_item.path}}",
+          "file_index": {{loop.file_index}},
+          "analysis": {
+            "lines_of_code": 0,
+            "functions_count": 0,
+            "complexity_score": 0,
+            "quality_score": 0,
+            "issues": [],
+            "suggestions": []
+          },
+          "priority": "{{loop.file_item.priority}}"
+        }
+        ```
+
+      output:
+        save_to: file_analysis_results
+        format: json
+        fields:
+          - total_files_processed
+          - results_by_file
+          - aggregated_metrics
+          - files_by_priority
+
+      retry:
+        max_attempts: 2
+        backoff: exponential
+        delay_ms: 1000
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 2: Foreach Loop over Config Objects
+    # ═══════════════════════════════════════════════════════════════════════
+    step_2_foreach_config_objects:
+      name: "Foreach: Process Configuration Files"
+      description: |
+        Iterate over configuration file objects, validating each
+        config and checking for consistency.
+      type: loop
+
+      generative_entity: "${models.data_processor}"
+
+      loop:
+        type: foreach
+
+        foreach_config:
+          collection: "${hardcoded_values.config_files}"
+          item_variable: config_item
+          index_variable: config_index
+
+          # Filter predicate (optional)
+          filter: "${loop.config_item.critical} == true"
+
+          max_iterations: 5
+
+      prompt: |
+        Validate configuration file {{loop.config_index}}.
+
+        Config Details:
+        - Name: {{loop.config_item.name}}
+        - Format: {{loop.config_item.format}}
+        - Critical: {{loop.config_item.critical}}
+
+        Validation tasks:
+        1. Parse {{loop.config_item.name}} as {{loop.config_item.format}}
+        2. Validate schema and structure
+        3. Check for deprecated settings
+        4. Verify consistency with other configs
+        5. Report validation status
+
+        Output:
+        ```json
+        {
+          "config_name": "{{loop.config_item.name}}",
+          "format": "{{loop.config_item.format}}",
+          "is_critical": {{loop.config_item.critical}},
+          "validation": {
+            "valid": true,
+            "errors": [],
+            "warnings": [],
+            "deprecated_keys": []
+          }
+        }
+        ```
+
+      output:
+        save_to: config_validation_results
+        format: json
+        fields:
+          - configs_processed
+          - validation_summary
+          - critical_issues
+          - warnings
+
+      depends_on:
+        - step_1_foreach_file_array
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 3: Foreach Loop over Key-Value Pairs
+    # ═══════════════════════════════════════════════════════════════════════
+    step_3_foreach_key_value_pairs:
+      name: "Foreach: Process Environment Variables"
+      description: |
+        Iterate over key-value pairs (object/dictionary), processing
+        each entry with validation and transformation.
+      type: loop
+
+      generative_entity: "${models.data_processor}"
+
+      loop:
+        type: foreach
+
+        foreach_config:
+          # Object/dictionary iteration
+          collection: "${hardcoded_values.environment_vars}"
+          item_variable: env_entry
+
+          # For key-value iteration
+          key_variable: env_key
+          value_variable: env_value
+
+          max_iterations: 10
+
+      prompt: |
+        Process environment variable entry.
+
+        Entry Details:
+        - Key: {{loop.env_key}}
+        - Value: {{loop.env_value}}
+        - Entry: {{loop.env_entry}}
+
+        Tasks:
+        1. Validate the variable name format
+        2. Check value against expected patterns
+        3. Determine if value is secure/sensitive
+        4. Suggest optimizations or changes
+        5. Categorize by usage type
+
+        Output:
+        ```json
+        {
+          "key": "{{loop.env_key}}",
+          "value": "{{loop.env_value}}",
+          "validation": {
+            "valid_format": true,
+            "secure": false,
+            "category": "build",
+            "recommendations": []
+          }
+        }
+        ```
+
+      output:
+        save_to: env_var_results
+        format: json
+        fields:
+          - variables_processed
+          - validation_results
+          - security_analysis
+          - categorization
+
+      depends_on:
+        - step_2_foreach_config_objects
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 4: Foreach Loop over Nested Data Structure
+    # ═══════════════════════════════════════════════════════════════════════
+    step_4_foreach_nested_structure:
+      name: "Foreach: Process Module Structure"
+      description: |
+        Iterate over nested module data, processing each module
+        with its associated files and metadata.
+      type: loop
+
+      generative_entity: "${models.data_processor}"
+
+      loop:
+        type: foreach
+
+        foreach_config:
+          # Iterate over object keys (module names)
+          collection: "${hardcoded_values.modules}"
+          item_variable: module_data
+
+          # Key is the module name
+          key_variable: module_name
+
+          # Value is the module configuration object
+          value_variable: module_config
+
+          max_iterations: 5
+
+      prompt: |
+        Process module: {{loop.module_name}}
+
+        Module Configuration:
+        - Name: {{loop.module_name}}
+        - Files: {{loop.module_config.files}}
+        - Priority: {{loop.module_config.priority}}
+        - Test Count: {{loop.module_config.tests}}
+
+        Tasks:
+        1. Analyze module structure
+        2. Calculate test coverage ratio (files vs tests)
+        3. Assess module complexity
+        4. Check priority alignment with file count
+        5. Generate module health score
+
+        Output:
+        ```json
+        {
+          "module_name": "{{loop.module_name}}",
+          "config": {{loop.module_config}},
+          "analysis": {
+            "file_count": 0,
+            "test_count": {{loop.module_config.tests}},
+            "coverage_ratio": 0.0,
+            "priority_level": "{{loop.module_config.priority}}",
+            "health_score": 0.0,
+            "recommendations": []
+          }
+        }
+        ```
+
+      output:
+        save_to: module_analysis_results
+        format: json
+        fields:
+          - modules_processed
+          - analysis_by_module
+          - coverage_summary
+          - health_scores
+
+      depends_on:
+        - step_3_foreach_key_value_pairs
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 5: Nested Foreach (Files within Modules)
+    # ═══════════════════════════════════════════════════════════════════════
+    step_5_nested_foreach_files:
+      name: "Nested Foreach: Files per Module"
+      description: |
+        Nested foreach iteration - outer loop over modules,
+        inner loop over files within each module.
+      type: loop
+
+      generative_entity: "${models.data_processor}"
+
+      loop:
+        type: foreach
+
+        foreach_config:
+          collection: "${hardcoded_values.modules}"
+          item_variable: outer_module
+          key_variable: module_key
+
+          # Nested foreach configuration
+          nested_loop:
+            type: foreach
+            foreach_config:
+              # Iterate over files array within each module
+              collection: "${loop.outer_module.files}"
+              item_variable: file_name
+              index_variable: file_idx
+
+          max_iterations: 20  # Total files across all modules
+
+      prompt: |
+        Process file within module context.
+
+        Outer Loop Context:
+        - Module: {{loop.module_key}}
+        - Module Priority: {{loop.outer_module.priority}}
+
+        Inner Loop Context:
+        - File: {{loop.file_name}}
+        - File Index: {{loop.file_idx}} in module {{loop.module_key}}
+
+        Full path: /workspace/src/{{loop.module_key}}/{{loop.file_name}}
+
+        Tasks:
+        1. Resolve full file path
+        2. Check file exists in module context
+        3. Analyze file in context of module priority
+        4. Compare with standalone analysis from step 1
+        5. Generate contextual recommendations
+
+        Output:
+        ```json
+        {
+          "module": "{{loop.module_key}}",
+          "module_priority": "{{loop.outer_module.priority}}",
+          "file_name": "{{loop.file_name}}",
+          "full_path": "/workspace/src/{{loop.module_key}}/{{loop.file_name}}",
+          "contextual_analysis": {
+            "exists": true,
+            "priority_match": true,
+            "recommendations": []
+          }
+        }
+        ```
+
+      output:
+        save_to: nested_foreach_results
+        format: json
+        fields:
+          - total_modules_processed
+          - total_files_processed
+          - results_by_module_and_file
+          - contextual_findings
+
+      depends_on:
+        - step_4_foreach_nested_structure
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 6: Foreach with Filtering and Transformation
+    # ═══════════════════════════════════════════════════════════════════════
+    step_6_foreach_filtered_transformed:
+      name: "Foreach: Filtered and Transformed"
+      description: |
+        Foreach loop with filtering predicates and value transformation
+        applied during iteration.
+      type: loop
+
+      generative_entity: "${models.data_processor}"
+
+      loop:
+        type: foreach
+
+        foreach_config:
+          collection: "${hardcoded_values.code_files}"
+          item_variable: filtered_file
+
+          # Filter: only high priority files
+          filter_predicate: "${loop.filtered_file.priority} == 'high'"
+
+          # Transformation applied to each item
+          transform:
+            absolute_path: "/workspace/project/${loop.filtered_file.path}"
+            file_extension: "${loop.filtered_file.path | split: '.' | last}"
+            is_entry_point: "${loop.filtered_file.path | contains: 'main.rs'}"
+
+          max_iterations: 5
+
+      prompt: |
+        Process filtered and transformed file item.
+
+        Original Item:
+        - Path: {{loop.filtered_file.path}}
+        - Type: {{loop.filtered_file.type}}
+        - Priority: {{loop.filtered_file.priority}}
+
+        Transformed Values:
+        - Absolute Path: {{loop.transformed.absolute_path}}
+        - Extension: {{loop.transformed.file_extension}}
+        - Is Entry Point: {{loop.transformed.is_entry_point}}
+
+        This file was selected because:
+        - Filter: priority == 'high'
+
+        Tasks:
+        1. Verify transformed path is correct
+        2. Analyze high-priority file deeply
+        3. Check entry point characteristics
+        4. Generate critical recommendations
+
+        Output:
+        ```json
+        {
+          "original_path": "{{loop.filtered_file.path}}",
+          "transformed_path": "{{loop.transformed.absolute_path}}",
+          "is_entry_point": {{loop.transformed.is_entry_point}},
+          "deep_analysis": {
+            "criticality": "high",
+            "recommendations": [],
+            "must_fix": []
+          }
+        }
+        ```
+
+      output:
+        save_to: filtered_transformed_results
+        format: json
+        fields:
+          - files_matching_filter
+          - transformed_results
+          - high_priority_summary
+          - critical_recommendations
+
+      depends_on:
+        - step_5_nested_foreach_files
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # STEP 7: Aggregate All Foreach Results
+    # ═══════════════════════════════════════════════════════════════════════
+    step_7_aggregate_foreach_results:
+      name: "Aggregate All Foreach Results"
+      description: |
+        Combine and summarize results from all foreach loop iterations.
+      type: agent
+
+      generative_entity: "${models.data_processor}"
+
+      prompt: |
+        Aggregate all foreach loop iteration results:
+
+        1. File Array Results:
+        {{step.step_1_foreach_file_array.output}}
+
+        2. Config Objects Results:
+        {{step.step_2_foreach_config_objects.output}}
+
+        3. Key-Value Pairs Results:
+        {{step.step_3_foreach_key_value_pairs.output}}
+
+        4. Nested Structure Results:
+        {{step.step_4_foreach_nested_structure.output}}
+
+        5. Nested Foreach Results:
+        {{step.step_5_nested_foreach_files.output}}
+
+        6. Filtered/Transformed Results:
+        {{step.step_6_foreach_filtered_transformed.output}}
+
+        Generate comprehensive summary:
+        - Total items processed across all collections
+        - Collection type breakdown
+        - Success/failure rates
+        - Most critical findings
+        - Prioritized action items
+
+      input_variables:
+        file_results: "${step.step_1_foreach_file_array.output}"
+        config_results: "${step.step_2_foreach_config_objects.output}"
+        env_results: "${step.step_3_foreach_key_value_pairs.output}"
+        module_results: "${step.step_4_foreach_nested_structure.output}"
+        nested_results: "${step.step_5_nested_foreach_files.output}"
+        filtered_results: "${step.step_6_foreach_filtered_transformed.output}"
+
+      output:
+        save_to: final_foreach_aggregation
+        format: json
+        file_output:
+          enabled: true
+          path: /workspace/output/foreach_loops_summary.json
+          format: json
+          encoding: utf-8
+
+      depends_on:
+        - step_6_foreach_filtered_transformed
+
+# ── WORKFLOW EXECUTION STRATEGY ───────────────────────────────────────────────
+workflow_execution_strategy:
+  load_unload: lazy
+  processing: serial
+
+  parallel:
+    enabled: false
+
+  memory:
+    allocation:
+      strategy: dynamic
+    model_lifecycle:
+      load_unload_strategy: lazy
+      unload_unused: true
+
+  timeout:
+    total: 3h
+    per_operation:
+      step: 20m
+      tool_call: 10m
+
+  error_handling:
+    default_action:
+      type: retry
+      reason: "Retry failed foreach iterations"
+
+    retry:
+      max_attempts_per_step: 3
+      backoff_strategy:
+        type: exponential
+        base_delay_ms: 1500
+        max_delay_ms: 45000
+
+  checkpointing:
+    enabled: true
+    configuration:
+      level: info
+      output_path: "/workspace/checkpoints/foreach_loops_checkpoint.json"
+    triggers:
+      interval:
+        steps: [step_4_foreach_nested_structure, step_7_aggregate_foreach_results]
+
+# ── LOGGING CONFIGURATION ─────────────────────────────────────────────────────
+logging:
+  enabled: true
+  levels:
+    default: info
+    workflow: debug
+    pipeline: debug
+    tools: info
+
+  output:
+    console:
+      enabled: true
+      color: true
+      timestamps: true
+      format: text
+
+    file:
+      enabled: true
+      path: /workspace/logs/foreach_loops_workflow.log
+      format: json
+      rotation:
+        enabled: true
+        max_size_mb: 75
+        max_files: 5
+
+# ── METRICS COLLECTION ────────────────────────────────────────────────────────
+metrics:
+  enabled: true
+  collection:
+    step_level:
+      - execution_time_secs
+      - memory_peak_mb
+      - items_processed
+    custom_metrics:
+      - name: total_items_iterated
+        description: "Sum of all items across foreach loops"
+      - name: collection_types_used
+        description: "Types of collections processed"
+
+  output:
+    path: /workspace/metrics/foreach_loops_metrics.json
+    format: json
+    include_timestamps: true
+
+# ── FEATURES DEMONSTRATED ─────────────────────────────────────────────────────
+features_demonstrated:
+  - foreach_loops
+  - array_iteration
+  - object_key_value_iteration
+  - nested_data_structures
+  - nested_foreach
+  - filtering_predicates
+  - value_transformation
+  - batch_processing
+  - item_variable_access
+  - index_tracking
+  - collection_aggregation

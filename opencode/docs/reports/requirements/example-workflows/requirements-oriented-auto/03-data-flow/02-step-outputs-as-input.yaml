@@ -1,0 +1,176 @@
+---
+# Variable interpolation between steps
+ showing how step outputs serve as inputs to subsequent steps
+# Various transformations like date formatting, string manipulation, list filtering, etc.
+
+models:
+  primary_analyzer
+    host: lmstudio
+    backend: vulkan
+    execution
+      mode: serial
+      memory:
+        max_allocated_memory_mb: 16384
+        model_memory_mb: 4096
+        unload_unused: true
+    logging
+      global:
+        level: debug
+        detail: high
+        output_type: chat
+        format: json
+        console: true
+      workflow_execution:
+        level: info
+        detail: medium
+      step_execution:
+        level: debug
+        detail: high
+      agent_execution:
+        level: info
+        detail: medium
+      tool_execution:
+        level: debug
+        detail: very_high
+      file_operations:
+        level: debug
+        detail: very_high
+      web_operations:
+        level: info
+        detail: high
+      state_management:
+        level: debug
+        detail: low
+      performance_metrics
+        level: info
+        detail: medium
+    retry
+      default:
+        max_attempts: 3
+        backoff_strategy: exponential
+        on_failure: escalate_model
+    validation_loop
+      type: validation
+      exact_criteria: true
+      tolerance: 0.0
+      max_iterations: 5
+      stop_conditions:
+        - condition: "${step.step_2.output.analysis} == 'significantly improved'"
+        - condition: "${step.step_3.output.decision} == 'proceed'"
+        - condition: "${step.step_3.output.decision} == 'retry_analysis'"
+          reason: "Analysis not improved, retry with simpler prompt"
+          max_attempts: 3
+          backoff: exponential
+          delay_ms: 1000
+          base_ms: 1000
+          max_ms: 30000
+          jitter: 0.2
+          checkpoint_after_retry: true
+      output:
+        save_to: final_analysis
+        format: json
+        console: true
+        fields:
+          - status
+          - summary
+          - decisions
+          - score
+          - suggestions
+          - issues
+          - recommendations
+          - priority
+            - simple: "address ${issue} if high priority"
+            - warning: "Minor issue, does low priority"
+        file_output:
+          enabled: true
+          path: "${workflow.output_path}/analysis_result.json"
+          format: json
+          encoding: utf-8
+      on_failure:
+        action: retry
+          reason: "Analysis failed, retry with simpler prompt"
+          max_attempts: 2
+          backoff: exponential
+          delay_ms: 1000
+        - action: continue
+          output_ref: final_analysis
+          format: json
+          console: true
+          fields:
+            - status
+            - summary
+            - decisions
+            - score
+            - suggestions
+            - issues
+            - recommendations
+            - priority
+
+      - step: step_4_regression_model
+        id: step_4
+        name: "Regression Model Training"
+        model: "${models.primary_analyzer}"
+        input:
+          prompt: |
+            Train a regression model to predict errors in the code.
+            Input data: ${step.step_3.output.analysis}
+            Previous_analysis: ${workflow.previous_analysis}
+            threshold: 0.85
+            learning_rate: 0.01
+          variables:
+            previous_analysis: "${step.step_3.output}"
+            threshold: 0.85
+            learning_rate: 0.01
+        output:
+          save_to: regression_model
+          format: json
+          console: true
+          fields:
+            - model_output
+            - predictions
+            - confidence_score
+      - step: step_5_generate_optimizations
+        id: step_5
+        name: "Generate optimizations"
+        model: "${models.primary_analyzer}"
+        input:
+          prompt: |
+            Based on the regression model output, apply these optimizations to fix the identified issues:
+            Optimize for performance while maintaining correctness.
+            Input_data:
+              regression_model: "${step.step_4.output}"
+              issues: "${step.step_4.output.issues}"
+            threshold: 0.8
+            learning_rate: 0.01
+          variables:
+            regression_model: "${step.step_4.output}"
+            issues: "${step.step_4.output.issues}"
+            threshold: 0.8
+            learning_rate: 0.01
+        output:
+          save_to: optimizations
+          format: json
+          console: true
+          fields:
+            - optimized_code
+            - performance_metrics
+            - correctness_score
+      file_operations:
+        - operation: read
+          file_path: "${workflow.checkpoint_path}/regression_model.yml"
+          format: yaml
+          encoding: utf-8
+        - operation: read
+          file_path: "${workflow.state_path}/optimization_result.json"
+          format: json
+          encoding: utf-8
+        - operation: write
+          file_path: "${workflow.output_path}/final_optimized_code.json"
+          format: json
+          encoding: utf-8
+      on_failure:
+        action: retry
+          reason: "Optimization failed, retry with simpler prompt"
+          max_attempts: 2
+          backoff: exponential
+          delay_ms: 1000

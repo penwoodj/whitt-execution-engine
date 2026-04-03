@@ -1,0 +1,508 @@
+---
+# Workflow: Fine-Grained Tool Access Control Per Step
+# Category: Tool Permissions
+# Focus: Step-level permissions, dynamic access control, conditional tool usage
+
+workflow_id: fine_grained_step_control
+name: Fine-Grained Tool Access Control Per Step
+description: Workflow demonstrating step-level tool permission control with dynamic access and conditional usage patterns
+version: "1.0.0"
+author: "AgentSDK Examples"
+tags:
+  - tool-permissions
+  - step-level
+  - dynamic-access
+  - conditional-permissions
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GLOBAL TOOL PERMISSIONS (Base Configuration)
+# ─────────────────────────────────────────────────────────────────────────────
+tool_permissions:
+  mode: hybrid
+  default_action: deny
+  
+  allowlist:
+    - tool: file_read
+      scope: read
+    - tool: file_write
+      scope: write
+    - tool: web_fetch
+      scope: network
+    - tool: shell_execute
+      scope: execute
+  
+  denylist:
+    - tool: system_exec
+      severity: critical
+      override_allowed: false
+    - tool: process_kill
+      severity: critical
+      override_allowed: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODEL CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+models:
+  primary_agent:
+    host:
+      type: lmstudio
+      connection_settings:
+        host: localhost
+        port: 1234
+    generative_entity: "llama-3.2-3b-instruct"
+    backend: vulkan
+
+  validator_agent:
+    host:
+      type: ollama
+      connection_settings:
+        base_url: "http://localhost:11434"
+    generative_entity: "llama3.2"
+    backend: cpu
+
+  trusted_agent:
+    host:
+      type: openai_compatible
+      connection_settings:
+        api_base: "https://api.openai.com/v1"
+        api_key_env: "OPENAI_API_KEY"
+    generative_entity: "gpt-4o-mini"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXECUTION MODE
+# ─────────────────────────────────────────────────────────────────────────────
+execution:
+  mode: hybrid
+  security:
+    enforce_tool_permissions: true
+    dynamic_permission_updates: true
+    approval_timeout_secs: 300
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOGGING
+# ─────────────────────────────────────────────────────────────────────────────
+logging:
+  global:
+    level: info
+    detail: medium
+    format: json
+    console: true
+    file: true
+    log_file: /workspace/logs/step_permissions.log
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PIPELINE DEFINITION
+# ─────────────────────────────────────────────────────────────────────────────
+agentic_workflow:
+  steps:
+    # Step 1: Read-Only Analysis (Restricted)
+    - step: read_only_analysis
+      id: step_1
+      generative_entity: "${models.primary_agent}"
+      type: agent
+      tool_permissions:
+        mode: explicit_allow
+        inherit_from_workflow: true
+        allowlist:
+          - tool: file_read
+            constraints:
+              allowed_paths:
+                - "/workspace/input/**"
+              max_file_size_mb: 20
+        denylist:
+          - tool: file_write
+          - tool: file_append
+        disabled_scopes:
+          - network
+          - execute
+      prompt: |
+        Perform read-only analysis of input files:
+        Permission constraints: Read access only to /workspace/input/
+        
+        Tasks:
+        1. Scan input directory structure
+        2. Read all configuration files
+        3. Analyze file contents
+        
+        Output:
+        - files_analyzed: list
+        - metadata: file metadata
+        - patterns: detected patterns
+
+      output:
+        save_to: read_analysis
+        format: json
+
+    # Step 2: Network-Enabled Fetch (Expanded)
+    - step: fetch_external_resources
+      id: step_2
+      generative_entity: "${models.primary_agent}"
+      type: agent
+      tool_permissions:
+        mode: hybrid
+        inherit_from_workflow: true
+        expanded_allowlist:
+          - tool: web_fetch
+            scope: network
+            constraints:
+              allowed_domains:
+                - "api.github.com"
+                - "registry.npmjs.org"
+                - "pypi.org"
+              timeout_secs: 60
+        inherited_scopes:
+          - read
+      prompt: |
+        Fetch external resources from approved registries:
+        Allowed domains: api.github.com, registry.npmjs.org, pypi.org
+        
+        Tasks:
+        1. Fetch package information from registries
+        2. Get dependency metadata
+        3. Check for security advisories
+        
+        Input: Detected packages: ${step.step_1.output.patterns}
+        
+        Output:
+        - packages_fetched: list
+        - security_advisories: advisory list
+
+      output:
+        save_to: external_resources
+        format: json
+
+    # Step 3: Conditional Write Access
+    - step: conditional_write
+      id: step_3
+      generative_entity: "${models.primary_agent}"
+      type: agent
+      tool_permissions:
+        mode: hybrid
+        inherit_from_workflow: true
+        conditional_allowlist:
+          - tool: file_write
+            scope: write
+            condition:
+              expression: "${step.step_2.output.security_advisories} == []"
+              on_false: deny
+            constraints:
+              allowed_paths:
+                - "/workspace/output/approved/**"
+              max_file_size_mb: 5
+              require_checksum: true
+        inherited_scopes:
+          - read
+      prompt: |
+        Write approved packages (conditional on security check):
+        Condition: If no security advisories, proceed with write
+        
+        Tasks:
+        1. Check security advisory status
+        2. If safe, write approved packages list
+        3. Generate checksums
+        
+        Output:
+        - write_status: success | denied | skipped
+        - files_written: list (if allowed)
+
+      output:
+        save_to: conditional_write_result
+        format: json
+
+    # Step 4: Elevated Permissions (Approval Required)
+    - step: elevated_operations
+      id: step_4
+      generative_entity: "${models.trusted_agent}"
+      type: agent
+      tool_permissions:
+        mode: explicit_allow
+        inherit_from_workflow: false
+        elevated_access:
+          - tool: shell_execute
+            scope: execute
+            requires_approval: true
+            approval_config:
+              approver_role: "security_admin"
+              timeout_secs: 300
+              auto_approve_conditions:
+                - condition: "${workflow.dry_run} == true"
+              justification_required: true
+            constraints:
+              allowed_commands:
+                - "npm audit"
+                - "pip check"
+                - "safety check"
+              working_directory: "/workspace"
+          - tool: file_write
+            scope: write
+            requires_approval: true
+            approval_config:
+              approver_role: "data_admin"
+              timeout_secs: 180
+            constraints:
+              allowed_paths:
+                - "/workspace/output/audit/**"
+      prompt: |
+        Perform elevated security audit operations:
+        Required approvals: shell_execute (security_admin), file_write (data_admin)
+        
+        Tasks:
+        1. Run npm audit for dependency vulnerabilities
+        2. Run pip check for Python dependencies
+        3. Write audit reports
+        
+        Output:
+        - approval_status: map of approvals
+        - audit_results: security audit findings
+
+      output:
+        save_to: elevated_operations_result
+        format: json
+
+    # Step 5: Permission Escalation Detection
+    - step: detect_escalation
+      id: step_5
+      generative_entity: "${models.validator_agent}"
+      type: agent
+      tool_permissions:
+        mode: explicit_allow
+        inherit_from_workflow: false
+        allowlist:
+          - tool: file_read
+            scope: read
+            constraints:
+              allowed_paths:
+                - "/workspace/logs/**"
+                - "/workspace/output/audit/**"
+          - tool: permission_audit
+            scope: read
+      prompt: |
+        Detect and analyze permission escalation attempts:
+        Audit sources: Permission logs, Audit reports
+        
+        Tasks:
+        1. Parse permission log for escalation events
+        2. Identify approval requests
+        3. Check for denied access attempts
+        
+        Output:
+        - escalation_attempts: count
+        - approved_escalations: list
+        - denied_escalations: list
+        - risk_assessment: risk score
+
+      output:
+        save_to: escalation_analysis
+        format: json
+
+    # Step 6: Dynamic Permission Update
+    - step: update_permissions
+      id: step_6
+      generative_entity: "${models.trusted_agent}"
+      type: agent
+      tool_permissions:
+        mode: hybrid
+        inherit_from_workflow: true
+        dynamic_updates:
+          enabled: true
+          rules:
+            - condition: "${step.step_5.output.risk_assessment} < 0.3"
+              action: expand_permissions
+              expansions:
+                - tool: shell_execute
+                  additional_commands:
+                    - "npm outdated"
+                    - "npm update --dry-run"
+            - condition: "${step.step_5.output.risk_assessment} > 0.7"
+              action: restrict_permissions
+              restrictions:
+                - disable_scope: network
+                - disable_scope: execute
+          fallback:
+            mode: explicit_allow
+            allowlist:
+              - tool: file_read
+              - tool: file_write
+      prompt: |
+        Update permissions based on risk assessment:
+        Risk score: ${step.step_5.output.risk_assessment}
+        
+        Dynamic rules:
+        - If risk < 0.3: Expand shell_execute permissions
+        - If risk > 0.7: Restrict network and execute scopes
+        
+        Output:
+        - applied_rule: which rule was applied
+        - permissions_before: previous state
+        - permissions_after: new state
+
+      output:
+        save_to: permission_update
+        format: json
+
+    # Step 7: Multi-Scope Operation
+    - step: multi_scope_operation
+      id: step_7
+      generative_entity: "${models.primary_agent}"
+      type: agent
+      tool_permissions:
+        mode: hybrid
+        inherit_from_workflow: true
+        enabled_scopes:
+          - read
+          - write
+          - network
+          - execute
+        scope_constraints:
+          read:
+            allowed_paths:
+              - "/workspace/**"
+          write:
+            allowed_paths:
+              - "/workspace/output/**"
+            require_versioning: true
+          network:
+            allowed_domains:
+              - "*.internal.company.com"
+            rate_limit_per_minute: 30
+          execute:
+            allowed_commands:
+              - "git"
+              - "npm"
+              - "node"
+            sandbox: true
+      prompt: |
+        Perform multi-scope operation combining all permission types:
+        Enabled scopes: read, write, network, execute
+        
+        Tasks:
+        1. Read configuration files (read scope)
+        2. Fetch updates from internal API (network scope)
+        3. Execute build commands (execute scope)
+        4. Write build artifacts (write scope)
+        
+        Input:
+        - Config: ${step.step_1.output}
+        - Updates: ${step.step_2.output}
+        - Permissions: ${step.step_6.output}
+        
+        Output:
+        - scope_usage: per-scope usage stats
+        - operations_performed: list
+
+      output:
+        save_to: multi_scope_result
+        format: json
+
+    # Step 8: Generate Access Control Report
+    - step: generate_access_report
+      id: step_8
+      generative_entity: "${models.validator_agent}"
+      type: agent
+      tool_permissions:
+        mode: explicit_allow
+        inherit_from_workflow: false
+        allowlist:
+          - tool: file_read
+            scope: read
+            constraints:
+              allowed_paths:
+                - "/workspace/**"
+          - tool: file_write
+            scope: write
+            constraints:
+              allowed_paths:
+                - "/workspace/output/reports/**"
+          - tool: permission_audit
+            scope: read
+      prompt: |
+        Generate comprehensive access control report:
+        Step permission configurations:
+        1. Step 1 (Read-only): Restricted to read
+        2. Step 2 (Network): Expanded with web_fetch
+        3. Step 3 (Conditional): Based on security check
+        4. Step 4 (Elevated): Approval required
+        5. Step 5 (Detection): Audit access only
+        6. Step 6 (Dynamic): Risk-based updates
+        7. Step 7 (Multi-scope): All scopes enabled
+        
+        Generate report including:
+        1. Permission configuration per step
+        2. Dynamic permission changes
+        3. Approval flow events
+        4. Scope utilization summary
+        5. Compliance verification
+
+      output:
+        save_to: access_control_report
+        format: markdown
+        file_output:
+          enabled: true
+          path: /workspace/output/reports/access_control_report.md
+          encoding: utf-8
+
+# ─────────────────────────────────────────────────────────────────────────────
+# APPROVAL CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+approvals:
+  enabled: true
+  roles:
+    security_admin:
+      can_approve:
+        - shell_execute
+        - system_exec
+      notification_channel: "security-alerts"
+    data_admin:
+      can_approve:
+        - file_write
+        - database_write
+      notification_channel: "data-alerts"
+  workflow:
+    timeout_secs: 300
+    reminder_interval_secs: 60
+    escalation_enabled: true
+  auto_approve:
+    enabled: true
+    rules:
+      - condition: "${workflow.dry_run} == true"
+        tools: ["*"]
+      - condition: "${workflow.environment} == 'development'"
+        tools: ["file_write", "shell_execute"]
+        constraints:
+          safe_mode: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# METRICS
+# ─────────────────────────────────────────────────────────────────────────────
+metrics:
+  enabled: true
+  collect:
+    - step_permission_overrides
+    - approval_request_count
+    - approval_response_time_secs
+    - permission_escalation_count
+    - scope_utilization_per_step
+    - dynamic_permission_changes
+  output:
+    path: /workspace/metrics/step_permission_metrics.json
+    format: json
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FEATURE SUMMARY
+# ─────────────────────────────────────────────────────────────────────────────
+features_demonstrated:
+  step_level_overrides:
+    types: [restriction, expansion, replacement]
+  conditional_permissions:
+    conditions: [expression_based, context_based, previous_step_based]
+  elevated_access:
+    features: [approval_flow, auto_approve, escalation]
+  permission_escalation_detection: true
+  dynamic_permission_updates:
+    triggers: [risk_score, context_change, rule_evaluation]
+  multi_scope_operations:
+    scopes: [read, write, network, execute]
+  approval_workflow:
+    roles: [security_admin, data_admin]
+  permission_inheritance:
+    modes: [inherit, override, extend, disable]

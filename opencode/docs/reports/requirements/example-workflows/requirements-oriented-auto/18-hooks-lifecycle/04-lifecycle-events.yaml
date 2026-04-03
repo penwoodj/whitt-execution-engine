@@ -1,0 +1,493 @@
+---
+workflow_id: lifecycle_events
+name: Lifecycle Events
+description: Demonstrates handling of startup, shutdown, pause, and resume events
+
+# ── MODEL CONFIGURATION ────────────────────────────────────
+models:
+  
+  default_model_router: automatic
+  
+  # ── MODEL: LIFECYCLE_MANAGER ───────────────────────
+  "llama-3.2-3b-instruct":
+    name: lifecycle_manager
+    
+    host:
+      type: lmstudio
+      connection_settings:
+        host: localhost
+        port: 1234
+    
+    resource_limits:
+      max_allowed:
+        ram: 2048MB
+        vram: 2048MB
+        cpu: 80%
+        gpu: 80%
+        attention_tokens: 8192
+        concurrent_requests: 1
+      
+      min_allowed:
+        ram: 1024MB
+        vram: 1024MB
+        cpu: 40%
+        gpu: 40%
+        attention_tokens: 4096
+      
+      allocation_strategy: dynamic
+    
+    execution:
+      timeout:
+        load_into_memory: 10s
+        time_to_first_response: 30s
+        total_time_to_response: 10m
+      
+      max_turns: 5
+      stop_on_tool_failure: false
+      accumulate_tool_results: true
+
+# ── WORKFLOW EXECUTION STRATEGY ────────────────────────────
+workflow_execution_strategy:
+  
+  load_unload: adaptive
+  
+  processing: serial
+  
+  memory:
+    allocation:
+      strategy: adaptive
+      max_allowed:
+        ram: 2048MB
+        vram: 2048MB
+        cpu: 80%
+        gpu: 80%
+        attention_tokens: 8192
+    
+    model_lifecycle:
+      load_unload_strategy: adaptive
+      cache_size: medium
+      swap_timeout_secs: 30
+      unload_unused: true
+  
+  timeout:
+    total: 30m
+    timeout_strategy: fail
+  
+  error_handling:
+    default_action: retry
+    max_retries_per_step: 2
+    retry_backoff_multiplier: 1.5
+
+# ── LOGGING CONFIGURATION ────────────────────────────────────
+logging:
+  
+  level: info
+  
+  output_destinations:
+    console:
+      enabled: true
+      include_timestamps: true
+
+# ── PIPELINE DEFINITION ───────────────────────────────────
+agentic_workflow:
+  
+  hardcoded_values:
+    workspace_path: /workspace
+    output_path: /workspace/output
+    workflow_start_time: "{{now}}"
+    workflow_version: "1.0.0"
+  
+  steps:
+    
+    # ── STEP 1: Handle Startup Event ─────────────────────
+    step_1_startup_handler:
+      name: "Handle Startup Event"
+      description: "Process workflow startup and initialization"
+      type: agent
+      
+      generative_entity: "${models.lifecycle_manager}"
+      
+      prompt: |
+        Handle the workflow startup event.
+        
+        Startup information:
+        - Workflow ID: {{workflow_id}}
+        - Start time: {{workflow_start_time}}
+        - Workspace: {{workspace_path}}
+        - Output path: {{output_path}}
+        
+        Perform startup tasks:
+        1. Verify workspace accessibility
+        2. Check system resources
+        3. Initialize workflow state
+        4. Load required models
+        5. Set up monitoring
+        
+        Report startup status with:
+        - Initialization results
+        - Resource availability
+        - Model loading status
+        - Ready state
+      
+      output:
+        save_to: startup_status
+        format: structured
+        fields:
+          - initialization_complete  # Whether initialization succeeded
+          - resources_available    # System resource status
+          - models_loaded         # Model loading status
+          - ready_for_work       # Workflow ready state
+          
+        console:
+          enabled: true
+          prefix: "[Startup] "
+      
+      # ── EVENT HANDLING HOOKS ─────────────────────────────
+      on_startup:
+        
+        log:
+          level: info
+          message: "Workflow startup event triggered"
+          
+        initialize_state:
+          set_workflow_status: "initializing"
+          record_start_timestamp: "{{now}}"
+          
+        notify:
+          enabled: true
+          notification_type: webhook
+          webhook_url: "https://api.example.com/lifecycle"
+          payload:
+            event: "startup"
+            workflow_id: "{{workflow_id}}"
+            timestamp: "{{now}}"
+    
+    # ── STEP 2: Pause and Resume Handler ───────────────────
+    step_2_pause_resume:
+      name: "Handle Pause and Resume Events"
+      description: "Process workflow pause and resume operations"
+      type: agent
+      
+      generative_entity: "${models.lifecycle_manager}"
+      
+      prompt: |
+        Handle the workflow pause/resume state.
+        
+        State check:
+        Determine if workflow is:
+        - Running normally
+        - Paused by user
+        - Paused for resource constraints
+        - Paused for errors
+        
+        If running:
+        1. Continue normal execution
+        2. Log active state
+        3. Resume any paused operations
+        
+        If paused:
+        1. Check pause reason
+        2. Verify state is safe to resume
+        3. Resume execution from checkpoint
+        4. Validate resources are available
+        
+        Report action taken:
+        - Current state
+        - Action performed (continue/wait)
+        - Next steps
+        
+        Save state snapshot for recovery.
+      
+      output:
+        save_to: pause_resume_action
+        format: structured
+        fields:
+          - current_state         # Running/paused/stopped
+          - action_taken          # What action was performed
+          - can_proceed          # Whether workflow can continue
+          - state_snapshot        # Saved state information
+          
+        console:
+          enabled: true
+          prefix: "[Pause/Resume] "
+      
+      # ── EVENT HANDLING HOOKS ─────────────────────────────
+      on_pause:
+        
+        log:
+          level: warning
+          message: "Workflow paused"
+          include_pause_reason: true
+          
+        save_state:
+          enabled: true
+          save_checkpoint: true
+          path: "${workspace.state}/pause-state.json"
+          
+        release_resources:
+          enabled: true
+          unload_models: true
+          release_memory: true
+          
+        notify:
+          enabled: true
+          notification_type: email
+          recipients: ["admin@example.com"]
+          subject: "Workflow Paused"
+          include_timestamp: true
+      
+      on_resume:
+        
+        log:
+          level: info
+          message: "Workflow resumed"
+          include_resume_reason: true
+          
+        restore_state:
+          enabled: true
+          load_checkpoint: true
+          path: "${workspace.state}/pause-state.json"
+          
+        validate_resources:
+          check_availability: true
+          check_permissions: true
+          
+        notify:
+          enabled: true
+          notification_type: slack
+          channel: "#workflows"
+          message: "Workflow resumed from pause"
+    
+    # ── STEP 3: Shutdown Handler ─────────────────────────
+    step_3_shutdown_handler:
+      name: "Handle Shutdown Event"
+      description: "Process workflow shutdown and cleanup"
+      type: agent
+      
+      generative_entity: "${models.lifecycle_manager}"
+      
+      prompt: |
+        Handle the workflow shutdown event.
+        
+        Shutdown trigger:
+        - Normal completion
+        - User cancellation
+        - Error-induced shutdown
+        - Timeout termination
+        - System signal
+        
+        Perform shutdown tasks:
+        1. Save final state
+        2. Generate completion summary
+        3. Release all resources
+        4. Clean up temporary files
+        5. Close open connections
+        6. Archive logs and outputs
+        7. Notify stakeholders
+        
+        Shutdown report should include:
+        - Final workflow state
+        - Total execution time
+        - Steps completed/failed
+        - Resource usage statistics
+        - Outputs generated
+        - Cleanup status
+        - Notification confirmation
+      
+      output:
+        save_to: shutdown_report
+        format: structured
+        fields:
+          - shutdown_reason       # Why workflow shut down
+          - final_state          # Workflow state at shutdown
+          - execution_time       # Total duration
+          - steps_status         # Completed vs failed steps
+          - cleanup_status       # What was cleaned up
+          
+        console:
+          enabled: true
+          prefix: "[Shutdown] "
+      
+      # ── EVENT HANDLING HOOKS ─────────────────────────────
+      on_shutdown:
+        
+        log:
+          level: info
+          message: "Workflow shutdown event triggered"
+          include_shutdown_reason: true
+          
+        finalize_state:
+          enabled: true
+          save_final: true
+          path: "${workspace.state}/final-state.json"
+          
+        cleanup:
+          remove_temp_files: true
+          remove_temp_dirs: true
+          clear_caches: true
+          
+        archive:
+          enabled: true
+          archive_logs: true
+          archive_outputs: true
+          archive_path: "${workspace.archives}/shutdown-{{now}}.tar.gz"
+          
+        release_resources:
+          enabled: true
+          unload_all_models: true
+          release_memory: true
+          close_connections: true
+          
+        generate_summary:
+          enabled: true
+          include_execution_stats: true
+          include_resource_usage: true
+          
+        notify:
+          enabled: true
+          notification_type: webhook
+          webhook_url: "https://api.example.com/lifecycle"
+          payload:
+            event: "shutdown"
+            workflow_id: "{{workflow_id}}"
+            timestamp: "{{now}}"
+            summary: "${workflow.execution_summary}}"
+    
+    # ── STEP 4: Resource Monitoring ─────────────────────
+    step_4_monitor_resources:
+      name: "Monitor Resource Usage"
+      description: "Track resource consumption during execution"
+      type: tool
+      
+      depends_on:
+        - step_1_startup_handler
+      
+      generative_entity: "${models.lifecycle_manager}"
+      
+      prompt: |
+        Monitor system resource usage during workflow execution.
+        
+        Resources to track:
+        - CPU usage percentage
+        - Memory usage (RAM/VRAM)
+        - Disk I/O
+        - Network activity
+        - Model loading states
+        
+        Sample interval: 5 seconds
+        Duration: Monitor for workflow lifetime
+        Output format: JSON metrics stream
+      tool:
+        type: cli_run
+        
+        parameters:
+          command: |
+            while true; do
+              echo "{\"timestamp\": \"$(date -Iseconds)\", \
+                    \"cpu_percent\": $(top -bn1 | grep 'Cpu(s)' | awk '{print $2}' | cut -d'%' -f1), \
+                    \"memory_mb\": $(free -m | grep '^Mem:' | awk '{print $4}'), \
+                    \"vram_mb\": $(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits | cut -d',' -f3), \
+                    \"disk_io\": $(iostat -x | grep 'Device' | head -1 | awk '{print $4}')" \
+              >> ${output_path}/resource-metrics.json && \
+              sleep 5 && \
+              [ $(cat ${output_path}/resource-metrics.json | wc -l) -gt 100 ] && break
+            done
+            
+          working_directory: /
+          timeout_secs: 3600
+          
+          capture_output:
+            enabled: true
+      
+      output:
+        save_to: monitoring_status
+        format: text
+        
+        console:
+          enabled: false
+      
+      timeout_secs: 3600
+  
+  # ── WORKFLOW-LEVEL EVENT HANDLING ───────────────────────
+  workflow_event_hooks:
+    
+    on_startup:
+      initialize_resources:
+        preload_models: false
+        reserve_memory_mb: 256
+        create_working_dirs: true
+        
+      validate_environment:
+        check_dependencies: true
+        check_permissions: true
+        verify_workspace: true
+        
+      notify:
+        enabled: true
+        notification_type: email
+        recipients: ["team@example.com"]
+        message: "Workflow starting"
+    
+    on_pause:
+      validate_resume_conditions:
+        check_resources_available: true
+        check_dependencies_stable: true
+        
+      create_checkpoint:
+        enabled: true
+        include_partial_results: true
+        
+      notify:
+        enabled: true
+        notification_type: slack
+        channel: "#alerts"
+        message: "Workflow paused"
+    
+    on_resume:
+      restore_checkpoint:
+        enabled: true
+        validate_checkpoint: true
+        
+      reinitialize_resources:
+        reallocate_memory: true
+        reload_models: true
+        
+      notify:
+        enabled: true
+        notification_type: email
+        recipients: ["team@example.com"]
+        message: "Workflow resumed"
+    
+    on_shutdown:
+      finalize_results:
+        enabled: true
+        generate_summary: true
+        
+      cleanup_all:
+        enabled: true
+        remove_temp_files: true
+        clear_caches: true
+        
+      release_all_resources:
+        enabled: true
+        unload_models: true
+        release_memory: true
+        close_connections: true
+        
+      archive:
+        enabled: true
+        compress_logs: true
+        archive_outputs: true
+        
+      generate_final_report:
+        enabled: true
+        include_statistics: true
+        
+      notify_all:
+        enabled: true
+        notification_types:
+          - email: ["team@example.com", "admin@example.com"]
+          slack: "#workflows"
+          webhook: "https://api.example.com/complete"
+        
+        include_summary_attachment: true

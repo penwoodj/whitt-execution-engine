@@ -1,0 +1,762 @@
+---
+# Workflow: Complex Orchestration with Sub-Agent Coordination
+# Category: Comprehensive Integration
+# Focus: orchestration:, sub-agent orchestration, validation aggregation, interdependent validations
+#
+# This workflow demonstrates:
+# - Top-level orchestration configuration
+# - Sub-agent definitions with interdependencies
+# - Validation aggregation across sub-agents
+# - Event handling and propagation
+# - Checkpoint coordination
+# - Policy inheritance and override
+
+workflow_id: complex_orchestration_sub_agents
+name: Complex Orchestration with Sub-Agent Coordination
+description: Comprehensive demonstration of orchestration features including sub-agent coordination, validation aggregation, and interdependent validations
+version: "1.0.0"
+author: "AgentSDK Examples"
+tags:
+  - orchestration
+  - sub-agents
+  - validation-aggregation
+  - interdependent-validations
+  - event-propagation
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODEL CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+models:
+  default_router: smart_routing
+
+  primary_orchestrator:
+    name: "Primary Orchestrator"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+        connection_timeout_secs: 30
+    generative_entity: "llama-3.2-3b-instruct"
+    backend: vulkan
+    max_allowed:
+      ram: 15%
+      vram: 4GB
+
+  code_analyzer_model:
+    name: "Code Analyzer"
+    host:
+      type: ollama
+      connection_settings:
+        base_url: "http://localhost:11434"
+        timeout_secs: 60
+    generative_entity: "llama3.2"
+    backend: cpu
+
+  doc_generator_model:
+    name: "Documentation Generator"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+    generative_entity: "llama-3.2-3b-instruct"
+    backend: vulkan
+
+  quality_validator_model:
+    name: "Quality Validator"
+    host:
+      type: llama_cpp_with_vulkan
+      connection_settings:
+        model_path: "/models/llama-3.2-3b.Q4_K_M.gguf"
+        n_gpu_layers: 35
+    generative_entity: "/models/llama-3.2-3b.Q4_K_M.gguf"
+    backend: vulkan
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ORCHESTRATION CONFIGURATION (Top-Level)
+# Demonstrates comprehensive orchestration settings
+# ─────────────────────────────────────────────────────────────────────────────
+orchestration:
+  enabled: true
+
+  # ── STEP COORDINATION ─────────────────────────────────────────────────────
+  step_coordination:
+    max_concurrent_steps: 10
+    step_priority: fifo  # fifo | priority_queue | user_defined
+
+    inter_step_dependencies:
+      enabled: true
+      resolution_strategy: wait_for_all  # wait_for_all | continue_with_available | skip_failed
+      dependency_timeout_secs: 300
+
+    wait_strategy: eager  # eager | lazy
+    event_propagation_delay_ms: 100
+
+  # ── SUB-AGENT ORCHESTRATION ───────────────────────────────────────────────
+  sub_agent_orchestration:
+    enabled: true
+
+    # Sub-agent definitions with interdependencies
+    sub_agents:
+      # ── SUB-AGENT 1: Code Analyzer ───────────────────────────────────────
+      - id: code_analyzer_sub
+        name: "Code Analyzer Sub-Agent"
+        description: "Analyzes codebase structure, patterns, and quality"
+        workflow_ref: code_analysis_workflow
+        alias: analyzer
+
+        validation_config:
+          type: loop
+          max_iterations: 4
+          tolerance: 0.05
+          on_convergence: continue
+          on_max_iterations: use_best_result
+
+        interdependent_validations:
+          - depends_on: [doc_generator_sub, refactor_generator_sub]
+            validation_criteria:
+              metric: code_quality
+              operator: ">="
+              target: 0.90
+            on_failure: relax_criteria
+            relaxation_factor: 0.10
+
+        resource_allocation:
+          cpu_percent: 40
+          memory_mb: 4096
+          priority: high
+
+      # ── SUB-AGENT 2: Documentation Generator ──────────────────────────────
+      - id: doc_generator_sub
+        name: "Documentation Generator Sub-Agent"
+        description: "Generates comprehensive documentation from code analysis"
+        workflow_ref: documentation_workflow
+        alias: docgen
+
+        validation_config:
+          type: loop
+          max_iterations: 3
+          tolerance: 0.08
+          on_convergence: continue
+
+        interdependent_validations:
+          - depends_on: [code_analyzer_sub]
+            validation_criteria:
+              metric: documentation_completeness
+              operator: ">="
+              target: 0.85
+            on_failure: retry_with_different_prompt
+
+        resource_allocation:
+          cpu_percent: 30
+          memory_mb: 3072
+          priority: medium
+
+      # ── SUB-AGENT 3: Refactor Generator ───────────────────────────────────
+      - id: refactor_generator_sub
+        name: "Refactor Generator Sub-Agent"
+        description: "Generates refactored code based on analysis"
+        workflow_ref: refactoring_workflow
+        alias: refactorer
+
+        validation_config:
+          type: loop
+          max_iterations: 5
+          tolerance: 0.03
+          on_convergence: continue
+
+        interdependent_validations:
+          - depends_on: [code_analyzer_sub]
+            validation_criteria:
+              metric: refactor_quality
+              operator: ">="
+              target: 0.92
+            on_failure: escalate_to_oracle
+
+        resource_allocation:
+          cpu_percent: 50
+          memory_mb: 6144
+          priority: high
+
+      # ── SUB-AGENT 4: Quality Validator ────────────────────────────────────
+      - id: quality_validator_sub
+        name: "Quality Validator Sub-Agent"
+        description: "Validates overall quality across all outputs"
+        workflow_ref: validation_workflow
+        alias: validator
+
+        validation_config:
+          type: loop
+          max_iterations: 3
+          tolerance: 0.02
+          on_convergence: return_result
+
+        interdependent_validations:
+          - depends_on: [code_analyzer_sub, doc_generator_sub, refactor_generator_sub]
+            validation_criteria:
+              metric: overall_quality
+              operator: ">="
+              target: 0.88
+            on_failure: fail_workflow
+
+        resource_allocation:
+          cpu_percent: 25
+          memory_mb: 2048
+          priority: critical
+
+    # ── EVENT HANDLING ──────────────────────────────────────────────────────
+    event_handling:
+      on_validation_result:
+        aggregate_at_top_level: true
+        propagate_to_dependents: true
+        log_result: true
+
+      on_interdependent_failure:
+        notify_dependent_sub_agents: true
+        adjust_validation_criteria: true
+        propagate_failure_up: true
+        retry_affected_sub_agents: true
+
+      on_checkpoint:
+        save_state_snapshot: true
+        notify_all_sub_agents: true
+        track_version: true
+
+    # ── EXECUTION COORDINATION ──────────────────────────────────────────────
+    execution_coordination:
+      max_parallel_sub_agents: 4
+      parallel_group_timeout_secs: 600
+      sub_agent_timeout_secs: 300
+
+      failure_handling:
+        strategy: continue_with_partial
+        max_failures_allowed: 1
+        on_max_failures: fail_workflow
+
+  # ── VALIDATION AGGREGATION ───────────────────────────────────────────────
+  validation_aggregation:
+    strategy: hierarchical  # hierarchical | conjunction | disjunction | weighted
+
+    overall_validation_criteria:
+      - name: code_quality_score
+        weight: 0.30
+        required: true
+        threshold: 0.90
+        source: code_analyzer_sub
+
+      - name: documentation_completeness
+        weight: 0.25
+        required: true
+        threshold: 0.85
+        source: doc_generator_sub
+
+      - name: refactor_quality
+        weight: 0.25
+        required: true
+        threshold: 0.92
+        source: refactor_generator_sub
+
+      - name: overall_validation_passed
+        weight: 0.20
+        required: true
+        threshold: 0.88
+        source: quality_validator_sub
+
+    overall_threshold: 0.85
+    min_metrics_required: 4
+
+    aggregation_timeout_secs: 120
+    on_aggregation_timeout: use_best_available
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WORKFLOW EXECUTION STRATEGY
+# ─────────────────────────────────────────────────────────────────────────────
+workflow_execution_strategy:
+  processing: parallel
+
+  parallel:
+    enabled: true
+    algorithm: priority_queue
+    max_threads: 8
+    max_sub_agents: 4
+
+  memory:
+    allocation:
+      strategy: adaptive
+      max_allowed:
+        ram: 60%
+        vram: 80%
+
+    model_lifecycle:
+      load_unload_strategy: lazy
+      cache_size: medium
+      unload_unused: true
+
+  sub_workflow:
+    enabled: true
+
+    inherit_policy:
+      enabled: true
+      inherit_from_parent:
+        runtime: true
+        review: true
+        rigor: true
+        concurrency: true
+
+    reference_resolution:
+      strategy: hierarchical
+      caching:
+        enabled: true
+        cache_ttl_secs: 3600
+
+    circular_reference_detection:
+      enabled: true
+      max_depth: 3
+      on_circular_reference:
+        action: fail_workflow
+
+  synchronization:
+    enabled: true
+    coordination:
+      barrier_sync:
+        enabled: true
+        timeout_secs: 60
+      deadlock_detection: true
+
+  checkpointing:
+    enabled: true
+    configuration:
+      level: timetravel
+      output_path: "/workspace/checkpoints/orchestration/"
+    triggers:
+      interval:
+        time: 5m
+        steps: [orchestrate_sub_agents, aggregate_validations]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SUB-WORKFLOW DEFINITIONS
+# ─────────────────────────────────────────────────────────────────────────────
+sub_workflows:
+  - workflow_id: code_analysis_workflow
+    name: "Code Analysis Sub-Workflow"
+    description: "Analyzes code structure and quality"
+    path: ./workflows/sub/code-analysis.yml
+    inputs:
+      - code_path
+      - analysis_depth
+    outputs:
+      - analysis_results
+      - quality_metrics
+
+  - workflow_id: documentation_workflow
+    name: "Documentation Generation Sub-Workflow"
+    description: "Generates documentation from analysis"
+    path: ./workflows/sub/documentation.yml
+    inputs:
+      - analysis_results
+      - doc_format
+    outputs:
+      - documentation_content
+      - completeness_score
+
+  - workflow_id: refactoring_workflow
+    name: "Refactoring Sub-Workflow"
+    description: "Generates refactored code"
+    path: ./workflows/sub/refactoring.yml
+    inputs:
+      - analysis_results
+      - refactoring_scope
+    outputs:
+      - refactored_code
+      - quality_improvement
+
+  - workflow_id: validation_workflow
+    name: "Validation Sub-Workflow"
+    description: "Validates all outputs"
+    path: ./workflows/sub/validation.yml
+    inputs:
+      - analysis_results
+      - documentation
+      - refactored_code
+    outputs:
+      - validation_report
+      - overall_quality_score
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOGGING CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+logging:
+  enabled: true
+
+  global:
+    level: info
+    detail: medium
+    output_type: chat
+    format: json
+    console: true
+    file: true
+    log_file: /workspace/logs/orchestration.log
+
+  scopes:
+    workflow:
+      enabled: true
+      include_timestamps: true
+      include_execution_id: true
+
+    orchestration:
+      enabled: true
+      include_sub_agent_events: true
+      include_validation_aggregation: true
+      include_event_propagation: true
+
+    models:
+      enabled: true
+      include_load_unload: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# METRICS COLLECTION
+# ─────────────────────────────────────────────────────────────────────────────
+metrics:
+  enabled: true
+
+  collect:
+    # Orchestration metrics
+    - sub_agent_execution_time_ms
+    - validation_aggregation_time_ms
+    - interdependency_resolution_time_ms
+    - event_propagation_latency_ms
+
+    # Quality metrics
+    - code_quality_score
+    - documentation_completeness
+    - refactor_quality
+    - overall_validation_score
+
+    # Performance metrics
+    - parallel_efficiency_percent
+    - resource_utilization_percent
+    - checkpoint_overhead_ms
+
+  output:
+    path: /workspace/metrics/orchestration_metrics.json
+    format: json
+    include_timestamps: true
+    aggregation_interval_secs: 60
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PIPELINE DEFINITION
+# ─────────────────────────────────────────────────────────────────────────────
+agentic_workflow:
+  steps:
+    # ── STEP 1: Initialize Orchestration ───────────────────────────────────
+    - step: initialize_orchestration
+      id: step_1
+      generative_entity: "${models.primary_orchestrator}"
+      type: agent
+
+      prompt: |
+        Initialize orchestration system for sub-agent coordination:
+
+        Sub-agents to coordinate:
+        1. code_analyzer_sub - Code structure and quality analysis
+        2. doc_generator_sub - Documentation generation
+        3. refactor_generator_sub - Code refactoring
+        4. quality_validator_sub - Overall validation
+
+        Interdependencies:
+        - code_analyzer_sub → doc_generator_sub
+        - code_analyzer_sub → refactor_generator_sub
+        - All three → quality_validator_sub
+
+        Tasks:
+        1. Validate all sub-workflow references
+        2. Initialize execution context
+        3. Set up event propagation channels
+        4. Configure validation aggregation
+
+        Output:
+        - orchestration_status: initialized|failed
+        - sub_agent_count: number
+        - dependency_graph: adjacency_list
+        - validation_criteria_count: number
+
+      output:
+        save_to: orchestration_init
+        format: json
+
+    # ── STEP 2: Execute Sub-Agent Code Analysis ─────────────────────────────
+    - step: execute_code_analysis
+      id: step_2
+      generative_entity: "${models.code_analyzer_model}"
+      type: sub_workflow
+      sub_workflow: code_analysis_workflow
+
+      prompt: |
+        Execute code analysis sub-agent:
+
+        Configuration:
+        - Max iterations: 4
+        - Tolerance: 0.05
+        - Quality target: >= 0.90
+
+        Analysis scope:
+        - Code path: /workspace/src
+        - Analysis depth: comprehensive
+
+        Output validation criteria:
+        - code_quality >= 0.90
+        - pattern_coverage >= 0.85
+        - issue_detection >= 0.95
+
+      input_variables:
+        code_path: /workspace/src
+        analysis_depth: comprehensive
+
+      output:
+        save_to: code_analysis_results
+        format: json
+        fields:
+          - analysis_results
+          - quality_metrics
+          - patterns_found
+          - issues_detected
+
+      retry:
+        max_attempts: 3
+        backoff: exponential
+        delay_ms: 2000
+
+    # ── STEP 3: Execute Parallel Sub-Agents ─────────────────────────────────
+    - step: execute_parallel_sub_agents
+      id: step_3
+      type: control
+      parallel_group: sub_agent_execution
+      max_parallel: 3
+
+      branches:
+        # ── BRANCH 3A: Documentation Generation ─────────────────────────────
+        doc_generation:
+          name: "Documentation Generation"
+          enabled_by: "step_2.status == 'success'"
+          next_step: step_3a
+
+          parallel_group: doc_gen_group
+          timeout_secs: 300
+
+          on_entry:
+            log:
+              message: "Starting documentation generation"
+              level: info
+
+          on_exit:
+            checkpoint:
+              enabled: true
+
+        # ── BRANCH 3B: Refactoring ──────────────────────────────────────────
+        refactoring:
+          name: "Code Refactoring"
+          enabled_by: "step_2.status == 'success'"
+          next_step: step_3b
+
+          parallel_group: refactor_group
+          timeout_secs: 400
+
+    # ── STEP 3A: Execute Documentation Sub-Agent ────────────────────────────
+    - step: step_3a
+      id: doc_generation_step
+      generative_entity: "${models.doc_generator_model}"
+      type: sub_workflow
+      sub_workflow: documentation_workflow
+
+      prompt: |
+        Generate documentation based on code analysis:
+
+        Analysis results:
+        ${step.step_2.output}
+
+        Documentation requirements:
+        - Completeness target: >= 0.85
+        - Format: markdown
+        - Include: API docs, README, inline comments
+
+        Validation criteria:
+        - documentation_completeness >= 0.85
+        - api_coverage >= 0.90
+
+      input_variables:
+        analysis_results: "${step.step_2.output.analysis_results}"
+        doc_format: markdown
+
+      output:
+        save_to: documentation_results
+        format: json
+
+    # ── STEP 3B: Execute Refactoring Sub-Agent ──────────────────────────────
+    - step: step_3b
+      id: refactoring_step
+      generative_entity: "${models.quality_validator_model}"
+      type: sub_workflow
+      sub_workflow: refactoring_workflow
+
+      prompt: |
+        Generate refactored code based on analysis:
+
+        Analysis results:
+        ${step.step_2.output}
+
+        Refactoring requirements:
+        - Quality target: >= 0.92
+        - Preserve functionality
+        - Improve maintainability
+
+        Validation criteria:
+        - refactor_quality >= 0.92
+        - functionality_preserved: true
+
+      input_variables:
+        analysis_results: "${step.step_2.output.analysis_results}"
+        refactoring_scope: comprehensive
+
+      output:
+        save_to: refactoring_results
+        format: json
+
+    # ── STEP 4: Aggregate and Validate ──────────────────────────────────────
+    - step: aggregate_validations
+      id: step_4
+      generative_entity: "${models.quality_validator_model}"
+      type: sub_workflow
+      sub_workflow: validation_workflow
+
+      prompt: |
+        Aggregate and validate all sub-agent outputs:
+
+        Code analysis:
+        ${step.step_2.output}
+
+        Documentation:
+        ${step.doc_generation_step.output}
+
+        Refactoring:
+        ${step.refactoring_step.output}
+
+        Validation aggregation strategy: hierarchical
+
+        Overall criteria (weighted):
+        - code_quality_score (30%): >= 0.90
+        - documentation_completeness (25%): >= 0.85
+        - refactor_quality (25%): >= 0.92
+        - overall_validation_passed (20%): >= 0.88
+
+        Overall threshold: 0.85
+        Minimum metrics required: 4
+
+        Tasks:
+        1. Aggregate validation results from all sub-agents
+        2. Apply weighted scoring
+        3. Check interdependent validations
+        4. Generate final validation report
+
+        Output:
+        - overall_quality_score: float
+        - validation_passed: boolean
+        - criteria_breakdown: object
+        - recommendations: array
+
+      input_variables:
+        analysis_results: "${step.step_2.output}"
+        documentation: "${step.doc_generation_step.output}"
+        refactored_code: "${step.refactoring_step.output}"
+
+      output:
+        save_to: final_validation
+        format: json
+        fields:
+          - overall_quality_score
+          - validation_passed
+          - criteria_breakdown
+          - recommendations
+        file_output:
+          enabled: true
+          path: /workspace/output/validation_report.json
+
+    # ── STEP 5: Generate Orchestration Report ───────────────────────────────
+    - step: generate_orchestration_report
+      id: step_5
+      generative_entity: "${models.primary_orchestrator}"
+      type: agent
+
+      prompt: |
+        Generate comprehensive orchestration report:
+
+        Orchestration initialization:
+        ${step.step_1.output}
+
+        Code analysis results:
+        ${step.step_2.output}
+
+        Documentation results:
+        ${step.doc_generation_step.output}
+
+        Refactoring results:
+        ${step.refactoring_step.output}
+
+        Final validation:
+        ${step.step_4.output}
+
+        Report sections:
+        1. Executive Summary
+        2. Sub-Agent Execution Summary
+        3. Interdependency Resolution
+        4. Validation Aggregation Results
+        5. Event Propagation Analysis
+        6. Performance Metrics
+        7. Recommendations
+
+      output:
+        save_to: orchestration_report
+        format: markdown
+        file_output:
+          enabled: true
+          path: /workspace/output/orchestration_report.md
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RETRY CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+retry:
+  default:
+    max_attempts: 3
+    backoff: exponential
+    on_failure: retry_with_fallback
+
+  escalation:
+    strategy: sub_agent_escalation
+    escalate_to_oracle_after: 5
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FEATURE SUMMARY
+# ─────────────────────────────────────────────────────────────────────────────
+features_demonstrated:
+  - orchestration: true
+    components: [step_coordination, sub_agent_orchestration, validation_aggregation]
+
+  - sub_agent_coordination: true
+    count: 4
+    interdependencies: true
+
+  - validation_aggregation: true
+    strategy: hierarchical
+    weighted_criteria: true
+
+  - interdependent_validations: true
+    relaxation_strategies: true
+
+  - event_propagation: true
+    bidirectional: true
+
+  - checkpoint_coordination: true
+    timetravel_enabled: true
+
+  - parallel_execution: true
+    sub_agent_parallelism: true

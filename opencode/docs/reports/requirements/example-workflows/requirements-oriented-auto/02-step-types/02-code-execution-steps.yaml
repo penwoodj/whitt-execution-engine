@@ -1,0 +1,482 @@
+---
+workflow_id: code_execution_steps
+name: Code Execution Steps
+description: Demonstrates bash and Python script execution with environment variables, working directories, and output capture
+version: "1.0.0"
+
+# ── MODEL CONFIGURATION ────────────────────────────────────
+models:
+  default_model_router: automatic
+  
+  "llama-3.2-3b-instruct":
+    name: code_executor
+    host:
+      type: lmstudio
+      connection_settings:
+        host: localhost
+        port: 1234
+    
+    max_allowed:
+      ram: 4096MB
+      vram: 4096MB
+      attention_tokens: 8192
+      concurrent_requests: 2
+    
+    execution:
+      timeout:
+        load_into_memory: 10s
+        time_to_first_response: 30s
+        total_time_to_response: 2h
+      max_turns: 20
+
+# ── WORKFLOW EXECUTION STRATEGY ────────────────────────────
+workflow_execution_strategy:
+  load_unload: lazy
+  processing: serial
+  
+  memory:
+    allocation:
+      strategy: dynamic
+      max_allowed:
+        ram: 8192MB
+        vram: 8192MB
+    
+    model_lifecycle:
+      unload_unused: true
+  
+  timeout:
+    default_timeout_secs: 300
+    timeout_strategy: continue_with_partial
+  
+  error_handling:
+    default_action: retry
+    max_retries_per_step: 3
+
+# ── LOGGING CONFIGURATION ────────────────────────────────────
+logging:
+  level: info
+  detail: high
+  
+  output_destinations:
+    chat_file:
+      enabled: true
+      path: "${workflow.output_path}/code-execution-workflow.md"
+      format: markdown
+    
+    console:
+      enabled: true
+      include_timestamps: true
+
+# ── TOOL PERMISSIONS ────────────────────────────────────────────
+tool_permissions:
+  file_operations:
+    read:
+      enabled: true
+      require_confirmation: false
+      allowed_paths:
+        - /workspace/scripts
+        - /workspace/data
+      max_file_size_mb: 100
+    
+    write:
+      enabled: true
+      require_confirmation: true
+      allowed_paths:
+        - /workspace/output
+        - /workspace/results
+      backup_existing: true
+  
+  shell_operations:
+    exec:
+      enabled: true
+      require_confirmation: true
+      timeout_seconds: 120
+      allowed_commands:
+        - python
+        - bash
+        - cargo
+        - git
+      forbidden_commands:
+        - rm
+        - sudo
+      working_directories:
+        - /workspace
+
+# ── PIPELINE DEFINITION ─────────────────────────────────────────
+agentic_workflow:
+  hardcoded_values:
+    python_env:
+      PYTHONPATH: /workspace/lib
+      MODEL_PATH: /models/llama-3.2
+      LOG_LEVEL: INFO
+    
+    bash_env:
+      PATH: /usr/local/bin:/usr/bin
+      WORKSPACE: /workspace
+      OUTPUT_PATH: /workspace/output
+    
+    timeout_configs:
+      short: 10
+      medium: 60
+      long: 120
+
+  steps:
+    # ── STEP 1: Execute Python Data Processing Script ─────────
+    step_1_python_data_processing:
+      name: "Python Data Processing"
+      description: "Execute Python script with environment variables for data processing"
+      type: agent
+      
+      generative_entity: "${models.code_executor}"
+      
+      prompt: |
+        Execute the Python data processing script:
+        
+        Script: ${workflow.input.python_script_path}
+        Working Directory: ${workflow.input.working_directory}
+        
+        Environment Variables:
+        - PYTHONPATH: ${hardcoded_values.python_env.PYTHONPATH}
+        - MODEL_PATH: ${hardcoded_values.python_env.MODEL_PATH}
+        - LOG_LEVEL: ${hardcoded_values.python_env.LOG_LEVEL}
+        - INPUT_FILE: ${workflow.input.input_file}
+        - OUTPUT_FILE: ${workflow.output_path}/processed_data.json
+        - TIMEOUT: ${hardcoded_values.timeout_configs.medium}
+        
+        Execute the script and capture:
+        - Standard output
+        - Error output
+        - Exit code
+        - Execution time
+        - Generated output file location
+        
+        Return structured results with execution details.
+      
+      input_variables:
+        python_script_path: "${workflow.input.python_script_path}"
+        working_directory: "${workflow.input.working_directory}"
+        input_file: "${workflow.input.input_file}"
+        output_path: "${workflow.output_path}"
+      
+      output:
+        save_to: python_execution_result
+        format: json
+        fields:
+          - success
+          - exit_code
+          - execution_time_secs
+          - stdout
+          - stderr
+          - output_file_path
+        
+        file_output:
+          enabled: true
+          path: "${workflow.output_path}/python_results.json"
+        
+        console:
+          enabled: true
+          prefix: "[Python Exec] "
+      
+      retry:
+        max_attempts: 3
+        backoff: exponential
+        delay_ms: 2000
+
+    # ── STEP 2: Execute Bash Build Script ─────────────
+    step_2_bash_build_script:
+      name: "Bash Build Script"
+      description: "Execute bash script for building the project"
+      type: agent
+      
+      generative_entity: "${models.code_executor}"
+      
+      prompt: |
+        Execute the bash build script:
+        
+        Script: ${workflow.input.bash_script_path}
+        Working Directory: ${workflow.input.working_directory}
+        
+        Environment Variables:
+        - PATH: ${hardcoded_values.bash_env.PATH}
+        - WORKSPACE: ${hardcoded_values.bash_env.WORKSPACE}
+        - OUTPUT_PATH: ${hardcoded_values.bash_env.OUTPUT_PATH}
+        - BUILD_MODE: ${workflow.input.build_mode}
+        - TIMEOUT: ${hardcoded_values.timeout_configs.long}
+        
+        Build tasks:
+        1. Compile the project
+        2. Run linting
+        3. Generate documentation
+        4. Create distribution package
+        
+        Execute the script and capture:
+        - Build output
+        - Warning messages
+        - Error messages
+        - Exit code
+        - Execution time
+        - Generated artifacts
+        
+        Return structured build results.
+      
+      input_variables:
+        bash_script_path: "${workflow.input.bash_script_path}"
+        working_directory: "${workflow.input.working_directory}"
+        build_mode: "${workflow.input.build_mode}"
+        output_path: "${workflow.output_path}"
+      
+      output:
+        save_to: bash_build_result
+        format: json
+        fields:
+          - success
+          - exit_code
+          - execution_time_secs
+          - build_output
+          - warnings
+          - errors
+          - artifacts_generated
+        
+        file_output:
+          enabled: true
+          path: "${workflow.output_path}/build_results.json"
+        
+        console:
+          enabled: true
+          prefix: "[Bash Build] "
+      
+      retry:
+        max_attempts: 2
+        backoff: exponential
+        delay_ms: 3000
+
+    # ── STEP 3: Execute Python Test Suite ─────────────
+    step_3_python_test_suite:
+      name: "Python Test Suite"
+      description: "Execute Python test suite with coverage reporting"
+      type: agent
+      
+      generative_entity: "${models.code_executor}"
+      
+      prompt: |
+        Execute the Python test suite:
+        
+        Test Script: ${workflow.input.test_script_path}
+        Working Directory: ${workflow.input.working_directory}
+        
+        Environment Variables:
+        - PYTHONPATH: ${hardcoded_values.python_env.PYTHONPATH}
+        - TEST_MODE: coverage
+        - COVERAGE_FILE: ${workflow.output_path}/coverage.json
+        - REPORT_FILE: ${workflow.output_path}/test_report.xml
+        - TIMEOUT: ${hardcoded_values.timeout_configs.medium}
+        
+        Test execution tasks:
+        1. Run all unit tests
+        2. Generate coverage report
+        3. Create test report
+        4. Identify failing tests (if any)
+        
+        Execute the test suite and capture:
+        - Test results (pass/fail)
+        - Coverage percentage
+        - Test duration
+        - Error messages for failed tests
+        - Exit code
+        
+        Return structured test results.
+      
+      input_variables:
+        test_script_path: "${workflow.input.test_script_path}"
+        working_directory: "${workflow.input.working_directory}"
+        output_path: "${workflow.output_path}"
+      
+      output:
+        save_to: test_suite_result
+        format: json
+        fields:
+          - success
+          - exit_code
+          - execution_time_secs
+          - total_tests
+          - passed_tests
+          - failed_tests
+          - coverage_percentage
+          - failed_test_details
+        
+        file_output:
+          enabled: true
+          path: "${workflow.output_path}/test_results.json"
+        
+        console:
+          enabled: true
+          prefix: "[Test Suite] "
+      
+      retry:
+        max_attempts: 2
+        backoff: fixed
+        delay_ms: 1000
+
+    # ── STEP 4: Execute Bash Deployment Script ─────────────
+    step_4_bash_deployment:
+      name: "Bash Deployment Script"
+      description: "Execute bash script for deploying artifacts"
+      type: agent
+      
+      generative_entity: "${models.code_executor}"
+      
+      prompt: |
+        Execute the bash deployment script:
+        
+        Script: ${workflow.input.deploy_script_path}
+        Working Directory: ${workflow.input.working_directory}
+        
+        Environment Variables:
+        - PATH: ${hardcoded_values.bash_env.PATH}
+        - WORKSPACE: ${hardcoded_values.bash_env.WORKSPACE}
+        - OUTPUT_PATH: ${hardcoded_values.bash_env.OUTPUT_PATH}
+        - DEPLOY_ENV: ${workflow.input.deploy_env}
+        - VERSION: ${workflow.input.version}
+        - TIMEOUT: ${hardcoded_values.timeout_configs.long}
+        
+        Deployment tasks:
+        1. Validate artifacts
+        2. Package artifacts
+        3. Upload to deployment target
+        4. Verify deployment
+        
+        Execute the script and capture:
+        - Deployment output
+        - Validation results
+        - Upload status
+        - Exit code
+        - Deployment URL (if applicable)
+        
+        Return structured deployment results.
+      
+      input_variables:
+        deploy_script_path: "${workflow.input.deploy_script_path}"
+        working_directory: "${workflow.input.working_directory}"
+        deploy_env: "${workflow.input.deploy_env}"
+        version: "${workflow.input.version}"
+        output_path: "${workflow.output_path}"
+      
+      output:
+        save_to: deployment_result
+        format: json
+        fields:
+          - success
+          - exit_code
+          - execution_time_secs
+          - deployment_output
+          - validation_results
+          - upload_status
+          - deployment_url
+        
+        file_output:
+          enabled: true
+          path: "${workflow.output_path}/deployment_results.json"
+        
+        console:
+          enabled: true
+          prefix: "[Deployment] "
+      
+      retry:
+        max_attempts: 2
+        backoff: exponential
+        delay_ms: 5000
+
+    # ── STEP 5: Execute Python Cleanup Script ─────────────
+    step_5_python_cleanup:
+      name: "Python Cleanup Script"
+      description: "Execute Python script for cleaning up temporary files"
+      type: agent
+      
+      generative_entity: "${models.code_executor}"
+      
+      prompt: |
+        Execute the Python cleanup script:
+        
+        Script: ${workflow.input.cleanup_script_path}
+        Working Directory: ${workflow.input.working_directory}
+        
+        Environment Variables:
+        - PYTHONPATH: ${hardcoded_values.python_env.PYTHONPATH}
+        - CLEANUP_MODE: ${workflow.input.cleanup_mode}
+        - LOG_FILE: ${workflow.output_path}/cleanup.log
+        - TIMEOUT: ${hardcoded_values.timeout_configs.short}
+        
+        Cleanup tasks:
+        1. Identify temporary files
+        2. Remove old artifacts
+        3. Clear cache directories
+        4. Generate cleanup report
+        
+        Execute the script and capture:
+        - Cleanup actions taken
+        - Files removed count
+        - Disk space freed
+        - Exit code
+        - Execution time
+        
+        Return structured cleanup results.
+      
+      input_variables:
+        cleanup_script_path: "${workflow.input.cleanup_script_path}"
+        working_directory: "${workflow.input.working_directory}"
+        cleanup_mode: "${workflow.input.cleanup_mode}"
+        output_path: "${workflow.output_path}"
+      
+      output:
+        save_to: cleanup_result
+        format: json
+        fields:
+          - success
+          - exit_code
+          - execution_time_secs
+          - files_removed
+          - disk_space_freed_mb
+          - cleanup_actions
+        
+        file_output:
+          enabled: true
+          path: "${workflow.output_path}/cleanup_results.json"
+        
+        console:
+          enabled: true
+          prefix: "[Cleanup] "
+      
+      retry:
+        max_attempts: 1
+        backoff: fixed
+        delay_ms: 500
+
+# ── WORKFLOW VARIABLES ──────────────────────────────────────────
+workflow:
+  input:
+    python_script_path: /workspace/scripts/process_data.py
+    bash_script_path: /workspace/scripts/build_project.sh
+    test_script_path: /workspace/scripts/run_tests.py
+    deploy_script_path: /workspace/scripts/deploy.sh
+    cleanup_script_path: /workspace/scripts/cleanup.py
+    working_directory: /workspace
+    input_file: /workspace/data/input.json
+    build_mode: release
+    deploy_env: staging
+    version: "1.0.0"
+    cleanup_mode: aggressive
+  
+  output_path: /workspace/output
+
+# ── FEATURES DEMONSTRATED ───────────────────────────────────────
+features_demonstrated:
+  - python_script_execution
+  - bash_script_execution
+  - environment_variables
+  - working_directories
+  - timeout_configuration
+  - output_capture
+  - file_operations
+  - shell_operations
+  - tool_permissions
+  - retry_with_different_strategies

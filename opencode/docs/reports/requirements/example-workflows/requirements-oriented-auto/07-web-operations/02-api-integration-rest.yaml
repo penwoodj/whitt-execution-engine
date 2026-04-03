@@ -1,0 +1,370 @@
+---
+workflow_id: api_integration_rest
+name: REST API Integration with Authentication
+description: Demonstrates REST API integration, authentication methods (OAuth, API keys), request/response handling, rate limiting, and error handling
+version: "1.0.0"
+author: "AgentSDK Examples"
+tags:
+  - web-operations
+  - rest-api
+  - authentication
+  - rate-limiting
+
+models:
+  api_client:
+    name: "API Integration Agent"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+    generative_entity: "llama-3.2-3b-instruct"
+    backend: vulkan
+
+workflow_execution_strategy:
+  load_unload: lazy
+  processing: serial
+
+tool_permissions:
+  web_operations:
+    fetch:
+      enabled: true
+      require_confirmation: false
+      timeout_secs: 30
+      max_concurrent_requests: 3
+      allowed_domains:
+        - api.github.com
+        - jsonplaceholder.typicode.com
+        - restapi.example.com
+
+    scrape:
+      enabled: false
+
+  shell_operations:
+    exec:
+      enabled: true
+      require_confirmation: false
+      allowed_commands:
+        - curl
+      working_directories:
+        - /workspace
+
+agentic_workflow:
+  step_1_configure_authentication:
+    name: "Configure API Authentication"
+    type: agent
+    model: "${models.api_client}"
+
+    input:
+      prompt: |
+        Configure authentication for API calls.
+
+        Read configuration from: /workspace/config/api-credentials.yml
+
+        Authentication methods:
+        1. API Key (Bearer token)
+        2. OAuth 2.0 (access token)
+        3. Basic Auth (username/password)
+
+        Configuration format:
+        ```
+        api_credentials:
+          provider: github
+          auth_type: api_key
+          api_key: ${GITHUB_TOKEN}
+          base_url: https://api.github.com
+          rate_limit:
+            requests_per_hour: 5000
+            burst_limit: 100
+        ```
+
+        Validate credentials format and prepare authentication headers.
+
+    output:
+      save_to: auth_config
+      format: json
+
+  step_2_make_get_request:
+    name: "GET Request - List Repositories"
+    type: agent
+    model: "${models.api_client}"
+
+    input:
+      variables:
+        auth: "${step.step_1_configure_authentication.output}"
+
+      prompt: |
+        Make GET request to list repositories.
+
+        Using authentication:
+        {{auth}}
+
+        Request details:
+        - Method: GET
+        - Endpoint: /user/repos
+        - Headers: Authorization with token
+        - Query parameters: type=owner, sort=updated
+
+        Handle response:
+        1. Check status code (200 OK, 401 Unauthorized, 429 Rate Limit)
+        2. Parse JSON response
+        3. Extract repository list
+        4. Handle pagination (Link header)
+
+        Return repository list with metadata.
+
+    output:
+      save_to: get_response
+      format: json
+
+  step_3_make_post_request:
+    name: "POST Request - Create Repository"
+    type: agent
+    model: "${models.api_client}"
+
+    input:
+      variables:
+        auth: "${step.step_1_configure_authentication.output}"
+
+      prompt: |
+        Make POST request to create a repository.
+
+        Using authentication:
+        {{auth}}
+
+        Request details:
+        - Method: POST
+        - Endpoint: /user/repos
+        - Content-Type: application/json
+        - Headers: Authorization with token
+
+        Request body:
+        ```json
+        {
+          "name": "test-repository",
+          "description": "Test repository created via workflow",
+          "private": false,
+          "auto_init": true
+        }
+        ```
+
+        Handle response:
+        1. Check status code (201 Created)
+        2. Parse response
+        3. Extract repository details (URL, ID, full_name)
+        4. Handle validation errors (400)
+
+        Return repository creation result.
+
+    output:
+      save_to: post_response
+      format: json
+
+  step_4_make_put_request:
+    name: "PUT Request - Update Repository"
+    type: agent
+    model: "${models.api_client}"
+
+    input:
+      variables:
+        auth: "${step.step_1_configure_authentication.output}"
+        repo_info: "${step.step_2_make_get_request.output}"
+
+      prompt: |
+        Make PUT request to update repository description.
+
+        Using authentication:
+        {{auth}}
+
+        Repository from previous step:
+        {{repo_info}}
+
+        Request details:
+        - Method: PUT
+        - Endpoint: /repos/{owner}/{repo}
+        - Content-Type: application/json
+
+        Request body:
+        ```json
+        {
+          "description": "Updated description via workflow",
+          "has_wiki": true
+        }
+        ```
+
+        Handle response:
+        1. Check status code (200 OK)
+        2. Parse response
+        3. Verify update succeeded
+
+        Return update confirmation.
+
+    output:
+      save_to: put_response
+      format: json
+
+  step_5_handle_rate_limiting:
+    name: "Handle Rate Limiting"
+    type: agent
+    model: "${models.api_client}"
+
+    input:
+      variables:
+        auth: "${step.step_1_configure_authentication.output}"
+
+      prompt: |
+        Demonstrate rate limit handling.
+
+        Rate limit from config:
+        {{auth.rate_limit}}
+
+        Scenarios to handle:
+        1. HTTP 429 (Too Many Requests)
+        2. Rate limit headers (X-RateLimit-Remaining, X-RateLimit-Reset)
+        3. Exponential backoff on rate limit
+        4. Queue requests for retry
+
+        Retry strategy:
+        - Initial delay: 1 second
+        - Max delay: 60 seconds
+        - Exponential backoff: 2x multiplier
+
+        Return rate limit handling strategy and recommendations.
+
+    output:
+      save_to: rate_limit_strategy
+      format: json
+
+  step_6_delete_resource:
+    name: "DELETE Request - Clean Up"
+    type: agent
+    model: "${models.api_client}"
+
+    input:
+      variables:
+        auth: "${step.step_1_configure_authentication.output}"
+        created_repo: "${step.step_3_make_post_request.output}"
+
+      prompt: |
+        Make DELETE request to clean up test repository.
+
+        Using authentication:
+        {{auth}}
+
+        Repository to delete:
+        {{created_repo}}
+
+        Request details:
+        - Method: DELETE
+        - Endpoint: /repos/{owner}/{repo}
+        - Require confirmation: true
+
+        Safety checks:
+        1. Verify repository name contains "test"
+        2. Confirm with user before deletion
+        3. Archive repository instead if unsure
+
+        Handle response:
+        1. Check status code (204 No Content)
+        2. Verify deletion succeeded
+
+        Return deletion result and confirmation.
+
+    output:
+      save_to: delete_response
+      format: json
+
+  step_7_generate_api_report:
+    name: "Generate API Integration Report"
+    type: agent
+    model: "${models.api_client}"
+
+    input:
+      variables:
+        auth_result: "${step.step_1_configure_authentication.output}"
+        get_result: "${step.step_2_make_get_request.output}"
+        post_result: "${step.step_3_make_post_request.output}"
+        put_result: "${step.step_4_make_put_request.output}"
+        rate_strategy: "${step.step_5_handle_rate_limiting.output}"
+        delete_result: "${step.step_6_delete_resource.output}"
+
+      prompt: |
+        Generate comprehensive API integration report.
+
+        Authentication:
+        {{auth_result}}
+
+        Request results:
+        - GET: {{get_result}}
+        - POST: {{post_result}}
+        - PUT: {{put_result}}
+        - DELETE: {{delete_result}}
+
+        Rate limiting:
+        {{rate_strategy}}
+
+        Report sections:
+        1. Request statistics (total, success, failure)
+        2. Response time analysis
+        3. Rate limit hit count
+        4. Authentication success
+        5. Error patterns
+        6. Recommendations for optimization
+
+        Write report to: /workspace/output/api-integration-report.md
+
+    output:
+      save_to: api_report
+      format: markdown
+      file_output:
+        enabled: true
+        path: /workspace/output/api-integration-report.md
+
+error_handling:
+  default_action:
+    type: retry_with_backoff
+    reason: "Transient API errors require retry"
+
+  retry:
+    max_attempts: 3
+    backoff_strategy:
+      type: exponential
+      base_delay_ms: 1000
+      max_delay_ms: 10000
+
+  handling_by_type:
+    authentication_errors:
+      action: fail_workflow
+      notify_level: critical
+
+    rate_limit_errors:
+      action: retry_with_backoff
+      notify_level: warning
+
+    server_errors:
+      action: retry_with_backoff
+      notify_level: error
+
+logging:
+  enabled: true
+
+  levels:
+    default: info
+    web_operations: debug
+
+  scopes:
+    web_operations:
+      enabled: true
+      include_request_headers: true
+      include_response_codes: true
+
+    execution:
+      enabled: true
+
+  output:
+    console:
+      enabled: true
+
+    file:
+      enabled: true
+      path: /workspace/logs/api-integration.log

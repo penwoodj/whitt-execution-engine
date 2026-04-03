@@ -1,0 +1,429 @@
+---
+workflow_id: cli_commands_environment
+name: CLI Commands and Environment Variables
+description: Demonstrates CLI command execution, environment variable passing, output streaming, working directories, and error handling
+version: "1.0.0"
+author: "AgentSDK Examples"
+tags:
+  - cli-commands
+  - environment-variables
+  - output-streaming
+  - shell-execution
+
+models:
+  cli_agent:
+    name: "CLI Command Agent"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+    generative_entity: "llama-3.2-3b-instruct"
+    backend: vulkan
+
+workflow_execution_strategy:
+  load_unload: lazy
+  processing: serial
+
+tool_permissions:
+  shell_operations:
+    exec:
+      enabled: true
+      require_confirmation: false
+      timeout_seconds: 90
+      allowed_commands:
+        - cargo
+        - rustc
+        - git
+        - ls
+        - cat
+        - grep
+        - find
+        - wc
+      working_directories:
+        - /workspace
+        - /workspace/src
+
+agentic_workflow:
+  step_1_set_environment_variables:
+    name: "Set Environment Variables"
+    type: agent
+    model: "${models.cli_agent}"
+
+    input:
+      prompt: |
+        Configure environment variables for CLI commands.
+
+        Required variables:
+        - RUST_BACKTRACE: 1 (full backtraces)
+        - RUST_LOG: debug (logging level)
+        - CARGO_BUILD_JOBS: 4 (parallel jobs)
+        - GIT_TERMINAL_PROMPT: "Workflow> " (prompt style)
+        - WORKSPACE_ROOT: /workspace (workspace path)
+
+        Variable types:
+        1. Direct assignment: KEY=value
+        2. Path variables: export PATH=$PATH:/new/path
+        3. Conditional: ${VAR:-default}
+        4. Array: ITEMS=(item1 item2 item3)
+
+        Prepare environment for subsequent commands.
+
+        Return environment configuration.
+
+    output:
+      save_to: env_config
+      format: json
+
+  step_2_execute_cargo_build:
+    name: "Execute Cargo Build"
+    type: agent
+    model: "${models.cli_agent}"
+
+    input:
+      variables:
+        env: "${step.step_1_set_environment_variables.output}"
+
+      prompt: |
+        Execute cargo build command.
+
+        Working directory: /workspace/src
+
+        Environment:
+        {{env}}
+
+        Command details:
+        ```
+        cargo build --release --message-format short
+        ```
+
+        Command options:
+        - --release: Optimize for production
+        - --message-format short: Concise output
+        - -j: Parallel jobs (from RUST_BUILD_JOBS)
+
+        Output to capture:
+        1. Build status (success/failure)
+        2. Compilation warnings
+        3. Build artifacts location
+        4. Build duration
+        5. Binary size
+
+        Execute with proper error handling:
+        - Capture stdout and stderr
+        - Parse cargo exit codes
+        - Handle common build errors
+        - Respect timeout (90 seconds)
+
+        Return build results and binary information.
+
+    output:
+      save_to: cargo_build_result
+      format: json
+
+  step_3_execute_rustc_check:
+    name: "Execute Rust Compiler Check"
+    type: agent
+    model: "${models.cli_agent}"
+
+    input:
+      variables:
+        env: "${step.step_1_set_environment_variables.output}"
+
+      prompt: |
+        Execute rustc compiler check.
+
+        Working directory: /workspace/src
+
+        Environment:
+        {{env}}
+
+        Command details:
+        ```
+        rustc --crate-type lib --emit metadata
+        ```
+
+        Compiler options:
+        - --crate-type lib: Build as library
+        - --emit metadata: Generate metadata
+        - -D warnings: Enable warnings
+
+        Output to capture:
+        1. Compilation status
+        2. Compiler warnings (pedantic, unused)
+        3. Metadata generated
+        4. Crate information
+        5. Dependencies resolved
+
+        Execute with:
+        - Check Rust compiler available
+        - Parse compiler output format
+        - Handle compilation errors gracefully
+        - Capture all warnings
+
+        Return compiler check results and metadata.
+
+    output:
+      save_to: rustc_check_result
+      format: json
+
+  step_4_execute_git_operations:
+    name: "Execute Git Operations"
+    type: agent
+    model: "${models.cli_agent}"
+
+    input:
+      variables:
+        env: "${step.step_1_set_environment_variables.output}"
+
+      prompt: |
+        Execute multiple git commands.
+
+        Working directory: /workspace
+
+        Environment:
+        {{env}}
+
+        Git commands to execute in sequence:
+
+        1. Status check:
+           ```
+           git status --short
+           ```
+
+        2. List recent commits:
+           ```
+           git log --oneline -10
+           ```
+
+        3. Check for uncommitted changes:
+           ```
+           git diff --stat
+           ```
+
+        4. Create branch if needed:
+           ```
+           git checkout -b workflow-branch-{{timestamp}}
+           ```
+
+        5. Stage changes:
+           ```
+           git add -A
+           ```
+
+        Command behavior:
+        - Use --short for concise output
+        - --oneline for single-line commits
+        - --stat for file change statistics
+        - Respect GIT_TERMINAL_PROMPT for prompt style
+
+        Output to capture:
+        - Git status (clean/modified)
+        - Recent commit history
+        - Uncommitted file changes
+        - Branch creation status
+        - Staging results
+
+        Execute each command sequentially, collecting outputs.
+
+        Return git repository state and operation results.
+
+    output:
+      save_to: git_operations_result
+      format: json
+
+  step_5_execute_grep_search:
+    name: "Execute Grep Search"
+    type: agent
+    model: "${models.cli_agent}"
+
+    input:
+      prompt: |
+        Execute grep to search for patterns.
+
+        Working directory: /workspace/src
+
+        Search command:
+        ```
+        grep -r "TODO\|FIXME\|XXX" --include="*.rs" --color=never
+        ```
+
+        Grep options:
+        - -r: Recursive search
+        - --include="*.rs": Only Rust files
+        - --color=never: Disable coloring for parsing
+        - Pattern: TODO|FIXME|XXX (code markers)
+        - Extended regex (\\| for OR)
+
+        Output to capture:
+        1. Matching file paths
+        2. Line numbers where pattern found
+        3. Context lines (before/after matches)
+        4. Total match count
+        5. File distribution
+
+        Execute with:
+        - Parse grep output format
+        - Handle large output streams
+        - Respect execution timeout
+
+        Return search results with file locations and matches.
+
+    output:
+      save_to: grep_search_result
+      format: json
+
+  step_6_execute_file_stats:
+    name: "Execute File Statistics Commands"
+    type: agent
+    model: "${models.cli_agent}"
+
+    input:
+      prompt: |
+        Execute commands to generate file statistics.
+
+        Working directory: /workspace/src
+
+        Commands to execute:
+
+        1. Count lines:
+           ```
+           wc -l **/*.rs
+           ```
+
+        2. Count words:
+           ```
+           wc -w **/*.rs
+           ```
+
+        3. Count characters:
+           ```
+           wc -c **/*.rs
+           ```
+
+        4. Find largest files:
+           ```
+           find . -name "*.rs" -exec wc -l {} + | sort -rn | head -10
+           ```
+
+        Command details:
+        - Use **/*.rs glob pattern for all Rust files
+        - Sort results numerically (-rn)
+        - Take top 10 (head -10)
+
+        Output to capture:
+        - Line counts per file
+        - Word counts per file
+        - Character counts per file
+        - Total statistics
+        - Largest files ranked
+        - File size distribution
+
+        Execute all commands and aggregate statistics.
+
+        Return comprehensive file statistics.
+
+    output:
+      save_to: file_stats_result
+      format: json
+
+  step_7_generate_cli_report:
+    name: "Generate CLI Execution Report"
+    type: agent
+    model: "${models.cli_agent}"
+
+    input:
+      variables:
+        env: "${step.step_1_set_environment_variables.output}"
+        cargo: "${step.step_2_execute_cargo_build.output}"
+        rustc: "${step.step_3_execute_rustc_check.result}"
+        git: "${step.step_4_execute_git_operations.output}"
+        grep: "${step.step_5_execute_grep_search.output}"
+        stats: "${step.step_6_execute_file_stats.output}"
+
+      prompt: |
+        Generate comprehensive CLI execution report.
+
+        Command execution results:
+        - Environment: {{env}}
+        - Cargo: {{cargo}}
+        - Rustc: {{rustc}}
+        - Git: {{git}}
+        - Grep: {{grep}}
+        - Stats: {{stats}}
+
+        Report sections:
+        1. Environment configuration summary
+        2. Build status and artifacts
+        3. Compilation warnings and errors
+        4. Git repository state
+        5. Code quality markers (TODO, FIXME)
+        6. File statistics and metrics
+        7. Performance comparison
+        8. Recommendations for improvement
+
+        Format as Markdown with:
+        - Code blocks for commands
+        - Tables for statistics
+        - Section headers for organization
+        - Summary highlights
+
+        Write report to: /workspace/output/cli-execution-report.md
+
+    output:
+      save_to: cli_report
+      format: markdown
+      file_output:
+        enabled: true
+        path: /workspace/output/cli-execution-report.md
+
+logging:
+  enabled: true
+
+  levels:
+    default: info
+    shell_operations: debug
+    execution: info
+
+  scopes:
+    shell_operations:
+      enabled: true
+      include_command_output: true
+      include_environment_vars: true
+
+    execution:
+      enabled: true
+
+  output:
+    console:
+      enabled: true
+
+    file:
+      enabled: true
+      path: /workspace/logs/cli-commands.log
+
+error_handling:
+  default_action:
+    type: log_and_continue
+    reason: "Continue with next command if one fails"
+
+  handling_by_type:
+    command_not_found:
+      action: fail_workflow
+      notify_level: critical
+      message: "Required command not available"
+
+    permission_denied:
+      action: log_and_skip
+      notify_level: error
+      message: "Command execution permission denied"
+
+    timeout_exceeded:
+      action: log_and_skip
+      notify_level: warning
+      message: "Command execution timed out"
+
+    non_zero_exit:
+      action: log_and_continue
+      notify_level: error
+      message: "Command returned non-zero exit code"
