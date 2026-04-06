@@ -10,8 +10,8 @@
 
 This document consolidates all schema-related requirements, features, and demonstrations from:
 1. `requirements.md` - Original requirements specification
-2. Example workflows (all 52 categorized examples) - 18 comprehensive workflow demonstrations
-3. Review cycles (1-8) - Quality validation and gap analysis
+2. Example workflows (53 categorized examples across 19 categories)
+3. Review cycles (1-14) - Quality validation and gap analysis
 
 The YAML schema provides a complete foundation for defining, executing, and optimizing agentic workflows with local LLMs.
 

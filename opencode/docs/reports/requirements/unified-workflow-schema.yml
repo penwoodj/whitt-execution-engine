@@ -1578,6 +1578,120 @@ features_demonstrated:
   schema_versioning: true
   configuration_profiles: true
 
+# ── VARIABLE INTERPOLATION SYNTAX ──────────────────────────────
+# Two interpolation forms are supported. They resolve at different times.
+#
+# ${...}  — STRUCTURAL REFERENCES (resolved at workflow parse time)
+#   ${models.model_name}        → Reference to a model definition
+#   ${workflow.field_name}      → Reference to a workflow-level variable
+#   ${workspace.path_var}       → Reference to a workspace path
+#   Used in: model: fields, configuration values, path references
+#
+# {{...}} — DYNAMIC TEMPLATE VALUES (resolved at runtime/execution time)
+#   {{step.step_id.output}}     → Captured output from a completed step
+#   {{now}}                     → Current ISO 8601 timestamp
+#   {{workflow_id}}             → Workflow identifier string
+#   {{run.number}}              → Sequential execution run number
+#   Used in: prompt: blocks, input templates, dynamic string fields
+#
+# RULE: Use ${...} for static structural references, {{...}} for runtime values.
+# Both forms may appear in the same workflow but serve different purposes.
+
+# ── DEFAULT BEHAVIOR REFERENCE ────────────────────────────────
+# When optional fields are omitted, these defaults apply:
+#
+# execution.mode:              "serial"      (sequential step execution)
+# retry (block absent):        no retry      (fail immediately on error)
+# retry (condition absent):    always retry  (if retry block is present)
+# retry.default.max_attempts:  3
+# retry.default.backoff:       exponential
+# retry.default.delay_ms:      1000
+# logging.level:               "info"
+# logging.enabled:             true
+# logging.output_type:         "chat"
+# checkpointing.enabled:       true
+# checkpointing.on_failure:    create
+# checkpointing.on_timeout:    create
+# checkpointing.on_user_interrupt: create
+# error_handling.default_action: type: retry
+# tool_permissions (absent):   all allowed  (open by default)
+# models.default_router:       automatic     (when step model is unspecified)
+
+# ── SCOPE & INHERITANCE RULES ──────────────────────────────────
+# Configuration cascades through well-defined inheritance:
+#
+# Tool Permissions:
+#   Global tool_permissions defines the baseline access control.
+#   Per-step limited_tools / additional_tools RESTRICTS — cannot grant
+#   beyond what global allows. Per-model overrides exist via
+#   model_overrides within tool_permissions.
+#
+# Logging:
+#   Hierarchical inheritance. Global settings are baseline.
+#   Per-scope overrides (workflow, pipeline, models, tools, execution)
+#   take precedence within their scope. Child scopes inherit from
+#   parent unless explicitly overridden.
+#
+# Retry:
+#   Workflow-level retry.default is the baseline.
+#   Per-step retry: blocks override completely (not merged).
+#   When step retry is absent, workflow default applies.
+#
+# Models:
+#   Per-step model: references override workflow defaults.
+#   When absent, default_router: automatic selects based on task type.
+
+# ── NUMERIC THRESHOLD GUIDANCE ────────────────────────────────
+# Field                        | Range       | Default | Description
+# ─────────────────────────────┼─────────────┼─────────┼────────────────────────────
+# thinking.budget_tokens       | 0 - 16384   | 4096    | Chain-of-thought token budget
+# count_config.max_iterations  | 1 - 1000    | 5       | Max iterations for count loops
+# validation_config.tolerance  | 0.0 - 1.0   | 0.03    | Acceptable deviation from exact
+# validation_config.max_iterations | 1 - 100  | 4       | Max validation loop iterations
+# exact_criteria.target        | 0.0 - 1.0   | 0.95    | Minimum quality score for acceptance
+# infinite_config.max_iterations | 1 - 10000 | 100     | Safety cap for infinite loops
+# infinite_config.timeout_seconds | 1 - 3600  | 30      | Max wall-clock time (seconds)
+# overall_threshold            | 0.0 - 1.0   | 0.85    | Minimum aggregate validation score
+# exec timeout.load_into_memory | 5 - 300s   | 45s     | Time to load model into memory
+# exec timeout.first_response   | 5s - 5m     | 1m      | Time to first token/response
+# exec timeout.total_response   | 1m - 24h    | 4h      | Total allowed execution time
+
+# ── DUPLICATE CONFIGURATION SYSTEMS CLARIFICATION ─────────────
+# Three cases appear where similar concepts exist under different keys.
+# These are COMPLEMENTARY by design, not redundant:
+#
+# 1. PARALLELISM (three levels of control):
+#    parallel_group (on steps)     — WHICH steps execute concurrently (branch grouping)
+#    parallel.algorithm (global)   — HOW parallel tasks are scheduled (round_robin, etc.)
+#    load_balancing.strategy       — WHERE resources are assigned (least_loaded, etc.)
+#
+# 2. PERMISSIONS (two enforcement surfaces):
+#    tool_permissions (static)     — Explicit tool-by-tool access control at config time
+#    guardrails.tool_use (dynamic) — Policy-based safety at runtime based on content
+#    Rule: guardrails CANNOT grant beyond what tool_permissions allows
+#
+# 3. ORCHESTRATION (parent-child relationship):
+#    orchestration (top-level)     — General coordination container (enabled, strategy)
+#    sub_agent_orchestration       — Nested section for hierarchical sub-agent defs
+#    Rule: sub_agent_orchestration is always a child of orchestration
+
+# ── LIFECYCLE STATE MACHINE ───────────────────────────────────
+# Model lifecycle transitions:
+#
+#   LOADED → WARMING → ACTIVE → COOLING → UNLOADED
+#              ↑                    │
+#              └──── (re-warm) ─────┘
+#
+# States:
+#   LOADED   — Model file in memory, not yet initialized
+#   WARMING  — Pre-loading cache, running warmup prompt (configurable timeout)
+#   ACTIVE   — Ready for inference, serving requests
+#   COOLING  — Idle detection triggered, cache flush in progress
+#   UNLOADED — Model removed from memory, resources freed
+#
+# Control fields: load_unload_strategy, warmup.enabled, cooldown.idle_detection,
+#   cache_size, swap_timeout_secs, unload_unused, gc_interval_secs
+
 # ── SCHEMA METADATA ───────────────────────────────────────────
 schema_version: "1.0.0"
 min_schema_version: "1.0.0"

@@ -739,30 +739,34 @@ agentic_workflow:
 
 ## Example Workflows
 
-The framework includes **18 comprehensive example workflows** demonstrating all features:
+The framework includes **53 example workflows across 19 categories** demonstrating all features:
 
-1. **ex01**: Direct LLM pipeline with single model
-2. **ex02**: Multi-model serial pipeline with auto-routing
-3. **ex03**: AgentSDK with sub-agents orchestration
-4. **ex04**: Tool permissions and safety
-5. **ex05**: Convergence loops for iterative improvement
-6. **ex06**: RAG CRUD operations and knowledge base management
-7. **ex07**: Prompt-to-workflow generation with policy sliders
-8. **ex08**: Nested workflow references (5 patterns)
-9. **ex09**: Web operations with URL parameters
-10. **ex10**: Script and CLI execution with environment variables
-11. **ex11**: Nested validation loops with parallel explicit workflows
-12. **ex12**: Local file CRUD operations
-13. **ex13**: Loop variations (count, time, infinite, validation, retry)
-14. **ex14**: Web scraping to RAG pipeline
-15. **ex15**: Hierarchical logging (9 levels)
-16. **ex16**: Multi-step prompt refinement (6 iterations)
-17. **ex17**: Conditional branching workflows with event-based execution
-18. **ex18**: Comprehensive features workflow demonstrating ALL schema features
+| # | Category | Examples |
+|---|----------|----------|
+| 01 | Model Configuration | Basic selection, parameter tuning, lifecycle, cost tracking |
+| 02 | Step Types | LLM inference, code execution, tool invocation, hybrid |
+| 03 | Data Flow | Workflow variables, step outputs, context injection |
+| 04 | Parallel Execution | Parallel groups, resource concurrency, load balancing |
+| 05 | Loops & Convergence | For/foreach/while loops, convergence reduction |
+| 06 | File Operations | Read/write/batch, permissions & backup |
+| 07 | Web Operations | Fetch/scrape, REST API integration, URL parameters |
+| 08 | RAG Operations | Document indexing, context-aware generation |
+| 09 | Script & CLI | Script execution, CLI commands & environment |
+| 10 | Sub-Workflows | Nested references, composition patterns |
+| 11 | Conditional Branching | Event-based branching, decision logic |
+| 12 | Error Handling & Retries | Retry strategies, propagation, graceful recovery |
+| 13 | Logging & Monitoring | Hierarchical logging, metrics, structured output |
+| 14 | Checkpointing & State | Save/restore, state management |
+| 15 | Resource Management | Memory allocation, CPU/GPU scheduling, throttling |
+| 16 | Tool Permissions | Allow/deny lists, fine-grained step control |
+| 17 | User Inputs & UI | Input validation, interactive feedback |
+| 18 | Hooks & Lifecycle | Pre/post workflow hooks, step hooks, error handling hooks, lifecycle events |
+| 19 | Comprehensive Integration | Complex orchestration, guardrails & content safety |
 
-**All workflows validated**: 8 review cycles completed
+**All workflows validated**: 14 review cycles completed
 **Schema quality score**: 0.94/1.0 (Excellent)
 **Coverage**: 100% of all requirements
+**Full examples**: `opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/`
 
 ---
 
