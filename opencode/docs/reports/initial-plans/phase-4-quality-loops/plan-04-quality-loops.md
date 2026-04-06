@@ -63,7 +63,7 @@ This plan implements quality loops, benchmark-driven file-type expansion, and ar
 
 ### Requirements Review
 
-From `requirements.mdc` and `schema-consolidated-report.md`:
+From `requirements.md` and `schema-consolidated-report.md`:
 
 **R04**: Depth-over-speed and capability-normalized outcomes
 **R21**: Artifact semantics - workflows are inspectable, editable artifacts

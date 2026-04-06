@@ -752,16 +752,16 @@ agentic_workflow:
 **Objective:** Update all examples to work with unified parser
 
 **Tasks:**
-1. [ ] Update ex01-ex06 to unified schema
+1. [ ] Update all 52 categorized examples to unified schema
    - Keep compatible with manual structure
    - Test backward compatibility
    - Add missing features
 
-2. [ ] Update ex07-ex12 to unified schema
+2. [ ] Update all 52 categorized examples to unified schema
    - Test all features
    - Validate round-trip
 
-3. [ ] Update ex13-ex18 to unified schema
+3. [ ] Update all 52 categorized examples to unified schema
    - Test complex orchestration
    - Validate all features
 
@@ -771,7 +771,7 @@ agentic_workflow:
    - Document migration results
 
 **Deliverables:**
-- Updated ex01-ex18.yml files
+- Updated all 52 categorized examples.yml files
 - Migration tool
 - Migration documentation
 
@@ -842,14 +842,14 @@ agentic_workflow:
 ### 6.1 Schema Completeness
 
 - [ ] All 22 original requirements covered
-- [ ] All 18 example workflow features supported
+- [ ] All 53 categorized workflow example features supported
 - [ ] All 15 manual advanced features preserved
 - [ ] Clear required/optional markings
 - [ ] Default values for all optional fields
 
 ### 6.2 Compatibility
 
-- [ ] All existing ex01-ex18 workflows parse successfully
+- [ ] All 52 categorized workflow YAML files parse successfully
 - [ ] Manual schema parses successfully
 - [ ] Both pipeline syntaxes (object and array) supported
 - [ ] Both model config styles (percentage and absolute) supported

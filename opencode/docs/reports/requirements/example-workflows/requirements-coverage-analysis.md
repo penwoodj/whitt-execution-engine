@@ -127,7 +127,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `input.prompt` with multi-line support
 - `output.save_to`, `output.format`, `output.fields`
 - Variable interpolation (`{{step.step_1.output}}`)
-**Examples**: ex01, ex02, ex03, ex07, ex08, ex09, ex10, ex11, ex12, ex13, ex14, ex15, ex16, ex17, ex18
+**Examples**: 01-basic-model-selection-providers.yaml, 02-model-parameters-tuning.yaml, 03-model-lifecycle-management.yaml, 01-web-fetch-scrape.yaml, 01-parallel-groups-execution.yaml, 03-url-parameters-requests.yaml, 01-script-execution.yaml, 01-document-indexing-retrieval.yaml, 01-file-read-write-batch.yaml, 01-for-loops-explicit-iteration.yaml, 02-rag-generation-context-aware.yaml, 01-hierarchical-logging-system.yaml, 01-workflow-level-variables.yaml, 01-user-input-prompts-validation.yaml, 01-complex-orchestration-sub-agents.yaml
 
 ### 2. AgentSDK Support
 **Status**: ✅ FULLY COVERED
@@ -136,7 +136,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `model.framework.custom_executor_name`
 - Model hooks: on_create, on_run_start, on_turn_start, on_tool_call, etc.
 - Model tools: default_permissions, allowed_tools, forbidden_tools, custom_tools
-**Examples**: ex03, ex17, ex18
+**Examples**: 03-model-lifecycle-management.yaml, 01-user-input-prompts-validation.yaml, 01-complex-orchestration-sub-agents.yaml
 
 ### 3. Individual File Editing and Tool Support
 **Status**: ✅ FULLY COVERED
@@ -144,7 +144,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `tool_permissions.file_operations.read/write/delete`
 - `tool_permissions.shell_operations.exec`
 - `input.file_operations: read/write/delete`
-**Examples**: ex04, ex12, ex14, ex17
+**Examples**: 04-cost-tracking-budgets.yaml, 01-file-read-write-batch.yaml, 02-rag-generation-context-aware.yaml, 01-user-input-prompts-validation.yaml
 
 ### 4. URL Type Parameters
 **Status**: ✅ FULLY COVERED
@@ -153,7 +153,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `tool.connection: url, method, timeout, follow_redirects, validate_ssl`
 - `tool.authentication: type, token, header_name`
 - `tool.caching: enabled, cache_ttl_secs, respect_cache_control`
-**Examples**: ex09, ex17, ex18
+**Examples**: 03-url-parameters-requests.yaml, 01-user-input-prompts-validation.yaml, 01-complex-orchestration-sub-agents.yaml
 
 ### 5. Scripts and CLI Execution
 **Status**: ✅ FULLY COVERED
@@ -162,7 +162,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `tool.config: script, args, working_dir, timeout, env_vars, capture_output`
 - `tool.type: cli_run`
 - `tool.config: cli, args, working_dir, timeout, env_vars, capture_output`
-**Examples**: ex10, ex14, ex17, ex18
+**Examples**: 01-script-execution.yaml, 02-rag-generation-context-aware.yaml, 01-user-input-prompts-validation.yaml, 01-complex-orchestration-sub-agents.yaml
 
 ### 6. Hierarchical Logging with Detail Levels
 **Status**: ✅ FULLY COVERED
@@ -171,7 +171,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `logging.detail` (low/medium/high/verbose)
 - `logging.output_destinations: chat_file, json_file, console`
 - `logging.error_logging: separate_file, path, include_stack_trace, include_context`
-**Examples**: ex01, ex02, ex03, ex04, ex05, ex06, ex07, ex08, ex09, ex10, ex11, ex12, ex13, ex14, ex15, ex16, ex17, ex18
+**Examples**: all 52 categorized examples
 
 ### 7. Logging Mode Params (output-type)
 **Status**: ✅ FULLY COVERED
@@ -180,7 +180,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `logging.output_destinations.json_file.enabled`
 - `logging.output_destinations.console.enabled`
 - `logging.output_destinations.chat_file.format`
-**Examples**: ex01, ex02, ex03, ex04, ex05, ex06, ex07, ex08, ex09, ex10, ex11, ex12, ex13, ex14, ex15, ex16, ex17, ex18
+**Examples**: all 52 categorized examples
 
 ### 8. Loops
 **Status**: ✅ FULLY COVERED (All Loop Types)
@@ -191,7 +191,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `loop.validation_config`: abstract_criteria, tolerance, exact_criteria
 - `loop.retry_config`: max_attempts, base_delay_ms, timeout_ms, retry_strategies
 - `loop.infinite_config`: max_iterations, max_memory, timeout, checkpoint_interval, log_interval
-**Examples**: ex01 (validation), ex05 (convergence), ex13 (all loop types), ex17 (validation)
+**Examples**: 01-basic-model-selection-providers.yaml (validation), 04-convergence-reduction-aggregation.yaml (convergence), 01-for-loops-explicit-iteration.yaml (all loop types), 01-user-input-prompts-validation.yaml (validation)
 
 ### 9. Dynamic Parallelization with Memory Constraints
 **Status**: ✅ FULLY COVERED
@@ -201,7 +201,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `memory.allocation.max_allowed: ram, vram, cpu, gpu, attention_tokens`
 - `adaptive.resource_monitoring.enabled`
 - `adaptive.concurrency_adjustment.enabled`
-**Examples**: ex01, ex03, ex04, ex05, ex06, ex07, ex08, ex09, ex10, ex11, ex12, ex13, ex14, ex15, ex16, ex17, ex18
+**Examples**: all 52 categorized examples
 
 ### 10. Serial Execution with Model Loading/Unloading
 **Status**: ✅ FULLY COVERED
@@ -212,7 +212,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `model.model_lifecycle.cache_size`
 - `model.model_lifecycle.swap_timeout_secs`
 - `model.model_lifecycle.unload_unused`
-**Examples**: ex02, ex05, ex07, ex17, ex18
+**Examples**: 02-model-parameters-tuning.yaml, 04-convergence-reduction-aggregation.yaml, 01-web-fetch-scrape.yaml, 01-user-input-prompts-validation.yaml, 01-complex-orchestration-sub-agents.yaml
 
 ### 11. Different Loop Specifications
 **Status**: ✅ FULLY COVERED
@@ -220,7 +220,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - All 5 loop types (count, time, validation, retry, infinite)
 - Type-specific configuration objects (count_config, time_config, validation_config, retry_config, infinite_config)
 - Stop conditions, on_stop, on_convergence, on_max_iterations
-**Examples**: ex01 (validation), ex05 (convergence), ex13 (all loop types), ex17 (validation)
+**Examples**: 01-basic-model-selection-providers.yaml (validation), 04-convergence-reduction-aggregation.yaml (convergence), 01-for-loops-explicit-iteration.yaml (all loop types), 01-user-input-prompts-validation.yaml (validation)
 
 ### 12. Validation Criteria (Abstract and Exact)
 **Status**: ✅ FULLY COVERED
@@ -230,7 +230,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `validation_loop.tolerance`
 - `validation_loop.exact_criteria: operator, target, weight, required`
 - Overall thresholds, min_metrics_required, weighted scoring
-**Examples**: ex01, ex02, ex05, ex11, ex13, ex17, ex18
+**Examples**: 01-basic-model-selection-providers.yaml, 02-model-parameters-tuning.yaml, 04-convergence-reduction-aggregation.yaml, 01-document-indexing-retrieval.yaml, 01-for-loops-explicit-iteration.yaml, 01-user-input-prompts-validation.yaml, 01-complex-orchestration-sub-agents.yaml
 
 ### 13. Default and Overridable Retry Logic
 **Status**: ✅ FULLY COVERED
@@ -239,7 +239,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `retry.max_attempts`, `backoff_strategy`, `base_delay_ms`, `max_delay_ms`
 - Step-specific retry overrides
 - `retry.retry_on_status`, `log_attempts`
-**Examples**: ex01, ex02, ex03, ex04, ex05, ex06, ex07, ex08, ex09, ex10, ex11, ex12, ex13, ex14, ex15, ex16, ex17, ex18
+**Examples**: all 52 categorized examples
 
 ### 14. Failure History and Auto Model Routing
 **Status**: ✅ FULLY COVERED
@@ -247,7 +247,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `models.default_model_router: automatic | manual | smart_routing`
 - Model-specific resource limits
 - `models."model-name".host.type`
-**Examples**: ex02, ex07, ex17, ex18
+**Examples**: 02-model-parameters-tuning.yaml, 01-web-fetch-scrape.yaml, 01-user-input-prompts-validation.yaml, 01-complex-orchestration-sub-agents.yaml
 
 ### 15. Explicit Auto Model Routing in Schema
 **Status**: ✅ FULLY COVERED
@@ -256,7 +256,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `models.global_config_path`
 - Model naming (variable reference name)
 - Model host type configuration
-**Examples**: ex01, ex02, ex03, ex04, ex05, ex06, ex07, ex08, ex09, ex10, ex11, ex12, ex13, ex14, ex15, ex16, ex17, ex18
+**Examples**: all 52 categorized examples
 
 ### 16. Prompt with Sub LLM Prompt Passing Procedures
 **Status**: ✅ FULLY COVERED
@@ -266,7 +266,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `input.context.include_previous_outputs`
 - `input.context.injection_points`
 - `input.context.include_system_context`
-**Examples**: ex01, ex02, ex03, ex04, ex05, ex06, ex07, ex08, ex09, ex10, ex11, ex12, ex13, ex14, ex15, ex16, ex17, ex18
+**Examples**: all 52 categorized examples
 
 ### 17. Folder and Tool Permissions
 **Status**: ✅ FULLY COVERED
@@ -277,7 +277,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `tool_permissions.ai_operations.web_search/content_generation`
 - `tool_permissions.system_operations.process_management/network_operations`
 - Permission-specific controls: allowed_paths, forbidden_paths, allowed_commands, forbidden_commands
-**Examples**: ex04, ex12, ex14, ex17, ex18
+**Examples**: 04-cost-tracking-budgets.yaml, 01-file-read-write-batch.yaml, 02-rag-generation-context-aware.yaml, 01-user-input-prompts-validation.yaml, 01-complex-orchestration-sub-agents.yaml
 
 ### 18. Output Types and Logging Detail Levels
 **Status**: ✅ FULLY COVERED
@@ -289,7 +289,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `output.console`
 - `logging.level`, `logging.detail`
 - All logging detail levels (low/medium/high/verbose/trace)
-**Examples**: ex01, ex02, ex03, ex04, ex05, ex06, ex07, ex08, ex09, ex10, ex11, ex12, ex13, ex14, ex15, ex16, ex17, ex18
+**Examples**: all 52 categorized examples
 
 ### 19. Explicit Agent Definition (AgentSDK)
 **Status**: ✅ FULLY COVERED
@@ -298,7 +298,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `model.framework.type: agentsdk`
 - Model hooks and guardrails
 - Model tools configuration
-**Examples**: ex03, ex17, ex18
+**Examples**: 03-model-lifecycle-management.yaml, 01-user-input-prompts-validation.yaml, 01-complex-orchestration-sub-agents.yaml
 
 ### 20. Direct LLM Pipeline with Explicit Steps and Validation Loops
 **Status**: ✅ FULLY COVERED
@@ -307,7 +307,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - Explicit step names as keys
 - Validation loop configuration with type-specific settings
 - Branch decisions
-**Examples**: ex01, ex02, ex05, ex07, ex13, ex17, ex18
+**Examples**: 01-basic-model-selection-providers.yaml, 02-model-parameters-tuning.yaml, 04-convergence-reduction-aggregation.yaml, 01-web-fetch-scrape.yaml, 01-for-loops-explicit-iteration.yaml, 01-user-input-prompts-validation.yaml, 01-complex-orchestration-sub-agents.yaml
 
 ### 21. Workflow and Pipeline Step I/O and Variable Reference
 **Status**: ✅ FULLY COVERED
@@ -319,7 +319,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `output.save_to`, `output.format`, `output.fields`
 - `output.file_output`, `output.console`
 - Variable reference patterns: `{{step.step_id.output}}`, `{{workflow.variable}}`, `{{model.property}}`, `{{run.number}}`, `{{now}}`
-**Examples**: ex01, ex02, ex03, ex04, ex05, ex06, ex07, ex08, ex09, ex10, ex11, ex12, ex13, ex14, ex15, ex16, ex17, ex18
+**Examples**: all 52 categorized examples
 
 ### 22. Local RAG Specification and CRUD
 **Status**: ✅ FULLY COVERED
@@ -328,7 +328,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `rag.embedding`
 - `rag.retrieval`
 - RAG CRUD operations in pipeline steps
-**Examples**: ex06, ex14, ex18
+**Examples**: 02-rag-generation-context-aware.yaml, 01-complex-orchestration-sub-agents.yaml
 
 ### 23. Web Scraping to Local RAG
 **Status**: ✅ FULLY COVERED
@@ -337,7 +337,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `tool.config: url, extract_text/links/images/metadata, selectors, cleanup`
 - Follow links configuration
 - RAG integration in pipeline
-**Examples**: ex09, ex14, ex18
+**Examples**: 03-url-parameters-requests.yaml, 02-rag-generation-context-aware.yaml, 01-complex-orchestration-sub-agents.yaml
 
 ### 24. Web Searching and Forum Searching
 **Status**: ✅ FULLY COVERED
@@ -345,7 +345,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `tool.type: web_search`
 - `tool.type: forum_search`
 - Search configuration and limits
-**Examples**: ex09, ex11, ex14, ex18
+**Examples**: 03-url-parameters-requests.yaml, 01-document-indexing-retrieval.yaml, 02-rag-generation-context-aware.yaml, 01-complex-orchestration-sub-agents.yaml
 
 ### 25. Local File CRUD (Explicit and Implicit)
 **Status**: ✅ FULLY COVERED
@@ -353,7 +353,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `tool.type: file_read`, `file_write`, `file_delete`
 - `input.file_operations: read/write/delete`
 - File path, format, encoding, create_parent_directories
-**Examples**: ex12, ex14, ex17, ex18
+**Examples**: 01-file-read-write-batch.yaml, 02-rag-generation-context-aware.yaml, 01-user-input-prompts-validation.yaml, 01-complex-orchestration-sub-agents.yaml
 
 ---
 
@@ -400,7 +400,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - External integration: callback, http_request, webhook
 - Checkpoint/state: checkpoint, restore
 - Notification: notify
-**Examples**: ex03, ex17, ex18
+**Examples**: 03-model-lifecycle-management.yaml, 01-user-input-prompts-validation.yaml, 01-complex-orchestration-sub-agents.yaml
 
 ### Model Configuration
 **Status**: ✅ FULLY COVERED
@@ -414,21 +414,21 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - Hooks: all lifecycle hooks (on_create, on_run_start, on_turn_start, on_tool_call, etc.)
 - Guardrails: input guards (prompt_injection, pii_redaction, max_length), output guards (toxicity_filter, pii_redaction, format_validation, max_length), tool_use guards (no_web_access, no_file_access, no_script_access, no_terminal_access, no_mcp_access)
 - Framework: type (agentsdk/basic_agent/custom), custom_executor_name
-**Examples**: ex01, ex02, ex03, ex04, ex05, ex06, ex07, ex08, ex09, ex10, ex11, ex12, ex13, ex14, ex15, ex16, ex17, ex18
+**Examples**: all 52 categorized examples
 
 ### Allowed Processors
 **Status**: ✅ FULLY COVERED
 **Unified Schema Elements**:
 - `model.allowed_processors: (cpu_main | cpu_alt_1) & gpu_cluster2_brady`
 - Inline documentation: `|` = OR (backup), `&` = AND (load into both)
-**Examples**: ex18-manual (preserved as documentation)
+**Examples**: 01-complex-orchestration-sub-agents.yaml (manual brainstorm example, preserved as documentation)
 
 ### Interpolation Operators
 **Status**: ✅ FULLY COVERED
 **Unified Schema Elements**:
 - Complete operator reference inline
 - Usage examples in comments
-**Examples**: ex01, ex02, ex03, ex04, ex05, ex06, ex07, ex08, ex09, ex10, ex11, ex12, ex13, ex14, ex15, ex16, ex17, ex18
+**Examples**: all 52 categorized examples
 
 ### Variable References
 **Status**: ✅ FULLY COVERED
@@ -436,14 +436,14 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - Static context: workflow, run, now, now_iso8601, now_epoch_ms, random_float
 - Dynamic context: task, error, result, turn, tool.call, tool.result, chunk, stream_response, duration_ms, validation
 - Usage patterns: `{{variable_name}}`, `{{nested.property}}`
-**Examples**: ex01, ex02, ex03, ex04, ex05, ex06, ex07, ex08, ex09, ex10, ex11, ex12, ex13, ex14, ex15, ex16, ex17, ex18
+**Examples**: all 52 categorized examples
 
 ### Workflow Execution Strategy
 **Status**: ✅ FULLY COVERED
 **Unified Schema Elements**:
 - load_unload, memory_pressure_handling, processing, parallel, timeout, error_handling, sub_workflow, synchronization, checkpoint, resource_allocation, dependency_resolution, concurrency_limits, step_prioritization, performance_optimization, state_transition_hooks, advanced_scheduling, adaptive
 - All categories documented with inline enum values
-**Examples**: ex01, ex02, ex03, ex04, ex05, ex06, ex07, ex08, ex09, ex10, ex11, ex12, ex13, ex14, ex15, ex16, ex17, ex18
+**Examples**: all 52 categorized examples
 
 ---
 
@@ -510,8 +510,8 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 
 ### Schema Compatibility
 **Status**: ✅ MAINTAINED
-- All features from manual schema (ex18-manual) preserved
-- All features from example workflows (ex01-ex18) supported
+- All features from manual schema (see 01-complex-orchestration-sub-agents.yaml - manual brainstorm example) preserved
+- All features from example workflows (all 52 categorized examples) supported
 - No breaking changes to existing functionality
 - Only structural improvements for readability
 

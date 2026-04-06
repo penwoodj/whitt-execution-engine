@@ -71,7 +71,7 @@ This plan implements bounded autonomous loops with comprehensive metrics instrum
 
 ### Requirements Review
 
-From `requirements.mdc` and `schema-consolidated-report.md`:
+From `requirements.md` and `schema-consolidated-report.md`:
 
 **R12**: Runtime review, rigor, scope, concurrency, efficiency, logging, context-budget, policy layer
 **R25**: Generate to verify to repair review loop semantics

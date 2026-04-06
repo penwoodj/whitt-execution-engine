@@ -390,7 +390,7 @@ Phase 7 (UI)
 
 ## References
 
-- **Full Requirements Document**: [../requirements.mdc](../requirements.mdc)
+- **Full Requirements Document**: [../requirements.md](../requirements.md)
 - **Roadmap ADRs**: [../roadmap/](../roadmap/)
 - **Research Plans**: [../roadmap/research-plan-*.yml](../roadmap/)
 - **Completion Report**: [../roadmap/research/completion-report.yml](../roadmap/research/completion-report.yml)

@@ -1866,7 +1866,7 @@ This YAML demonstrates all current features:
 6. **Benchmarking metrics** (performance, quality, convergence)
 7. **Result aggregation** (collect results from all models)
 
-All of these are documented in requirements.mdc version 4.0 under section 12.5.
+All of these are documented in requirements.md version 4.0 under section 12.5.
 
 ---
 

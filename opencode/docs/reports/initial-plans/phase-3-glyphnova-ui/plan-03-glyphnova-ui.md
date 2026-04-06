@@ -66,7 +66,7 @@ This plan implements the Glyphnova desktop UI as a shell over the existing runti
 
 ### Requirements Review
 
-From `requirements.mdc` and `schema-consolidated-report.md`:
+From `requirements.md` and `schema-consolidated-report.md`:
 
 **R05**: CLI/TUI-first path then richer desktop UI
 **R08**: Left-side chat/work queue with titles and live execution meaning

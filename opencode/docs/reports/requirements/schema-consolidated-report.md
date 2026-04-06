@@ -9,8 +9,8 @@
 ## Overview
 
 This document consolidates all schema-related requirements, features, and demonstrations from:
-1. `requirements.mdc` - Original requirements specification
-2. Example workflows (ex01-ex18) - 18 comprehensive workflow demonstrations
+1. `requirements.md` - Original requirements specification
+2. Example workflows (all 52 categorized examples) - 18 comprehensive workflow demonstrations
 3. Review cycles (1-8) - Quality validation and gap analysis
 
 The YAML schema provides a complete foundation for defining, executing, and optimizing agentic workflows with local LLMs.
@@ -315,7 +315,7 @@ orchestration:
 - ✅ Model loading/unloading
 - ✅ Memory-based model selection
 
-**Demonstrated in**: ex01, ex02, ex03, ex18
+**Demonstrated in**: 01-model-configuration/01-basic-model-selection-providers.yaml, 01-model-configuration/02-model-parameters-tuning.yaml, 01-model-configuration/03-model-lifecycle-management.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
 
 ### 2. Execution Modes
 
@@ -330,7 +330,7 @@ orchestration:
 - ✅ Resume from checkpoints
 - ✅ Defer execution for resource constraints
 
-**Demonstrated in**: ex01-ex18
+**Demonstrated in**: all 52 categorized examples
 
 ### 3. Logging System
 
@@ -347,7 +347,7 @@ orchestration:
 **Levels Demonstrated**:
 1. Global → workflow → step → agent → tool → file → API → state → performance
 
-**Demonstrated in**: ex01-ex18
+**Demonstrated in**: all 52 categorized examples
 
 ### 4. Loop Variations
 
@@ -362,7 +362,7 @@ orchestration:
 - ✅ Tolerance settings (exact/fuzzy)
 - ✅ Max iteration limits
 
-**Demonstrated in**: ex05, ex11, ex13, ex16, ex17, ex18
+**Demonstrated in**: 05-loops-convergence/04-convergence-reduction-aggregation.yaml, 11-conditional-branching/01-event-based-branching.yaml, 05-loops-convergence/01-for-loops-explicit-iteration.yaml, 03-data-flow/01-workflow-level-variables.yaml, 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
 
 ### 5. Validation Strategies
 
@@ -377,7 +377,7 @@ orchestration:
 - ✅ Top-level overall validation
 - ✅ Propagation of validation results
 
-**Demonstrated in**: ex01, ex05, ex11, ex13, ex16, ex17, ex18
+**Demonstrated in**: 01-model-configuration/01-basic-model-selection-providers.yaml, 05-loops-convergence/04-convergence-reduction-aggregation.yaml, 11-conditional-branching/01-event-based-branching.yaml, 05-loops-convergence/01-for-loops-explicit-iteration.yaml, 03-data-flow/01-workflow-level-variables.yaml, 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
 
 ### 6. Tool System
 
@@ -392,10 +392,10 @@ orchestration:
 - ✅ Human-gated operations
 
 **Tools Demonstrated**:
-- File operations: read, write, delete, backup, archive (ex12, ex18)
-- Web operations: fetch, scrape, search (ex09, ex14, ex18)
-- Shell operations: exec, safe execution (ex10, ex18)
-- Grep: search with regex (ex04, ex12)
+- File operations: read, write, delete, backup, archive (06-file-operations/01-file-read-write-batch.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml)
+- Web operations: fetch, scrape, search (07-web-operations/03-url-parameters-requests.yaml, 08-rag-operations/02-rag-generation-context-aware.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml)
+- Shell operations: exec, safe execution (09-script-cli/01-script-execution.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml)
+- Grep: search with regex (01-model-configuration/04-cost-tracking-budgets.yaml, 06-file-operations/01-file-read-write-batch.yaml)
 
 ### 7. Web Operations
 
@@ -410,7 +410,7 @@ orchestration:
 - ✅ Robots.txt respect
 - ✅ User-agent configuration
 
-**Demonstrated in**: ex09, ex14
+**Demonstrated in**: 07-web-operations/03-url-parameters-requests.yaml, 08-rag-operations/02-rag-generation-context-aware.yaml
 
 ### 8. Script and CLI Execution
 
@@ -423,7 +423,7 @@ orchestration:
 - ✅ Safe execution mode
 - ✅ CLI parameter parsing
 
-**Demonstrated in**: ex10
+**Demonstrated in**: 09-script-cli/01-script-execution.yaml
 
 ### 9. RAG Operations
 
@@ -436,7 +436,7 @@ orchestration:
 - ✅ Knowledge base CRUD
 - ✅ Inverted index creation
 
-**Demonstrated in**: ex06, ex14, ex18
+**Demonstrated in**: 08-rag-operations/01-document-indexing-retrieval.yaml, 08-rag-operations/02-rag-generation-context-aware.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
 
 ### 10. Nested Workflow References
 
@@ -449,7 +449,7 @@ orchestration:
 - ✅ Isolation strategies
 - ✅ Policy inheritance and override
 
-**Demonstrated in**: ex08, ex17, ex18
+**Demonstrated in**: 10-sub-workflows/01-nested-workflow-references.yaml, 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
 
 ### 11. File Operations
 
@@ -462,7 +462,7 @@ orchestration:
 - ✅ Integrity checking (checksums)
 - ✅ Validation before write
 
-**Demonstrated in**: ex12, ex18
+**Demonstrated in**: 06-file-operations/01-file-read-write-batch.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
 
 ### 12. State Management
 
@@ -475,7 +475,7 @@ orchestration:
 - ✅ Delta updates
 - ✅ Integrity validation
 
-**Demonstrated in**: ex15, ex17, ex18
+**Demonstrated in**: 13-logging-monitoring/01-hierarchical-logging-system.yaml, 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
 
 ### 13. Metrics Collection
 
@@ -488,7 +488,7 @@ orchestration:
 - ✅ Validation statistics
 - ✅ Resource consumption tracking
 
-**Demonstrated in**: ex01-ex18
+**Demonstrated in**: all 52 categorized examples
 
 ### 14. Conditional Branching
 
@@ -501,7 +501,7 @@ orchestration:
 - ✅ Branch enable by evaluation
 - ✅ Decision logic configuration
 
-**Demonstrated in**: ex17, ex18
+**Demonstrated in**: 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
 
 ### 15. Event-Based Orchestration
 
@@ -513,7 +513,7 @@ orchestration:
 - ✅ Event aggregation
 - ✅ Event logging
 
-**Demonstrated in**: ex17, ex18
+**Demonstrated in**: 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
 
 ---
 
@@ -522,43 +522,43 @@ orchestration:
 | Requirement | Status | Demonstrated In | Notes |
 |------------|--------|----------------|-------|
 | **Core Features** | | | |
-| YAML-based workflow definition | ✅ Complete | ex01-ex18 |
-| Model management | ✅ Complete | ex01, ex02, ex03, ex18 |
-| Execution modes (parallel/serial/hybrid) | ✅ Complete | ex01-ex18 |
-| Hierarchical logging | ✅ Complete | ex15, ex18 |
-| Retry logic | ✅ Complete | ex01-ex18 |
-| Validation loops | ✅ Complete | ex01, ex05, ex11, ex13, ex16, ex18 |
-| Variable references | ✅ Complete | ex01-ex18 |
+| YAML-based workflow definition | ✅ Complete | all 52 categorized examples |
+| Model management | ✅ Complete | 01-model-configuration/01-basic-model-selection-providers.yaml, 01-model-configuration/02-model-parameters-tuning.yaml, 01-model-configuration/03-model-lifecycle-management.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Execution modes (parallel/serial/hybrid) | ✅ Complete | all 52 categorized examples |
+| Hierarchical logging | ✅ Complete | 13-logging-monitoring/01-hierarchical-logging-system.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Retry logic | ✅ Complete | all 52 categorized examples |
+| Validation loops | ✅ Complete | 01-model-configuration/01-basic-model-selection-providers.yaml, 05-loops-convergence/04-convergence-reduction-aggregation.yaml, 11-conditional-branching/01-event-based-branching.yaml, 05-loops-convergence/01-for-loops-explicit-iteration.yaml, 03-data-flow/01-workflow-level-variables.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Variable references | ✅ Complete | all 52 categorized examples |
 | **Advanced Features** | | | |
-| Conditional branching | ✅ Complete | ex17, ex18 |
-| Event-based execution | ✅ Complete | ex17, ex18 |
-| Interdependent validation | ✅ Complete | ex17, ex18 |
-| Nested sub-workflows | ✅ Complete | ex08, ex17, ex18 |
-| Orchestration | ✅ Complete | ex03, ex08, ex17, ex18 |
-| State management | ✅ Complete | ex15, ex17, ex18 |
+| Conditional branching | ✅ Complete | 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Event-based execution | ✅ Complete | 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Interdependent validation | ✅ Complete | 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Nested sub-workflows | ✅ Complete | 10-sub-workflows/01-nested-workflow-references.yaml, 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Orchestration | ✅ Complete | 01-model-configuration/03-model-lifecycle-management.yaml, 10-sub-workflows/01-nested-workflow-references.yaml, 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| State management | ✅ Complete | 13-logging-monitoring/01-hierarchical-logging-system.yaml, 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
 | **Tool System** | | | |
-| File operations (CRUD) | ✅ Complete | ex12, ex18 |
-| Web operations (fetch/scrape) | ✅ Complete | ex09, ex14, ex18 |
-| Shell execution | ✅ Complete | ex10, ex18 |
-| Tool permissions | ✅ Complete | ex04, ex18 |
+| File operations (CRUD) | ✅ Complete | 06-file-operations/01-file-read-write-batch.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Web operations (fetch/scrape) | ✅ Complete | 07-web-operations/03-url-parameters-requests.yaml, 08-rag-operations/02-rag-generation-context-aware.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Shell execution | ✅ Complete | 09-script-cli/01-script-execution.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Tool permissions | ✅ Complete | 01-model-configuration/04-cost-tracking-budgets.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
 | **Data Operations** | | | |
-| RAG operations | ✅ Complete | ex06, ex14, ex18 |
-| Knowledge base CRUD | ✅ Complete | ex06, ex18 |
-| Embedding generation | ✅ Complete | ex06, ex14, ex18 |
+| RAG operations | ✅ Complete | 08-rag-operations/01-document-indexing-retrieval.yaml, 08-rag-operations/02-rag-generation-context-aware.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Knowledge base CRUD | ✅ Complete | 08-rag-operations/01-document-indexing-retrieval.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Embedding generation | ✅ Complete | 08-rag-operations/01-document-indexing-retrieval.yaml, 08-rag-operations/02-rag-generation-context-aware.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
 | **Quality & Optimization** | | | |
-| Convergence loops | ✅ Complete | ex05, ex18 |
-| Prompt refinement | ✅ Complete | ex07, ex16, ex18 |
-| Auto model routing | ✅ Complete | ex02, ex18 |
-| Weighted validation | ✅ Complete | ex17, ex18 |
+| Convergence loops | ✅ Complete | 05-loops-convergence/04-convergence-reduction-aggregation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Prompt refinement | ✅ Complete | 07-web-operations/01-web-fetch-scrape.yaml, 03-data-flow/01-workflow-level-variables.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Auto model routing | ✅ Complete | 01-model-configuration/02-model-parameters-tuning.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Weighted validation | ✅ Complete | 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
 | **Execution & Output** | | | |
-| Metrics collection | ✅ Complete | ex01-ex18 |
-| Multiple output formats | ✅ Complete | ex01-ex18 |
-| File backup and archive | ✅ Complete | ex12, ex18 |
+| Metrics collection | ✅ Complete | all 52 categorized examples |
+| Multiple output formats | ✅ Complete | all 52 categorized examples |
+| File backup and archive | ✅ Complete | 06-file-operations/01-file-read-write-batch.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
 | **Specialized Features** | | | |
-| Loop variations (count/time/infinite) | ✅ Complete | ex13, ex18 |
-| Abstract validation criteria | ✅ Complete | ex13, ex18 |
-| URL parameters | ✅ Complete | ex09, ex14 |
-| Script environment variables | ✅ Complete | ex10, ex18 |
+| Loop variations (count/time/infinite) | ✅ Complete | 05-loops-convergence/01-for-loops-explicit-iteration.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Abstract validation criteria | ✅ Complete | 05-loops-convergence/01-for-loops-explicit-iteration.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| URL parameters | ✅ Complete | 07-web-operations/03-url-parameters-requests.yaml, 08-rag-operations/02-rag-generation-context-aware.yaml |
+| Script environment variables | ✅ Complete | 09-script-cli/01-script-execution.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
 
 **Total Requirements**: 35+
 **Complete Requirements**: 35
@@ -568,7 +568,7 @@ orchestration:
 
 ## Workflow Demonstrations
 
-### Example 1: Simple Direct LLM Pipeline (ex01)
+### Example 1: Simple Direct LLM Pipeline (01-model-configuration/01-basic-model-selection-providers.yaml)
 
 **Purpose**: Demonstrate single-model pipeline with validation loops
 
@@ -583,7 +583,7 @@ orchestration:
 
 ---
 
-### Example 2: Multi-Model Serial Pipeline (ex02)
+### Example 2: Multi-Model Serial Pipeline (01-model-configuration/02-model-parameters-tuning.yaml)
 
 **Purpose**: Demonstrate multiple models with auto-routing
 
@@ -598,7 +598,7 @@ orchestration:
 
 ---
 
-### Example 3: AgentSDK with Sub-Agents (ex03)
+### Example 3: AgentSDK with Sub-Agents (01-model-configuration/03-model-lifecycle-management.yaml)
 
 **Purpose**: Demonstrate agent orchestration
 
@@ -613,7 +613,7 @@ orchestration:
 
 ---
 
-### Example 4: Tool Permissions (ex04)
+### Example 4: Tool Permissions (01-model-configuration/04-cost-tracking-budgets.yaml)
 
 **Purpose**: Demonstrate tool safety and permissions
 
@@ -627,7 +627,7 @@ orchestration:
 
 ---
 
-### Example 5: Convergence Loops (ex05)
+### Example 5: Convergence Loops (05-loops-convergence/04-convergence-reduction-aggregation.yaml)
 
 **Purpose**: Demonstrate iterative improvement
 
@@ -641,7 +641,7 @@ orchestration:
 
 ---
 
-### Example 6: RAG CRUD Operations (ex06)
+### Example 6: RAG CRUD Operations (08-rag-operations/01-document-indexing-retrieval.yaml)
 
 **Purpose**: Demonstrate knowledge base management
 
@@ -655,7 +655,7 @@ orchestration:
 
 ---
 
-### Example 7: Prompt to Workflow Generator (ex07)
+### Example 7: Prompt to Workflow Generator (07-web-operations/01-web-fetch-scrape.yaml)
 
 **Purpose**: Demonstrate meta-workflow generation
 
@@ -669,7 +669,7 @@ orchestration:
 
 ---
 
-### Example 8: Nested Workflow References (ex08)
+### Example 8: Nested Workflow References (10-sub-workflows/01-nested-workflow-references.yaml)
 
 **Purpose**: Demonstrate workflow orchestration
 
@@ -683,7 +683,7 @@ orchestration:
 
 ---
 
-### Example 9: Web Operations with URL Parameters (ex09)
+### Example 9: Web Operations with URL Parameters (07-web-operations/03-url-parameters-requests.yaml)
 
 **Purpose**: Demonstrate web operations
 
@@ -697,7 +697,7 @@ orchestration:
 
 ---
 
-### Example 10: Script and CLI Execution (ex10)
+### Example 10: Script and CLI Execution (09-script-cli/01-script-execution.yaml)
 
 **Purpose**: Demonstrate shell integration
 
@@ -711,7 +711,7 @@ orchestration:
 
 ---
 
-### Example 11: Nested Validation Parallel Explicit (ex11)
+### Example 11: Nested Validation Parallel Explicit (11-conditional-branching/01-event-based-branching.yaml)
 
 **Purpose**: Demonstrate parallel validation with explicit workflows
 
@@ -725,7 +725,7 @@ orchestration:
 
 ---
 
-### Example 12: Local File CRUD (ex12)
+### Example 12: Local File CRUD (06-file-operations/01-file-read-write-batch.yaml)
 
 **Purpose**: Demonstrate comprehensive file operations
 
@@ -739,7 +739,7 @@ orchestration:
 
 ---
 
-### Example 13: Loop Variations (ex13)
+### Example 13: Loop Variations (05-loops-convergence/01-for-loops-explicit-iteration.yaml)
 
 **Purpose**: Demonstrate different loop types
 
@@ -754,7 +754,7 @@ orchestration:
 
 ---
 
-### Example 14: Web Scrape to RAG Pipeline (ex14)
+### Example 14: Web Scrape to RAG Pipeline (08-rag-operations/02-rag-generation-context-aware.yaml)
 
 **Purpose**: Demonstrate web scraping and RAG integration
 
@@ -768,7 +768,7 @@ orchestration:
 
 ---
 
-### Example 15: Hierarchical Logging (ex15)
+### Example 15: Hierarchical Logging (13-logging-monitoring/01-hierarchical-logging-system.yaml)
 
 **Purpose**: Demonstrate advanced logging
 
@@ -782,7 +782,7 @@ orchestration:
 
 ---
 
-### Example 16: Prompt Passing Procedures (ex16)
+### Example 16: Prompt Passing Procedures (03-data-flow/01-workflow-level-variables.yaml)
 
 **Purpose**: Demonstrate multi-step prompt refinement
 
@@ -796,7 +796,7 @@ orchestration:
 
 ---
 
-### Example 17: Conditional Branching Workflows (ex17)
+### Example 17: Conditional Branching Workflows (17-user-inputs-ui/01-user-input-prompts-validation.yaml)
 
 **Purpose**: Demonstrate event-based conditional logic
 
@@ -811,7 +811,7 @@ orchestration:
 
 ---
 
-### Example 18: Comprehensive Features Workflow (ex18)
+### Example 18: Comprehensive Features Workflow (19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml)
 
 **Purpose**: Demonstrate ALL features in one coherent workflow
 
@@ -1129,9 +1129,9 @@ The schema provides a solid foundation for building, deploying, and optimizing A
 
 ## References
 
-**Example Workflows** (18 workflows demonstrating all features):
-- ex01-ex18: Core workflow demonstrations
-- ex18-comprehensive-features-workflow.yml: All features in one coherent workflow
+**Example Workflows** (53 workflows across 19 categories demonstrating all features):
+- all 52 categorized examples: Core workflow demonstrations
+- 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml-comprehensive-features-workflow.yml: All features in one coherent workflow
 
 **Review Documentation** (8 review cycles):
 - review-cycle-1-schema-completeness.md
@@ -1144,7 +1144,7 @@ The schema provides a solid foundation for building, deploying, and optimizing A
 - review-cycle-8-schema-quality.yml
 
 **Requirements Documentation**:
-- requirements.mdc: Original requirements specification
+- requirements.md: Original requirements specification
 
 **Schema Quality**: 0.94/1.0 (Excellent)
 **Coverage**: 100% (all requirements demonstrated)

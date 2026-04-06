@@ -70,7 +70,7 @@ This plan implements CLI interface, backend provider abstraction, networking bou
 
 ### Requirements Review
 
-From `requirements.mdc` and `schema-consolidated-report.md`:
+From `requirements.md` and `schema-consolidated-report.md`:
 
 **R05**: CLI/TUI-first path
 **R18**: Tools and custom Rust tools as first-class nodes

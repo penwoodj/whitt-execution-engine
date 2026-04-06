@@ -10,8 +10,8 @@
 ## 1. Executive Summary
 
 ### Current State
-- **Manual Schema** (`ex18-comprehensive-features-workflow-manual.yml`): 1,254 lines, highly detailed but uses custom structure
-- **Example Workflows** (ex01-ex18): 18 files using different naming conventions, structures, and feature combinations
+- **Manual Schema** (`manual/agentic-workflow-manual-brainstorm.yml`): 1,254 lines, highly detailed but uses custom structure
+- **Example Workflows** (all 52 categorized examples): 18 files using different naming conventions, structures, and feature combinations
 - **Requirements Coverage**: 22 original requirements, 25+ documented feature categories
 
 ### Core Problem
@@ -98,7 +98,7 @@
 |----------|---------------|-------------------|----------------|
 | **Logging location** | Not shown (cut off) | `logging: { global, scopes, output_type, format, console, log_file }` | Manual has no logging shown; examples have full logging config |
 | **Scopes** | Not shown | `logging.scopes: { execution, memory, tool, validation, agent, state_management }` | Examples have hierarchical scopes; manual may need to add this |
-| **Hierarchical output** | Not shown | `logging_parameters: { workflow_level, step_level, tool_level, agent_level }` (ex15, ex18) | Some examples have nested logging parameters |
+| **Hierarchical output** | Not shown | `logging_parameters: { workflow_level, step_level, tool_level, agent_level }` (13-logging-monitoring/01-hierarchical-logging-system.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml) | Some examples have nested logging parameters |
 
 **Resolution**: Adopt examples' logging structure fully, as manual doesn't complete this section.
 
@@ -160,24 +160,24 @@
 
 | Feature | Description | Impact | Priority |
 |----------|-------------|--------|----------|
-| **Complete logging section** | `logging.global`, `logging.scopes`, `logging_parameters` (ex15, ex18) | Full hierarchical logging | CRITICAL |
+| **Complete logging section** | `logging.global`, `logging.scopes`, `logging_parameters` (13-logging-monitoring/01-hierarchical-logging-system.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml) | Full hierarchical logging | CRITICAL |
 | **Nested logging hierarchy** | 8-9 levels: global → workflow → step → agent → tool → file → API → state → performance | Fine-grained observability | HIGH |
-| **RAG configuration** | `rag.enabled`, `rag.backend`, `rag.config` (ex06, ex14, ex18) | Knowledge base management | HIGH |
-| **RAG operations** | add, query, update, delete with filters (ex06) | Knowledge base CRUD | HIGH |
-| **Web operations with URL params** | `web_fetch`, `web_scrape`, `web_search` with full URL parameters (ex09) | External data access | MEDIUM |
-| **Script and CLI execution** | `script_run`, `cli_run` with env_vars, working_dir, timeout (ex10) | System integration | MEDIUM |
-| **File operations** | Explicit `file_operations` with read, write, delete, backup, archive (ex12) | Local file management | HIGH |
-| **Loop variations** | count, time, infinite, validation (exact/abstract), retry (ex13) | Diverse loop types | HIGH |
-| **Web scraping to RAG** | End-to-end web scrape → embed → RAG add pipeline (ex14) | Knowledge base automation | MEDIUM |
-| **Prompt refinement procedures** | Multi-step prompt improvement loop (ex16) | Quality improvement | MEDIUM |
-| **Workflow registry** | `workflow_registry.registered_workflows` with discovery (ex08) | Dynamic workflow loading | MEDIUM |
-| **Workflow references** | 5 reference patterns (direct_import, inline_reference, registry_lookup, nested_execution, conditional_reference) (ex08) | Nested workflow orchestration | HIGH |
-| **Explicit CRUD operations** | `file_operations` with explicit operations (ex12) | Predictable file I/O | MEDIUM |
-| **Orchestration configuration** | `orchestration.sub_agent_relationships`, `interdependent_validations` (ex08, ex17) | Complex coordination | HIGH |
+| **RAG configuration** | `rag.enabled`, `rag.backend`, `rag.config` (08-rag-operations/01-document-indexing-retrieval.yaml, 08-rag-operations/02-rag-generation-context-aware.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml) | Knowledge base management | HIGH |
+| **RAG operations** | add, query, update, delete with filters (08-rag-operations/01-document-indexing-retrieval.yaml) | Knowledge base CRUD | HIGH |
+| **Web operations with URL params** | `web_fetch`, `web_scrape`, `web_search` with full URL parameters (07-web-operations/03-url-parameters-requests.yaml) | External data access | MEDIUM |
+| **Script and CLI execution** | `script_run`, `cli_run` with env_vars, working_dir, timeout (09-script-cli/01-script-execution.yaml) | System integration | MEDIUM |
+| **File operations** | Explicit `file_operations` with read, write, delete, backup, archive (06-file-operations/01-file-read-write-batch.yaml) | Local file management | HIGH |
+| **Loop variations** | count, time, infinite, validation (exact/abstract), retry (05-loops-convergence/01-for-loops-explicit-iteration.yaml) | Diverse loop types | HIGH |
+| **Web scraping to RAG** | End-to-end web scrape → embed → RAG add pipeline (08-rag-operations/02-rag-generation-context-aware.yaml) | Knowledge base automation | MEDIUM |
+| **Prompt refinement procedures** | Multi-step prompt improvement loop (03-data-flow/01-workflow-level-variables.yaml) | Quality improvement | MEDIUM |
+| **Workflow registry** | `workflow_registry.registered_workflows` with discovery (10-sub-workflows/01-nested-workflow-references.yaml) | Dynamic workflow loading | MEDIUM |
+| **Workflow references** | 5 reference patterns (direct_import, inline_reference, registry_lookup, nested_execution, conditional_reference) (10-sub-workflows/01-nested-workflow-references.yaml) | Nested workflow orchestration | HIGH |
+| **Explicit CRUD operations** | `file_operations` with explicit operations (06-file-operations/01-file-read-write-batch.yaml) | Predictable file I/O | MEDIUM |
+| **Orchestration configuration** | `orchestration.sub_agent_relationships`, `interdependent_validations` (10-sub-workflows/01-nested-workflow-references.yaml, 17-user-inputs-ui/01-user-input-prompts-validation.yaml) | Complex coordination | HIGH |
 | **Metrics collection** | `metrics.enabled`, `metrics.collect`, `metrics.output` (most examples) | Performance tracking | MEDIUM |
-| **Retry configuration** | `retry.default`, `retry.sub_agent_specific`, `retry.escalation` (ex03, ex13, ex16) | Flexible retry strategies | MEDIUM |
-| **Permission systems** | `permissions.global`, `permissions.agent_specific`, `tool_permissions`, `folder_permissions` (ex04, ex12) | Security and access control | HIGH |
-| **State management** | `state.save_interval_secs`, `state.checkpoint_interval_steps`, `state.state_file_path` (ex12) | Persistence and recovery | MEDIUM |
+| **Retry configuration** | `retry.default`, `retry.sub_agent_specific`, `retry.escalation` (01-model-configuration/03-model-lifecycle-management.yaml, 05-loops-convergence/01-for-loops-explicit-iteration.yaml, 03-data-flow/01-workflow-level-variables.yaml) | Flexible retry strategies | MEDIUM |
+| **Permission systems** | `permissions.global`, `permissions.agent_specific`, `tool_permissions`, `folder_permissions` (01-model-configuration/04-cost-tracking-budgets.yaml, 06-file-operations/01-file-read-write-batch.yaml) | Security and access control | HIGH |
+| **State management** | `state.save_interval_secs`, `state.checkpoint_interval_steps`, `state.state_file_path` (06-file-operations/01-file-read-write-batch.yaml) | Persistence and recovery | MEDIUM |
 
 **Total**: 18 major features in examples not present in manual
 
@@ -346,7 +346,7 @@
    - Check compatibility
    - Document changes needed
 
-3. [ ] Review against all 18 example workflows
+3. [ ] Review against all 53 categorized workflow examples
    - Verify all examples work with core schema
    - Document required changes
    - Create migration scripts if needed
@@ -368,17 +368,17 @@
 **Objective**: Update all examples to use unified core schema
 
 **Tasks**:
-1. [ ] Update ex01-ex06 to core schema
+1. [ ] Update all 52 categorized examples to core schema
    - Apply property name changes
    - Restructure sections
    - Add missing logging
 
-2. [ ] Update ex07-ex12 to core schema
+2. [ ] Update all 52 categorized examples to core schema
    - Apply property name changes
    - Restructure sections
    - Fix nested workflows
 
-3. [ ] Update ex13-ex18 to core schema
+3. [ ] Update all 52 categorized examples to core schema
    - Apply property name changes
    - Restructure sections
    - Add missing features
@@ -389,7 +389,7 @@
    - Execution tests (if possible)
 
 **Deliverables**:
-- Updated `ex01-ex18.yml` files
+- Updated `all 52 categorized examples.yml` files
 - `examples/update-summary-report.md`
 - `examples/validation-results.md`
 
@@ -543,7 +543,7 @@
 
 - [ ] All 22 original requirements covered
 - [ ] All 15 manual features preserved
-- [ ] All 18 example workflow patterns supported
+- [ ] All 53 categorized workflow example patterns supported
 - [ ] Required/optional clearly marked
 - [ ] Default values provided for all optional fields
 - [ ] Validation rules documented

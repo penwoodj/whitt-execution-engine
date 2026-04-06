@@ -69,7 +69,7 @@ This plan implements layered retrieval system with local memory, search indexing
 
 ### Requirements Review
 
-From `requirements.mdc` and `schema-consolidated-report.md`:
+From `requirements.md` and `schema-consolidated-report.md`:
 
 **R18**: Tools and custom Rust tools as first-class nodes
 **R30**: Observability with logging levels, summaries, graphs, reports, and provenance

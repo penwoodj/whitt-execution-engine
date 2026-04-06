@@ -1,176 +1,643 @@
 ---
-# Variable interpolation between steps
- showing how step outputs serve as inputs to subsequent steps
-# Various transformations like date formatting, string manipulation, list filtering, etc.
+# Workflow: Step Outputs as Inputs
+# Category: Data Flow
+# Focus: Step output interpolation, output chaining, multi-step data flow
+#
+# This workflow demonstrates:
+# - Step 1 produces output that becomes input for subsequent steps
+# - Step 2 references Step 1's output via ${step.step_1_name.output} interpolation
+# - Step 3 references outputs from both Step 1 and Step 2 (chaining)
+# - Step 4 transforms/combines outputs from multiple previous steps
+# - Step 5 aggregates all previous step outputs into final result
+# - Context control with include_previous_outputs flag
+# - File operations using step output interpolation
+
+workflow_id: step_outputs_as_input_demo
+name: Step Outputs as Input Demo
+description: |
+  Demonstrates comprehensive step output interpolation where each step's output
+  serves as input for subsequent steps. Shows chaining, transformation, and
+  aggregation patterns for multi-step data processing pipelines.
+version: "1.0.0"
+author: "AgentSDK Examples"
+tags:
+  - data-flow
+  - step-outputs
+  - interpolation
+  - chaining
+  - aggregation
 
 models:
-  primary_analyzer
-    host: lmstudio
+  data_extractor:
+    name: "Data Extraction Agent"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+        connection_timeout_secs: 30
+    generative_entity: "llama-3.2-3b-instruct"
     backend: vulkan
-    execution
-      mode: serial
-      memory:
-        max_allocated_memory_mb: 16384
-        model_memory_mb: 4096
-        unload_unused: true
-    logging
-      global:
-        level: debug
-        detail: high
-        output_type: chat
-        format: json
-        console: true
-      workflow_execution:
-        level: info
-        detail: medium
-      step_execution:
-        level: debug
-        detail: high
-      agent_execution:
-        level: info
-        detail: medium
-      tool_execution:
-        level: debug
-        detail: very_high
+    execution:
+      timeout:
+        time_to_first_response: 10s
+        total_time_to_response: 60s
+      max_turns: 5
+    thinking:
+      budget_tokens: 2048
+      capture_in_output: true
+
+  data_processor:
+    name: "Data Processing Agent"
+    host:
+      type: ollama
+      connection_settings:
+        base_url: "http://localhost:11434"
+        timeout_secs: 60
+    generative_entity: "llama3.2"
+
+  result_aggregator:
+    name: "Result Aggregation Agent"
+    host:
+      type: lmstudio
+      connection_settings:
+        host: "localhost"
+        port: 1234
+    generative_entity: "llama-3.2-3b-instruct"
+    backend: vulkan
+
+workflow_execution_strategy:
+  load_unload: one_at_a_time
+  processing: serial
+  timeout:
+    total: 30m
+  error_handling:
+    default_action:
+      type: retry
+      reason: "Transient failure, attempt automatic recovery"
+    retry:
+      max_attempts_per_step: 3
+      backoff_strategy:
+        type: exponential
+        base_delay_ms: 1000
+        max_delay_ms: 30000
+        jitter_factor: 0.2
+
+logging:
+  enabled: true
+  levels:
+    default: info
+    workflow: debug
+    pipeline: debug
+    models: info
+    tools: debug
+    execution: debug
+  scopes:
+    workflow:
+      enabled: true
+      include_timestamps: true
+      include_execution_id: true
+    pipeline:
+      enabled: true
+      include_step_transitions: true
+    tools:
+      enabled: true
+      include_tool_calls: true
+      include_tool_results: true
+  output:
+    console:
+      enabled: true
+      color: true
+      timestamps: true
+      format: text
+    file:
+      enabled: true
+      path: /workspace/logs/step_outputs_workflow.log
+      format: json
+
+user_inputs:
+  execution_mode: interactive
+  workflow_level:
+    ask_at_start: true
+    inputs:
+      - id: source_directory
+        type: text_line
+        label: "Source Directory"
+        placeholder: "/workspace/data/input"
+        default_value: "/workspace/data/input"
+        validation:
+          required: true
+          pattern: "^/.+"
+          error_message: "Must be an absolute path"
+
+      - id: analysis_depth
+        type: select
+        label: "Analysis Depth"
+        options:
+          - value: shallow
+            label: "Shallow Analysis"
+            description: "Quick overview with basic metrics"
+          - value: medium
+            label: "Medium Analysis"
+            description: "Balanced analysis with moderate detail"
+          - value: deep
+            label: "Deep Analysis"
+            description: "Comprehensive analysis with full details"
+        default_value: medium
+        required: true
+
+      - id: output_format
+        type: select
+        label: "Output Format"
+        options:
+          - value: json
+            label: "JSON"
+          - value: yaml
+            label: "YAML"
+          - value: markdown
+            label: "Markdown"
+        default_value: json
+        required: true
+
+  step_level:
+    ask_at_step_start: false
+
+agentic_workflow:
+  hardcoded_values:
+    config:
+      max_file_size_mb: 100
+      supported_formats:
+        - json
+        - csv
+        - xml
+      encoding: "utf-8"
+    processing:
+      chunk_size: 1000
+      max_retries: 3
+      timeout_seconds: 300
+    output:
+      base_path: "/workspace/output"
+      include_metadata: true
+      compress_results: false
+
+  steps:
+    step_1_extract_data:
+      name: "Extract Data from Source"
+      description: |
+        Initial data extraction step that reads from the source directory
+        and produces structured output that will be used by all subsequent steps.
+      type: agent
+      generative_entity: "${models.data_extractor}"
+      prompt: |
+        Extract data from the source directory and prepare it for processing.
+
+        Source Directory: {{user_inputs.source_directory}}
+        Supported Formats: {{workflow.config.supported_formats}}
+        Max File Size: {{workflow.config.max_file_size_mb}} MB
+
+        Tasks:
+        1. Scan the source directory for files
+        2. Identify file formats (json, csv, xml)
+        3. Extract content from each file
+        4. Create a structured inventory of all data found
+
+        Return JSON with:
+        - extraction_id: unique identifier for this extraction
+        - source_path: the source directory path
+        - files_found: list of files discovered
+        - file_count: total number of files
+        - total_size_bytes: total size of all files
+        - formats_detected: list of unique formats found
+        - extraction_timestamp: when extraction occurred
+        - status: "success" or "error"
+        - errors: any extraction errors (if any)
+
+      input_variables:
+        source_directory: "{{user_inputs.source_directory}}"
+        supported_formats: "{{workflow.config.supported_formats}}"
+        max_file_size: "{{workflow.config.max_file_size_mb}}"
+
+      context:
+        include_previous_outputs: false
+        include_system_context: true
+        include_tool_results: true
+
       file_operations:
-        level: debug
-        detail: very_high
-      web_operations:
-        level: info
-        detail: high
-      state_management:
-        level: debug
-        detail: low
-      performance_metrics
-        level: info
-        detail: medium
-    retry
-      default:
-        max_attempts: 3
-        backoff_strategy: exponential
-        on_failure: escalate_model
-    validation_loop
-      type: validation
-      exact_criteria: true
-      tolerance: 0.0
-      max_iterations: 5
-      stop_conditions:
-        - condition: "${step.step_2.output.analysis} == 'significantly improved'"
-        - condition: "${step.step_3.output.decision} == 'proceed'"
-        - condition: "${step.step_3.output.decision} == 'retry_analysis'"
-          reason: "Analysis not improved, retry with simpler prompt"
-          max_attempts: 3
-          backoff: exponential
-          delay_ms: 1000
-          base_ms: 1000
-          max_ms: 30000
-          jitter: 0.2
-          checkpoint_after_retry: true
+        - operation: read
+          file_path: "${user_inputs.source_directory}/manifest.json"
+          format: json
+        - operation: write
+          file_path: "/workspace/output/extraction_results.json"
+          format: json
+
       output:
-        save_to: final_analysis
+        save_to: extraction_output
         format: json
-        console: true
         fields:
+          - extraction_id
+          - source_path
+          - files_found
+          - file_count
+          - total_size_bytes
+          - formats_detected
+          - extraction_timestamp
           - status
-          - summary
-          - decisions
-          - score
-          - suggestions
-          - issues
-          - recommendations
-          - priority
-            - simple: "address ${issue} if high priority"
-            - warning: "Minor issue, does low priority"
+          - errors
         file_output:
           enabled: true
-          path: "${workflow.output_path}/analysis_result.json"
+          path: "/workspace/output/step_1_extraction.json"
           format: json
-          encoding: utf-8
-      on_failure:
-        action: retry
-          reason: "Analysis failed, retry with simpler prompt"
-          max_attempts: 2
-          backoff: exponential
-          delay_ms: 1000
-        - action: continue
-          output_ref: final_analysis
-          format: json
-          console: true
-          fields:
-            - status
-            - summary
-            - decisions
-            - score
-            - suggestions
-            - issues
-            - recommendations
-            - priority
+        console:
+          enabled: true
+          prefix: "[Extract] "
 
-      - step: step_4_regression_model
-        id: step_4
-        name: "Regression Model Training"
-        model: "${models.primary_analyzer}"
-        input:
-          prompt: |
-            Train a regression model to predict errors in the code.
-            Input data: ${step.step_3.output.analysis}
-            Previous_analysis: ${workflow.previous_analysis}
-            threshold: 0.85
-            learning_rate: 0.01
-          variables:
-            previous_analysis: "${step.step_3.output}"
-            threshold: 0.85
-            learning_rate: 0.01
-        output:
-          save_to: regression_model
+    step_2_analyze_data:
+      name: "Analyze Extracted Data"
+      description: |
+        Analyzes the data extracted in Step 1 using the extraction output
+        as input. Demonstrates single step output reference.
+      type: agent
+      generative_entity: "${models.data_processor}"
+      prompt: |
+        Analyze the data that was extracted in the previous step.
+
+        Data from Step 1 (Extraction):
+        {{step.step_1_extract_data.output}}
+
+        Analysis Depth: {{user_inputs.analysis_depth}}
+
+        Perform analysis based on the extraction results:
+        1. Categorize files by format
+        2. Identify potential data quality issues
+        3. Calculate preliminary statistics
+        4. Generate analysis summary
+
+        Return JSON with:
+        - analysis_id: unique identifier for this analysis
+        - extraction_id: ${step.step_1_extract_data.output.extraction_id}
+        - files_by_format: breakdown of files by their format
+        - quality_issues: list of identified quality concerns
+        - statistics:
+            total_records: estimated total records
+            avg_file_size: average file size
+            largest_file: path to largest file
+            smallest_file: path to smallest file
+        - analysis_depth: the depth of analysis performed
+        - recommendations: suggested next steps
+        - status: "success" or "warning" or "error"
+
+      input_variables:
+        extraction_data: "${step.step_1_extract_data.output}"
+        extraction_id: "${step.step_1_extract_data.output.extraction_id}"
+        source_path: "${step.step_1_extract_data.output.source_path}"
+        file_count: "${step.step_1_extract_data.output.file_count}"
+        files_found: "${step.step_1_extract_data.output.files_found}"
+        analysis_depth: "{{user_inputs.analysis_depth}}"
+
+      context:
+        include_previous_outputs: true
+        include_system_context: true
+        include_tool_results: false
+
+      output:
+        save_to: analysis_output
+        format: json
+        fields:
+          - analysis_id
+          - extraction_id
+          - files_by_format
+          - quality_issues
+          - statistics
+          - analysis_depth
+          - recommendations
+          - status
+        file_output:
+          enabled: true
+          path: "/workspace/output/step_2_analysis.json"
           format: json
-          console: true
-          fields:
-            - model_output
-            - predictions
-            - confidence_score
-      - step: step_5_generate_optimizations
-        id: step_5
-        name: "Generate optimizations"
-        model: "${models.primary_analyzer}"
-        input:
-          prompt: |
-            Based on the regression model output, apply these optimizations to fix the identified issues:
-            Optimize for performance while maintaining correctness.
-            Input_data:
-              regression_model: "${step.step_4.output}"
-              issues: "${step.step_4.output.issues}"
-            threshold: 0.8
-            learning_rate: 0.01
-          variables:
-            regression_model: "${step.step_4.output}"
-            issues: "${step.step_4.output.issues}"
-            threshold: 0.8
-            learning_rate: 0.01
-        output:
-          save_to: optimizations
-          format: json
-          console: true
-          fields:
-            - optimized_code
-            - performance_metrics
-            - correctness_score
+        console:
+          enabled: true
+          prefix: "[Analyze] "
+
+    step_3_validate_data:
+      name: "Validate Data Quality"
+      description: |
+        Validates data quality using outputs from both Step 1 (extraction)
+        and Step 2 (analysis). Demonstrates chaining multiple step outputs.
+      type: agent
+      generative_entity: "${models.data_processor}"
+      prompt: |
+        Perform data quality validation using extraction and analysis results.
+
+        Extraction Output (Step 1):
+        {{step.step_1_extract_data.output}}
+
+        Analysis Output (Step 2):
+        {{step.step_2_analyze_data.output}}
+
+        Validation Tasks:
+        1. Cross-reference extraction file list with analysis statistics
+        2. Verify all files were successfully analyzed
+        3. Check for data consistency between extraction and analysis
+        4. Validate quality issue detection was thorough
+
+        Return JSON with:
+        - validation_id: unique identifier for this validation
+        - extraction_id: ${step.step_1_extract_data.output.extraction_id}
+        - analysis_id: ${step.step_2_analyze_data.output.analysis_id}
+        - cross_check_results:
+            files_matched: whether file counts match
+            statistics_consistent: whether stats are consistent
+            issues_addressed: whether all quality issues were addressed
+        - validation_score: overall validation score (0-1)
+        - validation_checks: list of individual checks performed
+        - passed_checks: count of passed checks
+        - failed_checks: count of failed checks
+        - status: "pass" or "warning" or "fail"
+
+      input_variables:
+        extraction_data: "${step.step_1_extract_data.output}"
+        extraction_id: "${step.step_1_extract_data.output.extraction_id}"
+        analysis_data: "${step.step_2_analyze_data.output}"
+        analysis_id: "${step.step_2_analyze_data.output.analysis_id}"
+        quality_issues: "${step.step_2_analyze_data.output.quality_issues}"
+        statistics: "${step.step_2_analyze_data.output.statistics}"
+
+      context:
+        include_previous_outputs: true
+        include_system_context: false
+        include_tool_results: true
+
       file_operations:
         - operation: read
-          file_path: "${workflow.checkpoint_path}/regression_model.yml"
-          format: yaml
-          encoding: utf-8
+          file_path: "/workspace/output/step_1_extraction.json"
+          format: json
         - operation: read
-          file_path: "${workflow.state_path}/optimization_result.json"
+          file_path: "/workspace/output/step_2_analysis.json"
           format: json
-          encoding: utf-8
         - operation: write
-          file_path: "${workflow.output_path}/final_optimized_code.json"
+          file_path: "/workspace/output/step_3_validation.json"
           format: json
-          encoding: utf-8
-      on_failure:
-        action: retry
-          reason: "Optimization failed, retry with simpler prompt"
-          max_attempts: 2
-          backoff: exponential
-          delay_ms: 1000
+
+      output:
+        save_to: validation_output
+        format: json
+        fields:
+          - validation_id
+          - extraction_id
+          - analysis_id
+          - cross_check_results
+          - validation_score
+          - validation_checks
+          - passed_checks
+          - failed_checks
+          - status
+        file_output:
+          enabled: true
+          path: "/workspace/output/step_3_validation.json"
+          format: json
+
+    step_4_transform_data:
+      name: "Transform and Enrich Data"
+      description: |
+        Transforms and enriches data by combining outputs from Steps 1, 2, and 3.
+        Demonstrates multi-step output aggregation and transformation.
+      type: agent
+      generative_entity: "${models.data_processor}"
+      prompt: |
+        Transform and enrich data using all previous step outputs.
+
+        Step 1 - Extraction Output:
+        {{step.step_1_extract_data.output}}
+
+        Step 2 - Analysis Output:
+        {{step.step_2_analyze_data.output}}
+
+        Step 3 - Validation Output:
+        {{step.step_3_validate_data.output}}
+
+        Output Format: {{user_inputs.output_format}}
+        Base Output Path: {{workflow.output.base_path}}
+
+        Transformation Tasks:
+        1. Combine extraction, analysis, and validation results
+        2. Apply transformations based on validation feedback
+        3. Enrich data with computed metrics
+        4. Format output according to user preference
+
+        Return JSON with:
+        - transform_id: unique identifier for this transformation
+        - extraction_id: ${step.step_1_extract_data.output.extraction_id}
+        - analysis_id: ${step.step_2_analyze_data.output.analysis_id}
+        - validation_id: ${step.step_3_validate_data.output.validation_id}
+        - combined_data:
+            source_files: ${step.step_1_extract_data.output.files_found}
+            quality_metrics: ${step.step_2_analyze_data.output.statistics}
+            validation_results: ${step.step_3_validate_data.output.cross_check_results}
+        - transformations_applied: list of transformations performed
+        - enriched_fields: new fields added during enrichment
+        - output_format: format of the transformed data
+        - status: "success" or "error"
+
+      input_variables:
+        extraction_data: "${step.step_1_extract_data.output}"
+        extraction_id: "${step.step_1_extract_data.output.extraction_id}"
+        analysis_data: "${step.step_2_analyze_data.output}"
+        analysis_id: "${step.step_2_analyze_data.output.analysis_id}"
+        validation_data: "${step.step_3_validate_data.output}"
+        validation_id: "${step.step_3_validate_data.output.validation_id}"
+        validation_score: "${step.step_3_validate_data.output.validation_score}"
+        output_format: "{{user_inputs.output_format}}"
+        base_output_path: "{{workflow.output.base_path}}"
+
+      context:
+        include_previous_outputs: true
+        include_system_context: true
+        include_tool_results: true
+
+      file_operations:
+        - operation: write
+          file_path: "/workspace/output/transformed_data.\${user_inputs.output_format}"
+          format: "\${user_inputs.output_format}"
+
+      output:
+        save_to: transform_output
+        format: json
+        fields:
+          - transform_id
+          - extraction_id
+          - analysis_id
+          - validation_id
+          - combined_data
+          - transformations_applied
+          - enriched_fields
+          - output_format
+          - status
+        file_output:
+          enabled: true
+          path: "/workspace/output/step_4_transform.json"
+          format: json
+
+    step_5_generate_report:
+      name: "Generate Final Report"
+      description: |
+        Generates comprehensive final report by aggregating all previous step outputs.
+        Demonstrates complete multi-step output aggregation and final synthesis.
+      type: agent
+      generative_entity: "${models.result_aggregator}"
+      prompt: |
+        Generate a comprehensive final report aggregating all step outputs.
+
+        WORKFLOW EXECUTION SUMMARY:
+
+        Step 1 - Data Extraction:
+        {{step.step_1_extract_data.output}}
+
+        Step 2 - Data Analysis:
+        {{step.step_2_analyze_data.output}}
+
+        Step 3 - Data Validation:
+        {{step.step_3_validate_data.output}}
+
+        Step 4 - Data Transformation:
+        {{step.step_4_transform_data.output}}
+
+        Output Configuration:
+          Base Path: {{workflow.output.base_path}}
+          Include Metadata: {{workflow.output.include_metadata}}
+          Output Format: {{user_inputs.output_format}}
+
+        Generate a comprehensive report with:
+        1. Executive summary of the entire workflow
+        2. Step-by-step breakdown with key metrics
+        3. Data flow diagram (textual representation)
+        4. Quality assessment summary
+        5. Recommendations for future runs
+
+        Return JSON with:
+        - report_id: unique identifier for this report
+        - workflow_execution:
+            extraction_id: \${step.step_1_extract_data.output.extraction_id}
+            analysis_id: \${step.step_2_analyze_data.output.analysis_id}
+            validation_id: \${step.step_3_validate_data.output.validation_id}
+            transform_id: \${step.step_4_transform_data.output.transform_id}
+        - executive_summary: high-level overview
+        - step_summaries:
+            extraction: summary of extraction step
+            analysis: summary of analysis step
+            validation: summary of validation step
+            transformation: summary of transformation step
+        - data_flow:
+            step_1_to_2: how extraction fed into analysis
+            step_2_to_3: how analysis fed into validation
+            step_1_2_3_to_4: how all previous steps fed into transformation
+            all_to_5: how all steps aggregate into this report
+        - quality_summary:
+            extraction_status: \${step.step_1_extract_data.output.status}
+            analysis_status: \${step.step_2_analyze_data.output.status}
+            validation_status: \${step.step_3_validate_data.output.status}
+            validation_score: \${step.step_3_validate_data.output.validation_score}
+            transform_status: \${step.step_4_transform_data.output.status}
+        - recommendations: actionable insights
+        - output_location: where report was saved
+        - status: "success" or "error"
+
+      input_variables:
+        extraction_data: "\${step.step_1_extract_data.output}"
+        extraction_id: "\${step.step_1_extract_data.output.extraction_id}"
+        extraction_status: "\${step.step_1_extract_data.output.status}"
+        analysis_data: "\${step.step_2_analyze_data.output}"
+        analysis_id: "\${step.step_2_analyze_data.output.analysis_id}"
+        analysis_status: "\${step.step_2_analyze_data.output.status}"
+        validation_data: "\${step.step_3_validate_data.output}"
+        validation_id: "\${step.step_3_validate_data.output.validation_id}"
+        validation_status: "\${step.step_3_validate_data.output.status}"
+        validation_score: "\${step.step_3_validate_data.output.validation_score}"
+        transform_data: "\${step.step_4_transform_data.output}"
+        transform_id: "\${step.step_4_transform_data.output.transform_id}"
+        transform_status: "\${step.step_4_transform_data.output.status}"
+        output_format: "{{user_inputs.output_format}}"
+        base_path: "{{workflow.output.base_path}}"
+
+      context:
+        include_previous_outputs: true
+        include_system_context: true
+        include_tool_results: true
+
+      file_operations:
+        - operation: write
+          file_path: "/workspace/output/final_report.\${user_inputs.output_format}"
+          format: "\${user_inputs.output_format}"
+        - operation: write
+          file_path: "/workspace/output/execution_summary.json"
+          format: json
+
+      output:
+        save_to: final_report
+        format: json
+        fields:
+          - report_id
+          - workflow_execution
+          - executive_summary
+          - step_summaries
+          - data_flow
+          - quality_summary
+          - recommendations
+          - output_location
+          - status
+        file_output:
+          enabled: true
+          path: "/workspace/output/step_5_final_report.json"
+          format: json
+        console:
+          enabled: true
+          prefix: "[Final] "
+          color: green
+
+metrics:
+  enabled: true
+  collection:
+    pipeline_level:
+      - total_duration_secs
+      - average_step_duration_secs
+      - step_output_size_bytes
+      - data_flow_efficiency
+    step_level:
+      - execution_time_secs
+      - memory_peak_mb
+      - output_size_bytes
+      - input_variables_count
+    model_level:
+      - inference_time_ms
+      - tokens_processed
+  output:
+    path: /workspace/metrics/step_outputs_metrics.json
+    format: json
+
+validation:
+  workflow_schema:
+    enabled: true
+    required_fields:
+      - workflow_id
+      - name
+      - models
+      - agentic_workflow
+  step_outputs:
+    enabled: true
+    validate_format: json
+    validate_references:
+      - check_step_output_interpolation: true
+      - verify_previous_step_exists: true
+      - ensure_field_in_output: true
+
+features_demonstrated:
+  - step_output_interpolation
+  - single_step_output_reference
+  - multi_step_output_chaining
+  - output_aggregation_from_multiple_steps
+  - input_variables_using_step_outputs
+  - prompt_template_with_step_outputs
+  - context_include_previous_outputs_flag
+  - file_operations_with_step_output_paths
+  - step_output_field_access
+  - sequential_data_flow_pattern

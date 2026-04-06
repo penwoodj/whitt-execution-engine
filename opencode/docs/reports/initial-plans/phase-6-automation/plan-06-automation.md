@@ -70,7 +70,7 @@ This plan implements cron job scheduling, git-aware experiments, and manual refi
 
 ### Requirements Review
 
-From `requirements.mdc` and `schema-consolidated-report.md`:
+From `requirements.md` and `schema-consolidated-report.md`:
 
 **R17**: Multiple workflow archetypes and scheduling modes
 **R24**: Queue semantics (worker pools, persistence, cancellation, result retrieval)

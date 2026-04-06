@@ -17,7 +17,7 @@ This analysis evaluates whether a "barebones" approach—relying primarily on pu
 ## Analysis Methodology
 
 Evaluated requirements from:
-- `opencode/docs/reports/requirements/requirements.mdc` - Original specification
+- `opencode/docs/reports/requirements/requirements.md` - Original specification
 - `opencode/docs/reports/requirements/schema-consolidated-report.md` - Schema consolidation
 - Example workflows (ex01-ex18) - Feature demonstrations
 
@@ -231,7 +231,7 @@ The transpiler provides significant value beyond the Agent SDK:
 
 ## References
 
-- **Requirements**: `opencode/docs/reports/requirements/requirements.mdc`
+- **Requirements**: `opencode/docs/reports/requirements/requirements.md`
 - **Schema Consolidated**: `opencode/docs/reports/requirements/schema-consolidated-report.md`
 - **Example Workflows**: `opencode/docs/reports/requirements/example-workflows/`
 - **AutoAgents SDK**: https://github.com/liquidos-ai/AutoAgents

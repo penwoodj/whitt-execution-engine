@@ -57,7 +57,7 @@ The foundation phase provides the bedrock upon which all subsequent features are
 
 ### Requirements Review
 
-From `requirements.mdc` and `schema-consolidated-report.md`:
+From `requirements.md` and `schema-consolidated-report.md`:
 
 **R01**: System identity (compiler-centered local agentic orchestration)
 **R03**: Local-first operation
@@ -697,7 +697,7 @@ cargo test --test '*e2e*'
 
 - [ADR-0001: Foundation Compiler Contract](../roadmap/adr-0001-foundation-compiler-contract.yml)
 - [research-plan-01-foundation.yml](../roadmap/research-plan-01-foundation.yml)
-- [requirements.mdc](../requirements/requirements.mdc)
+- [requirements.md](../requirements/requirements.md)
 - [schema-consolidated-report.md](../requirements/schema-consolidated-report.md)
 
 ### Implementation References
