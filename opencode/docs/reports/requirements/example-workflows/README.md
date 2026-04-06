@@ -125,3 +125,42 @@ Rule: `${...}` for static structural references, `{{...}}` for runtime dynamic v
 2. **Parallel execution**: Verify concurrency limits, resource constraints, and timeout handling
 3. **Checkpoint/resume**: Save state, interrupt workflow, and verify correct resume from checkpoint
 4. **Guardrails**: Test content safety triggers, PII detection, and policy enforcement boundaries
+
+---
+
+## Feature-Specific Testing
+
+### RAG Workflows
+- **Indexing verification**: Confirm documents are properly chunked, embedded, and indexed
+- **Retrieval accuracy**: Test semantic search returns relevant results for test queries
+- **Context window handling**: Verify retrieved context fits within model token limits
+- **Citation validation**: Ensure LLM responses properly cite source documents
+- **Examples**: See `08-rag-operations/` directory
+
+### Web API Operations
+- **Mock API endpoints**: Create test APIs for development without hitting production services
+- **Rate limit handling**: Test retry behavior when API rate limits are hit
+- **Timeout management**: Configure appropriate timeouts for network operations
+- **Error propagation**: Ensure API errors properly bubble up through workflow steps
+- **Examples**: See `07-web-operations/` directory
+
+### Model Lifecycle
+- **Warmup timing**: Measure and configure model warmup duration for optimal performance
+- **Cooldown behavior**: Test idle detection and memory release triggers
+- **Memory pressure**: Simulate high memory usage to verify swap/unload behavior
+- **Model switching**: Test hot-swapping between models without workflow interruption
+- **Examples**: See `01-model-configuration/03-model-lifecycle-management.yaml`
+
+### Permission Controls
+- **Allowlist enforcement**: Verify only allowed tools/paths are accessible
+- **Denylist blocking**: Test that denied operations properly fail with appropriate errors
+- **Scope validation**: Confirm per-step restrictions don't exceed global permissions
+- **Dynamic guardrails**: Test content-based policy triggers (PII, harmful content)
+- **Examples**: See `16-tool-permissions/` directory
+
+### Error Recovery
+- **Retry backoff**: Verify exponential/linear backoff delays increase as expected
+- **Escalation paths**: Test escalation to model/oracle after configurable retry counts
+- **Partial recovery**: Confirm workflows can continue with partial results after failure
+- **Cleanup handling**: Verify resources are properly cleaned up after failures
+- **Examples**: See `12-error-handling-retries/` directory
