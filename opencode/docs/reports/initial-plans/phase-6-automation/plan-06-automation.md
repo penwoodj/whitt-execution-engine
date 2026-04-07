@@ -282,7 +282,7 @@ From `requirements.md` and `schema-consolidated-report.md`:
 3. Add validation criteria (tests pass, security scan, code review)
 4. Implement confidence threshold evaluation
 5. Generate merge recommendations (approve, request-changes, block)
-6. Add merge proposal artifacts (stored in `.glyphnova/`)
+6. Add merge proposal artifacts (stored in `.opencode/`)
 7. Implement merge proposal CLI commands (create, view, approve, reject)
 8. Add merge proposal UI integration
 

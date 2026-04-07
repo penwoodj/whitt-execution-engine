@@ -190,7 +190,7 @@ rag:
   enabled: true
   backend: chroma
   config:
-    path: /workspace/.rag
+    path: ./workspace/.rag
     embedding_model: lmstudio://all-MiniLM-L6-v2
     chunk_size: 512
     chunk_overlap: 50
@@ -199,7 +199,7 @@ rag:
   operations:
     add:
       documents:
-        - path: /workspace/docs/**/*.md
+        - path: ./workspace/docs/**/*.md
           metadata:
             type: documentation
             project: my_project

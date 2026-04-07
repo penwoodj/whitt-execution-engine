@@ -84,7 +84,7 @@ From `requirements.md` and `schema-consolidated-report.md`:
 - Metrics collection captures all relevant performance and quality signals
 - Human override and pause controls are always functional
 - Dashboards provide real-time visibility into autonomous operations
-- Observability integrates with `.glyphnova/` artifact system
+- Observability integrates with `.opencode/` artifact system
 - Validation thresholds prevent unsafe autonomous expansion
 
 **Validation Focus for v0.1.x and Later**:
@@ -313,7 +313,7 @@ From `requirements.md` and `schema-consolidated-report.md`:
 2. Implement intervention capture for all override types
 3. Add intervention context capture (workflow state, metrics, decisions)
 4. Implement intervention reason tracking
-5. Add intervention logging (structured logs in `.glyphnova/`)
+5. Add intervention logging (structured logs in `.opencode/`)
 6. Implement intervention query interface
 7. Add intervention analysis (trends, frequency, reasons)
 8. Implement intervention CLI commands (list, view, analyze)
@@ -374,7 +374,7 @@ From `requirements.md` and `schema-consolidated-report.md`:
 1. Define checkpoint structure (state, metrics, decisions, timestamp)
 2. Implement periodic checkpoint generation
 3. Add checkpoint-on-event (intervention, milestone, error)
-4. Implement checkpoint storage (in `.glyphnova/checkpoints/`)
+4. Implement checkpoint storage (in `.opencode/checkpoints/`)
 5. Add checkpoint versioning and compression
 6. Implement checkpoint restoration
 7. Add checkpoint validation (integrity check)
@@ -793,7 +793,7 @@ None (final plan)
 2. **Metrics Completeness**: Metrics collection captures all relevant performance and quality signals
 3. **Human Override Availability**: Human override and pause controls are always functional
 4. **Dashboard Visibility**: Dashboards provide real-time visibility into autonomous operations
-5. **Observability Integration**: Observability integrates with `.glyphnova/` artifact system
+5. **Observability Integration**: Observability integrates with `.opencode/` artifact system
 6. **Validation Threshold Safety**: Validation thresholds prevent unsafe autonomous expansion
 
 ### Critical Review Upstream Factors

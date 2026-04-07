@@ -43,8 +43,8 @@
 - **Recommendation**: Add loop selection matrix in README
 
 ### 7. File Path Assumptions
-- **Files**: All using `/workspace/` paths
-- **Question**: Is `/workspace/` a required convention or just examples?
+- **Files**: All using `./workspace/` paths
+- **Question**: Is `./workspace/` a required convention or just examples?
 - **Concern**: No explanation of path requirements
 - **Recommendation**: Add path configuration section in each file
 

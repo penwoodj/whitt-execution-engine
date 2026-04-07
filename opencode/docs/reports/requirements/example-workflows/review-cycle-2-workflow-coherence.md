@@ -258,7 +258,7 @@ logging:
       file: workflow_debug.log
     output_data:
       type: stateless_direct_io
-      path: /workspace/output/data.json
+      path: ./workspace/output/data.json
 ```
 
 ---
@@ -363,7 +363,7 @@ error_handling:
     cleanup_steps: [cleanup_temp_files]
   partial_results:
     save: true
-    path: /workspace/partial_results/
+    path: ./workspace/partial_results/
 ```
 
 ---

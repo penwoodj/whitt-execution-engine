@@ -116,7 +116,7 @@ loops:
       - error_type: timeout
     timeout_secs: 300
     save_iteration_results:
-      - path: /workspace/iterations/
+      - path: ./workspace/iterations/
       format: json
 ```
 
@@ -234,7 +234,7 @@ validation:
       pattern: "^https?://.*"
 
     - type: custom_function
-      function: python:/workspace/validators/check_output.py
+      function: python:./workspace/validators/check_output.py
       args:
         - output: "${result}"
         - rules: "${validation_rules}"
@@ -310,7 +310,7 @@ loops:
         save_results:
           - last_iteration: true
           - all_iterations: true
-          - path: /workspace/loop_results/
+          - path: ./workspace/loop_results/
 
       failure:
         continue_workflow: false  # or continue with warning

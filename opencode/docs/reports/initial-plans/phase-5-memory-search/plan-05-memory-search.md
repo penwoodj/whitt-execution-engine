@@ -23,7 +23,7 @@ This plan implements layered retrieval system with local memory, search indexing
 - **External Search Adapters**: Behind explicit policy gates with opt-in
 - **Web Scraping Compliance**: Robots.txt enforcement, scope restrictions
 - **Provenance Capture**: Timestamps, extraction traces, artifacts for all web/search operations
-- **Memory Artifact Versioning**: Stored in `.glyphnova/memory/` with versioned references
+- **Memory Artifact Versioning**: Stored in `.opencode/memory/` with versioned references
 - **Memory Garbage Collection**: Prevent unbounded growth
 
 **Key Deliverables**:
@@ -50,7 +50,7 @@ This plan implements layered retrieval system with local memory, search indexing
 3. **Hybrid Search**: Exact/full-text + semantic retrieval (not vector-only)
 4. **Web Provenance**: Records timestamps, extraction traces, artifacts
 5. **Scraping Compliance**: Robots and scope restrictions enforced
-6. **Memory Storage**: Stored in `.glyphnova/memory/` with versioned references
+6. **Memory Storage**: Stored in `.opencode/memory/` with versioned references
 
 **Scope**:
 - **Included**: Local memory architecture for workflows, search indexing and retrieval, external search adapters with policy gates, scraping compliance rules, provenance capture, memory artifact versioning and garbage collection
@@ -97,7 +97,7 @@ From `requirements.md` and `schema-consolidated-report.md`:
 - **Tool Nodes**: Should declare memory read/write effects
 - **External Search Tools**: Require policy compilation and approval
 - **Scraping Operations**: Require policy gates and provenance logging
-- **Search Results**: Should integrate with `.glyphnova/` artifact references
+- **Search Results**: Should integrate with `.opencode/` artifact references
 
 ### Research Plan Review
 
@@ -238,7 +238,7 @@ From `requirements.md` and `schema-consolidated-report.md`:
 5. Implement memory CRUD operations (create, read, update, delete)
 6. Add memory versioning (with references)
 7. Implement memory search query interface
-8. Add memory storage in `.glyphnova/memory/`
+8. Add memory storage in `.opencode/memory/`
 9. Implement memory migration and backup
 
 **Related Requirements**: ADR-0006 (local memory architecture)
@@ -627,7 +627,7 @@ From `requirements.md` and `schema-consolidated-report.md`:
 
 ### Blocks
 
-- plan-00 (Foundation): Needed for `.glyphnova/` structure and storage
+- plan-00 (Foundation): Needed for `.opencode/` structure and storage
 - plan-01 (MVP Queue): Needed for workflow execution and artifact storage
 - plan-02 (CLI & Backends): Needed for CLI memory commands
 - plan-03 (Glyphnova UI): Needed for UI memory browser
@@ -640,7 +640,7 @@ From `requirements.md` and `schema-consolidated-report.md`:
 
 ### Integration Points
 
-- **plan-00 (Foundation)**: Uses `.glyphnova/memory/` storage, provenance tracking
+- **plan-00 (Foundation)**: Uses `.opencode/memory/` storage, provenance tracking
 - **plan-01 (MVP Queue)**: Stores workflow artifacts in memory
 - **plan-02 (CLI & Backends)**: CLI commands for memory and search
 - **plan-03 (Glyphnova UI)**: Memory browser, search UI, provenance visualization

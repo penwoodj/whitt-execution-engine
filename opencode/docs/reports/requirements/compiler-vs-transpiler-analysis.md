@@ -383,7 +383,7 @@ Policy enforcement     No        Yes         Compiler ✅
 
 **Compiler**:
 - Deterministic output: Yes (same YAML → same IR → same code)
-- Intermediate artifacts: WorkflowIR stored in `.glyphnova/`
+- Intermediate artifacts: WorkflowIR stored in `.opencode/`
 - Provenance: Hash-based linking of YAML → IR → Rust
 - Rollback: Can revert to previous IR and regenerate
 - Audit trail: Complete history of transformations
@@ -1103,7 +1103,7 @@ Memory usage         High      Low         Compiler ✅
 
 **Compiler**:
 - Parallel transpilation: Safe (immutable IR)
-- Caching: IR cache in `.glyphnova/`
+- Caching: IR cache in `.opencode/`
 - Incremental rebuild: Yes (only recompile changed workflows)
 - Bottleneck: None (embarrassingly parallel)
 

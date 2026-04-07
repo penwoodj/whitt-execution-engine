@@ -170,12 +170,12 @@ yaml-to-rust-agentsdk run workflow.yml
 | Variable | Required | Description | Default | Example |
 |-----------|-----------|-------------|----------|----------|
 | `WORKSPACE_ROOT` | No | Base directory for workspace operations | `./workspace` |
-| `LOGS_DIR` | No | Directory for execution logs | `./workspace/logs` |
-| `CHAT_DIR` | No | Directory for conversation history | `./workspace/chat` |
-| `OUTPUT_DIR` | No | Directory for workflow output files | `./workspace/output` |
-| `STATE_DIR` | No | Directory for execution state/checkpoints | `./workspace/state` |
-| `CHECKPOINTS_DIR` | No | Directory for workflow checkpoints | `./workspace/checkpoints` |
-| `METRICS_DIR` | No | Directory for performance metrics | `./workspace/metrics` |
+| `LOGS_DIR` | No | Directory for execution logs | `../workspace/logs` |
+| `CHAT_DIR` | No | Directory for conversation history | `../workspace/chat` |
+| `OUTPUT_DIR` | No | Directory for workflow output files | `../workspace/output` |
+| `STATE_DIR` | No | Directory for execution state/checkpoints | `../workspace/state` |
+| `CHECKPOINTS_DIR` | No | Directory for workflow checkpoints | `../workspace/checkpoints` |
+| `METRICS_DIR` | No | Directory for performance metrics | `../workspace/metrics` |
 
 #### Workspace Structure
 
@@ -317,7 +317,7 @@ yaml-to-rust-agentsdk run workflow.yml
 |-----------|-----------|-------------|----------|----------|
 | `DEBUG_MODE` | No | Enable debug output and stack traces | `false` |
 | `ENABLE_PROFILING` | No | Enable performance profiling | `false` |
-| `PROFILES_DIR` | No | Directory for profile data | `./workspace/profiles` |
+| `PROFILES_DIR` | No | Directory for profile data | `../workspace/profiles` |
 
 #### Debug Mode
 
@@ -347,7 +347,7 @@ export DEBUG_MODE=true
 
 # Enable profiling for optimization
 export ENABLE_PROFILING=true
-export PROFILES_DIR=./workspace/profiles
+export PROFILES_DIR=../workspace/profiles
 
 # Run workflow
 yaml-to-rust-agentsdk run workflow.yml
@@ -422,7 +422,7 @@ yaml-to-rust-agentsdk run workflow.yml
 Check logs for detailed information:
 
 ```bash
-cat /workspace/logs/workflow.log | jq .
+cat ./workspace/logs/workflow.log | jq .
 ```
 
 ---

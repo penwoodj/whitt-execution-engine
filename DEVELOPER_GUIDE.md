@@ -484,7 +484,7 @@ hyperfine 'cargo run -- run my_workflow.yml' --warmup 3 --runs 10
 RUST_LOG=memory cargo run -- run my_workflow.yml
 
 # View memory usage
-# Check /workspace/metrics/run_*.json for memory metrics
+# Check ./workspace/metrics/run_*.json for memory metrics
 ```
 
 ---

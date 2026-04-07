@@ -188,7 +188,7 @@ model_metrics:
 
   routing_decisions:
     log: true
-    file: /workspace/.metrics/routing_decisions.json
+    file: ./workspace/.metrics/routing_decisions.json
 ```
 
 ---

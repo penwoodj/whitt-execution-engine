@@ -35,8 +35,8 @@ Reviewed tool definitions, tool execution, permissions (global, step, tool, fold
 tools:
   - name: directory_operations
     operations:
-      - create: /workspace/output
-      - list: /workspace/src
+      - create: ./workspace/output
+      - list: ./workspace/src
       - traverse: /workspace
     timeout_secs: 30
 
@@ -118,19 +118,19 @@ pipeline:
 permissions:
   global:
     allow:
-      - file_read: /workspace/src/*
+      - file_read: ./workspace/src/*
     deny:
-      - file_delete: /workspace/src/*
+      - file_delete: ./workspace/src/*
 
   step_permissions:
     analyze_code:
       allow:
-        - file_read: /workspace/src/*
+        - file_read: ./workspace/src/*
 ```
 
 **Questions**:
 - Do step permissions override global permissions completely or merge?
-- If step allows `file_read: /workspace/src/*` and global denies `file_delete: /workspace/src/*`, can step delete files?
+- If step allows `file_read: ./workspace/src/*` and global denies `file_delete: ./workspace/src/*`, can step delete files?
 - What if both allow and deny specify same operation on same path?
 
 **Recommendation**: Explicit permission scoping rules:
@@ -138,15 +138,15 @@ permissions:
 permissions:
   global:
     allow:
-      - file_read: /workspace/src/*
+      - file_read: ./workspace/src/*
     deny:
-      - file_delete: /workspace/src/*
+      - file_delete: ./workspace/src/*
 
   step_override:
     step_1:
       strategy: merge  # merge, override, ignore_global
       allow:
-        - file_write: /workspace/src/*
+        - file_write: ./workspace/src/*
       deny:
         - shell_exec: rm -rf
 
@@ -167,7 +167,7 @@ permissions:
 **ex04**:
 ```yaml
 folder_permissions:
-  - path: /workspace/src
+  - path: ./workspace/src
     operations: [read, search]
     allowed_tools: [file_read, grep, file_search]
     allowed_steps: [analyze_code, generate_fixes]
@@ -181,7 +181,7 @@ folder_permissions:
 **Recommendation**: Add permission enforcement semantics:
 ```yaml
 folder_permissions:
-  - path: /workspace/src
+  - path: ./workspace/src
     operations: [read, search]
     allowed_tools: [file_read, grep, file_search]
     allowed_steps: [analyze_code, generate_fixes]
@@ -290,8 +290,8 @@ script_run:
     MAX_RETRIES: "3"
   timeout_secs: 60
   capture_output:
-    stdout: /workspace/logs/script_output.log
-    stderr: /workspace/logs/script_errors.log
+    stdout: ./workspace/logs/script_output.log
+    stderr: ./workspace/logs/script_errors.log
   on_failure:
     retry: true
     notify: true
@@ -315,7 +315,7 @@ permissions:
   on_denial:
     action: block  # block, warn, log_only, escalate
     notify_user: true
-    log_to: /workspace/permission_denials.log
+    log_to: ./workspace/permission_denials.log
     fallback:
       step: notify_admin
       action: request_approval
@@ -338,12 +338,12 @@ permissions:
     rules:
       - trigger: step_3_success
         grant:
-          - file_write: /workspace/src/*
+          - file_write: ./workspace/src/*
         reason: "Code validated, safe to write"
 
       - trigger: step_5_failure
         revoke:
-          - file_delete: /workspace/*
+          - file_delete: ./workspace/*
         reason: "Error occurred, unsafe to delete"
 ```
 
@@ -366,7 +366,7 @@ permissions:
     enabled: true
     log_all_operations: true
     log_denials: true
-    audit_file: /workspace/audit/permissions.log
+    audit_file: ./workspace/audit/permissions.log
     report:
       - generate_on_completion: true
       - format: json
@@ -467,7 +467,7 @@ tools:
     - tool: grep
       config:
         pattern: "async fn"
-        path: /workspace/src
+        path: ./workspace/src
       output_to: grep_results
 
     - tool: file_analyzer
