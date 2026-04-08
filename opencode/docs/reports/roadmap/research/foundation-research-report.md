@@ -20,7 +20,7 @@ This research identifies canonical patterns for a local-first, compiler-centered
 **Recommendation**: Adopt a **typed-first approach** where Rust structs serve as the source of truth, with schema generation as a validation layer rather than ad-hoc YAML parsing.
 
 **Evidence Sources**:
-1. **yaml-serde** (Official fork) - Maintained Rust-YAML serialization library with strong type guarantees
+1. **serde-saphyr** (1.5x faster) - High-performance YAML parser with schema validation capabilities
 2. **schemars** - Schema generation framework for Rust types with validation attributes
 3. **JSON Schema.org** - Industry-standard schema format with broad tooling support
 
@@ -181,7 +181,7 @@ Proposed → Accepted → Superseded by ADR-XXX → Archived
 
 | Component | Technology | Rationale |
 |-----------|-----------|-----------|
-| **YAML DSL** | serde_yaml + schemars + JSON Schema | Industry standards, strong typing, broad tooling |
+| **YAML DSL** | serde-saphyr + schemars + JSON Schema | 1.5x faster than serde_yaml, strong type guarantees, broad tooling |
 | **IR Design** | HIR → THIR → MIR pattern | Rust compiler best practices, optimization opportunities |
 | **Schema Validation** | schemars with validation attributes | Compile-time safety, declarative constraints |
 | **Storage** | Content-addressed + SQLite | Replayability, auditability, zero external dependencies |
@@ -205,7 +205,7 @@ Proposed → Accepted → Superseded by ADR-XXX → Archived
 
 ## References
 
-1. **yaml-serde** - https://github.com/yaml/yaml-serde
+1. **serde-saphyr** - https://github.com/bourumir-wyngs/serde-saphyr
 2. **schemars** - https://graham.cool/schemars/
 3. **Rust Compiler Guide** - https://doc.rust-lang.org/nightly/nightly-rustc/dev-guide/
 4. **ADR GitHub Organization** - https://adr.github.io/

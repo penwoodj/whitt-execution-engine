@@ -34,7 +34,7 @@ This folder contains comprehensive research on advanced features, emerging techn
 ### 2. Emerging Technologies to Watch
 **File**: `02-emerging-technologies.md`
 
-**Summary**: Cutting-edge technologies that could dramatically enhance the minifier.
+**Summary**: Cutting-edge technologies that could dramatically enhance the workflow framework's performance and capabilities.
 
 **Key Topics**:
 - Probabilistic data structures (Bloom filters, Count-Min sketches) for context management

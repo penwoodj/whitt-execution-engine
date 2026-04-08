@@ -85,7 +85,7 @@ This index organizes the transpiler requirements into logical groupings with imp
 - R22: YAML → Rust AgentSDK execution target
 - R01: System identity (compiler-centered local agentic orchestration)
 - R03: Local-first operation
-- R28: Per-chat workspace and .glyphnova/ system-of-record
+- R28: Per-chat workspace and .opencode/ system-of-record
 - R31: Auditable local artifacts, versioned runs, hashes, privacy-preserving defaults
 
 ---
@@ -374,7 +374,7 @@ Phase 7 (UI)
 1. **Begin Phase 1 implementation** (foundation compiler contract)
    - Implement schema system with JSON Schema and schemars
    - Build WorkflowIR compiler pipeline
-   - Establish .glyphnova/ directory structure
+   - Establish .opencode/ directory structure
 
 2. **Validate ADR research** against actual implementation
    - Confirm schema patterns work in practice

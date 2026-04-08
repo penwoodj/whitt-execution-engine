@@ -26,6 +26,7 @@ This folder contains comprehensive research on advanced transpiler features, eme
 - 10 research questions with hypotheses
 - Academic approach for each direction
 - Expected outcomes and challenges
+- Focus on workflow optimization beyond minification (self-improvement, memory, verification)
 
 ### 📅 Enhancement Roadmap → [`04-enhancement-roadmap.md`](./04-enhancement-roadmap.md)
 - 6 phases with 3-year timeline
@@ -36,6 +37,7 @@ This folder contains comprehensive research on advanced transpiler features, eme
 - 8 scalability dimensions
 - Target: 10K workflows/sec (20× current)
 - Performance benchmarks and optimization priorities
+- Applies to overall framework execution, not just minification
 
 ### 💻 GitHub Patterns → [`github-patterns-reference.md`](./github-patterns-reference.md)
 - 24 real-world implementation patterns

@@ -17,7 +17,7 @@ graph TD
 
 ```
 example-workflows/
-├── requirements-oriented-auto/     53 examples across 19 categories
+├── requirements-oriented-auto/     52 categorized examples across 19 categories
 │   ├── 01-model-configuration/     Start here
 │   ├── 02-step-types/
 │   ├── ...
@@ -27,9 +27,13 @@ example-workflows/
 ├── requirements-coverage-analysis.md   Schema coverage report
 ├── unified-schema-feature-verification.md   Feature verification
 ├── workflow-completion-summary.md    Project status
-├── review-cycle-*.md               11 review cycles
+├── review-cycle-*.md               8 review cycles
 └── missing-workflows-summary.md    Gap analysis
 ```
+
+## Review Cycles
+
+8 review cycles document schema quality, completeness, and comprehensibility:
 
 ## Review Cycles
 

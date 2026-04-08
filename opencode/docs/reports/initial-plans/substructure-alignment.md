@@ -132,7 +132,7 @@ The agentic workflow schema defines a 5-layer abstraction hierarchy with approxi
 | Context | REFERENCED | WorkflowSpec needs `intake_context`, `extract` for YAML parsing |
 | Planning | REFERENCED | IR compilation uses `decompose`, `plan_step` concepts |
 | Reasoning | MISSING | Not implemented - no LLM reasoning yet |
-| Memory | REFERENCED | `.opencode/` storage implies `memory_write` semantics |
+| Memory | REFERENCED | `.glyphnova/` storage implies `memory_write` semantics |
 | Guardrails | IMPLEMENTED | Policy compilation implements `policy_check` |
 | Multi-Agent | MISSING | No agent coordination yet |
 
@@ -155,7 +155,7 @@ The agentic workflow schema defines a 5-layer abstraction hierarchy with approxi
 |-------|------------------------|-------|
 | intake_phase | IMPLEMENTED | YAML loading and validation |
 | understand_phase | MISSING | No intent classification |
-| prepare_context_phase | PARTIAL | `.opencode/` storage available |
+| prepare_context_phase | PARTIAL | `.glyphnova/` storage available |
 | plan_phase | IMPLEMENTED | IR compilation as planning |
 | execute_phase | MISSING | No runtime execution |
 | verify_phase | PARTIAL | Schema validation exists |
@@ -863,7 +863,7 @@ The agentic workflow schema defines a 5-layer abstraction hierarchy with approxi
 
 | From Plan | To Plans | Layers Transferred | Types |
 |-----------|----------|-------------------|-------|
-| plan-00 | plan-01 | L1 boundary, L1 observability | `WorkflowSpec`, `WorkflowIR`, `.opencode/` |
+| plan-00 | plan-01 | L1 boundary, L1 observability | `WorkflowSpec`, `WorkflowIR`, `.glyphnova/` |
 | plan-00 | plan-02 | L1 data_flow, L1 execution | Schema validation, provider interfaces |
 | plan-01 | plan-02 | L1 queue_resource, L5 scheduler_controller | Queue state, scheduling APIs |
 | plan-01 | plan-03 | L1 queue_resource, L4 phases | Queue visualization, state display |

@@ -204,10 +204,10 @@ logging:
 
 **Hierarchical Logging**: Supports nested logging scopes (workflow → step → agent → tool → file → API → state → performance)
 
-### 5. Pipeline Section
+### 5. Agentic Workflow Section
 
 ```yaml
-pipeline:
+agentic_workflow:
   - step: step_name
     id: unique_step_id
     model: "${models.primary}"
@@ -773,7 +773,7 @@ orchestration:
 **Purpose**: Demonstrate advanced logging
 
 **Features Shown**:
-- 9-level logging hierarchy
+- 8-level logging hierarchy
 - Per-scope configuration
 - Multiple output types
 - Console and file logging
@@ -1133,7 +1133,7 @@ The schema provides a solid foundation for building, deploying, and optimizing A
 - all 52 categorized examples: Core workflow demonstrations
 - 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml-comprehensive-features-workflow.yml: All features in one coherent workflow
 
-**Review Documentation** (8 review cycles):
+**Review Documentation** (11 review cycles):
 - review-cycle-1-schema-completeness.md
 - review-cycle-2-workflow-coherence.md
 - review-cycle-3-model-management.md
@@ -1142,6 +1142,9 @@ The schema provides a solid foundation for building, deploying, and optimizing A
 - review-cycle-6-completeness.yml
 - review-cycle-7-consistency.yml
 - review-cycle-8-schema-quality.yml
+- review-cycle-9-schema-core.md
+- review-cycle-10-schema-advanced.md
+- review-cycle-11-edge-cases.md
 
 **Requirements Documentation**:
 - requirements.md: Original requirements specification
