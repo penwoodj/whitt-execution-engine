@@ -23,7 +23,7 @@ use sled::{Db, Tree};
 use std::path::Path;
 use uuid::Uuid;
 
-/// Local storage manager for .glyphnova directory
+/// Local storage manager for ./workspace directory
 pub struct LocalStorage {
     db: Db,
     base_path: std::path::PathBuf,
@@ -32,7 +32,7 @@ pub struct LocalStorage {
 impl LocalStorage {
     /// Open or create local storage at ./workspace/
     pub fn open<P: AsRef<Path>>(base_path: P) -> Result<Self> {
-        let base_path = base_path.as_ref().join(".glyphnova");
+        let base_path = base_path.as_ref().join("./workspace");
         std::fs::create_dir_all(&base_path)
             .map_err(|e| Error::file_system("create", base_path.clone(), e.to_string()))?;
 
