@@ -16,6 +16,14 @@
 
 Create `src/defaults.rs`:
 
+**Important v2.0 Notes:**
+- v2.0 scope hierarchy: L1 (workflow top-level) → L2 (agentic_workflow defaults) → L3 (step-level)
+- Tool permissions: L1 is global baseline → L3 can only RESTRICT, not expand
+- Retry: L2 step defaults → L3 overrides completely (not merged)
+- Hooks: L2 default hooks MERGE with L3 step hooks (additive)
+- "presence = enabled" convention: Key presence without explicit enabled: field means enabled
+- disabled: true explicitly turns off features
+
 ```rust
 use crate::error::{Error, Result};
 use crate::schema::{WorkflowSpec, LoggingConfig, ToolPermissionsConfig, LogLevel};
@@ -60,12 +68,14 @@ impl DefaultValues {
                 tool_level: LogLevel::Info,
             },
             tool_permissions: ToolPermissionDefaults {
-                file_read_# presence = enabled,
-                file_write_# presence = enabled,
-                file_delete_# presence = enabled,
-                web_fetch_# presence = enabled,
-                web_scrape_# presence = enabled,
-                shell_exec_disabled: true,
+                // v2.0: "presence = enabled" convention
+                // In Rust struct fields, we use proper bool types
+                file_read_enabled: true,
+                file_write_enabled: true,
+                file_delete_enabled: true,
+                web_fetch_enabled: true,
+                web_scrape_enabled: true,
+                shell_exec_enabled: false,  // v2.0: shell exec defaults to disabled
             },
         }
     }
@@ -80,10 +90,10 @@ impl DefaultValues {
     fn apply_logging_defaults(&self, spec: &mut WorkflowSpec) -> Result<()> {
         let defaults = &self.logging;
 
-        // Set default if not specified
+        // Set default if not specified (v2.0: "step" instead of "pipeline")
         if spec.logging.levels.is_empty() {
             spec.logging.levels.insert("workflow".to_string(), defaults.workflow_level.clone());
-            spec.logging.levels.insert("pipeline".to_string(), defaults.step_level.clone());
+            spec.logging.levels.insert("step".to_string(), defaults.step_level.clone());  // v2.0: "step"
             spec.logging.levels.insert("models".to_string(), defaults.model_level.clone());
             spec.logging.levels.insert("tools".to_string(), defaults.tool_level.clone());
         }
@@ -94,7 +104,7 @@ impl DefaultValues {
     fn apply_tool_permission_defaults(&self, spec: &mut WorkflowSpec) -> Result<()> {
         let defaults = &self.tool_permissions;
 
-        // Apply file operation defaults
+        // Apply file operation defaults (v2.0: per-step can only RESTRICT L1 baseline)
         if !spec.tool_permissions.file_operations.read.enabled {
             spec.tool_permissions.file_operations.read.enabled = defaults.file_read_enabled;
         }
@@ -113,9 +123,10 @@ impl DefaultValues {
             spec.tool_permissions.web_operations.scrape.enabled = defaults.web_scrape_enabled;
         }
 
-        // Apply shell operation defaults
-        if !spec.tool_permissions.shell_operations.exec.enabled {
-            spec.tool_permissions.shell_operations.exec.enabled = defaults.shell_exec_enabled;
+        // Apply shell operation defaults (v2.0: shell_exec defaults to disabled)
+        // Note: Per-step config can only RESTRICT the baseline, not expand it
+        if spec.tool_permissions.shell_operations.exec.disabled.is_none() {
+            spec.tool_permissions.shell_operations.exec.disabled = !defaults.shell_exec_enabled;
         }
 
         Ok(())

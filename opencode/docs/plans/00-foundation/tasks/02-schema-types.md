@@ -10,7 +10,6 @@
 - Create: `src/schema/identification.rs` (Section 1: Workflow Identification)
 - Create: `src/schema/model.rs` (Section 2: Model Configuration)
 - Create: `src/schema/workspace.rs` (Section 13: Workspace Configuration)
-- Create: `src/schema/features.rs` (Section 14: Features Demonstrated)
 - Create: `src/schema/step.rs` (Step definitions)
 - Create: `src/schema/loop.rs` (Loop configurations)
 - Create: `src/schema/execution.rs` (Execution strategy)
@@ -443,9 +442,6 @@ pub struct ToolUseGuards {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 pub struct LifecycleHooks {
     #[serde(default)]
-    pub enabled: bool,
-
-    #[serde(default)]
     pub on_create: HashMap<String, serde_json::Value>,
 
     #[serde(default)]
@@ -497,15 +493,6 @@ pub struct LifecycleHooks {
     pub on_memory_store: HashMap<String, serde_json::Value>,
 }
 
-/// Framework type
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum FrameworkType {
-    Agentsdk,
-    BasicAgent,
-    Custom,
-}
-
 /// Model configuration (Section 2)
 #[derive(Debug, Clone, Serialize, Deserialize, Validate, JsonSchema)]
 pub struct ModelConfig {
@@ -513,12 +500,12 @@ pub struct ModelConfig {
     #[garde(skip)]
     pub name: String,
 
-    /// Variable reference name
-    #[serde(default)]
-    pub var_name: Option<String>,
-
     /// Host configuration
     pub host: ModelHost,
+
+    /// RAM allocation (presence = RAM allocation configured)
+    #[serde(default)]
+    pub ram_allocation: RamAllocation,
 
     /// Maximum resource limits
     #[serde(default)]
@@ -527,10 +514,6 @@ pub struct ModelConfig {
     /// Minimum resource requirements
     #[serde(default)]
     pub min_allowed: ResourceLimits,
-
-    /// Allocation strategy
-    #[serde(default = "default_allocation_strategy")]
-    pub allocation_strategy: String,
 
     /// Model memory configuration
     #[serde(default)]
@@ -552,25 +535,29 @@ pub struct ModelConfig {
     #[serde(default)]
     pub hooks: LifecycleHooks,
 
-    /// Guardrails (optional)
+    /// Guardrails (presence = guardrails enabled)
     #[serde(default)]
     pub guardrails: Option<Guardrails>,
-
-    /// Framework type
-    #[serde(default = "default_framework")]
-    pub framework: FrameworkType,
-
-    /// Custom executor name (only for FrameworkType::Custom)
-    #[serde(default)]
-    pub custom_executor_name: Option<String>,
 }
 
-fn default_allocation_strategy() -> String {
+/// RAM allocation configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RamAllocation {
+    /// Allocation strategy
+    #[serde(default = "default_ram_strategy")]
+    pub strategy: String,
+}
+
+impl Default for RamAllocation {
+    fn default() -> Self {
+        Self {
+            strategy: default_ram_strategy(),
+        }
+    }
+}
+
+fn default_ram_strategy() -> String {
     "dynamic".to_string()
-}
-
-fn default_framework() -> FrameworkType {
-    FrameworkType::Agentsdk
 }
 ```
 
@@ -637,60 +624,9 @@ fn default_temp_dir() -> String {
 ```
 
 **Commit:** `feat: add workspace configuration schema types`
-
 ---
 
-## Step 4: Create src/schema/features.rs
-
-Define features demonstrated types (Section 14):
-
-```rust
-use serde::{Deserialize, Serialize};
-use schemars::JsonSchema;
-
-/// Feature categories (19 categories from example workflows)
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum FeatureCategory {
-    ModelConfiguration,
-    StepTypes,
-    DataFlow,
-    ParallelExecution,
-    LoopsConvergence,
-    FileOperations,
-    WebOperations,
-    RagOperations,
-    ScriptCli,
-    SubWorkflows,
-    ConditionalBranching,
-    ErrorHandlingRetries,
-    LoggingMonitoring,
-    CheckpointingState,
-    ResourceManagement,
-    ToolPermissions,
-    UserInputsUi,
-    HooksLifecycle,
-    ComprehensiveIntegration,
-}
-
-/// Features demonstrated (Section 14)
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct FeaturesDemonstrated {
-    /// List of feature categories demonstrated in this workflow
-    #[serde(default)]
-    pub categories: Vec<FeatureCategory>,
-
-    /// Feature compatibility checks
-    #[serde(default)]
-    pub compatibility_checks: bool,
-}
-```
-
-**Commit:** `feat: add features demonstrated schema types`
-
----
-
-## Step 5: Create src/schema/step.rs
+## Step 4: Create src/schema/step.rs
 
 Define step configuration types:
 
@@ -699,23 +635,6 @@ use serde::{Deserialize, Serialize};
 use garde::Validate;
 use schemars::JsonSchema;
 use std::collections::HashMap;
-
-/// Step types
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum StepType {
-    Agent,
-    Tool,
-    SubWorkflow,
-    Control,
-    Loop,
-}
-
-impl Default for StepType {
-    fn default() -> Self {
-        StepType::Agent
-    }
-}
 
 /// Output format
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -770,9 +689,6 @@ pub struct RetryConfig {
     pub tolerance_adjustment: Option<f64>,
 
     #[serde(default)]
-    pub adjust_interdependencies: Option<bool>,
-
-    #[serde(default)]
     pub checkpoint_after_retry: bool,
 }
 
@@ -789,7 +705,6 @@ impl Default for RetryConfig {
             level: default_retry_level(),
             adjustment_strategy: None,
             tolerance_adjustment: None,
-            adjust_interdependencies: None,
             checkpoint_after_retry: false,
         }
     }
@@ -811,124 +726,69 @@ fn default_retry_level() -> String {
     "step_restart".to_string()
 }
 
-/// Output configuration
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct OutputConfig {
+/// Step configuration (step type inferred from keys present)
+#[derive(Debug, Clone, Serialize, Deserialize, Validate, JsonSchema)]
+pub struct Step {
+    /// Unique step identifier (used as variable name)
+    #[garde(length(min = 1))]
+    pub step: String,
+
+    /// Generative entity reference (e.g., "${models.primary}")
+    /// Step type = agent when this field is present
     #[serde(default)]
-    pub save_to: Option<String>,
+    pub generative_entity: Option<String>,
 
-    #[serde(default = "default_output_format")]
-    pub format: OutputFormat,
-
+    /// Prompt for agent steps
     #[serde(default)]
-    pub fields: Option<Vec<String>>,
+    pub prompt: Option<String>,
 
+    /// Tool name (e.g., "file_read")
+    /// Step type = tool when this field is present
     #[serde(default)]
-    pub file_output: Option<FileOutputConfig>,
+    pub tool: Option<String>,
 
+    /// Tool input
     #[serde(default)]
-    pub console: Option<ConsoleConfig>,
-}
+    pub input: Option<serde_json::Value>,
 
-impl Default for OutputConfig {
-    fn default() -> Self {
-        Self {
-            save_to: None,
-            format: default_output_format(),
-            fields: None,
-            file_output: None,
-            console: None,
-        }
-    }
-}
-
-fn default_output_format() -> OutputFormat {
-    OutputFormat::Json
-}
-
-/// File output configuration
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct FileOutputConfig {
+    /// Sub-workflow reference (e.g., "validate_workflow")
+    /// Step type = sub-workflow when this field is present
     #[serde(default)]
-    pub enabled: bool,
+    pub sub_workflow: Option<String>,
 
+    /// Loop configuration
+    /// Step type = loop when this field is present
     #[serde(default)]
-    pub path: String,
+    pub loop_config: Option<LoopConfig>,
 
-    #[serde(default = "default_output_format")]
-    pub format: OutputFormat,
-
+    /// GWT (Given When Then) configuration
+    /// Step type = control when this field is present
     #[serde(default)]
-    pub encoding: String,
-}
+    pub when: Option<WhenConfig>,
 
-/// Console output configuration
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct ConsoleConfig {
+    /// Model overrides
     #[serde(default)]
-    pub enabled: bool,
+    pub model_overrides: Option<ModelOverrides>,
 
+    /// User input prompt
     #[serde(default)]
-    pub prefix: String,
+    pub user_input: Option<UserInput>,
 
+    /// Step dependencies (require before execution)
     #[serde(default)]
-    pub color: String,
-}
+    pub depends_on: Option<Vec<DependencyConfig>>,
 
-/// Context configuration
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct ContextConfig {
-    #[serde(default)]
-    pub include_previous_outputs: bool,
-
-    #[serde(default)]
-    pub include_system_context: bool,
-
-    #[serde(default)]
-    pub include_tool_results: bool,
-}
-
-/// File operation
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct FileOperation {
-    #[serde(rename = "operation")]
-    pub op_type: String,
-
-    pub file_path: String,
-
-    #[serde(default)]
-    pub format: String,
-
-    #[serde(default)]
-    pub encoding: String,
-}
-
-/// Branch configuration
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct BranchConfig {
-    pub name: String,
-
-    #[serde(default)]
-    pub description: String,
-
-    pub enabled_by: String,
-
-    pub next_step: String,
-
+    /// Parallel group name
     #[serde(default)]
     pub parallel_group: Option<String>,
 
+    /// Retry configuration
     #[serde(default)]
-    pub max_parallel: Option<u32>,
+    pub retry: Option<RetryConfig>,
 
+    /// Timeout in seconds
     #[serde(default)]
     pub timeout_secs: Option<u64>,
-
-    #[serde(default)]
-    pub on_entry: Option<HashMap<String, serde_json::Value>>,
-
-    #[serde(default)]
-    pub on_exit: Option<HashMap<String, serde_json::Value>>,
 }
 
 /// Model overrides
@@ -936,87 +796,37 @@ pub struct BranchConfig {
 pub struct ModelOverrides {
     #[serde(default)]
     pub max_turns: Option<u32>,
-
-    #[serde(default)]
-    pub timeout: Option<ExecutionTimeouts>,
 }
 
-/// Step configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Validate, JsonSchema)]
-pub struct Step {
-    /// Unique step identifier
-    #[garde(length(min = 1))]
+/// User input prompt configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UserInput {
+    #[serde(rename = "type")]
+    pub input_type: String,
+
+    #[serde(default)]
+    pub message: Option<String>,
+
+    #[serde(default)]
+    pub default: Option<serde_json::Value>,
+}
+
+/// Dependency configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DependencyConfig {
+    /// Step name
     pub step: String,
 
+    /// Optional condition for dependency
     #[serde(default)]
-    pub id: Option<String>,
-
-    #[serde(default)]
-    pub name: Option<String>,
-
-    #[serde(default)]
-    pub description: Option<String>,
-
-    #[serde(default)]
-    #[garde(skip)]
-    #[serde(rename = "type")]
-    pub step_type: StepType,
-
-    #[serde(default)]
-    pub generative_entity: Option<String>,
-
-    #[serde(default)]
-    pub model: Option<String>,
-
-    #[serde(default)]
-    pub model_overrides: Option<ModelOverrides>,
-
-    #[serde(default)]
-    pub prompt: Option<String>,
-
-    #[serde(default)]
-    pub input_variables: Option<HashMap<String, serde_json::Value>>,
-
-    #[serde(default)]
-    pub file_operations: Option<Vec<FileOperation>>,
-
-    #[serde(default)]
-    pub context: Option<ContextConfig>,
-
-    #[serde(default)]
-    pub output: Option<OutputConfig>,
-
-    #[serde(default)]
-    pub retry: Option<RetryConfig>,
-
-    #[serde(default)]
-    pub branches: Option<Vec<BranchConfig>>,
-
-    #[serde(default)]
-    pub parallel_group: Option<String>,
-
-    #[serde(default)]
-    pub max_parallel: Option<u32>,
-
-    #[serde(default)]
-    pub timeout_secs: Option<u64>,
-
-    #[serde(default)]
-    pub depends_on: Option<Vec<String>>,
-
-    #[serde(default)]
-    pub pre_hooks: Option<HashMap<String, serde_json::Value>>,
-
-    #[serde(default)]
-    pub post_hooks: Option<HashMap<String, serde_json::Value>>,
+    pub condition: Option<String>,
 }
 ```
 
 **Commit:** `feat: add step configuration schema types`
-
 ---
 
-## Step 6: Create src/schema/loop.rs
+## Step 5: Create src/schema/loop.rs
 
 Define loop configuration types:
 
@@ -1352,10 +1162,9 @@ pub struct LoopConfig {
 ```
 
 **Commit:** `feat: add loop configuration schema types`
-
 ---
 
-## Step 7: Create src/schema/execution.rs
+## Step 6: Create src/schema/execution.rs
 
 Define execution strategy types:
 
@@ -1436,8 +1245,8 @@ pub enum OnTimeout {
 /// Memory configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct MemoryConfig {
-    #[serde(default = "default_allocation_strategy")]
-    pub allocation: AllocationStrategy,
+    #[serde(default)]
+    pub ram_allocation: RamAllocation,
 
     #[serde(default)]
     pub max_allowed: ResourceLimits,
@@ -1450,10 +1259,6 @@ pub struct MemoryConfig {
 
     #[serde(default)]
     pub pressure_handling: PressureHandlingConfig,
-}
-
-fn default_allocation_strategy() -> AllocationStrategy {
-    AllocationStrategy::Adaptive
 }
 
 /// Model lifecycle configuration
@@ -1634,9 +1439,6 @@ fn default_model_on_timeout() -> OnTimeout {
 /// Parallel configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ParallelConfig {
-    #[serde(default)]
-    pub enabled: bool,
-
     #[serde(default = "default_algorithm")]
     pub algorithm: String,
 
@@ -1665,7 +1467,7 @@ pub struct ParallelConfig {
 impl Default for ParallelConfig {
     fn default() -> Self {
         Self {
-            # presence = enabled,
+            enabled: false,
             algorithm: default_algorithm(),
             load_balancing: None,
             max_threads: default_max_threads(),
@@ -1714,9 +1516,6 @@ pub struct LoadBalancingConfig {
 
     #[serde(default = "default_worker_selection_timeout")]
     pub worker_selection_timeout_secs: u64,
-
-    #[serde(default)]
-    pub enabled: bool,
 }
 
 impl Default for LoadBalancingConfig {
@@ -1724,7 +1523,7 @@ impl Default for LoadBalancingConfig {
         Self {
             strategy: default_lb_strategy(),
             worker_selection_timeout_secs: default_worker_selection_timeout(),
-            # presence = enabled,
+            enabled: false,
         }
     }
 }
@@ -1766,10 +1565,9 @@ fn default_load_unload() -> LoadUnloadStrategy {
 ```
 
 **Commit:** `feat: add execution strategy schema types`
-
 ---
 
-## Step 8: Create src/schema/mod.rs
+## Step 7: Create src/schema/mod.rs
 
 Create module exports and main WorkflowSpec:
 
@@ -1782,7 +1580,6 @@ use std::collections::HashMap;
 pub mod identification;
 pub mod model;
 pub mod workspace;
-pub mod features;
 pub mod step;
 pub mod loop_config;
 pub mod execution;
@@ -1795,14 +1592,12 @@ pub use model::{
     InputGuards, OutputGuards, ToolUseGuards,
     PromptInjectionGuard, PiiRedactionGuard, MaxLengthGuard,
     ToxicityFilterGuard, FormatValidationGuard,
-    LifecycleHooks, FrameworkType,
+    LifecycleHooks, RamAllocation,
 };
 pub use workspace::WorkspaceConfig;
-pub use features::{FeaturesDemonstrated, FeatureCategory};
 pub use step::{
-    Step, StepType, OutputFormat, BackoffStrategy,
-    RetryConfig, OutputConfig, FileOutputConfig, ConsoleConfig,
-    ContextConfig, FileOperation, BranchConfig, ModelOverrides,
+    Step, OutputFormat, BackoffStrategy,
+    RetryConfig, ModelOverrides, UserInput, DependencyConfig,
 };
 pub use loop_config::{
     LoopConfig, LoopType, CountLoopConfig, TimeLoopConfig,
@@ -2000,9 +1795,6 @@ pub struct UiPanel {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct UiNotifications {
     #[serde(default)]
-    pub enabled: bool,
-
-    #[serde(default)]
     pub sound: bool,
 
     #[serde(default)]
@@ -2110,9 +1902,6 @@ pub enum LogLevel {
 /// Logging configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LoggingConfig {
-    #[serde(default)]
-    pub enabled: bool,
-
     #[serde(default = "default_log_level")]
     pub default: LogLevel,
 
@@ -2132,7 +1921,7 @@ pub struct LoggingConfig {
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
-            # presence = enabled,
+            enabled: false,
             default: default_log_level(),
             levels: HashMap::new(),
             scopes: HashMap::new(),
@@ -2173,9 +1962,6 @@ impl Default for LoggingOutput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ConsoleOutputConfig {
     #[serde(default)]
-    pub enabled: bool,
-
-    #[serde(default)]
     pub color: bool,
 
     #[serde(default)]
@@ -2188,7 +1974,7 @@ pub struct ConsoleOutputConfig {
 impl Default for ConsoleOutputConfig {
     fn default() -> Self {
         Self {
-            # presence = enabled,
+            enabled: false,
             color: true,
             timestamps: true,
             format: default_format(),
@@ -2204,9 +1990,6 @@ fn default_format() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct FileOutput {
     #[serde(default)]
-    pub enabled: bool,
-
-    #[serde(default)]
     pub path: String,
 
     #[serde(default = "default_log_format")]
@@ -2219,7 +2002,7 @@ pub struct FileOutput {
 impl Default for FileOutput {
     fn default() -> Self {
         Self {
-            # presence = enabled,
+            enabled: false,
             path: "./logs/workflow.log".to_string(),
             format: default_log_format(),
             rotation: None,
@@ -2234,9 +2017,6 @@ fn default_log_format() -> String {
 /// Log rotation
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct LogRotation {
-    #[serde(default)]
-    pub enabled: bool,
-
     #[serde(default = "default_max_size_mb")]
     pub max_size_mb: u64,
 
@@ -2247,7 +2027,7 @@ pub struct LogRotation {
 impl Default for LogRotation {
     fn default() -> Self {
         Self {
-            # presence = enabled,
+            enabled: false,
             max_size_mb: default_max_size_mb(),
             max_files: default_max_files(),
         }
@@ -2265,9 +2045,6 @@ fn default_max_files() -> u32 {
 /// Remote output configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteOutput {
-    #[serde(default)]
-    pub enabled: bool,
-
     #[serde(default)]
     pub webhook_url: String,
 
@@ -2356,9 +2133,6 @@ impl Default for FileOperationsPermissions {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ReadPermission {
     #[serde(default)]
-    pub enabled: bool,
-
-    #[serde(default)]
     pub require_confirmation: bool,
 
     #[serde(default)]
@@ -2377,7 +2151,7 @@ pub struct ReadPermission {
 impl Default for ReadPermission {
     fn default() -> Self {
         Self {
-            # presence = enabled,
+            enabled: false,
             require_confirmation: false,
             allowed_paths: Vec::new(),
             allowed_patterns: Vec::new(),
@@ -2394,9 +2168,6 @@ fn default_max_file_size_mb() -> u64 {
 /// Write permission
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WritePermission {
-    #[serde(default)]
-    pub enabled: bool,
-
     #[serde(default)]
     pub require_confirmation: bool,
 
@@ -2416,7 +2187,7 @@ pub struct WritePermission {
 impl Default for WritePermission {
     fn default() -> Self {
         Self {
-            # presence = enabled,
+            enabled: false,
             require_confirmation: true,
             allowed_paths: Vec::new(),
             backup_existing: true,
@@ -2434,9 +2205,6 @@ fn default_write_max_file_size_mb() -> u64 {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DeletePermission {
     #[serde(default)]
-    pub enabled: bool,
-
-    #[serde(default)]
     pub require_confirmation: bool,
 
     #[serde(default)]
@@ -2452,7 +2220,7 @@ pub struct DeletePermission {
 impl Default for DeletePermission {
     fn default() -> Self {
         Self {
-            # presence = enabled,
+            enabled: false,
             require_confirmation: true,
             allowed_paths: Vec::new(),
             confirm_delete_count: default_confirm_delete_count(),
@@ -2488,9 +2256,6 @@ impl Default for WebOperationsPermissions {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WebFetchPermission {
     #[serde(default)]
-    pub enabled: bool,
-
-    #[serde(default)]
     pub require_confirmation: bool,
 
     #[serde(default = "default_max_concurrent_requests")]
@@ -2515,7 +2280,7 @@ pub struct WebFetchPermission {
 impl Default for WebFetchPermission {
     fn default() -> Self {
         Self {
-            # presence = enabled,
+            enabled: false,
             require_confirmation: false,
             max_concurrent_requests: default_max_concurrent_requests(),
             timeout_secs: default_web_timeout_secs(),
@@ -2539,9 +2304,6 @@ fn default_web_timeout_secs() -> u64 {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WebScrapePermission {
     #[serde(default)]
-    pub enabled: bool,
-
-    #[serde(default)]
     pub require_confirmation: bool,
 
     #[serde(default)]
@@ -2557,7 +2319,7 @@ pub struct WebScrapePermission {
 impl Default for WebScrapePermission {
     fn default() -> Self {
         Self {
-            # presence = enabled,
+            enabled: false,
             require_confirmation: false,
             respect_robots_txt: true,
             max_pages_per_domain: default_max_pages_per_domain(),
@@ -2573,8 +2335,7 @@ fn default_max_pages_per_domain() -> u32 {
 /// Follow links configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct FollowLinksConfig {
-    #[serde(default)]
-    pub enabled: bool,
+}
 
     #[serde(default = "default_max_depth")]
     pub max_depth: u32,
@@ -2583,7 +2344,7 @@ pub struct FollowLinksConfig {
 impl Default for FollowLinksConfig {
     fn default() -> Self {
         Self {
-            disabled: true,
+            enabled: false,
             max_depth: default_max_depth(),
         }
     }
@@ -2612,9 +2373,6 @@ impl Default for ShellOperationsPermissions {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ShellExecPermission {
     #[serde(default)]
-    pub enabled: bool,
-
-    #[serde(default)]
     pub require_confirmation: bool,
 
     #[serde(default = "default_shell_timeout_seconds")]
@@ -2636,7 +2394,7 @@ pub struct ShellExecPermission {
 impl Default for ShellExecPermission {
     fn default() -> Self {
         Self {
-            # presence = enabled,
+            enabled: false,
             require_confirmation: true,
             timeout_seconds: default_shell_timeout_seconds(),
             allowed_commands: Vec::new(),
@@ -2674,9 +2432,6 @@ impl Default for AiOperationsPermissions {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct WebSearchPermission {
     #[serde(default)]
-    pub enabled: bool,
-
-    #[serde(default)]
     pub require_confirmation: bool,
 
     #[serde(default = "default_max_searches_per_hour")]
@@ -2686,7 +2441,7 @@ pub struct WebSearchPermission {
 impl Default for WebSearchPermission {
     fn default() -> Self {
         Self {
-            # presence = enabled,
+            enabled: false,
             require_confirmation: false,
             max_searches_per_hour: default_max_searches_per_hour(),
         }
@@ -2701,9 +2456,6 @@ fn default_max_searches_per_hour() -> u32 {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ContentGenerationPermission {
     #[serde(default)]
-    pub enabled: bool,
-
-    #[serde(default)]
     pub require_confirmation: bool,
 
     #[serde(default = "default_max_tokens_per_hour")]
@@ -2713,7 +2465,7 @@ pub struct ContentGenerationPermission {
 impl Default for ContentGenerationPermission {
     fn default() -> Self {
         Self {
-            # presence = enabled,
+            enabled: false,
             require_confirmation: false,
             max_tokens_per_hour: default_max_tokens_per_hour(),
         }
@@ -2746,26 +2498,22 @@ impl Default for SystemOperationsPermissions {
 /// Process management permission
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ProcessManagementPermission {
-    #[serde(default)]
-    pub enabled: bool,
 }
 
 impl Default for ProcessManagementPermission {
     fn default() -> Self {
-        Self { disabled: true }
+        Self { enabled: false }
     }
 }
 
 /// Network operations permission
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct NetworkOperationsPermission {
-    #[serde(default)]
-    pub enabled: bool,
 }
 
 impl Default for NetworkOperationsPermission {
     fn default() -> Self {
-        Self { disabled: true }
+        Self { enabled: false }
     }
 }
 
@@ -2779,17 +2527,17 @@ pub struct WorkflowSpec {
     #[serde(default)]
     pub models: ModelsConfig,
 
-    /// Workspace configuration
+    /// Sub-workflow definitions
     #[serde(default)]
-    pub workspace: WorkspaceConfig,
+    pub sub_workflows: SubWorkflowsConfig,
 
-    /// Features demonstrated
+    /// Agentic workflow (preferred format)
     #[serde(default)]
-    pub features: FeaturesDemonstrated,
+    pub agentic_workflow: AgenticWorkflow,
 
     /// Workflow execution strategy
     #[serde(default)]
-    pub execution: WorkflowExecutionStrategy,
+    pub workflow_execution_strategy: WorkflowExecutionStrategy,
 
     /// Tool permissions
     #[serde(default)]
@@ -2799,13 +2547,194 @@ pub struct WorkflowSpec {
     #[serde(default)]
     pub logging: LoggingConfig,
 
-    /// Agentic workflow (preferred format)
+    /// Memory configuration (RAG)
     #[serde(default)]
-    pub agentic_workflow: Option<AgenticWorkflow>,
+    pub memory: Option<MemoryConfig>,
 
-    /// Pipeline (array format, alternative to agentic_workflow)
+    /// Workspace configuration
     #[serde(default)]
-    pub pipeline: Option<Pipeline>,
+    pub workspace: WorkspaceConfig,
+}
+
+/// Sub-workflows configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SubWorkflowsConfig {
+    #[serde(flatten)]
+    pub workflows: HashMap<String, serde_json::Value>,
+}
+
+impl Default for SubWorkflowsConfig {
+    fn default() -> Self {
+        Self {
+            workflows: HashMap::new(),
+        }
+    }
+}
+
+/// Memory configuration (RAG)
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct MemoryConfig {
+    /// RAG configuration (presence = RAG enabled)
+    #[serde(default)]
+    pub rag: Option<RagConfig>,
+}
+
+/// RAG configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RagConfig {
+    #[serde(default)]
+    pub knowledge_base: KnowledgeBaseConfig,
+
+    #[serde(default)]
+    pub embedding_model: EmbeddingModelConfig,
+
+    #[serde(default)]
+    pub retrieval: RetrievalConfig,
+}
+
+/// Knowledge base configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct KnowledgeBaseConfig {
+    #[serde(default)]
+    pub path: String,
+
+    #[serde(default = "default_format")]
+    pub format: String,
+
+    #[serde(default = "default_chunk_size")]
+    pub chunk_size: u32,
+
+    #[serde(default = "default_chunk_overlap")]
+    pub chunk_overlap: u32,
+}
+
+fn default_format() -> String {
+    "vector_db".to_string()
+}
+
+fn default_chunk_size() -> u32 {
+    512
+}
+
+fn default_chunk_overlap() -> u32 {
+    50
+}
+
+/// Embedding model configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct EmbeddingModelConfig {
+    #[serde(default)]
+    pub model_ref: String,
+
+    #[serde(default = "default_dimension")]
+    pub dimension: u32,
+
+    #[serde(default = "default_batch_size")]
+    pub batch_size: u32,
+}
+
+fn default_dimension() -> u32 {
+    768
+}
+
+fn default_batch_size() -> u32 {
+    32
+}
+
+/// Retrieval configuration
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RetrievalConfig {
+    #[serde(default = "default_max_results")]
+    pub max_results: u32,
+
+    #[serde(default = "default_similarity_threshold")]
+    pub similarity_threshold: f64,
+
+    #[serde(default)]
+    pub include_sources: bool,
+}
+
+impl Default for RetrievalConfig {
+    fn default() -> Self {
+        Self {
+            max_results: default_max_results(),
+            similarity_threshold: default_similarity_threshold(),
+            include_sources: true,
+        }
+    }
+}
+
+fn default_max_results() -> u32 {
+    10
+}
+
+fn default_similarity_threshold() -> f64 {
+    0.7
+}
+
+/// When configuration (hooks)
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WhenConfig {
+    #[serde(default)]
+    pub before_step_starts: Vec<HookAction>,
+
+    #[serde(default)]
+    pub during_step_streaming: Vec<HookAction>,
+
+    #[serde(default)]
+    pub after_step_succeeds: Vec<HookAction>,
+
+    #[serde(default)]
+    pub after_step_fails: Vec<HookAction>,
+
+    #[serde(default)]
+    pub after_all_retries_exhausted: Vec<HookAction>,
+
+    #[serde(default)]
+    pub gwt: Option<Vec<GwtRule>>,
+
+    #[serde(default)]
+    pub requires: Vec<DependencyConfig>,
+
+    #[serde(default)]
+    pub on_requires_failed: Vec<HookAction>,
+}
+
+/// Hook action
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct HookAction {
+    #[serde(flatten)]
+    pub action_type: HookActionType,
+}
+
+/// Hook action type
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum HookActionType {
+    Log { to_file_path: String, event_fields: Vec<String> },
+    AppendTo(String),
+    SaveTo(String),
+    Notify { message: String },
+    Fail(String),
+    Bookmark { },
+}
+
+/// GWT (Given When Then) rule
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GwtRule {
+    pub given: String,
+    #[serde(default)]
+    pub when: Option<String>,
+    pub then: ThenClause,
+}
+
+/// Then clause
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ThenClause {
+    RouteTo(String),
+    RouteToMultiple(Vec<String>),
+    Custom(serde_json::Value),
 }
 ```
 
@@ -2824,10 +2753,9 @@ pub use schema::WorkflowSpec;
 ```
 
 **Commit:** `chore: export schema module from lib.rs`
-
 ---
 
-## Step 10: Write schema tests
+## Step 8: Write schema tests
 
 Create `tests/schema_test.rs`:
 
@@ -2853,56 +2781,46 @@ fn test_workflow_identification() {
 fn test_model_config() {
     let model = ModelConfig {
         name: "test_model".to_string(),
-        var_name: Some("primary".to_string()),
         host: ModelHost {
             provider_type: ModelProvider::LmStudio,
             connection_settings: Default::default(),
         },
+        ram_allocation: RamAllocation::default(),
         max_allowed: ResourceLimits::default(),
         min_allowed: ResourceLimits::default(),
-        allocation_strategy: "dynamic".to_string(),
         model_memory: ModelMemory::default(),
         execution: ExecutionTimeouts::default(),
         thinking: ThinkingConfig::default(),
         tools: ToolPermissions::default(),
         hooks: LifecycleHooks::default(),
         guardrails: None,
-        framework: FrameworkType::Agentsdk,
-        custom_executor_name: None,
     };
 
     assert_eq!(model.name, "test_model");
-    assert_eq!(model.framework, FrameworkType::Agentsdk);
+    assert_eq!(model.ram_allocation.strategy, "dynamic");
 }
 
 #[test]
 fn test_step_config() {
     let step = Step {
         step: "step_1".to_string(),
-        id: Some("unique_id".to_string()),
-        name: Some("Test Step".to_string()),
-        description: Some("A test step".to_string()),
-        step_type: StepType::Agent,
-        generative_entity: None,
-        model: Some("${models.primary}".to_string()),
-        model_overrides: None,
+        generative_entity: Some("${models.primary}".to_string()),
         prompt: Some("Test prompt".to_string()),
-        input_variables: None,
-        file_operations: None,
-        context: None,
-        output: None,
-        retry: None,
-        branches: None,
-        parallel_group: None,
-        max_parallel: None,
-        timeout_secs: None,
+        tool: None,
+        input: None,
+        sub_workflow: None,
+        loop_config: None,
+        when: None,
+        model_overrides: None,
+        user_input: None,
         depends_on: None,
-        pre_hooks: None,
-        post_hooks: None,
+        parallel_group: None,
+        retry: None,
+        timeout_secs: None,
     };
 
     assert_eq!(step.step, "step_1");
-    assert_eq!(step.step_type, StepType::Agent);
+    assert!(step.generative_entity.is_some());
 }
 
 #[test]
@@ -2947,16 +2865,16 @@ fn test_workflow_spec_serialization() {
             tags: vec![],
         },
         models: ModelsConfig::default(),
+        sub_workflows: SubWorkflowsConfig::default(),
+        agentic_workflow: AgenticWorkflow::default(),
+        workflow_execution_strategy: WorkflowExecutionStrategy::default(),
+        tool_permissions: ToolPermissionsConfig::default(),
+        logging: LoggingConfig::default(),
+        memory: None,
         workspace: WorkspaceConfig {
             root_path: "/test".to_string(),
             ..Default::default()
         },
-        features: FeaturesDemonstrated::default(),
-        execution: WorkflowExecutionStrategy::default(),
-        tool_permissions: ToolPermissionsConfig::default(),
-        logging: LoggingConfig::default(),
-        agentic_workflow: None,
-        pipeline: None,
     };
 
     // Test serialization to JSON
@@ -2970,10 +2888,9 @@ fn test_workflow_spec_serialization() {
 ```
 
 **Commit:** `test: add schema type tests`
-
 ---
 
-## Step 11: Run tests
+## Step 9: Run tests
 
 Verify all tests pass:
 

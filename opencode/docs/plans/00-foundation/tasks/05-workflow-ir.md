@@ -106,35 +106,56 @@ pub struct StepIR {
     pub id: StepId,
     pub step_type: StepTypeIR,
     pub model_id: Option<ModelId>,
-    pub prompt: String,
+    pub prompt: Option<String>,
+    pub tool_name: Option<String>,
+    pub input: Option<serde_json::Value>,
     pub dependencies: Vec<StepId>,
-    pub output_config: OutputConfigIR,
+    pub when: Option<WhenConfigIR>,
     pub retry_config: RetryConfigIR,
 }
 
-/// Step type (typed)
+/// Step type (INFERRED from keys, not parsed from YAML)
+/// - generative_entity + prompt → Agent
+/// - tool key → Tool
+/// - sub_workflow key → SubWorkflow
+/// - when key with gwt → Control
+/// - loop key → Loop
 #[derive(Debug, Clone, PartialEq)]
 pub enum StepTypeIR {
     Agent,
-    Tool { tool_name: String },
+    Tool,
     SubWorkflow { workflow_id: WorkflowId },
-    Control { control_type: String },
+    Control,
+    Loop,
 }
 
-/// Output configuration (typed)
+/// When configuration (hooks)
 #[derive(Debug, Clone)]
-pub struct OutputConfigIR {
-    pub save_to_variable: Option<String>,
-    pub format: OutputFormatIR,
-    pub file_path: Option<String>,
+pub struct WhenConfigIR {
+    pub gwt: Option<Vec<GwtRuleIR>>,
+    pub requires: Vec<DependencyConfigIR>,
 }
 
-/// Output format (typed)
+/// GWT rule (Given When Then)
+#[derive(Debug, Clone)]
+pub struct GwtRuleIR {
+    pub given: String,
+    pub when: Option<String>,
+    pub then: ThenClauseIR,
+}
+
+/// Then clause
 #[derive(Debug, Clone, PartialEq)]
-pub enum OutputFormatIR {
-    Json,
-    Yaml,
-    Text,
+pub enum ThenClauseIR {
+    RouteTo(String),
+    RouteToMultiple(Vec<String>),
+}
+
+/// Dependency configuration
+#[derive(Debug, Clone)]
+pub struct DependencyConfigIR {
+    pub step: String,
+    pub condition: Option<String>,
 }
 
 /// Retry configuration (typed)
@@ -237,19 +258,21 @@ fn test_execution_mode() {
 #[test]
 fn test_step_type_variants() {
     let agent = StepTypeIR::Agent;
-    let tool = StepTypeIR::Tool {
-        tool_name: "grep".to_string(),
-    };
+    let tool = StepTypeIR::Tool;
     let subworkflow = StepTypeIR::SubWorkflow {
         workflow_id: WorkflowId::new("sub_workflow"),
     };
+    let control = StepTypeIR::Control;
+    let loop_step = StepTypeIR::Loop;
 
     assert_eq!(matches!(agent, StepTypeIR::Agent), true);
-    assert_eq!(matches!(tool, StepTypeIR::Tool { .. }), true);
+    assert_eq!(matches!(tool, StepTypeIR::Tool), true);
     assert_eq!(
         matches!(subworkflow, StepTypeIR::SubWorkflow { .. }),
         true
     );
+    assert_eq!(matches!(control, StepTypeIR::Control), true);
+    assert_eq!(matches!(loop_step, StepTypeIR::Loop), true);
 }
 
 #[test]

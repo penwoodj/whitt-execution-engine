@@ -16,6 +16,13 @@
 
 Create `src/policy.rs`:
 
+**Important v2.0 Notes:**
+- v2.0 uses `when:` hooks for step-level events (logging, output, branching)
+- v2.0 scope hierarchy: L1 (workflow top-level) → L2 (agentic_workflow defaults) → L3 (step-level)
+- Tool permissions: L1 baseline → L3 can only RESTRICT (v3 enhancement)
+- Retry: L2 step defaults → L3 overrides completely (not merged)
+- Hooks: L2 default hooks MERGE with L3 step hooks (additive)
+
 ```rust
 use crate::error::{Error, Result};
 use crate::schema::{WorkflowSpec, LoggingConfig, ToolPermissionsConfig};
@@ -60,6 +67,18 @@ pub fn compile_policies(spec: &WorkflowSpec) -> Result<CompiledPolicy> {
     })
 }
 
+/// Compile logging policy as when: hooks (v2.0 approach)
+///
+/// In v2.0, logging is configured via when: lifecycle hooks on steps, not standalone logging: sections.
+/// The v2.0 scope hierarchy is L1 (workflow top-level) → L2 (agentic_workflow defaults) → L3 (step-level).
+///
+/// Inheritance rules (v2.0):
+/// - Tool Permissions: L1 is global baseline → L3 can only RESTRICT, not expand
+/// - Retry: L2 step defaults → L3 overrides completely (not merged)
+/// - Hooks: L2 default hooks MERGE with L3 step hooks (additive)
+///
+/// Note: In v2.0, logging: section still exists but when: hooks are the primary mechanism
+/// for step-level logging events (before_step_starts, after_step_succeeds, after_step_fails, etc.).
 fn compile_logging_policy(spec: &WorkflowSpec) -> Result<LoggingPolicy> {
     let config = &spec.logging;
 
@@ -68,7 +87,7 @@ fn compile_logging_policy(spec: &WorkflowSpec) -> Result<LoggingPolicy> {
         workflow_level: config.levels.get("workflow")
             .map(|l| format!("{:?}", l).to_lowercase())
             .unwrap_or_else(|| format!("{:?}", config.default).to_lowercase()),
-        step_level: config.levels.get("pipeline")
+        step_level: config.levels.get("step")  // v2.0: "step" instead of v1's "pipeline"
             .map(|l| format!("{:?}", l).to_lowercase())
             .unwrap_or_else(|| format!("{:?}", config.default).to_lowercase()),
         model_level: config.levels.get("models")
@@ -80,16 +99,22 @@ fn compile_logging_policy(spec: &WorkflowSpec) -> Result<LoggingPolicy> {
     })
 }
 
+/// Compile tool permissions policy (v2.0: L1 baseline only)
+///
+/// In v2.0, tool_permissions at L1 (workflow top-level) is the global baseline.
+/// Per-step (L3) configuration can only RESTRICT this baseline, never expand it.
+///
+/// v3 Enhancement: Tool permissions can only RESTRICT the L1 baseline
 fn compile_tool_permissions_policy(spec: &WorkflowSpec) -> Result<ToolPermissionsPolicy> {
     let config = &spec.tool_permissions;
 
     Ok(ToolPermissionsPolicy {
-        file_read_enabled: config.file_operations.read.enabled,
-        file_write_enabled: config.file_operations.write.enabled,
-        file_delete_enabled: config.file_operations.delete.enabled,
-        web_fetch_enabled: config.web_operations.fetch.enabled,
-        web_scrape_enabled: config.web_operations.scrape.enabled,
-        shell_exec_enabled: config.shell_operations.exec.enabled,
+        file_read_enabled: config.file_operations.read.enabled || config.file_operations.read.disabled.is_none(),
+        file_write_enabled: config.file_operations.write.enabled || config.file_operations.write.disabled.is_none(),
+        file_delete_enabled: config.file_operations.delete.enabled || config.file_operations.delete.disabled.is_none(),
+        web_fetch_enabled: config.web_operations.fetch.enabled || config.web_operations.fetch.disabled.is_none(),
+        web_scrape_enabled: config.web_operations.scrape.enabled || config.web_operations.scrape.disabled.is_none(),
+        shell_exec_enabled: !(config.shell_operations.exec.disabled.unwrap_or(false)),  // v2.0: defaults to disabled
     })
 }
 ```
@@ -199,17 +224,18 @@ logging:
   default: debug
   levels:
     workflow: info
-    workflow: error  # Duplicate key - should use last
+    step: error
 tool_permissions:
   file_operations:
-    read: { # presence = enabled }
-    read: { disabled: true }
+    read:
+    read:
+      disabled: true
 "#;
     let spec = parse_yaml(yaml).unwrap();
     let policy = compile_policies(&spec).unwrap();
 
-    // Last override should win
-    assert_eq!(policy.logging.workflow_level, "error");
+    // Last override should win (disabled: true overrides presence=enabled)
+    assert_eq!(policy.logging.step_level, "error");
     assert_eq!(policy.tool_permissions.file_read_enabled, false);
 }
 ```
@@ -231,22 +257,18 @@ logging:
   default: trace
   levels:
     workflow: debug
-    pipeline: info
+    step: info
     models: warn
     tools: error
-    file_operations: critical
-    web_operations: critical
-    shell_operations: critical
-    state_management: off
-    performance_metrics: off
 "#;
     let spec = parse_yaml(yaml).unwrap();
     let policy = compile_policies(&spec).unwrap();
 
-    // Verify each level inherits correctly
+    // Verify L1→L2 inheritance (v2.0 scope hierarchy)
+    // L1 (workflow top-level): default → L2 (agentic_workflow defaults): workflow/step/models/tools
     assert_eq!(policy.logging.default_level, "trace");
     assert_eq!(policy.logging.workflow_level, "debug");
-    assert_eq!(policy.logging.step_level, "info");
+    assert_eq!(policy.logging.step_level, "info");  // v2.0: "step" instead of "pipeline"
     assert_eq!(policy.logging.model_level, "warn");
     assert_eq!(policy.logging.tool_level, "error");
 }

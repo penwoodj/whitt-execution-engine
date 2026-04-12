@@ -80,46 +80,15 @@ models:
   primary:
     host:
       type: lmstudio
+    ram_allocation:
+      strategy: dynamic
 
 workspace:
   root_path: /workspace/test
 
-features:
-  categories:
-    - ModelConfiguration
-  compatibility_checks: true
-
 execution:
   processing: serial
   load_unload: one_at_a_time
-
-tool_permissions:
-  file_operations:
-    read:
-      # presence = enabled
-    write:
-      disabled: true
-    delete:
-      disabled: true
-  web_operations:
-    fetch:
-      disabled: true
-    scrape:
-      disabled: true
-  shell_operations:
-    exec:
-      disabled: true
-
-logging:
-  # presence = enabled
-  default: info
-  output:
-    console:
-      # presence = enabled
-    file:
-      disabled: true
-  errors:
-    log_parsing_errors: true
 ```
 
 **Commit:** `test: add minimal workflow fixture`
@@ -142,6 +111,8 @@ models:
   analyzer:
     host:
       type: lmstudio
+    ram_allocation:
+      strategy: dynamic
     max_allowed:
       ram: 13%
       vram: 3.7GB
@@ -151,7 +122,6 @@ models:
     min_allowed:
       ram: 9%
       vram: 2.4GB
-    allocation_strategy: dynamic
     execution:
       load_into_memory: 45s
       time_to_first_response: 1m
@@ -163,25 +133,19 @@ models:
 
 workspace:
   root_path: /workspace/complex
-  output_path: /workspace/complex/output
-  checkpoint_path: /workspace/complex/checkpoints
-  log_path: /workspace/complex/logs
-  metrics_path: /workspace/complex/metrics
-  temp_path: /workspace/complex/temp
-
-features:
-  categories:
-    - ModelConfiguration
-    - StepTypes
-    - DataFlow
-    - ParallelExecution
-  compatibility_checks: true
+  directories:
+    output: /workspace/complex/output
+    checkpoints: /workspace/complex/checkpoints
+    logs: /workspace/complex/logs
+    metrics: /workspace/complex/metrics
+    temp: /workspace/complex/temp
 
 execution:
   processing: parallel
   load_unload: adaptive
   memory:
-    ram_allocation: adaptive
+    ram_allocation:
+      strategy: dynamic
     max_allowed:
       ram: 13%
       vram: 3.7GB
@@ -195,109 +159,24 @@ execution:
       unload_unused: true
       gc_interval_secs: 300
   parallel:
-    # presence = enabled
     algorithm: round_robin
     max_threads: 4
     max_models: 3
     max_concurrent_requests: 2
     max_steps: 2
-    max_sub_agents: 2
 
 agentic_workflow:
   steps:
     step_1_analyze:
-      step: analyze
-      name: "Analyze Code"
-      description: "Analyze the codebase"
-      type: agent
-      model: "${models.analyzer}"
-      prompt: "Analyze the codebase"
-      output:
-        save_to: analysis
-        format: json
+      generative_entity: "${models.analyzer}"
+      prompt: "Analyze codebase"
 
     step_2_validate:
-      step: validate
-      name: "Validate Results"
-      description: "Validate analysis results"
-      type: agent
-      model: "${models.validator}"
-      depends_on:
-        - step_1_analyze
-      inputs:
+      generative_entity: "${models.validator}"
+      input:
         analysis: "${step.step_1_analyze.output}"
-
-tool_permissions:
-  file_operations:
-    read:
-      # presence = enabled
-      require_confirmation: false
-      allowed_paths:
-        - /workspace/complex/src
-      max_file_size_mb: 100
-    write:
-      # presence = enabled
-      require_confirmation: true
-      allowed_paths:
-        - /workspace/complex/output
-      backup_existing: true
-      max_file_size_mb: 500
-    delete:
-      # presence = enabled
-      require_confirmation: true
-      allowed_paths:
-        - /workspace/complex/temp
-  web_operations:
-    fetch:
-      # presence = enabled
-      require_confirmation: false
-      max_concurrent_requests: 5
-      timeout_secs: 30
-    scrape:
-      # presence = enabled
-      respect_robots_txt: true
-      max_pages_per_domain: 100
-  shell_operations:
-    exec:
-      # presence = enabled
-      require_confirmation: true
-      timeout_seconds: 30
-      allowed_commands:
-        - cargo
-        - rustc
-
-logging:
-  # presence = enabled
-  default: info
-  levels:
-    workflow: info
-    models: warning
-    tools: info
-    execution: debug
-  scopes:
-    workflow:
-      # presence = enabled
-      include_timestamps: true
-  output:
-    console:
-      # presence = enabled
-      color: true
-      timestamps: true
-      format: text
-    file:
-      # presence = enabled
-      path: /workspace/complex/logs/workflow.log
-      format: json
-      rotation:
-        # presence = enabled
-        max_size_mb: 100
-        max_files: 10
-  errors:
-    log_parsing_errors: true
-    hardware_limitation_errors: true
-    runtime_errors: true
-    validation_errors: true
-    error_log_file: /workspace/complex/logs/errors.log
+      depends_on:
+        - step: step_1_analyze
 ```
 
 **Commit:** `test: add complex workflow fixture`
@@ -323,46 +202,15 @@ models:
   primary:
     host:
       type: lmstudio
+    ram_allocation:
+      strategy: dynamic
 
 workspace:
   root_path: /workspace/test
 
-features:
-  categories:
-    - ModelConfiguration
-  compatibility_checks: true
-
 execution:
   processing: serial
   load_unload: one_at_a_time
-
-tool_permissions:
-  file_operations:
-    read:
-      # presence = enabled
-    write:
-      disabled: true
-    delete:
-      disabled: true
-  web_operations:
-    fetch:
-      disabled: true
-    scrape:
-      disabled: true
-  shell_operations:
-    exec:
-      disabled: true
-
-logging:
-  # presence = enabled
-  default: info
-  output:
-    console:
-      # presence = enabled
-    file:
-      disabled: true
-  errors:
-    log_parsing_errors: true
 "#;
 
     let spec = parse_workflow_str(yaml).unwrap();
@@ -419,46 +267,15 @@ models:
   primary:
     host:
       type: lmstudio
+    ram_allocation:
+      strategy: dynamic
 
 workspace:
   root_path: /workspace/test
 
-features:
-  categories:
-    - ModelConfiguration
-  compatibility_checks: true
-
 execution:
   processing: serial
   load_unload: one_at_a_time
-
-tool_permissions:
-  file_operations:
-    read:
-      # presence = enabled
-    write:
-      disabled: true
-    delete:
-      disabled: true
-  web_operations:
-    fetch:
-      disabled: true
-    scrape:
-      disabled: true
-  shell_operations:
-    exec:
-      disabled: true
-
-logging:
-  # presence = enabled
-  default: info
-  output:
-    console:
-      # presence = enabled
-    file:
-      disabled: true
-  errors:
-    log_parsing_errors: true
 "#;
 
     let spec = parse_workflow_str(yaml).unwrap();
@@ -478,52 +295,20 @@ models:
   primary:
     host:
       type: lmstudio
+    ram_allocation:
+      strategy: dynamic
 
 workspace:
   root_path: /workspace/test
-
-features:
-  categories:
-    - ModelConfiguration
-  compatibility_checks: true
 
 execution:
   processing: serial
   load_unload: one_at_a_time
 
-tool_permissions:
-  file_operations:
-    read:
-      # presence = enabled
-    write:
-      disabled: true
-    delete:
-      disabled: true
-  web_operations:
-    fetch:
-      disabled: true
-    scrape:
-      disabled: true
-  shell_operations:
-    exec:
-      disabled: true
-
-logging:
-  # presence = enabled
-  default: info
-  output:
-    console:
-      # presence = enabled
-    file:
-      disabled: true
-  errors:
-    log_parsing_errors: true
-
 agentic_workflow:
   steps:
     step_1:
-      step: test_step
-      model: "${models.primary}"
+      generative_entity: "${models.primary}"
       prompt: "Test prompt"
 "#;
 

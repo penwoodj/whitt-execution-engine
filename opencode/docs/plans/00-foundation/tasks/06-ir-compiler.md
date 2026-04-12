@@ -16,9 +16,20 @@
 
 Add to `src/compiler/mod.rs`:
 
+**Important v2.0 Notes:**
+- v2.0 infers step type from keys present (no explicit type: property)
+  - generative_entity + prompt → agent step
+  - tool key → tool step
+  - loop key → loop step
+  - sub_workflow key → sub-workflow step
+  - only when key → control flow step
+- v2.0 uses `when:` hooks for step-level events (logging, output, branching)
+- v2.0 has no standalone `output:` section on steps (output is via when hooks)
+- v2.0: "presence = enabled" convention — key presence means enabled
+
 ```rust
 use crate::error::{Error, Result};
-use crate::schema::{WorkflowSpec, ModelConfig, Step, StepType, OutputFormat, BackoffStrategy, ModelProvider};
+use crate::schema::{WorkflowSpec, ModelConfig, Step, WhenConfig, OutputFormat, BackoffStrategy, ModelProvider};
 use crate::ir::*;
 use crate::interpolation::{ParseContext, interpolate_parse};
 use std::collections::HashMap;
@@ -37,7 +48,7 @@ pub fn compile(spec: &WorkflowSpec) -> Result<WorkflowIR> {
 
     let mut steps = HashMap::new();
     if let Some(agentic) = &spec.agentic_workflow {
-        for (step_id, step_spec) in agentic_workflow.steps.iter() {
+        for (step_id, step_spec) in agentic.steps.iter() {
             steps.insert(
                 StepId::new(step_id),
                 compile_step(step_spec, &ctx)?,
@@ -128,44 +139,66 @@ fn compile_step(spec: &Step, ctx: &ParseContext) -> Result<StepIR> {
         .map(|deps| deps.iter().map(|d| StepId::new(d)).collect())
         .unwrap_or_default();
 
+    // Infer step type from keys present (v2.0: no explicit type field)
+    let step_type = infer_step_type_from_keys(spec)?;
+
     Ok(StepIR {
         id: StepId::new(spec.step.clone()),
-        step_type: compile_step_type(&spec.step_type)?,
+        step_type,
         model_id,
         prompt,
         dependencies,
-        output_config: compile_output_config(spec.output.as_ref())?,
+        output_config: compile_when_hooks(spec.when.as_ref())?,  // v2.0: compile when hooks instead of output config
         retry_config: compile_retry_config(spec.retry.as_ref())?,
     })
 }
 
-fn compile_step_type(step_type: &StepType) -> Result<StepTypeIR> {
-    Ok(match step_type {
-        StepType::Agent => StepTypeIR::Agent,
-        StepType::Tool => StepTypeIR::Tool {
-            tool_name: "default".to_string(),
-        },
-        StepType::SubWorkflow => StepTypeIR::SubWorkflow {
-            workflow_id: WorkflowId::new("default"),
-        },
-        StepType::Control => StepTypeIR::Control {
-            control_type: "default".to_string(),
-        },
-        StepType::Loop => StepTypeIR::Agent, // Loops compile to agent steps
-    })
+/// Infer step type from keys present (v2.0 approach)
+fn infer_step_type_from_keys(step_spec: &Step) -> Result<StepTypeIR> {
+    // Check for generative_entity + prompt → agent step
+    if step_spec.generative_entity.is_some() && step_spec.prompt.is_some() {
+        return Ok(StepTypeIR::Agent);
+    }
+
+    // Check for tool key → tool step
+    if step_spec.tool.is_some() {
+        return Ok(StepTypeIR::Tool {
+            tool_name: step_spec.tool.as_ref().unwrap().clone(),
+        });
+    }
+
+    // Check for loop key → loop step
+    if step_spec.loop.is_some() {
+        return Ok(StepTypeIR::Loop);
+    }
+
+    // Check for sub_workflow key → sub-workflow step
+    if step_spec.sub_workflow.is_some() {
+        return Ok(StepTypeIR::SubWorkflow {
+            workflow_id: WorkflowId::new(
+                step_spec.sub_workflow.as_ref().unwrap()
+            ),
+        });
+    }
+
+    // Check for only when key → control flow step
+    if step_spec.when.is_some() && step_spec.generative_entity.is_none() {
+        return Ok(StepTypeIR::Control {
+            control_type: "conditional".to_string(),
+        });
+    }
+
+    // Default to agent step if ambiguous
+    Ok(StepTypeIR::Agent)
 }
 
-fn compile_output_config(output: Option<&OutputConfig>) -> Result<OutputConfigIR> {
-    let output = output.unwrap();
+/// Compile when hooks (v2.0: replaces output config)
+fn compile_when_hooks(when: Option<&WhenConfig>) -> Result<OutputConfigIR> {
+    let when = when.unwrap();
     Ok(OutputConfigIR {
-        save_to_variable: output.save_to.clone(),
-        format: match output.format {
-            OutputFormat::Json => OutputFormatIR::Json,
-            OutputFormat::Yaml => OutputFormatIR::Yaml,
-            OutputFormat::Text => OutputFormatIR::Text,
-            OutputFormat::Markdown => OutputFormatIR::Text,
-        },
-        file_path: output.file_output.as_ref().map(|f| f.path.clone()),
+        save_to_variable: None,  // v2.0: output is via when hooks (save_to, append_to)
+        format: OutputFormatIR::Yaml,  // v2.0: default format
+        file_path: None,  // v2.0: output is via when hooks
     })
 }
 
@@ -264,7 +297,6 @@ execution:
 tool_permissions:
   file_operations:
     read:
-      # presence = enabled
     write:
       disabled: true
     delete:
@@ -279,11 +311,9 @@ tool_permissions:
       disabled: true
 
 logging:
-  # presence = enabled
   default: info
   output:
     console:
-      # presence = enabled
     file:
       disabled: true
   errors:
@@ -292,8 +322,7 @@ logging:
 agentic_workflow:
   steps:
     step_1:
-      step: test_step
-      model: "${models.primary}"
+      generative_entity: "${models.primary}"
       prompt: "Use model ${models.primary.name}"
 "#;
 
