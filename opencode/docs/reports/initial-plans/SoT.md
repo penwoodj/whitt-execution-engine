@@ -141,7 +141,7 @@ Before proceeding from one plan to the next, the following quality gates must pa
 - [ ] WorkflowIR compiles from valid WorkflowSpec deterministically
 - [ ] IR validation passes without errors for valid workflows
 - [ ] IR serialization produces hash and provenance metadata
-- [ ] `.glyphnova/` directory structure is defined and stable
+- [ ] `./workspace/` directory structure is defined and stable
 - [ ] Policy fields are deterministic and compile-time resolvable
 
 ### MVP Quality Gates (plan-01)
@@ -192,7 +192,7 @@ Before proceeding from one plan to the next, the following quality gates must pa
 - [ ] Metrics collection captures all relevant performance signals
 - [ ] Human override and pause controls are always functional
 - [ ] Dashboards provide real-time visibility
-- [ ] Observability integrates with `.glyphnova/` artifact system
+- [ ] Observability integrates with `./workspace/` artifact system
 
 ---
 

@@ -86,7 +86,7 @@ Polish features for production-grade benchmarking.
 
 | Area | Properties | Status |
 |------|-----------|--------|
-| Workflow steps | `agentic_workflow.steps`, `input_variables` | ✅ Complete |
+| Workflow steps | `agentic_workflow.steps`, `inputs` | ✅ Complete |
 | Model configuration | `models.<id>.*`, `models.host.type` | ✅ Complete |
 | Retry logic | `retry.max_attempts`, `retry.backoff`, `retry.level` | ✅ Complete |
 | Timeout control | `model_overrides.timeout.*` | ✅ Complete |

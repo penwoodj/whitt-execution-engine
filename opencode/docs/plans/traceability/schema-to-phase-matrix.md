@@ -127,7 +127,7 @@
 | `agentic_workflow.steps."step_id".generative_entity` | string | - | Phase 1 | - | Model reference resolved |
 | `agentic_workflow.steps."step_id".model_overrides` | object | - | Phase 1 | `02-model-parameters-tuning.yaml` | Per-step model config applied |
 | `agentic_workflow.steps."step_id".prompt` | string | - | Phase 1 | All workflows | Prompt with interpolation rendered |
-| `agentic_workflow.steps."step_id".input_variables` | object | - | Phase 1 | - | Input variables passed |
+| `agentic_workflow.steps."step_id".inputs` | object | - | Phase 1 | - | Input variables passed |
 | `agentic_workflow.steps."step_id".file_operations` | array | - | Phase 1 | `01-file-read-write-batch.yaml` | Pre-step file ops execute |
 | `agentic_workflow.steps."step_id".context.*` | boolean | true | Phase 1 | - | Context injection configured |
 | `agentic_workflow.steps."step_id".output.save_to` | string | - | Phase 1 | - | Output variable stored |
@@ -276,8 +276,8 @@
 | `tool_permissions.shell_operations.exec.enabled` | boolean | true | Phase 2 | - | Shell exec allowed |
 | `tool_permissions.shell_operations.exec.require_confirmation` | boolean | true | Phase 2 | - | Confirmation required |
 | `tool_permissions.shell_operations.exec.allowed_commands` | array | - | Phase 2 | - | Commands validated |
-| `tool_permissions.ai_operations.web_search.enabled` | boolean | true | Phase 5 | - | Web search allowed |
-| `tool_permissions.ai_operations.content_generation.enabled` | boolean | true | Phase 5 | - | Content generation allowed |
+| `tool_permissions.content_operations.web_search.enabled` | boolean | true | Phase 5 | - | Web search allowed |
+| `tool_permissions.content_operations.content_generation.enabled` | boolean | true | Phase 5 | - | Content generation allowed |
 | `tool_permissions.system_operations.*` | object | - | Phase 6 | - | System ops controlled |
 
 **Test Coverage**:

@@ -10,7 +10,7 @@
 
 The AgentSDK Execution Engine is a **compiler-centered, local-first agentic orchestration framework** that:
 
-1. Reads YAML workflow definitions conforming to the unified schema (1705 lines)
+1. Reads YAML workflow definitions conforming to the unified schema (801 lines)
 2. Compiles them through a typed pipeline: YAML → WorkflowSpec → WorkflowIR
 3. Executes WorkflowIR against local LLM backends (LM Studio, Ollama, llama.cpp)
 4. Provides dual execution: Direct (development) and Code Generation (production)

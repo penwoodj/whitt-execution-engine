@@ -49,7 +49,7 @@ example-workflows/
 
 ## Schema Reference
 
-- **Unified Schema**: `../unified-workflow-schema.yml`
+- **Unified Schema**: `../unifying-schema/unified-workflow-schema.yml`
 - **Requirements Index**: `../index.md`
 
 ---

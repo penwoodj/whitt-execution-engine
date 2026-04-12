@@ -67,6 +67,6 @@ graph TD
 
 ## Schema Reference
 
-- **Unified Schema**: `../../unified-workflow-schema.yml`
+- **Unified Schema**: `../../unifying-schema/unified-workflow-schema.yml`
 - **Coverage Analysis**: `../requirements-coverage-analysis.md`
 - **Manual Brainstorm**: `../manual/agentic-workflow-manual-brainstorm.yml`

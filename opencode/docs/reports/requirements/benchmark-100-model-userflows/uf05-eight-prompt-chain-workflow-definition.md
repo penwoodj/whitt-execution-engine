@@ -69,15 +69,15 @@ Benchmark execution is initiated for a model.
 
 ### Step 3: Configure Steps 2-8
 - **Action**: Set up each remaining step with appropriate prompt template
-- **Schema Properties Used**: `steps.step_N.prompt`, `steps.step_N.output`, `steps.step_N.input_variables`
+- **Schema Properties Used**: `steps.step_N.prompt`, `steps.step_N.output`, `steps.step_N.inputs`
 - **Input**: Prompt templates per type
 - **Output**: Complete workflow YAML
 - **Error Handling**: N/A at definition time
 - **New Schema Requirements**: None
 
 ### Step 4: Configure Variable Passing
-- **Action**: Set up `input_variables` so each step can reference previous step outputs
-- **Schema Properties Used**: `input_variables`, `"${step.step_N.output}"`
+- **Action**: Set up `inputs` so each step can reference previous step outputs
+- **Schema Properties Used**: `inputs`, `"${step.step_N.output}"`
 - **Input**: Step dependency chain
 - **Output**: Workflow with interconnected variables
 - **Error Handling**: If variable reference is circular, validation should catch it
@@ -132,7 +132,7 @@ Benchmark execution is initiated for a model.
 | Feature | Covered by Schema | Needs Addition |
 |---------|-------------------|----------------|
 | 8-step workflow | Yes (`agentic_workflow.steps`) | None |
-| Variable passing between steps | Yes (`input_variables`) | None |
+| Variable passing between steps | Yes (`inputs`) | None |
 | Per-step output format | Yes (`output.format`) | None |
 | Per-step retry | Yes (`retry.max_attempts`) | None |
 | Per-step timeout | Yes (`model_overrides.timeout`) | None |

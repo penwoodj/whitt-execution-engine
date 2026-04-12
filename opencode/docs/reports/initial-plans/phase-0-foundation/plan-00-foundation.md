@@ -16,7 +16,7 @@
 This plan implements the foundation architecture for the YAML to Rust AgentSDK transpiler, establishing:
 - Canonical execution unit: typed `WorkflowSpec` and compiled `WorkflowIR`
 - YAML DSL authoring surface with schema validation
-- Local-first system-of-record under `.glyphnova/`
+- Local-first system-of-record under `./workspace/`
 - Policy compilation into deterministic fields
 - Complete artifact provenance and replayability
 
@@ -27,7 +27,7 @@ The foundation phase provides the bedrock upon which all subsequent features are
 - `WorkflowSpec` Rust structs with validation
 - `WorkflowIR` typed internal representation
 - Compiler pipeline: YAML → `WorkflowSpec` → `WorkflowIR`
-- `.glyphnova/` directory structure and persistence layer
+- `./workspace/` directory structure and persistence layer
 - Policy compilation system
 - Reproducibility and privacy defaults
 
@@ -46,12 +46,12 @@ The foundation phase provides the bedrock upon which all subsequent features are
 4. **Prompt → YAML Planning Layer**: Planning layer for prompt-to-workflow generation
 5. **Explicit DAG/State-Machine Semantics**: Deterministic execution paths
 6. **YAML → Rust Execution Target**: Compile to Rust AgentSDK
-7. **Per-Chat Workspace**: `.glyphnova/` system-of-record for each session
+7. **Per-Chat Workspace**: `./workspace/` system-of-record for each session
 8. **Auditable Artifacts**: Versioned runs, hashes, privacy-preserving defaults
 
 **Implementation Notes**:
 - Prefer typed Rust structs plus schema generation over ad-hoc YAML maps
-- Store workflow, policy, logs, summaries, reports, and hashes under `.glyphnova/`
+- Store workflow, policy, logs, summaries, reports, and hashes under `./workspace/`
 - Define stable ADR-aware directory layout before code generation begins
 - Treat validation criteria for v0.1.0 as artifacts stored beside foundation spec
 
@@ -65,7 +65,7 @@ From `requirements.md` and `schema-consolidated-report.md`:
 **R16**: Prompt → YAML workflow generation planning layer
 **R19**: Explicit DAG/state-machine semantics, composability, determinism
 **R22**: YAML → Rust AgentSDK execution target
-**R28**: Per-chat workspace and `.glyphnova/` system-of-record
+**R28**: Per-chat workspace and `./workspace/` system-of-record
 **R31**: Auditable local artifacts, versioned runs, hashes, privacy-preserving defaults
 
 ### Research Plan Review
@@ -221,10 +221,10 @@ From `requirements.md` and `schema-consolidated-report.md`:
 
 ### Phase 4: Local-First Storage
 
-**Description**: Implement `.glyphnova/` system-of-record
+**Description**: Implement `./workspace/` system-of-record
 
 **Tasks**:
-1. Define `.glyphnova/` directory structure
+1. Define `./workspace/` directory structure
 2. Implement artifact storage layer
 3. Add run ID generation
 4. Implement versioning system
@@ -339,7 +339,7 @@ From `requirements.md` and `schema-consolidated-report.md`:
 
 **Coverage Areas**:
 - Complete YAML to Rust execution
-- `.glyphnova/` artifact creation
+- `./workspace/` artifact creation
 - Reproducibility guarantees
 - Privacy defaults
 
@@ -420,7 +420,7 @@ From `requirements.md` and `schema-consolidated-report.md`:
 ### Checkpoint 004: Phase 4 Complete (Local-First Storage)
 
 **Date**: TBD
-**Description**: `.glyphnova/` system-of-record implemented
+**Description**: `./workspace/` system-of-record implemented
 
 **Verification Layers Covered**: 1, 2, 3, 4
 **Sign-off Criteria**:
@@ -535,7 +535,7 @@ None (foundation phase - no dependencies)
 **Shared Components**:
 - `WorkflowSpec` struct - used by all subsequent plans
 - `WorkflowIR` - execution target for all plans
-- `.glyphnova/` directory structure - used by all plans
+- `./workspace/` directory structure - used by all plans
 
 **APIs and Interfaces**:
 - `compile_workflow_spec()` - called by all plans
@@ -573,7 +573,7 @@ None (foundation phase - no dependencies)
    - Success Criteria: Hash verified in unit tests
    - Status: Not Started
 
-5. **G5: .glyphnova/ directory structure is defined and stable**
+5. **G5: ./workspace/ directory structure is defined and stable**
    - Description: Directory layout documented and tested
    - Success Criteria: E2E tests create expected structure
    - Status: Not Started

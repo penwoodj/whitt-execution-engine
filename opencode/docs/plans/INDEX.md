@@ -9,7 +9,7 @@
 
 ## Purpose
 
-This Plan File Suite provides an **extremely extensive, well-organized implementation roadmap** for the AgentSDK Execution Engine — a native Rust runtime that executes YAML-defined agentic workflows against local LLM backends (LM Studio, Ollama, llama.cpp). Every requirement from the 1705-line unified schema, 53 example workflows, 9 ADRs, and extensive research is covered with incremental validation criteria to prevent goal drift.
+This Plan File Suite provides an **extremely extensive, well-organized implementation roadmap** for the AgentSDK Execution Engine — a native Rust runtime that executes YAML-defined agentic workflows against local LLM backends (LM Studio, Ollama, llama.cpp). Every requirement from the 801-line unified schema, 53 example workflows, 9 ADRs, and extensive research is covered with incremental validation criteria to prevent goal drift.
 
 ---
 

@@ -474,7 +474,7 @@ From `requirements.md` and `schema-consolidated-report.md`:
 - [ ] Tab completion works
 - [ ] Error messages are clear and actionable
 - [ ] Config file loading works
-- [ ] Workspace discovery finds `.glyphnova/`
+- [ ] Workspace discovery finds `./workspace/`
 
 **Status**: Not Started
 

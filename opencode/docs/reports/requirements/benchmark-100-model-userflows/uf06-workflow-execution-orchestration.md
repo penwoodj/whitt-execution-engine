@@ -79,7 +79,7 @@ Benchmark session started for a specific model, or next model in the benchmark q
 
 ### Step 3: Execute Step 1 — Code Generation
 - **Action**: Send the code generation prompt to the model and capture the response
-- **Schema Properties Used**: `agentic_workflow.steps.step_1`, `input_variables`, `model_overrides.timeout.time_to_first_response`
+- **Schema Properties Used**: `agentic_workflow.steps.step_1`, `inputs`, `model_overrides.timeout.time_to_first_response`
 - **Input**: Prompt template, model reference
 - **Output**: Step 1 output saved to execution context variable
 - **Error Handling**: On timeout: retry once, then record timeout and continue to next step. On model error: log and continue.
@@ -87,7 +87,7 @@ Benchmark session started for a specific model, or next model in the benchmark q
 
 ### Step 4: Execute Steps 2-7 Sequentially
 - **Action**: Execute steps 2 through 7 (Summary, Reasoning, Creative, Factual QA, Instruction Following, Multi-Turn) in order, passing prior outputs as context
-- **Schema Properties Used**: `agentic_workflow.steps.step_2` through `step_7`, `input_variables`, `"${step.step_N.output}"`
+- **Schema Properties Used**: `agentic_workflow.steps.step_2` through `step_7`, `inputs`, `"${step.step_N.output}"`
 - **Input**: Each step's prompt + outputs from prior steps
 - **Output**: Each step's output saved to context variable
 - **Error Handling**: Per-step: retry once on timeout. On persistent failure, record error and continue to next step (don't abort entire benchmark for one step).
@@ -95,7 +95,7 @@ Benchmark session started for a specific model, or next model in the benchmark q
 
 ### Step 5: Execute Step 8 — Tool Use Planning
 - **Action**: Execute final step (tool use planning), which may reference all prior step outputs
-- **Schema Properties Used**: `agentic_workflow.steps.step_8`, `input_variables`
+- **Schema Properties Used**: `agentic_workflow.steps.step_8`, `inputs`
 - **Input**: Prompt + accumulated context from steps 1-7
 - **Output**: Step 8 output saved to context variable
 - **Error Handling**: Same as Step 4
@@ -152,7 +152,7 @@ Benchmark session started for a specific model, or next model in the benchmark q
 | Feature | Covered by Schema | Needs Addition |
 |---------|-------------------|----------------|
 | Serial step execution | Yes (`agentic_workflow.steps`) | None |
-| Variable passing between steps | Yes (`input_variables`, `"${step.step_N.output}"`) | None |
+| Variable passing between steps | Yes (`inputs`, `"${step.step_N.output}"`) | None |
 | Load/unload cycle | Yes (`workflow_execution_strategy.load_unload`) | None |
 | Per-step timeout | Yes (`model_overrides.timeout`) | None |
 | Error continuation to next step | Partially | `retry.level: step_continue` |
