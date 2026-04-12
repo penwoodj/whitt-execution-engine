@@ -25,40 +25,9 @@ workflow_execution_strategy:
   load_unload: lazy
   processing: serial
 
-state_management:
-  
-  configuration:
-    state_directory: "${workspace.state_path}"
-    versioning_enabled: true
-    delta_updates_enabled: true
-    integrity_validation: true
-  
-  versioning:
-    strategy: append_only
-    max_versions: 100
-    compression: gzip
-    compression_level: 6
-  
-  delta_updates:
-    delta_threshold_bytes: 10240
-    apply_deltas_batch: true
-    merge_strategy: union
-  
-  integrity_validation:
-    validate_on_save: true
-    validate_on_load: true
-    checksum_algorithm: sha256
-    schema_validation: true
-  
-  resume:
-    state_id: "latest"
-    allow_partial_state: true
-    validate_on_resume: true
-
 agentic_workflow:
   step_1_initialize_state:
     name: "Initialize State Management"
-    type: agent
     model: "${models.state_manager}"
     
     input:
@@ -84,18 +53,18 @@ agentic_workflow:
         
         Return initialization confirmation with state file path.
     
-    output:
-      save_to: state_init
-      format: json
+    when:
+      after_step_succeeds:
+        save_to: state_init
 
   step_2_save_state_checkpoint:
     name: "Save State Checkpoint"
-    type: agent
     model: "${models.state_manager}"
     
-    post_hooks:
-      checkpoint:
-        reason: "Save state as checkpoint"
+    when:
+      after_step_succeeds:
+        checkpoint:
+          reason: "Save state as checkpoint"
     
     input:
       prompt: |
@@ -127,13 +96,12 @@ agentic_workflow:
         
         Return save confirmation with new state version.
     
-    output:
-      save_to: state_checkpoint
-      format: json
+    when:
+      after_step_succeeds:
+        save_to: state_checkpoint
 
   step_3_load_state_from_checkpoint:
     name: "Load State from Checkpoint"
-    type: agent
     model: "${models.state_manager}"
     
     input:
@@ -158,13 +126,12 @@ agentic_workflow:
         
         Return load confirmation with restored state version.
     
-    output:
-      save_to: loaded_state
-      format: json
+    when:
+      after_step_succeeds:
+        save_to: loaded_state
 
   step_4_update_variables:
     name: "Update Workflow Variables"
-    type: agent
     model: "${models.state_manager}"
     
     input:
@@ -195,18 +162,18 @@ agentic_workflow:
         
         Return update confirmation with new state.
     
-    output:
-      save_to: variable_update
-      format: json
+    when:
+      after_step_succeeds:
+        save_to: variable_update
 
   step_5_create_final_checkpoint:
     name: "Create Final State Checkpoint"
-    type: agent
     model: "${models.state_manager}"
     
-    post_hooks:
-      checkpoint:
-        reason: "Final state checkpoint before workflow completion"
+    when:
+      after_step_succeeds:
+        checkpoint:
+          reason: "Final state checkpoint before workflow completion"
     
     input:
       prompt: |
@@ -235,13 +202,12 @@ agentic_workflow:
         
         Return final checkpoint with completion metadata.
     
-    output:
-      save_to: final_state
-      format: json
+    when:
+      after_step_succeeds:
+        save_to: final_state
 
   step_6_cleanup_old_states:
     name: "Cleanup Old State Versions"
-    type: agent
     model: "${models.state_manager}"
     
     input:
@@ -271,43 +237,6 @@ agentic_workflow:
         
         Return cleanup summary with retention statistics.
     
-    output:
-      save_to: cleanup_summary
-      format: json
-
-logging:
-  
-  levels:
-    default: info
-    state_management: debug
-  
-  scopes:
-    state_management:
-      include_state_versions: true
-      include_delta_updates: true
-      include_validation_results: true
-  
-  output:
-    console:
-      timestamps: true
-    
-    file:
-      path: ./workspace/logs/state-management.log
-
-error_handling:
-  default_action:
-    type: save_checkpoint
-    reason: "State errors trigger checkpoints"
-
-  handling_by_type:
-    state_corruption:
-      action: fail_workflow
-      notify_level: critical
-    
-    integrity_error:
-      action: rollback_and_retry
-      notify_level: error
-    
-    checksum_mismatch:
-      action: log_and_investigate
-      notify_level: warning
+    when:
+      after_step_succeeds:
+        save_to: cleanup_summary

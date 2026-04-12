@@ -173,24 +173,7 @@ execution:
     unload_unused: true
     gc_interval_secs: 300
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LOGGING
-# ─────────────────────────────────────────────────────────────────────────────
-logging:
-  global:
-    level: info
-    detail: medium
-    output_type: chat
-    format: json
-    console: true
-    file: true
-    log_file: ./workspace/logs/model_selection.log
 
-  models:
-    level: debug
-    detail: high
-    include_load_unload: true
-    include_connection_events: true
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PIPELINE DEFINITION
@@ -201,38 +184,32 @@ agentic_workflow:
     - step: check_provider_availability
       id: step_1
       generative_entity: "${models.primary_analyzer}"
-      type: agent
-      
+
       prompt: |
         Check availability of all configured model providers:
-        
+
         Providers to check:
         1. LM Studio (localhost:1234)
         2. Ollama (localhost:11434)
         3. llama.cpp (local file)
         4. Cloud API (api.openai.com)
         5. Custom Server (localhost:8080)
-        
+
         For each provider, verify:
         - Connection reachable
         - Model loaded/available
         - Response latency acceptable
         - Resource availability
-        
+
         Output:
         - provider_status: {provider_name: "available"|"unavailable"|"degraded"}
         - latency_ms: {provider_name: latency_in_ms}
         - recommended_primary: best_available_provider
         - recommended_fallback: backup_provider
 
-      output:
-        save_to: provider_health_check
-        format: json
-        fields:
-          - provider_status
-          - latency_ms
-          - recommended_primary
-          - recommended_fallback
+      when:
+        after_step_succeeds:
+          save_to: provider_health_check
 
       retry:
         max_attempts: 2
@@ -243,28 +220,27 @@ agentic_workflow:
     - step: select_optimal_model
       id: step_2
       generative_entity: "${models.primary_analyzer}"
-      type: agent
-      
+
       prompt: |
         Based on provider health check, select optimal model configuration:
-        
+
         Provider health results:
         ${step.step_1.output}
-        
+
         Task requirements:
         - Task type: code_analysis
         - Estimated complexity: moderate
         - Estimated tokens: 2000-5000
-        
+
         Routing rules:
         ${models.routing_rules}
-        
+
         Select model based on:
         1. Provider availability
         2. Task routing rules
         3. Current system load
         4. Estimated latency
-        
+
         Output:
         - selected_model: model_identifier
         - selected_provider: provider_type
@@ -274,33 +250,27 @@ agentic_workflow:
       provider_health: "${step.step_1.output}"
       routing_rules: "${models.routing_rules}"
 
-      output:
-        save_to: model_selection
-        format: json
-        fields:
-          - selected_model
-          - selected_provider
-          - selection_reason
-          - fallback_chain
+      when:
+        after_step_succeeds:
+          save_to: model_selection
 
     # ── STEP 3: Code Analysis with Selected Model ───────────────
     - step: analyze_codebase
       id: step_3
       generative_entity: "${step.step_2.output.selected_model}"
-      type: agent
-      
+
       prompt: |
-        Perform code analysis using the selected model:
-        
+        Perform code analysis using selected model:
+
         Selected model: ${step.step_2.output.selected_model}
         Provider: ${step.step_2.output.selected_provider}
-        
+
         Analysis tasks:
         1. Scan source files in ./workspace/src
         2. Identify code patterns and structures
         3. Detect potential issues
         4. Generate improvement suggestions
-        
+
         Output structured analysis with:
         - file_count: number of files analyzed
         - patterns_found: list of detected patterns
@@ -309,21 +279,15 @@ agentic_workflow:
 
       code_path: ./workspace/src
 
-      output:
-        save_to: code_analysis
-        format: json
-        fields:
-          - file_count
-          - patterns_found
-          - issues
-          - suggestions
-          - model_used
+      when:
+        after_step_succeeds:
+          save_to: code_analysis
 
       retry:
         max_attempts: 3
         backoff: exponential
         delay_ms: 2000
-        
+
         # Fallback to backup model on failure
         on_failure: fallback_model
         fallback_chain:
@@ -334,22 +298,21 @@ agentic_workflow:
     - step: validate_analysis
       id: step_4
       generative_entity: "${models.secondary_validator}"
-      type: agent
-      
+
       prompt: |
-        Validate the code analysis results using a different provider:
-        
+        Validate code analysis results using a different provider:
+
         Analysis results to validate:
         ${step.step_3.output}
-        
+
         Validation tasks:
         1. Cross-check identified patterns
         2. Verify issue severity ratings
         3. Validate suggestion feasibility
         4. Add any missed issues
-        
+
         Using different provider (Ollama) for independent validation.
-        
+
         Output:
         - validation_passed: boolean
         - corrections: any corrections to analysis
@@ -358,37 +321,30 @@ agentic_workflow:
 
       analysis_results: "${step.step_3.output}"
 
-      output:
-        save_to: validation_results
-        format: json
-        fields:
-          - validation_passed
-          - corrections
-          - additional_issues
-          - confidence_score
-          - validator_model
+      when:
+        after_step_succeeds:
+          save_to: validation_results
 
     # ── STEP 5: Generate Report ─────────────────────────────────
     - step: generate_final_report
       id: step_5
       generative_entity: "${models.primary_analyzer}"
-      type: agent
-      
+
       prompt: |
         Generate comprehensive report of model selection and analysis:
-        
+
         Provider health check:
         ${step.step_1.output}
-        
+
         Model selection:
         ${step.step_2.output}
-        
+
         Code analysis:
         ${step.step_3.output}
-        
+
         Validation results:
         ${step.step_4.output}
-        
+
         Generate report including:
         1. Provider selection summary
         2. Model performance metrics
@@ -396,12 +352,10 @@ agentic_workflow:
         4. Validation summary
         5. Recommendations
 
-      output:
-        save_to: final_report
-        format: markdown
-        file_output:
-          path: ./workspace/output/model_selection_report.md
-          encoding: utf-8
+      when:
+        after_step_succeeds:
+          - save_to: final_report
+          - append_to: ./workspace/output/model_selection_report.md
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RETRY CONFIGURATION
@@ -435,8 +389,3 @@ metrics:
     - provider_availability_rate
     - fallback_usage_count
     - total_tokens_processed
-  output:
-    path: ./workspace/metrics/model_selection_metrics.json
-    format: json
-
-# ─────────────────────────────────────────────────────────────────────────────

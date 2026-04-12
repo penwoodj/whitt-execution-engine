@@ -104,123 +104,88 @@ execution:
     model_memory_mb: 4096
     unload_unused: true
 
-logging:
-  global:
-    level: debug
-    detail: high
-    output_type: chat
-    format: json
-    console: true
-    file: true
-    log_file: ./workspace/logs/model_parameters.log
-  models:
-    level: debug
-    detail: very_high
-    include_parameters: true
-    include_token_usage: true
+
 
 agentic_workflow:
   steps:
     - step: creative_writing_task
       id: step_1
       generative_entity: "${models.creative_writer}"
-      type: agent
-      
+
       prompt: |
         Generate a creative story introduction about a software developer who discovers an AI assistant.
-        
+
         Requirements:
         - Engaging opening hook
         - Character development
         - Setting description
         - Approximately 300-500 words
-        
+
         Use high temperature (0.8) for creative variations.
 
-      output:
-        save_to: creative_output
-        format: text
-        fields:
-          - story_text
-          - word_count
-          - model_used
-          - parameters_used
+      when:
+        after_step_succeeds:
+          save_to: creative_output
 
     - step: precise_analysis_task
       id: step_2
       generative_entity: "${models.precise_analyzer}"
-      type: agent
-      
+
       prompt: |
-        Analyze the following creative text for technical accuracy and logical consistency:
-        
+        Analyze following creative text for technical accuracy and logical consistency:
+
         Text to analyze:
         ${step.step_1.output.story_text}
-        
+
         Provide:
         1. Factual consistency score (0-100)
         2. Logical flow score (0-100)
         3. Any technical inaccuracies found
         4. Suggestions for improvement
-        
+
         Use low temperature (0.1) for consistent, precise analysis.
 
       creative_text: "${step.step_1.output.story_text}"
 
-      output:
-        save_to: analysis_output
-        format: json
-        fields:
-          - factual_score
-          - logical_score
-          - inaccuracies
-          - suggestions
-          - model_used
-          - parameters_used
+      when:
+        after_step_succeeds:
+          save_to: analysis_output
 
     - step: balanced_refinement_task
       id: step_3
       generative_entity: "${models.balanced_assistant}"
-      type: agent
-      
+
       prompt: |
-        Refine the creative story based on the analysis:
-        
+        Refine creative story based on analysis:
+
         Original story:
         ${step.step_1.output.story_text}
-        
+
         Analysis results:
         ${step.step_2.output}
-        
+
         Refinement goals:
         1. Fix any technical inaccuracies
         2. Improve logical flow
         3. Maintain creative quality
-        4. Keep the engaging narrative style
-        
+        4. Keep engaging narrative style
+
         Use balanced temperature (0.5) for measured improvements.
 
       original_story: "${step.step_1.output.story_text}"
       analysis: "${step.step_2.output}"
 
-      output:
-        save_to: refined_output
-        format: text
-        fields:
-          - refined_text
-          - changes_made
-          - improvement_summary
-          - model_used
-          - parameters_used
+      when:
+        after_step_succeeds:
+          save_to: refined_output
 
     - step: code_generation_task
       id: step_4
       generative_entity: "${models.code_generator}"
-      type: agent
-      
+
       prompt: |
-        Generate Python code that implements a simple text analyzer based on the analysis criteria used in step 2.
-        
+        Generate Python code that implements a simple text analyzer based on analysis criteria used in step 2.
+
         Requirements:
         - Class-based design
         - Methods for factual consistency checking
@@ -228,15 +193,53 @@ agentic_workflow:
         - Return structured results
         - Include type hints
         - Add docstrings
-        
+
         Use code-optimized parameters (temperature 0.3) for consistent code generation.
 
-      output:
-        save_to: generated_code
-        format: text
-        file_output:
-          path: ./workspace/output/text_analyzer.py
-          encoding: utf-8
+      when:
+        after_step_succeeds:
+          - save_to: generated_code
+          - append_to: ./workspace/output/text_analyzer.py
+
+    - step: parameter_comparison_report
+      id: step_5
+      generative_entity: "${models.precise_analyzer}"
+
+      prompt: |
+        Generate a comparison report of how different model parameters affected outputs:
+
+        Creative output (temp=0.8):
+        Model: ${step.step_1.output.model_used}
+        Parameters: ${step.step_1.output.parameters_used}
+
+        Analysis output (temp=0.1):
+        Model: ${step.step_2.output.model_used}
+        Parameters: ${step.step_2.output.parameters_used}
+
+        Refined output (temp=0.5):
+        Model: ${step.step_3.output.model_used}
+        Parameters: ${step.step_3.output.parameters_used}
+
+        Code output (temp=0.3):
+        Model: ${step.step_4.output.model_used}
+        Parameters: ${step.step_4.output.parameters_used}
+
+        Compare:
+        1. How temperature affected creativity vs precision
+        2. How top_p influenced diversity
+        3. How frequency_penalty reduced repetition
+        4. How max_tokens limited output length
+        5. Trade-offs between parameter settings
+
+      step1_output: "${step.step_1.output}"
+      step2_output: "${step.step_2.output}"
+      step3_output: "${step.step_3.output}"
+      step4_output: "${step.step_4.output}"
+
+      when:
+        after_step_succeeds:
+          - save_to: comparison_report
+          - append_to: ./workspace/output/parameter_comparison.md
         fields:
           - code
           - line_count
@@ -246,7 +249,7 @@ agentic_workflow:
     - step: parameter_comparison_report
       id: step_5
       generative_entity: "${models.precise_analyzer}"
-      type: agent
+      # type: inferred from prompt + generative_entity
       
       prompt: |
         Generate a comparison report of how different model parameters affected the outputs:
@@ -279,14 +282,6 @@ agentic_workflow:
       step3_output: "${step.step_3.output}"
       step4_output: "${step.step_4.output}"
 
-      output:
-        save_to: comparison_report
-        format: markdown
-        file_output:
-          path: ./workspace/output/parameter_comparison.md
-          encoding: utf-8
-
-retry:
   default:
     max_attempts: 3
     backoff: exponential
@@ -300,65 +295,3 @@ metrics:
     - actual_tokens_generated
     - generation_time_ms
     - token_generation_rate
-  output:
-    path: ./workspace/metrics/parameter_tuning_metrics.json
-    format: json
-
-parameter_documentation:
-  temperature:
-    description: "Controls randomness in output generation"
-    range: "0.0 - 2.0"
-    low_value: "0.0-0.3: Deterministic, consistent outputs"
-    medium_value: "0.4-0.7: Balanced creativity and coherence"
-    high_value: "0.8-1.0+: Creative, diverse outputs"
-    
-  top_p:
-    description: "Nucleus sampling - cumulative probability threshold"
-    range: "0.0 - 1.0"
-    low_value: "0.1-0.5: Conservative token selection"
-    medium_value: "0.6-0.8: Balanced selection"
-    high_value: "0.9-1.0: Diverse token selection"
-    
-  top_k:
-    description: "Limits token selection to top K most likely tokens"
-    range: "1 - 100+"
-    low_value: "1-10: Very focused outputs"
-    medium_value: "20-40: Balanced focus"
-    high_value: "50+: More diverse options"
-    
-  frequency_penalty:
-    description: "Penalizes tokens based on frequency in output"
-    range: "-2.0 - 2.0"
-    low_value: "0.0: No penalty"
-    medium_value: "0.5: Moderate repetition reduction"
-    high_value: "1.0+: Strong repetition avoidance"
-    
-  presence_penalty:
-    description: "Penalizes tokens that have appeared at all"
-    range: "-2.0 - 2.0"
-    low_value: "0.0: No penalty"
-    medium_value: "0.5: Encourages topic diversity"
-    high_value: "1.0+: Strong topic diversity"
-    
-  max_tokens:
-    description: "Maximum number of tokens to generate"
-    range: "1 - model context limit"
-    recommendation: "Set based on expected output length"
-    
-  min_tokens:
-    description: "Minimum number of tokens to generate"
-    range: "0 - max_tokens"
-    recommendation: "Use to ensure sufficient output length"
-    
-  repeat_penalty:
-    description: "Overall penalty for repeating content"
-    range: "1.0 - 2.0"
-    low_value: "1.0: No penalty"
-    medium_value: "1.1-1.2: Mild repetition reduction"
-    high_value: "1.3+: Strong repetition penalty"
-    
-  stop_sequences:
-    description: "Custom sequences that stop generation"
-    type: "Array of strings"
-    examples: ["\n\n", "END", "```", "---"]
-

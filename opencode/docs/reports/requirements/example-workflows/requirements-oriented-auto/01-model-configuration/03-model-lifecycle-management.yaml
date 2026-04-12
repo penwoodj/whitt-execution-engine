@@ -98,7 +98,8 @@ models:
       cpu: 20%
       attention_tokens: 2048
     
-    allocation_strategy: static
+    ram_allocation:
+      strategy: static
     
     model_memory:
       cache_size: min
@@ -130,7 +131,8 @@ models:
       cpu: 25%
       attention_tokens: 2048
     
-    allocation_strategy: dynamic
+    ram_allocation:
+      strategy: dynamic
     
     hooks:
       on_run_complete:
@@ -194,42 +196,25 @@ execution:
     unload_unused: true
     gc_interval_secs: 180
 
-logging:
-  global:
-    level: debug
-    detail: very_high
-    output_type: chat
-    format: json
-    console: true
-    file: true
-    log_file: ./workspace/logs/model_lifecycle.log
-  
-  models:
-    level: debug
-    detail: very_high
-    include_load_unload: true
-    include_resource_usage: true
-    include_lifecycle_events: true
 
 agentic_workflow:
   steps:
     - step: model_warmup_phase
       id: step_1_warmup
       generative_entity: "${models.primary_model}"
-      type: agent
-      
+
       prompt: |
         Execute model warmup sequence:
-        
+
         Warmup tasks:
         1. Pre-load model into memory
         2. Initialize KV cache
         3. Run inference warmup prompt
         4. Verify model responsiveness
         5. Record warmup metrics
-        
+
         Warmup prompt: "Hello, please confirm you are ready to process requests."
-        
+
         Expected output:
         - warmup_complete: boolean
         - load_time_ms: milliseconds
@@ -245,21 +230,14 @@ agentic_workflow:
           - log_state: "warmup_complete"
           - record_metrics: true
 
-      output:
-        save_to: warmup_results
-        format: json
-        fields:
-          - warmup_complete
-          - load_time_ms
-          - first_token_time_ms
-          - memory_allocated_mb
-          - cache_initialized
+      when:
+        after_step_succeeds:
+          save_to: warmup_results
 
     - step: primary_processing_task
       id: step_2_primary
       generative_entity: "${models.primary_model}"
-      type: agent
-      
+            
       prompt: |
         Process the main analysis task using the primary model:
         
@@ -288,11 +266,13 @@ agentic_workflow:
           - update_model_metrics: true
           - check_cooldown_threshold: 300
 
-      output:
-        save_to: primary_analysis
-        format: json
-        fields:
-          - components_found
+      when:
+
+
+        after_step_succeeds:
+
+
+          save_to: primary_analysis          - components_found
           - organization_score
           - recommendations
           - memory_used_mb
@@ -301,8 +281,7 @@ agentic_workflow:
     - step: switch_to_secondary_model
       id: step_3_switch
       generative_entity: "${models.secondary_model}"
-      type: agent
-      
+            
       prompt: |
         Validate the primary analysis using the secondary model:
         
@@ -327,11 +306,13 @@ agentic_workflow:
         keep_primary_cached: true
         preload_secondary: true
 
-      output:
-        save_to: validation_results
-        format: json
-        fields:
-          - validation_passed
+      when:
+
+
+        after_step_succeeds:
+
+
+          save_to: validation_results          - validation_passed
           - cross_check_score
           - additional_findings
           - model_switch_time_ms
@@ -339,8 +320,7 @@ agentic_workflow:
     - step: quick_response_task
       id: step_4_quick
       generative_entity: "${models.lightweight_model}"
-      type: agent
-      
+            
       prompt: |
         Generate a quick summary using the lightweight model:
         
@@ -358,14 +338,16 @@ agentic_workflow:
       analysis_data: "${step.step_2_primary.output}"
       validation_data: "${step.step_3_switch.output}"
 
-      output:
-        save_to: quick_summary
-        format: text
+      when:
 
+
+        after_step_succeeds:
+
+
+          save_to: quick_summary
     - step: multi_model_parallel_task
       id: step_5_parallel
-      type: agent
-      parallel_group: multi_model_analysis
+            parallel_group: multi_model_analysis
       max_parallel: 2
       
       prompt: |
@@ -394,11 +376,13 @@ agentic_workflow:
         load_strategy: staggered
         stagger_delay_ms: 500
 
-      output:
-        save_to: parallel_results
-        format: json
-        fields:
-          - detailed_analysis_result
+      when:
+
+
+        after_step_succeeds:
+
+
+          save_to: parallel_results          - detailed_analysis_result
           - independent_validation_result
           - peak_memory_usage_mb
           - parallel_execution_time_ms
@@ -406,8 +390,7 @@ agentic_workflow:
     - step: model_cooldown_phase
       id: step_6_cooldown
       generative_entity: "${models.primary_model}"
-      type: agent
-      
+            
       prompt: |
         Execute model cooldown and cleanup sequence:
         
@@ -434,10 +417,13 @@ agentic_workflow:
           - evaluate_unload_decision: true
           - cleanup_temporary_resources: true
 
-      output:
-        save_to: cooldown_report
-        format: json
-        file_output:
+      when:
+
+
+        after_step_succeeds:
+
+
+          save_to: cooldown_report        file_output:
           path: ./workspace/output/lifecycle_report.json
         fields:
           - total_uptime_secs
@@ -471,30 +457,3 @@ metrics:
     - gc_collections
     - oom_events
     - throttle_events
-  output:
-    path: ./workspace/metrics/lifecycle_metrics.json
-    format: json
-
-lifecycle_configuration:
-  warmup:
-    preload_cache: true
-    warmup_prompt: "Hello, please confirm readiness."
-    timeout_secs: 60
-  
-  cooldown:
-    idle_threshold_secs: 300
-    cache_flush_on_cooldown: false
-    metrics_collection: true
-  
-  switching:
-    strategy: adaptive
-    memory_check_before_switch: true
-    unload_previous_model: auto
-    cache_previous_model: true
-  
-  memory_management:
-    gc_interval_secs: 180
-    pressure_threshold_percent: 85
-    swap_enabled: true
-    oom_recovery: graceful_degradation
-
