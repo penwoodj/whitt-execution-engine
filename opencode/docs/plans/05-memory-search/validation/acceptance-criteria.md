@@ -132,7 +132,7 @@ Complete acceptance criteria for Phase 05 Memory & Search, verifying all ADR-000
 
 ### Constraint 7: Memory Artifacts
 
-- [ ] **Memory artifacts in .glyphnova/memory/ with versioned references**
+- [ ] **Memory artifacts in ./workspace/memory/ with versioned references**
   - Test: `test_memory_location()`
   - Command: `cargo test --package agentsdk-memory --test acceptance_location`
   - Expected: PASS, all artifacts in correct directory
@@ -472,7 +472,7 @@ Complete acceptance criteria for Phase 05 Memory & Search, verifying all ADR-000
   - Expected: All schema tests pass
 
 - [ ] **JSON schemas validated**
-  - Command: `cat .glyphnova/schemas/*.json | jq .`
+  - Command: `cat ./workspace/schemas/*.json | jq .`
   - Expected: All schemas valid
 
 ### Layer 5: ADR-0006 Compliance
@@ -498,11 +498,11 @@ Complete acceptance criteria for Phase 05 Memory & Search, verifying all ADR-000
 ### Layer 7: Log Verification
 
 - [ ] **All operations logged**
-  - Command: `grep -c '"operation":' .glyphnova/logs/*.log`
+  - Command: `grep -c '"operation":' ./workspace/logs/*.log`
   - Expected: Count matches operation count
 
 - [ ] **Logs include required fields**
-  - Command: `jq -r 'keys' .glyphnova/logs/*.log | head -1`
+  - Command: `jq -r 'keys' ./workspace/logs/*.log | head -1`
   - Expected: Required fields present
 
 ---

@@ -36,7 +36,7 @@ This automation layer enables automated workflow execution while maintaining str
 ### Key Principles
 
 - **Safety-First**: All automation runs in isolated contexts (worktrees, branches, containers)
-- **Auditability**: Every automated action produces artifacts in `.glyphnova/`
+- **Auditability**: Every automated action produces artifacts in `./workspace/`
 - **Manual Control**: Merge proposals are outputs, not auto-commits (ADR-0007)
 - **Recoverability**: All experiments can be rolled back with complete cleanup
 
@@ -98,10 +98,10 @@ ADR-0007 governs automation in the AgentSDK. This implementation must follow the
 
 ### Merge Recommendations Are Outputs (Not Auto-Commits)
 
-**Constraint:** Merge proposals are generated as artifacts in `.glyphnova/`, not automatically committed.
+**Constraint:** Merge proposals are generated as artifacts in `./workspace/`, not automatically committed.
 
 **Implementation:**
-- Task 02: Merge Proposal Generation writes diff files to `.glyphnova/merge-proposals/`
+- Task 02: Merge Proposal Generation writes diff files to `./workspace/merge-proposals/`
 - Task 03: Manual Refinement Capture links proposals to approval/rejection events
 - Task 07: Automation CLI provides `approve` and `reject` commands for manual action
 - No auto-merge logic in the automation layer
@@ -113,12 +113,12 @@ ADR-0007 governs automation in the AgentSDK. This implementation must follow the
 
 ### Manual Refinement Preserved as Artifacted Events
 
-**Constraint:** All manual changes (approvals, rejections, refinements) are captured as events in `.glyphnova/`.
+**Constraint:** All manual changes (approvals, rejections, refinements) are captured as events in `./workspace/`.
 
 **Implementation:**
 - Task 03: Manual Refinement Capture records all refinement events
 - Events include: what, why, who, when, linked artifacts
-- Immutable event log in `.glyphnova/refinements/`
+- Immutable event log in `./workspace/refinements/`
 - Rollback can undo refinements by reversing event log
 
 **Validation:**
@@ -194,14 +194,14 @@ ADR-0007 governs automation in the AgentSDK. This implementation must follow the
 3. **Execution**: Cron scheduler triggers workflow execution
 4. **Experiment**: Workflow runs experiment in isolated branch/worktree
 5. **Result Capture**: Experiment results captured and compared
-6. **Merge Proposal**: Diff generated and written to `.glyphnova/merge-proposals/`
+6. **Merge Proposal**: Diff generated and written to `./workspace/merge-proposals/`
 7. **Manual Refinement**: User reviews, approves/rejects/refines via CLI or UI
 8. **Rollback**: If needed, experiment rolled back and branch deleted
 
 ### Artifact Structure
 
 ```
-.glyphnova/
+./workspace/
 ├── experiments/
 │   ├── <experiment-id>/
 │   │   ├── manifest.json
@@ -435,7 +435,7 @@ See `validation/` for validation criteria tests:
 
 - [ ] Cron policies compiled to WorkflowIR, not interpreted at runtime
 - [ ] Git experiments run in isolated branches only
-- [ ] Merge proposals written to `.glyphnova/` only, never auto-committed
+- [ ] Merge proposals written to `./workspace/` only, never auto-committed
 - [ ] Manual refinements captured as immutable events
 
 ### Functional Validation

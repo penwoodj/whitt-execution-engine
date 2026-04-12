@@ -10,7 +10,7 @@
 - **IR Layer**: WorkflowIR typed internal representation for execution
 - **Compiler Layer**: WorkflowSpec→WorkflowIR compilation pipeline with validation
 - **Policy Layer**: Deterministic policy field compilation and inheritance
-- **Storage Layer**: Local .glyphnova/ directory structure with sled persistence
+- **Storage Layer**: Local ./workspace/ directory structure with sled persistence
 - **Validation Layer**: DAG validation, circular reference detection, threshold validation
 
 **Tech Stack:**
@@ -163,7 +163,7 @@ Implement deterministic policy field compilation with inheritance and override r
 **Dependencies:** Task 6
 **Estimated Time:** 6 hours
 
-Implement .glyphnova/ directory structure and persistence with sled (ACID transactions).
+Implement ./workspace/ directory structure and persistence with sled (ACID transactions).
 
 ### Task 10: Workspace Management
 **File:** `tasks/10-workspace-management.md`
@@ -365,7 +365,7 @@ Phase 0 is complete when:
 2. **Parser Correctness**: YAML→WorkflowSpec parsing with accurate error reporting
 3. **IR Compilation**: WorkflowSpec→WorkflowIR pipeline passes all tests
 4. **Validation**: DAG validation, threshold validation, policy compilation all pass
-5. **Persistence**: Local .glyphnova/ directory structure with sled persistence
+5. **Persistence**: Local ./workspace/ directory structure with sled persistence
 6. **Test Coverage**: All unit, integration, and property tests pass
 7. **Verification**: All 7 verification layers pass with zero errors
 

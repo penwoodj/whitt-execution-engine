@@ -6,7 +6,7 @@
 
 **Estimated Time:** 6-8 days
 
-**Goal:** Build a merge proposal generator that creates accurate diffs, validates changes, scores confidence, and artifacts proposals to `.glyphnova/merge-proposals/` without auto-committing.
+**Goal:** Build a merge proposal generator that creates accurate diffs, validates changes, scores confidence, and artifacts proposals to `./workspace/merge-proposals/` without auto-committing.
 
 ---
 
@@ -17,11 +17,11 @@ The merge proposal generator:
 - Generates comprehensive diffs between experiment and base branches
 - Validates changes against criteria (test passage, code quality, etc.)
 - Scores proposal confidence (high/medium/low)
-- Artifacts proposals to `.glyphnova/merge-proposals/`
+- Artifacts proposals to `./workspace/merge-proposals/`
 - Links proposals to experiments and refinement events
 
 **ADR-0007 Compliance:**
-- Proposals are OUTPUTS only (written to `.glyphnova/`, never auto-committed)
+- Proposals are OUTPUTS only (written to `./workspace/`, never auto-committed)
 - Manual approval required via CLI/UI (Task 03, Task 07)
 - Complete audit trail via artifact linking
 
@@ -58,7 +58,7 @@ pub use artifacts::{ProposalArtifactManager, ProposalMetadata};
 use std::path::PathBuf;
 
 /// Merge proposal artifact directory
-pub const PROPOSAL_ARTIFACT_DIR: &str = ".glyphnova/merge-proposals";
+pub const PROPOSAL_ARTIFACT_DIR: &str = "./workspace/merge-proposals";
 ```
 
 ---
@@ -634,7 +634,7 @@ async fn test_proposal_artifact_manager() {
     let manager = ProposalArtifactManager::new(temp_dir.path()).unwrap();
 
     // Verify artifact directory created
-    let artifact_dir = temp_dir.path().join(".glyphnova/merge-proposals");
+    let artifact_dir = temp_dir.path().join("./workspace/merge-proposals");
     assert!(artifact_dir.exists());
 
     // Save proposal
@@ -702,14 +702,14 @@ pub use merge::{
 # Merge Proposal Generation
 
 The merge proposal generator creates comprehensive diff proposals with validation
-and confidence scoring, all artifacted to `.glyphnova/merge-proposals/`.
+and confidence scoring, all artifacted to `./workspace/merge-proposals/`.
 
 ## Features
 
 - Comprehensive diff generation
 - Validation criteria (tests, code quality, patterns)
 - Confidence scoring (high/medium/low)
-- Artifact storage in `.glyphnova/merge-proposals/`
+- Artifact storage in `./workspace/merge-proposals/`
 - Linking to experiments and refinement events
 
 ## ADR-0007 Compliance
@@ -757,7 +757,7 @@ git commit -m "feat(automation): implement merge proposal generation (Task 02)
 - Add comprehensive diff generation from git branches
 - Implement validation criteria (tests, code quality, patterns)
 - Add confidence scoring (high/medium/low)
-- Implement proposal artifact manager (.glyphnova/merge-proposals/)
+- Implement proposal artifact manager (./workspace/merge-proposals/)
 - Write comprehensive unit and integration tests
 - Follow ADR-0007: proposals are outputs only, never auto-committed
 
@@ -773,7 +773,7 @@ Task 02 implements merge proposal generation with:
 ✅ Comprehensive diff generation
 ✅ Validation criteria (tests, code quality, patterns)
 ✅ Confidence scoring (high/medium/low)
-✅ Proposal artifact management (`.glyphnova/merge-proposals/`)
+✅ Proposal artifact management (`./workspace/merge-proposals/`)
 ✅ Unit and integration tests
 ✅ ADR-0007 compliance (proposals are outputs only)
 

@@ -28,7 +28,7 @@ This phase delivers the core user-facing CLI and the LLM backend abstraction lay
 **Estimated Time:** 8-10 weeks
 
 **Dependencies:**
-- **Phase 0:** WorkflowSpec, WorkflowIR, parser, .glyphnova/ storage
+- **Phase 0:** WorkflowSpec, WorkflowIR, parser, ./workspace/ storage
 - **Phase 1:** Queue, Scheduler, StepExecutor, LoopRunner
 
 ---
@@ -79,7 +79,7 @@ This phase adheres to ADR-0003 (Schema Domain Ownership) with the following doma
 
 ### CLI-First Design
 - All functionality exposed through CLI with clear subcommands
-- Configuration loaded from `~/.glyphnova/config.yaml`
+- Configuration loaded from `~/./workspace/config.yaml`
 - Tab completion support for all commands and options
 - Output formatting (plain, JSON, table) for different use cases
 
@@ -495,9 +495,9 @@ pub enum LlmError {
 ## Configuration Structure
 
 ```yaml
-# ~/.glyphnova/config.yaml
+# ~/./workspace/config.yaml
 general:
-  network_enabled: false  # Opt-in for network access
+  network_disabled: true  # Opt-in for network access
   output_format: plain   # plain | json | table
 
 providers:
@@ -537,20 +537,20 @@ permissions:
     - shell.exec
 
 rag:
-  enabled: false
-  knowledge_base: ~/.glyphnova/knowledge
+  disabled: true
+  knowledge_base: ~/./workspace/knowledge
   embedding_model: nomic-embed-text
   max_context: 2000
   retrieval_limit: 5
 
 codegen:
-  enabled: false
-  output_dir: ~/.glyphnova/generated
+  disabled: true
+  output_dir: ~/./workspace/generated
   compile_on_generate: true
 
 self_improvement:
-  enabled: false
-  log_dir: ~/.glyphnova/logs
+  disabled: true
+  log_dir: ~/./workspace/logs
   auto_apply: false
 ```
 

@@ -131,7 +131,7 @@ This document defines exit criteria for Phase 1 MVP Queue & Scheduler implementa
 - [ ] Uses WorkflowSpec from Phase 0
 - [ ] Uses WorkflowIR from Phase 0
 - [ ] Uses YAML parser from Phase 0
-- [ ] Uses .glyphnova/ storage from Phase 0
+- [ ] Uses ./workspace/ storage from Phase 0
 - [ ] Uses variable interpolation from Phase 0
 
 #### Compatibility Criteria

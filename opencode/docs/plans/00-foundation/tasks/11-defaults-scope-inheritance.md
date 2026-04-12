@@ -60,12 +60,12 @@ impl DefaultValues {
                 tool_level: LogLevel::Info,
             },
             tool_permissions: ToolPermissionDefaults {
-                file_read_enabled: true,
-                file_write_enabled: true,
-                file_delete_enabled: true,
-                web_fetch_enabled: true,
-                web_scrape_enabled: true,
-                shell_exec_enabled: false,
+                file_read_# presence = enabled,
+                file_write_# presence = enabled,
+                file_delete_# presence = enabled,
+                web_fetch_# presence = enabled,
+                web_scrape_# presence = enabled,
+                shell_exec_disabled: true,
             },
         }
     }

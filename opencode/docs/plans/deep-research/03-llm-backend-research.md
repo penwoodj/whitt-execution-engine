@@ -897,10 +897,10 @@ grep -r "SSE\|NDJSON" src/backend/streaming.rs
 ### Task 1: Document API Protocols for All 4 Backends
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/lmstudio-api-protocol.yaml`
-- Create: `.glyphnova/plans/research/evidence/ollama-api-protocol.yaml`
-- Create: `.glyphnova/plans/research/evidence/llamacpp-api-protocol.yaml`
-- Create: `.glyphnova/plans/research/evidence/openai-api-protocol.yaml`
+- Create: `./workspace/plans/research/evidence/lmstudio-api-protocol.yaml`
+- Create: `./workspace/plans/research/evidence/ollama-api-protocol.yaml`
+- Create: `./workspace/plans/research/evidence/llamacpp-api-protocol.yaml`
+- Create: `./workspace/plans/research/evidence/openai-api-protocol.yaml`
 
 - [ ] **Step 1: Document LM Studio API protocol**
 
@@ -928,7 +928,7 @@ Expected output: `openai-api-protocol.yaml`
 
 - [ ] **Step 5: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ && git commit -m "feat: add llm backend api protocols"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add llm backend api protocols"`
 Expected: Git commit successful
 
 ---
@@ -936,7 +936,7 @@ Expected: Git commit successful
 ### Task 2: Design Unified Backend Trait
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/unified-backend-trait.md`
+- Create: `./workspace/plans/research/evidence/unified-backend-trait.md`
 
 - [ ] **Step 1: Design Backend trait with async methods**
 
@@ -958,7 +958,7 @@ Expected output: `unified-backend-trait.md`
 
 - [ ] **Step 4: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ && git commit -m "feat: add unified backend trait design evidence"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add unified backend trait design evidence"`
 Expected: Git commit successful
 
 ---
@@ -966,7 +966,7 @@ Expected: Git commit successful
 ### Task 3: Create Wiremock Mocking Strategy
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/wiremock-mocking-strategy.md`
+- Create: `./workspace/plans/research/evidence/wiremock-mocking-strategy.md`
 - Create: `tests/backend/mocks/lmstudio.rs`
 - Create: `tests/backend/mocks/ollama.rs`
 - Create: `tests/backend/mocks/llamacpp.rs`
@@ -992,7 +992,7 @@ Expected output: `wiremock-mocking-strategy.md`
 
 - [ ] **Step 4: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ tests/backend/mocks/ && git commit -m "feat: add wiremock mocking strategy evidence"`
+Run: `git add ./workspace/plans/research/evidence/ tests/backend/mocks/ && git commit -m "feat: add wiremock mocking strategy evidence"`
 Expected: Git commit successful
 
 ---
@@ -1001,7 +1001,7 @@ Expected: Git commit successful
 
 **Files:**
 - Modify: `opencode/docs/plans/deep-research/03-llm-backend-research.md`
-- Create: `.glyphnova/plans/research/validation/llm-backend-validation-report.md`
+- Create: `./workspace/plans/research/validation/llm-backend-validation-report.md`
 
 - [ ] **Step 1: Run all validation scripts**
 
@@ -1031,7 +1031,7 @@ Expected output: `llm-backend-validation-report.md`
 
 - [ ] **Step 6: Commit validation report**
 
-Run: `git add .glyphnova/plans/research/validation/ && git commit -m "feat: add llm backend research validation report"`
+Run: `git add ./workspace/plans/research/validation/ && git commit -m "feat: add llm backend research validation report"`
 Expected: Git commit successful
 
 ---

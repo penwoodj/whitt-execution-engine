@@ -39,7 +39,7 @@ pub struct StorageConfig {
 impl Default for StorageConfig {
     fn default() -> Self {
         Self {
-            db_path: ".glyphnova/queue".to_string(),
+            db_path: "./workspace/queue".to_string(),
             cache_size: 1024 * 1024 * 256, // 256MB
             flush_every_ms: Some(1000),
         }

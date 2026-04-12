@@ -94,7 +94,7 @@ pub struct WorkflowIR {
 
 ### Key Finding: Content-Addressed Storage with Replayability
 
-**Recommendation**: Implement a **local-first artifact layout** rooted in `.glyphnova/` with content-addressed storage, per-chat workspaces, and explicit provenance tracking.
+**Recommendation**: Implement a **local-first artifact layout** rooted in `./workspace/` with content-addressed storage, per-chat workspaces, and explicit provenance tracking.
 
 **Evidence Sources**:
 1. **AWS DevOps Guidance** - Emphasizes frequent small commits for replayable checkpoints
@@ -103,7 +103,7 @@ pub struct WorkflowIR {
 
 **Recommended Layout**:
 ```
-.glyphnova/
+./workspace/
 ├── per-chat-workspaces/
 │   ├── {chat-id}/
 │   │   ├── workflow_spec.yaml
@@ -127,7 +127,7 @@ pub struct WorkflowIR {
 4. **Replayability**: Any state reproducible from event stream or checkpoint
 5. **Auditability**: Hash chains and commit logs prove integrity
 
-**ADR Alignment**: ADR-0001 states "Every chat is a scoped executable work container with a local system-of-record rooted in a per-chat workspace and `.glyphnova/`"
+**ADR Alignment**: ADR-0001 states "Every chat is a scoped executable work container with a local system-of-record rooted in a per-chat workspace and `./workspace/`"
 
 ---
 

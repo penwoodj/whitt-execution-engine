@@ -16,7 +16,7 @@ This phase implements the core execution engine for the AgentSDK: a persistent j
 
 **Estimated Time:** 8-10 weeks
 
-**Dependencies:** Phase 0 must be complete (WorkflowSpec, WorkflowIR, .glyphnova/ storage layer)
+**Dependencies:** Phase 0 must be complete (WorkflowSpec, WorkflowIR, ./workspace/ storage layer)
 
 **ADR-0002 Compliance:**
 - ChatSession as work container for all workflow execution
@@ -425,7 +425,7 @@ At each checkpoint:
 - `src/spec.rs`: WorkflowSpec struct with YAML schema definitions
 - `src/ir.rs`: WorkflowIR struct with validated, typed representation
 - `src/parser.rs`: YAML parser from WorkflowSpec to WorkflowIR
-- `src/storage.rs`: .glyphnova/ persistence layer for workflow files
+- `src/storage.rs`: ./workspace/ persistence layer for workflow files
 - `src/interpolation.rs`: Variable interpolation for workflow inputs
 
 **External Dependencies:**

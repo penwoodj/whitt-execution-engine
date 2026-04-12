@@ -18,7 +18,7 @@ This document is the **master research orchestrator** for the AgentSDK Execution
 2. **Research-to-Implementation Integration Pipeline**: How findings flow into specific implementation phases
 3. **Research Quality Gates**: Criteria for research completion and validation
 4. **Research Completion Criteria**: Definition of done for each research stream
-5. **Research Document Versioning**: How research artifacts are stored and versioned in `.glyphnova/`
+5. **Research Document Versioning**: How research artifacts are stored and versioned in `./workspace/`
 6. **Anti-Goal-Drift Checkpoints**: Mechanisms to prevent research from diverging from project goals
 
 ---
@@ -43,7 +43,7 @@ This document is the **master research orchestrator** for the AgentSDK Execution
 1. **Evidence-Based**: All recommendations must cite 2+ sources (URLs, version numbers, benchmarks)
 2. **Actionable**: Research must produce concrete integration points and validation criteria
 3. **Traceable**: Every research finding must link to specific implementation phases
-4. **Versioned**: All research artifacts stored in `.glyphnova/plans/research/` with content-addressed hashes
+4. **Versioned**: All research artifacts stored in `./workspace/plans/research/` with content-addressed hashes
 5. **Anti-Drift**: Checkpoints prevent research from diverging from project goals
 
 ### Research Document Template
@@ -281,7 +281,7 @@ scripts/validate-traceability.sh <research-document.md>
 Each research stream (`01-*.md` through `06-*.md`) is complete when:
 
 1. **Completeness Gate**: ✅ All quality gates pass
-2. **Evidence Repository**: All evidence artifacts stored in `.glyphnova/plans/research/evidence/`
+2. **Evidence Repository**: All evidence artifacts stored in `./workspace/plans/research/evidence/`
 3. **Validation Artifacts**: All validation scripts pass
 4. **Integration Mapping**: All findings mapped to implementation phases
 5. **ADR Traceability**: All findings linked to relevant ADRs
@@ -304,10 +304,10 @@ This master plan is complete when:
 
 ### Storage Layout
 
-Research documents stored in `.glyphnova/plans/research/`:
+Research documents stored in `./workspace/plans/research/`:
 
 ```
-.glyphnova/
+./workspace/
 ├── plans/
 │   ├── research/
 │   │   ├── 00-research-master-plan.md          # This document
@@ -477,9 +477,9 @@ scripts/validate-adr-alignment.sh <research-document.md>
 ### Task 1: Initialize Research Infrastructure
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/`
-- Create: `.glyphnova/plans/research/validation/`
-- Create: `.glyphnova/plans/research/dashboard/`
+- Create: `./workspace/plans/research/evidence/`
+- Create: `./workspace/plans/research/validation/`
+- Create: `./workspace/plans/research/dashboard/`
 - Create: `scripts/validate-research-completeness.sh`
 - Create: `scripts/validate-evidence-quality.sh`
 - Create: `scripts/validate-integration-completeness.sh`
@@ -490,7 +490,7 @@ scripts/validate-adr-alignment.sh <research-document.md>
 
 - [ ] **Step 1: Create research directory structure**
 
-Run: `mkdir -p .glyphnova/plans/research/{evidence,validation,dashboard}`
+Run: `mkdir -p ./workspace/plans/research/{evidence,validation,dashboard}`
 Expected: Directory structure created
 
 - [ ] **Step 2: Create validation completeness script**
@@ -591,7 +591,7 @@ Expected: Script created and executable
 
 - [ ] **Step 6: Commit research infrastructure**
 
-Run: `git add .glyphnova/plans/research/ scripts/validate-*.sh && git commit -m "feat: initialize research infrastructure with validation scripts"`
+Run: `git add ./workspace/plans/research/ scripts/validate-*.sh && git commit -m "feat: initialize research infrastructure with validation scripts"`
 Expected: Git commit successful
 
 ---
@@ -599,7 +599,7 @@ Expected: Git commit successful
 ### Task 2: Create Research Integration Matrix
 
 **Files:**
-- Create: `.glyphnova/plans/research/dashboard/research-integration-matrix.md`
+- Create: `./workspace/plans/research/dashboard/research-integration-matrix.md`
 
 - [ ] **Step 1: Write research integration matrix document**
 
@@ -698,12 +698,12 @@ Expected: Git commit successful
 - [ ] Implementation team notified
 ```
 
-Run: `mkdir -p .glyphnova/plans/research/dashboard && touch .glyphnova/plans/research/dashboard/research-integration-matrix.md`
+Run: `mkdir -p ./workspace/plans/research/dashboard && touch ./workspace/plans/research/dashboard/research-integration-matrix.md`
 Expected: Research integration matrix document created
 
 - [ ] **Step 2: Commit research integration matrix**
 
-Run: `git add .glyphnova/plans/research/dashboard/research-integration-matrix.md && git commit -m "feat: create research integration matrix dashboard"`
+Run: `git add ./workspace/plans/research/dashboard/research-integration-matrix.md && git commit -m "feat: create research integration matrix dashboard"`
 Expected: Git commit successful
 
 ---
@@ -711,7 +711,7 @@ Expected: Git commit successful
 ### Task 3: Create Evidence Gate Dashboard
 
 **Files:**
-- Create: `.glyphnova/plans/research/dashboard/evidence-gate-dashboard.md`
+- Create: `./workspace/plans/research/dashboard/evidence-gate-dashboard.md`
 
 - [ ] **Step 1: Write evidence gate dashboard document**
 
@@ -943,12 +943,12 @@ Expected: Git commit successful
 **Next Review**: 2026-04-13
 ```
 
-Run: `touch .glyphnova/plans/research/dashboard/evidence-gate-dashboard.md`
+Run: `touch ./workspace/plans/research/dashboard/evidence-gate-dashboard.md`
 Expected: Evidence gate dashboard document created
 
 - [ ] **Step 2: Commit evidence gate dashboard**
 
-Run: `git add .glyphnova/plans/research/dashboard/evidence-gate-dashboard.md && git commit -m "feat: create evidence gate dashboard with real-time status tracking"`
+Run: `git add ./workspace/plans/research/dashboard/evidence-gate-dashboard.md && git commit -m "feat: create evidence gate dashboard with real-time status tracking"`
 Expected: Git commit successful
 
 ---
@@ -956,7 +956,7 @@ Expected: Git commit successful
 ### Task 4: Create Research Handoff Documentation
 
 **Files:**
-- Create: `.glyphnova/plans/research/research-handoff.md`
+- Create: `./workspace/plans/research/research-handoff.md`
 
 - [ ] **Step 1: Write research handoff documentation**
 
@@ -986,7 +986,7 @@ Expected: Git commit successful
 
 ### Evidence Artifacts
 - [x] All evidence sources documented in research documents
-- [x] Evidence artifacts stored in `.glyphnova/plans/research/evidence/`
+- [x] Evidence artifacts stored in `./workspace/plans/research/evidence/`
 - [x] Evidence sources include URLs, versions, dates
 - [x] Evidence sources include metrics and benchmarks
 
@@ -1319,12 +1319,12 @@ Expected: Git commit successful
 **End of Research Handoff Documentation**
 ```
 
-Run: `touch .glyphnova/plans/research/research-handoff.md`
+Run: `touch ./workspace/plans/research/research-handoff.md`
 Expected: Research handoff documentation created
 
 - [ ] **Step 2: Commit research handoff documentation**
 
-Run: `git add .glyphnova/plans/research/research-handoff.md && git commit -m "feat: create research handoff documentation for implementation team"`
+Run: `git add ./workspace/plans/research/research-handoff.md && git commit -m "feat: create research handoff documentation for implementation team"`
 Expected: Git commit successful
 
 ---
@@ -1332,11 +1332,11 @@ Expected: Git commit successful
 ### Task 5: Complete Master Research Plan
 
 **Files:**
-- Modify: `.glyphnova/plans/research/00-research-master-plan.md`
+- Modify: `./workspace/plans/research/00-research-master-plan.md`
 
 - [ ] **Step 1: Update master plan status to Complete**
 
-Run: `git add .glyphnova/plans/research/00-research-master-plan.md && git commit -m "feat: complete research master plan with infrastructure, validation, and handoff"`
+Run: `git add ./workspace/plans/research/00-research-master-plan.md && git commit -m "feat: complete research master plan with infrastructure, validation, and handoff"`
 Expected: Git commit successful
 
 ---
@@ -1423,7 +1423,7 @@ Expected: Git commit successful
 1. **ADR-0001**: Foundation Phase Architecture Decision
 2. **ADR-0002**: MVP Queue & Scheduler Architecture Decision
 3. **ADR-0003**: CLI & Backend Architecture Decision
-4. **Foundation Research Report**: `.glyphnova/docs/reports/roadmap/research/foundation-research-report.md`
+4. **Foundation Research Report**: `./workspace/docs/reports/roadmap/research/foundation-research-report.md`
 5. **Next Steps Research**: `opencode/docs/research/next-steps/`
 6. **YAML Schema Specification**: `opencode/docs/reports/requirements/schema-consolidated-report.md`
 

@@ -76,14 +76,14 @@
 - Command: Generate schema from structs, compare
 - Result: No discrepancies
 
-### Constraint 3: Every chat: scoped executable work container with local .glyphnova/ system-of-record
+### Constraint 3: Every chat: scoped executable work container with local ./workspace/ system-of-record
 
-**Quote**: "Every chat: scoped executable work container with local .glyphnova/ system-of-record"
+**Quote**: "Every chat: scoped executable work container with local ./workspace/ system-of-record"
 
 **Owning Phase**: Phase 0 (Foundation)
 
 **Compliance Test**:
-- Test: Create workflow and verify .glyphnova/ directory structure
+- Test: Create workflow and verify ./workspace/ directory structure
 - Expected: Required subdirectories created
 - Command: Execute workflow, check directory
 - Result: All required paths present
@@ -121,7 +121,7 @@
 **Compliance Test**:
 - Test: Execute workflow and check persistence
 - Expected: All required artifacts saved
-- Command: Run workflow, examine .glyphnova/runs/
+- Command: Run workflow, examine ./workspace/runs/
 - Result: spec, policy, artifacts, hash, provenance present
 
 **Verification Method**:
@@ -173,7 +173,7 @@
 **Owning Phase**: Phase 0 (Foundation)
 
 **Compliance Test**:
-- Test: Verify .glyphnova/ directory structure is stable
+- Test: Verify ./workspace/ directory structure is stable
 - Expected: All required subdirectories exist
 - Command: Check directory structure against spec
 - Result: Structure matches ADR-0001
@@ -788,15 +788,15 @@
 - Command: Attempt scrape outside scope
 - Result: Access denied
 
-### Constraint 6: Memory and search artifacts stored in .glyphnova/memory/ with versioned references
+### Constraint 6: Memory and search artifacts stored in ./workspace/memory/ with versioned references
 
-**Quote**: "Memory and search artifacts are stored in .glyphnova/memory/ with versioned references"
+**Quote**: "Memory and search artifacts are stored in ./workspace/memory/ with versioned references"
 
 **Owning Phase**: Phase 5 (Memory storage)
 
 **Compliance Test**:
 - Test: Store memory artifact and verify location
-- Expected: Artifact in .glyphnova/memory/
+- Expected: Artifact in ./workspace/memory/
 - Command: Store memory artifact
 - Result: Correct path
 
@@ -1017,7 +1017,7 @@
 **Verification Method**:
 - test: Verify artifact requirements met
 - Expected: All autonomous ops produce artifacts
-- Command: Check .glyphnova/ after autonomous run
+- Command: Check ./workspace/ after autonomous run
 - Result: All required artifacts present
 
 ### Constraint 6: Observability and metrics collection integrated into transpiler runtime
@@ -1069,14 +1069,14 @@ These constraints span multiple phases and are verified incrementally.
 **Owning Phases**: Phase 0 (Foundation), Phase 1 (Execution), Phase 2 (Persistence)
 
 **Compliance Test**:
-- Phase 0: Verify .glyphnova/ structure created
+- Phase 0: Verify ./workspace/ structure created
 - Phase 1: Verify run artifacts saved
 - Phase 2: Verify persistence across restarts
 
 **Verification Method**:
 - Check: All artifacts are queryable
 - Expected: Can retrieve any run's complete context
-- Command: Query .glyphnova/ for historical run
+- Command: Query ./workspace/ for historical run
 - Result: Complete context retrieved
 
 ### Constraint: Local-first defaults

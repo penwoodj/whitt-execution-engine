@@ -880,7 +880,7 @@ find src/ -name "*.rs" -exec wc -l {} + | tail -1
 ### Task 1: Document 7-Layer Verification Framework
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/7-layer-verification-framework.md`
+- Create: `./workspace/plans/research/evidence/7-layer-verification-framework.md`
 
 - [ ] **Step 1: Document each verification layer**
 
@@ -902,7 +902,7 @@ Expected output: `7-layer-verification-framework.md`
 
 - [ ] **Step 4: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ && git commit -m "feat: add 7-layer verification framework evidence"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add 7-layer verification framework evidence"`
 Expected: Git commit successful
 
 ---
@@ -910,7 +910,7 @@ Expected: Git commit successful
 ### Task 2: Document Mock Strategies for External Dependencies
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/mock-strategies.md`
+- Create: `./workspace/plans/research/evidence/mock-strategies.md`
 
 - [ ] **Step 1: Document HTTP mocking strategies**
 
@@ -938,7 +938,7 @@ Expected output: `mock-strategies.md`
 
 - [ ] **Step 5: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ && git commit -m "feat: add mock strategies evidence"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add mock strategies evidence"`
 Expected: Git commit successful
 
 ---
@@ -977,7 +977,7 @@ Expected: Git commit successful
 
 **Files:**
 - Modify: `opencode/docs/plans/deep-research/05-testing-strategy-research.md`
-- Create: `.glyphnova/plans/research/validation/testing-strategy-validation-report.md`
+- Create: `./workspace/plans/research/validation/testing-strategy-validation-report.md`
 
 - [ ] **Step 1: Run all validation scripts**
 
@@ -1007,7 +1007,7 @@ Expected output: `testing-strategy-validation-report.md`
 
 - [ ] **Step 6: Commit validation report**
 
-Run: `git add .glyphnova/plans/research/validation/ && git commit -m "feat: add testing strategy research validation report"`
+Run: `git add ./workspace/plans/research/validation/ && git commit -m "feat: add testing strategy research validation report"`
 Expected: Git commit successful
 
 ---

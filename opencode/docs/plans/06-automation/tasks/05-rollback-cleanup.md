@@ -16,7 +16,7 @@ The rollback and cleanup system:
 
 - Provides safe rollback procedures
 - Deletes experiment branches
-- Cleans up artifacts (worktrees, `.glyphnova/` entries)
+- Cleans up artifacts (worktrees, `./workspace/` entries)
 - Verifies successful rollback
 - Prevents partial cleanup states
 
@@ -137,9 +137,9 @@ impl RollbackProcedure {
 
     fn cleanup_artifacts(&self, experiment_id: &str) -> Result<(), std::error::Error> {
         let artifact_dirs = vec![
-            self.repo_path.join(".glyphnova/experiment-results"),
-            self.repo_path.join(".glyphnova/refinements"),
-            self.repo_path.join(".glyphnova/merge-proposals"),
+            self.repo_path.join("./workspace/experiment-results"),
+            self.repo_path.join("./workspace/refinements"),
+            self.repo_path.join("./workspace/merge-proposals"),
         ];
 
         for artifact_dir in artifact_dirs {
@@ -223,9 +223,9 @@ impl CleanupManager {
 
     fn cleanup_all_artifacts(&self, result: &mut CleanupResult) -> Result<(), std::io::Error> {
         let artifact_dirs = vec![
-            self.repo_path.join(".glyphnova/experiment-results"),
-            self.repo_path.join(".glyphnova/refinements"),
-            self.repo_path.join(".glyphnova/merge-proposals"),
+            self.repo_path.join("./workspace/experiment-results"),
+            self.repo_path.join("./workspace/refinements"),
+            self.repo_path.join("./workspace/merge-proposals"),
         ];
 
         for artifact_dir in artifact_dirs {
@@ -327,9 +327,9 @@ impl RollbackVerifier {
 
     fn verify_artifacts_cleaned(&self, experiment_id: &str) -> Result<(), Box<dyn std::error::Error>> {
         let artifact_dirs = vec![
-            self.repo_path.join(".glyphnova/experiment-results"),
-            self.repo_path.join(".glyphnova/refinements"),
-            self.repo_path.join(".glyphnova/merge-proposals"),
+            self.repo_path.join("./workspace/experiment-results"),
+            self.repo_path.join("./workspace/refinements"),
+            self.repo_path.join("./workspace/merge-proposals"),
         ];
 
         for artifact_dir in artifact_dirs {

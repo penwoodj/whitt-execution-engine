@@ -514,14 +514,14 @@ Expected: Orphan detected, error raised
 
 ---
 
-## .glyphnova/ Storage
+## ./workspace/ Storage
 
-**Requirement:** .glyphnova/ storage structure works correctly
+**Requirement:** ./workspace/ storage structure works correctly
 
 ### Storage Layout
 
 ```
-.glyphnova/
+./workspace/
 ├── cache/              # Cached artifacts
 ├── state/              # Workflow execution state
 ├── logs/               # Structured logs
@@ -533,10 +533,10 @@ Expected: Orphan detected, error raised
 ### Verification Commands
 
 ```bash
-# Test .glyphnova/ directory creation
+# Test ./workspace/ directory creation
 cargo test --lib storage::tests::directory_creation
 
-# Test file storage in .glyphnova/
+# Test file storage in ./workspace/
 cargo test --lib storage::tests::file_storage
 
 # Test state persistence
@@ -556,7 +556,7 @@ cargo test --lib storage::tests::state_persistence
    - Large files handled correctly
 
 3. **State Persistence:**
-   - Workflow state saved to .glyphnova/state/
+   - Workflow state saved to ./workspace/state/
    - State restored correctly after interruption
    - Concurrent writes handled safely
 

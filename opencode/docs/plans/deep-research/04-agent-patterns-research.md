@@ -784,9 +784,9 @@ grep -r "github.com" opencode/docs/plans/deep-research/04-agent-patterns-researc
 ### Task 1: Document Agent Orchestration Patterns
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/react-loop-pattern.md`
-- Create: `.glyphnova/plans/research/evidence/tool-calling-chain-pattern.md`
-- Create: `.glyphnova/plans/research/evidence/multi-agent-coordination-patterns.md`
+- Create: `./workspace/plans/research/evidence/react-loop-pattern.md`
+- Create: `./workspace/plans/research/evidence/tool-calling-chain-pattern.md`
+- Create: `./workspace/plans/research/evidence/multi-agent-coordination-patterns.md`
 
 - [ ] **Step 1: Document ReAct loop pattern**
 
@@ -808,7 +808,7 @@ Expected output: `multi-agent-coordination-patterns.md`
 
 - [ ] **Step 4: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ && git commit -m "feat: add agent orchestration patterns evidence"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add agent orchestration patterns evidence"`
 Expected: Git commit successful
 
 ---
@@ -816,7 +816,7 @@ Expected: Git commit successful
 ### Task 2: Document Convergence Detection Strategies
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/convergence-detection-strategies.md`
+- Create: `./workspace/plans/research/evidence/convergence-detection-strategies.md`
 
 - [ ] **Step 1: Research convergence detection strategies**
 
@@ -832,7 +832,7 @@ Expected output: `convergence-detection-strategies.md`
 
 - [ ] **Step 3: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ && git commit -m "feat: add convergence detection strategies evidence"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add convergence detection strategies evidence"`
 Expected: Git commit successful
 
 ---
@@ -841,7 +841,7 @@ Expected: Git commit successful
 
 **Files:**
 - Modify: `opencode/docs/plans/deep-research/04-agent-patterns-research.md`
-- Create: `.glyphnova/plans/research/validation/agent-patterns-validation-report.md`
+- Create: `./workspace/plans/research/validation/agent-patterns-validation-report.md`
 
 - [ ] **Step 1: Run all validation scripts**
 
@@ -871,7 +871,7 @@ Expected output: `agent-patterns-validation-report.md`
 
 - [ ] **Step 6: Commit validation report**
 
-Run: `git add .glyphnova/plans/research/validation/ && git commit -m "feat: add agent patterns research validation report"`
+Run: `git add ./workspace/plans/research/validation/ && git commit -m "feat: add agent patterns research validation report"`
 Expected: Git commit successful
 
 ---

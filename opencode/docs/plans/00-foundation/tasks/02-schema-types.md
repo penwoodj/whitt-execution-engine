@@ -1665,7 +1665,7 @@ pub struct ParallelConfig {
 impl Default for ParallelConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            # presence = enabled,
             algorithm: default_algorithm(),
             load_balancing: None,
             max_threads: default_max_threads(),
@@ -1724,7 +1724,7 @@ impl Default for LoadBalancingConfig {
         Self {
             strategy: default_lb_strategy(),
             worker_selection_timeout_secs: default_worker_selection_timeout(),
-            enabled: true,
+            # presence = enabled,
         }
     }
 }
@@ -2132,7 +2132,7 @@ pub struct LoggingConfig {
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            # presence = enabled,
             default: default_log_level(),
             levels: HashMap::new(),
             scopes: HashMap::new(),
@@ -2188,7 +2188,7 @@ pub struct ConsoleOutputConfig {
 impl Default for ConsoleOutputConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            # presence = enabled,
             color: true,
             timestamps: true,
             format: default_format(),
@@ -2219,7 +2219,7 @@ pub struct FileOutput {
 impl Default for FileOutput {
     fn default() -> Self {
         Self {
-            enabled: true,
+            # presence = enabled,
             path: "./logs/workflow.log".to_string(),
             format: default_log_format(),
             rotation: None,
@@ -2247,7 +2247,7 @@ pub struct LogRotation {
 impl Default for LogRotation {
     fn default() -> Self {
         Self {
-            enabled: true,
+            # presence = enabled,
             max_size_mb: default_max_size_mb(),
             max_files: default_max_files(),
         }
@@ -2377,7 +2377,7 @@ pub struct ReadPermission {
 impl Default for ReadPermission {
     fn default() -> Self {
         Self {
-            enabled: true,
+            # presence = enabled,
             require_confirmation: false,
             allowed_paths: Vec::new(),
             allowed_patterns: Vec::new(),
@@ -2416,7 +2416,7 @@ pub struct WritePermission {
 impl Default for WritePermission {
     fn default() -> Self {
         Self {
-            enabled: true,
+            # presence = enabled,
             require_confirmation: true,
             allowed_paths: Vec::new(),
             backup_existing: true,
@@ -2452,7 +2452,7 @@ pub struct DeletePermission {
 impl Default for DeletePermission {
     fn default() -> Self {
         Self {
-            enabled: true,
+            # presence = enabled,
             require_confirmation: true,
             allowed_paths: Vec::new(),
             confirm_delete_count: default_confirm_delete_count(),
@@ -2515,7 +2515,7 @@ pub struct WebFetchPermission {
 impl Default for WebFetchPermission {
     fn default() -> Self {
         Self {
-            enabled: true,
+            # presence = enabled,
             require_confirmation: false,
             max_concurrent_requests: default_max_concurrent_requests(),
             timeout_secs: default_web_timeout_secs(),
@@ -2557,7 +2557,7 @@ pub struct WebScrapePermission {
 impl Default for WebScrapePermission {
     fn default() -> Self {
         Self {
-            enabled: true,
+            # presence = enabled,
             require_confirmation: false,
             respect_robots_txt: true,
             max_pages_per_domain: default_max_pages_per_domain(),
@@ -2583,7 +2583,7 @@ pub struct FollowLinksConfig {
 impl Default for FollowLinksConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            disabled: true,
             max_depth: default_max_depth(),
         }
     }
@@ -2636,7 +2636,7 @@ pub struct ShellExecPermission {
 impl Default for ShellExecPermission {
     fn default() -> Self {
         Self {
-            enabled: true,
+            # presence = enabled,
             require_confirmation: true,
             timeout_seconds: default_shell_timeout_seconds(),
             allowed_commands: Vec::new(),
@@ -2686,7 +2686,7 @@ pub struct WebSearchPermission {
 impl Default for WebSearchPermission {
     fn default() -> Self {
         Self {
-            enabled: true,
+            # presence = enabled,
             require_confirmation: false,
             max_searches_per_hour: default_max_searches_per_hour(),
         }
@@ -2713,7 +2713,7 @@ pub struct ContentGenerationPermission {
 impl Default for ContentGenerationPermission {
     fn default() -> Self {
         Self {
-            enabled: true,
+            # presence = enabled,
             require_confirmation: false,
             max_tokens_per_hour: default_max_tokens_per_hour(),
         }
@@ -2752,7 +2752,7 @@ pub struct ProcessManagementPermission {
 
 impl Default for ProcessManagementPermission {
     fn default() -> Self {
-        Self { enabled: false }
+        Self { disabled: true }
     }
 }
 
@@ -2765,7 +2765,7 @@ pub struct NetworkOperationsPermission {
 
 impl Default for NetworkOperationsPermission {
     fn default() -> Self {
-        Self { enabled: false }
+        Self { disabled: true }
     }
 }
 

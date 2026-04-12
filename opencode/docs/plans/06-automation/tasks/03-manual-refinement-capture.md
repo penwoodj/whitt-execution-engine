@@ -6,7 +6,7 @@
 
 **Estimated Time:** 5-7 days
 
-**Goal:** Build a refinement capture system that records all manual changes (approvals, rejections, refinements) as immutable events in `.glyphnova/refinements/`, linked to artifacts for complete audit trails.
+**Goal:** Build a refinement capture system that records all manual changes (approvals, rejections, refinements) as immutable events in `./workspace/refinements/`, linked to artifacts for complete audit trails.
 
 ---
 
@@ -56,7 +56,7 @@ pub use linking::{ArtifactLink, LinkedArtifacts};
 use std::path::PathBuf;
 
 /// Refinement artifact directory
-pub const REFINEMENT_ARTIFACT_DIR: &str = ".glyphnova/refinements";
+pub const REFINEMENT_ARTIFACT_DIR: &str = "./workspace/refinements";
 ```
 
 ---
@@ -499,7 +499,7 @@ pub use refinement::{
 # Manual Refinement Capture
 
 The refinement capture system records all manual changes (approvals, rejections,
-refinements) as immutable events in `.glyphnova/refinements/`.
+refinements) as immutable events in `./workspace/refinements/`.
 
 ## Features
 

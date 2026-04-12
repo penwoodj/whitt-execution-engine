@@ -1,6 +1,6 @@
 # Task 9: Local Storage
 
-**Goal:** Implement .glyphnova/ directory structure and persistence with sled (ACID transactions).
+**Goal:** Implement ./workspace/ directory structure and persistence with sled (ACID transactions).
 
 **Estimated Time:** 6 hours
 
@@ -30,7 +30,7 @@ pub struct LocalStorage {
 }
 
 impl LocalStorage {
-    /// Open or create local storage at .glyphnova/
+    /// Open or create local storage at ./workspace/
     pub fn open<P: AsRef<Path>>(base_path: P) -> Result<Self> {
         let base_path = base_path.as_ref().join(".glyphnova");
         std::fs::create_dir_all(&base_path)
@@ -214,11 +214,11 @@ cargo build
 cargo test storage_test
 # Expected: test result: ok. X passed
 
-# 3. .glyphnova/ directory created
+# 3. ./workspace/ directory created
 ```
 
 **Checkpoint Criteria:**
-- ✅ .glyphnova/ directory structure created
+- ✅ ./workspace/ directory structure created
 - ✅ sled persistence works with ACID transactions
 - ✅ Workflow IR storage and retrieval works
 - ✅ Execution state storage works

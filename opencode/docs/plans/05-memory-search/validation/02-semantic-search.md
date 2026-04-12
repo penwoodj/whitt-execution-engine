@@ -351,7 +351,7 @@ cargo bench --bench semantic_bench bench_similarity_search
 
 ### Semantic Index Location
 
-- [ ] **Semantic index stored in `.glyphnova/memory/index/semantic/`**
+- [ ] **Semantic index stored in `./workspace/memory/index/semantic/`**
   - Test: `test_semantic_index_location()`
   - Command: `cargo test --package agentsdk-search test_semantic_index_location`
   - Expected: Index files in correct directory
@@ -425,45 +425,45 @@ cargo bench --bench semantic_bench bench_similarity_search
 ### Embedding Operation Logs
 
 - [ ] **Embedding generation logged with trace ID**
-  - Grep: `grep '"operation":"embedding"' .glyphnova/logs/search.log | jq -r '.trace_id' | wc -l`
+  - Grep: `grep '"operation":"embedding"' ./workspace/logs/search.log | jq -r '.trace_id' | wc -l`
   - Expected: Count equals number of embedding operations
 
 - [ ] **Model version logged**
-  - Grep: `grep '"operation":"embedding"' .glyphnova/logs/search.log | jq -r '.model_version'`
+  - Grep: `grep '"operation":"embedding"' ./workspace/logs/search.log | jq -r '.model_version'`
   - Expected: Model version present for all operations
 
 - [ ] **Embedding duration logged**
-  - Grep: `grep '"operation":"embedding"' .glyphnova/logs/search.log | jq -r '.duration_ms'`
+  - Grep: `grep '"operation":"embedding"' ./workspace/logs/search.log | jq -r '.duration_ms'`
   - Expected: Duration in milliseconds for all operations
 
 ### Similarity Search Logs
 
 - [ ] **Similarity search logged**
-  - Grep: `grep '"operation":"similarity_search"' .glyphnova/logs/search.log | wc -l`
+  - Grep: `grep '"operation":"similarity_search"' ./workspace/logs/search.log | wc -l`
   - Expected: Count equals number of similarity searches
 
 - [ ] **Search k parameter logged**
-  - Grep: `grep '"operation":"similarity_search"' .glyphnova/logs/search.log | jq -r '.k'`
+  - Grep: `grep '"operation":"similarity_search"' ./workspace/logs/search.log | jq -r '.k'`
   - Expected: k parameter present for all searches
 
 ### Hybrid Fusion Logs
 
 - [ ] **Fusion operations logged**
-  - Grep: `grep '"operation":"fusion"' .glyphnova/logs/search.log | wc -l`
+  - Grep: `grep '"operation":"fusion"' ./workspace/logs/search.log | wc -l`
   - Expected: Count equals number of fusions
 
 - [ ] **Fusion weights logged**
-  - Grep: `grep '"operation":"fusion"' .glyphnova/logs/search.log | jq -r '.weights'`
+  - Grep: `grep '"operation":"fusion"' ./workspace/logs/search.log | jq -r '.weights'`
   - Expected: Weights present for all fusions
 
 - [ ] **Fusion strategy logged**
-  - Grep: `grep '"operation":"fusion"' .glyphnova/logs/search.log | jq -r '.strategy'`
+  - Grep: `grep '"operation":"fusion"' ./workspace/logs/search.log | jq -r '.strategy'`
   - Expected: Strategy present for all fusions
 
 ### Error Logs
 
 - [ ] **Embedding errors logged with context**
-  - Grep: `grep '"level":"error"' .glyphnova/logs/search.log | grep embedding | jq -r '.error'`
+  - Grep: `grep '"level":"error"' ./workspace/logs/search.log | grep embedding | jq -r '.error'`
   - Expected: Error messages include text and operation details
 
 ---
@@ -515,7 +515,7 @@ cargo bench --bench semantic_bench bench_similarity_search
 - [ ] Performance meets all targets
 
 ### ADR-0006 Compliant
-- [ ] Semantic index in `.glyphnova/memory/index/semantic/`
+- [ ] Semantic index in `./workspace/memory/index/semantic/`
 - [ ] All embedding operations track provenance
 - [ ] Semantic search ONLY combined with fulltext
 

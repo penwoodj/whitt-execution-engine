@@ -533,6 +533,7 @@ workflow:
     - name: main_pipeline
       steps:
         - name: call_sub_workflow
+          # v2: step type inferred from keys (generative_entity, tool, when, sub_workflow, loop)
           type: sub_workflow
           workflow: sub_workflow.yaml
           inputs:
@@ -552,6 +553,7 @@ workflow:
     - name: sub_pipeline
       steps:
         - name: process
+          # v2: step type inferred from keys (generative_entity, tool, when, sub_workflow, loop)
           type: llm
           model: gpt-4
           prompt: "Process: ${workflow.sub_input}"

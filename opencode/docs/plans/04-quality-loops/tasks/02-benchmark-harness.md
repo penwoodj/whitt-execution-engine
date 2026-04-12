@@ -365,7 +365,7 @@ impl Default for BenchmarkMetadata {
             labels: HashMap::new(),
             category: "general".to_string(),
             priority: 100,
-            enabled: true,
+            # presence = enabled,
             custom: HashMap::new(),
         }
     }

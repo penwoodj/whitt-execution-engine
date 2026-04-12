@@ -327,7 +327,7 @@ cargo bench --bench search_bench bench_search_10k
   - Expected: < 1GB for 10000 documents
 
 - [ ] **Index size on disk reasonable**
-  - Command: `du -sh .glyphnova/memory/index/fulltext/`
+  - Command: `du -sh ./workspace/memory/index/fulltext/`
   - Expected: < 500MB for 10000 documents
 
 ---
@@ -428,7 +428,7 @@ cargo bench --bench search_bench bench_search_10k
 
 ### Search Index Location
 
-- [ ] **Search indexes stored in `.glyphnova/memory/index/fulltext/`**
+- [ ] **Search indexes stored in `./workspace/memory/index/fulltext/`**
   - Test: `test_index_location()`
   - Command: `cargo test --package agentsdk-search test_index_location`
   - Expected: Index files in correct directory
@@ -507,39 +507,39 @@ cargo bench --bench search_bench bench_search_10k
 ### Index Operation Logs
 
 - [ ] **Index operations logged with trace ID**
-  - Grep: `grep '"operation":"index"' .glyphnova/logs/search.log | jq -r '.trace_id' | wc -l`
+  - Grep: `grep '"operation":"index"' ./workspace/logs/search.log | jq -r '.trace_id' | wc -l`
   - Expected: Count equals number of index operations
 
 - [ ] **Document IDs logged**
-  - Grep: `grep '"operation":"index"' .glyphnova/logs/search.log | jq -r '.document_id'`
+  - Grep: `grep '"operation":"index"' ./workspace/logs/search.log | jq -r '.document_id'`
   - Expected: All document IDs present
 
 - [ ] **Index duration logged**
-  - Grep: `grep '"operation":"index"' .glyphnova/logs/search.log | jq -r '.duration_ms'`
+  - Grep: `grep '"operation":"index"' ./workspace/logs/search.log | jq -r '.duration_ms'`
   - Expected: Duration in milliseconds for all operations
 
 ### Search Operation Logs
 
 - [ ] **Search operations logged with query**
-  - Grep: `grep '"operation":"search"' .glyphnova/logs/search.log | jq -r '.query'`
+  - Grep: `grep '"operation":"search"' ./workspace/logs/search.log | jq -r '.query'`
   - Expected: Query string present for all searches
 
 - [ ] **Search results count logged**
-  - Grep: `grep '"operation":"search"' .glyphnova/logs/search.log | jq -r '.result_count'`
+  - Grep: `grep '"operation":"search"' ./workspace/logs/search.log | jq -r '.result_count'`
   - Expected: Number of results returned
 
 - [ ] **Search latency logged**
-  - Grep: `grep '"operation":"search"' .glyphnova/logs/search.log | jq -r '.duration_ms'`
+  - Grep: `grep '"operation":"search"' ./workspace/logs/search.log | jq -r '.duration_ms'`
   - Expected: Latency in milliseconds for all searches
 
 ### Error Logs
 
 - [ ] **Search errors logged with context**
-  - Grep: `grep '"level":"error"' .glyphnova/logs/search.log | jq -r '.error'`
+  - Grep: `grep '"level":"error"' ./workspace/logs/search.log | jq -r '.error'`
   - Expected: Error messages include query and operation details
 
 - [ ] **Index errors logged**
-  - Grep: `grep '"level":"error"' .glyphnova/logs/search.log | grep '"operation":"index"' | wc -l`
+  - Grep: `grep '"level":"error"' ./workspace/logs/search.log | grep '"operation":"index"' | wc -l`
   - Expected: All index errors captured
 
 ---
@@ -592,7 +592,7 @@ cargo bench --bench search_bench bench_search_10k
 - [ ] Performance meets all targets
 
 ### ADR-0006 Compliant
-- [ ] Index in `.glyphnova/memory/index/fulltext/`
+- [ ] Index in `./workspace/memory/index/fulltext/`
 - [ ] All search operations track provenance
 - [ ] Search results include content hashes
 - [ ] No external search dependencies

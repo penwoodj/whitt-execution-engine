@@ -406,39 +406,39 @@ cargo bench --bench query_bench bench_uncached_query
 ### Query Execution Logs
 
 - [ ] **Query execution logged**
-  - Grep: `grep '"operation":"query"' .glyphnova/logs/search.log | wc -l`
+  - Grep: `grep '"operation":"query"' ./workspace/logs/search.log | wc -l`
   - Expected: Count equals number of queries
 
 - [ ] **Query parameters logged**
-  - Grep: `grep '"operation":"query"' .glyphnova/logs/search.log | jq -r '.query'`
+  - Grep: `grep '"operation":"query"' ./workspace/logs/search.log | jq -r '.query'`
   - Expected: Query parameters present
 
 - [ ] **Query duration logged**
-  - Grep: `grep '"operation":"query"' .glyphnova/logs/search.log | jq -r '.duration_ms'`
+  - Grep: `grep '"operation":"query"' ./workspace/logs/search.log | jq -r '.duration_ms'`
   - Expected: Duration in milliseconds
 
 ### Cache Logs
 
 - [ ] **Cache hits logged**
-  - Grep: `grep '"cache":"hit"' .glyphnova/logs/search.log | wc -l`
+  - Grep: `grep '"cache":"hit"' ./workspace/logs/search.log | wc -l`
   - Expected: Count equals number of cache hits
 
 - [ ] **Cache misses logged**
-  - Grep: `grep '"cache":"miss"' .glyphnova/logs/search.log | wc -l`
+  - Grep: `grep '"cache":"miss"' ./workspace/logs/search.log | wc -l`
   - Expected: Count equals number of cache misses
 
 - [ ] **Cache invalidations logged**
-  - Grep: `grep '"operation":"cache_invalidate"' .glyphnova/logs/search.log | wc -l`
+  - Grep: `grep '"operation":"cache_invalidate"' ./workspace/logs/search.log | wc -l`
   - Expected: Count equals number of invalidations
 
 ### Re-ranking Logs
 
 - [ ] **Re-ranking operations logged**
-  - Grep: `grep '"operation":"rerank"' .glyphnova/logs/search.log | wc -l`
+  - Grep: `grep '"operation":"rerank"' ./workspace/logs/search.log | wc -l`
   - Expected: Count equals number of re-rankings
 
 - [ ] **Re-ranking strategy logged**
-  - Grep: `grep '"operation":"rerank"' .glyphnova/logs/search.log | jq -r '.strategy'`
+  - Grep: `grep '"operation":"rerank"' ./workspace/logs/search.log | jq -r '.strategy'`
   - Expected: Strategy present for all re-rankings
 
 ---

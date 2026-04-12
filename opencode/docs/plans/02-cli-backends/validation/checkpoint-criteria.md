@@ -9,7 +9,7 @@ This document defines the criteria for validating completion of each task in Pha
 ### Checkpoint Criteria
 - [ ] CLI parses all subcommands (run, generate, queue, status, config)
 - [ ] Global options (--config, --output, --verbose) work correctly
-- [ ] Configuration file loads from `~/.glyphnova/config.yaml`
+- [ ] Configuration file loads from `~/./workspace/config.yaml`
 - [ ] Configuration validates against schema
 - [ ] Output formatters (plain, JSON, table) produce correct output
 - [ ] All command handlers exist and execute without panics

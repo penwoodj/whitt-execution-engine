@@ -53,7 +53,7 @@ pub use export::{ResultExporter, ExportFormat};
 use std::path::PathBuf;
 
 /// Result artifact directory
-pub const RESULT_ARTIFACT_DIR: &str = ".glyphnova/experiment-results";
+pub const RESULT_ARTIFACT_DIR: &str = "./workspace/experiment-results";
 ```
 
 ---

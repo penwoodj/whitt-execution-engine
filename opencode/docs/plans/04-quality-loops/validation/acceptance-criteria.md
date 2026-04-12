@@ -81,12 +81,12 @@ This document defines acceptance criteria for Phase 04 (Quality Loops). Implemen
 
 - [ ] **Check:** Loop state is persisted
 - **Verification:**
-  - Loop iterations saved to .glyphnova/
+  - Loop iterations saved to ./workspace/
   - Verification results stored
   - Repair attempts tracked
 - **Test Steps:**
   1. Run quality loop
-  2. Check .glyphnova/quality-loops/ directory
+  2. Check ./workspace/quality-loops/ directory
   3. Verify iteration logs present
   4. Verify verification results present
   5. Verify repair attempts tracked
@@ -462,7 +462,7 @@ This document defines acceptance criteria for Phase 04 (Quality Loops). Implemen
   - Repair success/failure tracked
 - **Test Steps:**
   1. Run repair loop
-  2. Check .glyphnova/quality-loops/repairs/
+  2. Check ./workspace/quality-loops/repairs/
   3. Verify repair attempts logged
   4. Verify strategy recorded
 - **Expected Output:** Complete repair tracking

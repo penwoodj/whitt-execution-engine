@@ -379,7 +379,7 @@ impl InterventionLogger {
 
 impl Default for InterventionLogger {
     fn default() -> Self {
-        Self::new(PathBuf::from(".glyphnova/interventions"))
+        Self::new(PathBuf::from("./workspace/interventions"))
     }
 }
 ```

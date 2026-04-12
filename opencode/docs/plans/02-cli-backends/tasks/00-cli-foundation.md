@@ -22,7 +22,7 @@
 
 ## Overview
 
-Implement the complete CLI foundation using clap's derive API. This includes subcommands for all major operations (run, generate, queue, status, config), global options for configuration, output formatting (plain, JSON, table), tab completion support, and configuration file loading from `~/.glyphnova/config.yaml`.
+Implement the complete CLI foundation using clap's derive API. This includes subcommands for all major operations (run, generate, queue, status, config), global options for configuration, output formatting (plain, JSON, table), tab completion support, and configuration file loading from `~/./workspace/config.yaml`.
 
 ---
 
@@ -431,7 +431,7 @@ pub struct RAGConfig {
 fn default_knowledge_base() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".glyphnova/knowledge")
+        .join("./workspace/knowledge")
 }
 
 fn default_embedding_model() -> String {
@@ -461,7 +461,7 @@ pub struct CodeGenConfig {
 fn default_codegen_output_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".glyphnova/generated")
+        .join("./workspace/generated")
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -479,7 +479,7 @@ pub struct SelfImprovementConfig {
 fn default_log_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".glyphnova/logs")
+        .join("./workspace/logs")
 }
 ```
 
@@ -528,7 +528,7 @@ pub fn save_config(config: &Config, config_path: Option<PathBuf>) -> Result<()> 
 fn default_config_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".glyphnova/config.yaml")
+        .join("./workspace/config.yaml")
 }
 
 pub fn validate_config(config: &Config) -> Result<()> {
@@ -1351,7 +1351,7 @@ async fn execute_edit() -> Result<Box<dyn OutputFormatter>> {
 
     // TODO: Implement editor integration
     Ok(create_output_formatter(&config, OutputData::Success {
-        message: "Edit not yet implemented - use $EDITOR ~/.glyphnova/config.yaml".to_string(),
+        message: "Edit not yet implemented - use $EDITOR ~/./workspace/config.yaml".to_string(),
     }))
 }
 
@@ -1498,7 +1498,7 @@ git commit -m "feat(cli): add CLI module to library exports"
 This task implements the complete CLI foundation including:
 
 1. **CLI structure** with clap derive API for all subcommands
-2. **Configuration loading** from `~/.glyphnova/config.yaml` with validation
+2. **Configuration loading** from `~/./workspace/config.yaml` with validation
 3. **Output formatters** for plain, JSON, and table output
 4. **Command handlers** for run, generate, queue, status, and config subcommands
 5. **Comprehensive tests** for all components

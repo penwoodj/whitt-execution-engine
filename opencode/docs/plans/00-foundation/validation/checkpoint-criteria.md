@@ -335,7 +335,7 @@ Verify task 8 implements ONLY policy compilation:
 ## Task 9: Local Storage
 
 ### Gate Criteria
-- ✅ .glyphnova/ directory structure created
+- ✅ ./workspace/ directory structure created
 - ✅ sled persistence works with ACID transactions
 - ✅ Workflow IR storage and retrieval works
 - ✅ Execution state storage works
@@ -358,7 +358,7 @@ cargo clippy -- -D warnings    # Zero warnings
 - ✅ new_execution_id() - Generate UUID
 - ✅ base_path() - Get base path
 - ✅ ExecutionState struct
-- ✅ .glyphnova/ directory created
+- ✅ ./workspace/ directory created
 - ✅ sled database initialized
 - ✅ ACID transactions work
 

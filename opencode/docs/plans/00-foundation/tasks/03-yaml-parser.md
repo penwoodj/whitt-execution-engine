@@ -96,28 +96,28 @@ execution:
 tool_permissions:
   file_operations:
     read:
-      enabled: true
+      # presence = enabled
     write:
-      enabled: false
+      disabled: true
     delete:
-      enabled: false
+      disabled: true
   web_operations:
     fetch:
-      enabled: false
+      disabled: true
     scrape:
-      enabled: false
+      disabled: true
   shell_operations:
     exec:
-      enabled: false
+      disabled: true
 
 logging:
-  enabled: true
+  # presence = enabled
   default: info
   output:
     console:
-      enabled: true
+      # presence = enabled
     file:
-      enabled: false
+      disabled: true
   errors:
     log_parsing_errors: true
 ```
@@ -181,7 +181,7 @@ execution:
   processing: parallel
   load_unload: adaptive
   memory:
-    allocation: adaptive
+    ram_allocation: adaptive
     max_allowed:
       ram: 13%
       vram: 3.7GB
@@ -195,7 +195,7 @@ execution:
       unload_unused: true
       gc_interval_secs: 300
   parallel:
-    enabled: true
+    # presence = enabled
     algorithm: round_robin
     max_threads: 4
     max_models: 3
@@ -224,42 +224,42 @@ agentic_workflow:
       model: "${models.validator}"
       depends_on:
         - step_1_analyze
-      input_variables:
+      inputs:
         analysis: "${step.step_1_analyze.output}"
 
 tool_permissions:
   file_operations:
     read:
-      enabled: true
+      # presence = enabled
       require_confirmation: false
       allowed_paths:
         - /workspace/complex/src
       max_file_size_mb: 100
     write:
-      enabled: true
+      # presence = enabled
       require_confirmation: true
       allowed_paths:
         - /workspace/complex/output
       backup_existing: true
       max_file_size_mb: 500
     delete:
-      enabled: true
+      # presence = enabled
       require_confirmation: true
       allowed_paths:
         - /workspace/complex/temp
   web_operations:
     fetch:
-      enabled: true
+      # presence = enabled
       require_confirmation: false
       max_concurrent_requests: 5
       timeout_secs: 30
     scrape:
-      enabled: true
+      # presence = enabled
       respect_robots_txt: true
       max_pages_per_domain: 100
   shell_operations:
     exec:
-      enabled: true
+      # presence = enabled
       require_confirmation: true
       timeout_seconds: 30
       allowed_commands:
@@ -267,7 +267,7 @@ tool_permissions:
         - rustc
 
 logging:
-  enabled: true
+  # presence = enabled
   default: info
   levels:
     workflow: info
@@ -276,20 +276,20 @@ logging:
     execution: debug
   scopes:
     workflow:
-      enabled: true
+      # presence = enabled
       include_timestamps: true
   output:
     console:
-      enabled: true
+      # presence = enabled
       color: true
       timestamps: true
       format: text
     file:
-      enabled: true
+      # presence = enabled
       path: /workspace/complex/logs/workflow.log
       format: json
       rotation:
-        enabled: true
+        # presence = enabled
         max_size_mb: 100
         max_files: 10
   errors:
@@ -339,28 +339,28 @@ execution:
 tool_permissions:
   file_operations:
     read:
-      enabled: true
+      # presence = enabled
     write:
-      enabled: false
+      disabled: true
     delete:
-      enabled: false
+      disabled: true
   web_operations:
     fetch:
-      enabled: false
+      disabled: true
     scrape:
-      enabled: false
+      disabled: true
   shell_operations:
     exec:
-      enabled: false
+      disabled: true
 
 logging:
-  enabled: true
+  # presence = enabled
   default: info
   output:
     console:
-      enabled: true
+      # presence = enabled
     file:
-      enabled: false
+      disabled: true
   errors:
     log_parsing_errors: true
 "#;
@@ -435,28 +435,28 @@ execution:
 tool_permissions:
   file_operations:
     read:
-      enabled: true
+      # presence = enabled
     write:
-      enabled: false
+      disabled: true
     delete:
-      enabled: false
+      disabled: true
   web_operations:
     fetch:
-      enabled: false
+      disabled: true
     scrape:
-      enabled: false
+      disabled: true
   shell_operations:
     exec:
-      enabled: false
+      disabled: true
 
 logging:
-  enabled: true
+  # presence = enabled
   default: info
   output:
     console:
-      enabled: true
+      # presence = enabled
     file:
-      enabled: false
+      disabled: true
   errors:
     log_parsing_errors: true
 "#;
@@ -494,28 +494,28 @@ execution:
 tool_permissions:
   file_operations:
     read:
-      enabled: true
+      # presence = enabled
     write:
-      enabled: false
+      disabled: true
     delete:
-      enabled: false
+      disabled: true
   web_operations:
     fetch:
-      enabled: false
+      disabled: true
     scrape:
-      enabled: false
+      disabled: true
   shell_operations:
     exec:
-      enabled: false
+      disabled: true
 
 logging:
-  enabled: true
+  # presence = enabled
   default: info
   output:
     console:
-      enabled: true
+      # presence = enabled
     file:
-      enabled: false
+      disabled: true
   errors:
     log_parsing_errors: true
 

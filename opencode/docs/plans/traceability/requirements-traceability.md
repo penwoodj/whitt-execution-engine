@@ -27,7 +27,7 @@
 
 **Acceptance Test**:
 - Test: Create workflow and verify system identity
-- Command: Execute workflow, inspect .glyphnova/runs/
+- Command: Execute workflow, inspect ./workspace/runs/
 - Expected: System-of-record shows compiler-centered identity
 - Validation: All workflows include required identification fields
 
@@ -54,7 +54,7 @@
 **Implementation Tasks**:
 1. Define local-first defaults in config
 2. Implement workspace isolation
-3. Create .glyphnova/ system-of-record
+3. Create ./workspace/ system-of-record
 4. Implement privacy-preserving defaults
 
 **Acceptance Test**:
@@ -747,9 +747,9 @@
 
 ---
 
-## R28: Per-Chat Workspace and .glyphnova/ System-of-Record
+## R28: Per-Chat Workspace and ./workspace/ System-of-Record
 
-**Definition**: Per-chat workspace with .glyphnova/ directory for system-of-record
+**Definition**: Per-chat workspace with ./workspace/ directory for system-of-record
 
 **Owner Phase**: Phase 0 (Foundation)
 
@@ -760,14 +760,14 @@
 - Section 14: Features Demonstrated (system-of-record features)
 
 **Implementation Tasks**:
-1. Implement .glyphnova/ directory creation
+1. Implement ./workspace/ directory creation
 2. Create workspace isolation per chat
 3. Add system-of-record storage
 4. Implement artifact management
 
 **Acceptance Test**:
-- Test: Create workflow, verify .glyphnova/ structure
-- Command: Execute workflow, inspect .glyphnova/
+- Test: Create workflow, verify ./workspace/ structure
+- Command: Execute workflow, inspect ./workspace/
 - Expected: All required subdirectories created
 - Validation: Verify structure matches ADR-0001
 
@@ -863,7 +863,7 @@
 
 **Acceptance Test**:
 - Test: Execute workflow, verify artifacts and hashes
-- Command: Run workflow, examine .glyphnova/runs/
+- Command: Run workflow, examine ./workspace/runs/
 - Expected: spec, policy, artifacts, hash, provenance present
 - Validation: Verify hash matches source
 

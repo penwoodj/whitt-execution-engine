@@ -146,7 +146,7 @@ cargo test --test circular_dependency
 
 ### 5. Persistence ✅
 
-**Requirement:** Local .glyphnova/ directory structure with sled persistence
+**Requirement:** Local ./workspace/ directory structure with sled persistence
 
 **Verification:**
 ```bash
@@ -155,12 +155,12 @@ cargo test storage_test
 # Expected: All tests pass
 
 # Check directory structure
-ls -la .glyphnova/
+ls -la ./workspace/
 # Expected: db/ directory present
 ```
 
 **Acceptance:**
-- ✅ .glyphnova/ directory created on open
+- ✅ ./workspace/ directory created on open
 - ✅ sled database initialized with ACID transactions
 - ✅ Workflow IR storage works
 - ✅ Workflow IR retrieval works

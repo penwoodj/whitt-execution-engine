@@ -893,10 +893,10 @@ pub struct ExportConfig {
 impl Default for ExportConfig {
     fn default() -> Self {
         Self {
-            prometheus_enabled: true,
+            prometheus_# presence = enabled,
             prometheus_port: 9090,
-            json_enabled: true,
-            json_path: ".glyphnova/metrics.json".to_string(),
+            json_# presence = enabled,
+            json_path: "./workspace/metrics.json".to_string(),
         }
     }
 }

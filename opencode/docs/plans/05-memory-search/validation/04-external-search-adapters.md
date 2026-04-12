@@ -431,39 +431,39 @@ cargo bench --bench external_bench bench_search_latency
 ### Policy Gate Logs
 
 - [ ] **Policy gate decisions logged**
-  - Grep: `grep '"operation":"policy_gate"' .glyphnova/logs/external.log | wc -l`
+  - Grep: `grep '"operation":"policy_gate"' ./workspace/logs/external.log | wc -l`
   - Expected: Count equals number of policy checks
 
 - [ ] **Approval decisions logged**
-  - Grep: `grep '"decision":"approved"' .glyphnova/logs/external.log | wc -l`
+  - Grep: `grep '"decision":"approved"' ./workspace/logs/external.log | wc -l`
   - Expected: Count equals number of approvals
 
 - [ ] **Denial reasons logged**
-  - Grep: `grep '"decision":"denied"' .glyphnova/logs/external.log | jq -r '.reason'`
+  - Grep: `grep '"decision":"denied"' ./workspace/logs/external.log | jq -r '.reason'`
   - Expected: Reason present for all denials
 
 ### Rate Limit Logs
 
 - [ ] **Rate limit checks logged**
-  - Grep: `grep '"operation":"rate_limit_check"' .glyphnova/logs/external.log | wc -l`
+  - Grep: `grep '"operation":"rate_limit_check"' ./workspace/logs/external.log | wc -l`
   - Expected: Count equals number of checks
 
 - [ ] **Rate limit exceeded logged**
-  - Grep: `grep '"event":"rate_limit_exceeded"' .glyphnova/logs/external.log | wc -l`
+  - Grep: `grep '"event":"rate_limit_exceeded"' ./workspace/logs/external.log | wc -l`
   - Expected: Count equals number of exceeded events
 
 ### External Search Logs
 
 - [ ] **External search requests logged**
-  - Grep: `grep '"operation":"external_search"' .glyphnova/logs/external.log | wc -l`
+  - Grep: `grep '"operation":"external_search"' ./workspace/logs/external.log | wc -l`
   - Expected: Count equals number of searches
 
 - [ ] **Search provider logged**
-  - Grep: `grep '"operation":"external_search"' .glyphnova/logs/external.log | jq -r '.provider'`
+  - Grep: `grep '"operation":"external_search"' ./workspace/logs/external.log | jq -r '.provider'`
   - Expected: Provider present for all searches
 
 - [ ] **Search duration logged**
-  - Grep: `grep '"operation":"external_search"' .glyphnova/logs/external.log | jq -r '.duration_ms'`
+  - Grep: `grep '"operation":"external_search"' ./workspace/logs/external.log | jq -r '.duration_ms'`
   - Expected: Duration in milliseconds
 
 ---

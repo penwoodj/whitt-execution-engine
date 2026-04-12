@@ -297,7 +297,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let cli = Cli::parse();
 
     // Initialize memory operations
-    let memory_path = std::path::PathBuf::from(".glyphnova/memory");
+    let memory_path = std::path::PathBuf::from("./workspace/memory");
     let memory_ops = agentsdk_memory::MemoryOperations::new(&memory_path);
     memory_ops.initialize().await?;
 

@@ -416,49 +416,49 @@ cargo bench --bench garbage_bench bench_backup_creation
 ### GC Operation Logs
 
 - [ ] **GC runs logged**
-  - Grep: `grep '"operation":"gc_run"' .glyphnova/logs/garbage.log | wc -l`
+  - Grep: `grep '"operation":"gc_run"' ./workspace/logs/garbage.log | wc -l`
   - Expected: Count equals number of GC runs
 
 - [ ] **GC policy logged**
-  - Grep: `grep '"operation":"gc_run"' .glyphnova/logs/garbage.log | jq -r '.policy'`
+  - Grep: `grep '"operation":"gc_run"' ./workspace/logs/garbage.log | jq -r '.policy'`
   - Expected: Policy present for all runs
 
 - [ ] **Items deleted logged**
-  - Grep: `grep '"operation":"gc_delete"' .glyphnova/logs/garbage.log | wc -l`
+  - Grep: `grep '"operation":"gc_delete"' ./workspace/logs/garbage.log | wc -l`
   - Expected: Count equals number of deletions
 
 ### Backup Logs
 
 - [ ] **Backup creation logged**
-  - Grep: `grep '"operation":"backup_create"' .glyphnova/logs/garbage.log | wc -l`
+  - Grep: `grep '"operation":"backup_create"' ./workspace/logs/garbage.log | wc -l`
   - Expected: Count equals number of backups
 
 - [ ] **Backup location logged**
-  - Grep: `grep '"operation":"backup_create"' .glyphnova/logs/garbage.log | jq -r '.backup_path'`
+  - Grep: `grep '"operation":"backup_create"' ./workspace/logs/garbage.log | jq -r '.backup_path'`
   - Expected: Path present for all backups
 
 - [ ] **Backup size logged**
-  - Grep: `grep '"operation":"backup_create"' .glyphnova/logs/garbage.log | jq -r '.backup_size_bytes'`
+  - Grep: `grep '"operation":"backup_create"' ./workspace/logs/garbage.log | jq -r '.backup_size_bytes'`
   - Expected: Size present for all backups
 
 ### Restore Logs
 
 - [ ] **Restore operations logged**
-  - Grep: `grep '"operation":"restore"' .glyphnova/logs/garbage.log | wc -l`
+  - Grep: `grep '"operation":"restore"' ./workspace/logs/garbage.log | wc -l`
   - Expected: Count equals number of restores
 
 - [ ] **Restore source logged**
-  - Grep: `grep '"operation":"restore"' .glyphnova/logs/garbage.log | jq -r '.backup_id'`
+  - Grep: `grep '"operation":"restore"' ./workspace/logs/garbage.log | jq -r '.backup_id'`
   - Expected: Backup ID present for all restores
 
 ### Error Logs
 
 - [ ] **GC errors logged**
-  - Grep: `grep '"level":"error"' .glyphnova/logs/garbage.log | grep gc | jq -r '.error'`
+  - Grep: `grep '"level":"error"' ./workspace/logs/garbage.log | grep gc | jq -r '.error'`
   - Expected: Error details present for all failures
 
 - [ ] **Backup errors logged**
-  - Grep: `grep '"level":"error"' .glyphnova/logs/garbage.log | grep backup | jq -r '.error'`
+  - Grep: `grep '"level":"error"' ./workspace/logs/garbage.log | grep backup | jq -r '.error'`
   - Expected: Error details present for all failures
 
 ---

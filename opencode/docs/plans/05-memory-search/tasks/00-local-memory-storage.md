@@ -6,7 +6,7 @@
 
 ## Overview
 
-Implement the foundational memory storage system with structured and unstructured memory types, CRUD operations, versioning, and persistent storage in `.glyphnova/memory/`.
+Implement the foundational memory storage system with structured and unstructured memory types, CRUD operations, versioning, and persistent storage in `./workspace/memory/`.
 
 ## Files
 

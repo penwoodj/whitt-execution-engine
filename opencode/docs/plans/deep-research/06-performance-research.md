@@ -45,7 +45,7 @@
 
 **Evidence sources**:
 - Next Steps Research: `opencode/docs/research/next-steps/05-scalability-considerations.md`
-- Foundation Research Report: `.glyphnova/docs/reports/roadmap/research/foundation-research-report.md`
+- Foundation Research Report: `./workspace/docs/reports/roadmap/research/foundation-research-report.md`
 - Performance benchmarks: Foundation research targets
 
 **Summary**:
@@ -737,7 +737,7 @@ cargo flamegraph --bin agentsdk -- run
 ### Task 1: Document Performance Targets and Benchmarks
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/performance-targets.md`
+- Create: `./workspace/plans/research/evidence/performance-targets.md`
 
 - [ ] **Step 1: Document performance targets**
 
@@ -759,7 +759,7 @@ Expected output: `performance-targets.md`
 
 - [ ] **Step 4: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ && git commit -m "feat: add performance targets evidence"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add performance targets evidence"`
 Expected: Git commit successful
 
 ---
@@ -767,7 +767,7 @@ Expected: Git commit successful
 ### Task 2: Document YAML Parsing Optimization Strategies
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/yaml-parsing-optimization.md`
+- Create: `./workspace/plans/research/evidence/yaml-parsing-optimization.md`
 
 - [ ] **Step 1: Research YAML parsing optimization**
 
@@ -789,7 +789,7 @@ Expected output: `yaml-parsing-optimization.md`
 
 - [ ] **Step 4: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ && git commit -m "feat: add yaml parsing optimization evidence"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add yaml parsing optimization evidence"`
 Expected: Git commit successful
 
 ---
@@ -798,7 +798,7 @@ Expected: Git commit successful
 
 **Files:**
 - Modify: `opencode/docs/plans/deep-research/06-performance-research.md`
-- Create: `.glyphnova/plans/research/validation/performance-research-validation-report.md`
+- Create: `./workspace/plans/research/validation/performance-research-validation-report.md`
 
 - [ ] **Step 1: Run all validation scripts**
 
@@ -828,7 +828,7 @@ Expected output: `performance-research-validation-report.md`
 
 - [ ] **Step 6: Commit validation report**
 
-Run: `git add .glyphnova/plans/research/validation/ && git commit -m "feat: add performance research validation report"`
+Run: `git add ./workspace/plans/research/validation/ && git commit -m "feat: add performance research validation report"`
 Expected: Git commit successful
 
 ---
@@ -841,7 +841,7 @@ Expected: Git commit successful
 4. **Flamegraph**: https://github.com/flamegraph-rs/flamegraph
 5. **Tokio Console**: https://tokio.rs/tokio-console/
 6. **Next Steps Research**: `opencode/docs/research/next-steps/05-scalability-considerations.md`
-7. **Foundation Research Report**: `.glyphnova/docs/reports/roadmap/research/foundation-research-report.md`
+ 7. **Foundation Research Report**: `./workspace/docs/reports/roadmap/research/foundation-research-report.md`
 8. **ADR-0001**: Foundation Phase Architecture Decision
 9. **ADR-0002**: MVP Queue & Scheduler Architecture Decision
 

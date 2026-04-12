@@ -484,35 +484,35 @@ cargo bench --bench integration_bench bench_cli_execution
 ### Tool Operation Logs
 
 - [ ] **Tool invocations logged**
-  - Grep: `grep '"operation":"tool_invoke"' .glyphnova/logs/integration.log | wc -l`
+  - Grep: `grep '"operation":"tool_invoke"' ./workspace/logs/integration.log | wc -l`
   - Expected: Count equals number of tool calls
 
 - [ ] **Tool names logged**
-  - Grep: `grep '"operation":"tool_invoke"' .glyphnova/logs/integration.log | jq -r '.tool_name'`
+  - Grep: `grep '"operation":"tool_invoke"' ./workspace/logs/integration.log | jq -r '.tool_name'`
   - Expected: Tool name present for all calls
 
 - [ ] **Tool parameters logged**
-  - Grep: `grep '"operation":"tool_invoke"' .glyphnova/logs/integration.log | jq -r '.parameters'`
+  - Grep: `grep '"operation":"tool_invoke"' ./workspace/logs/integration.log | jq -r '.parameters'`
   - Expected: Parameters present for all calls
 
 ### CLI Operation Logs
 
 - [ ] **CLI command invocations logged**
-  - Grep: `grep '"operation":"cli_command"' .glyphnova/logs/integration.log | wc -l`
+  - Grep: `grep '"operation":"cli_command"' ./workspace/logs/integration.log | wc -l`
   - Expected: Count equals number of CLI commands
 
 - [ ] **Command names logged**
-  - Grep: `grep '"operation":"cli_command"' .glyphnova/logs/integration.log | jq -r '.command'`
+  - Grep: `grep '"operation":"cli_command"' ./workspace/logs/integration.log | jq -r '.command'`
   - Expected: Command name present for all invocations
 
 ### Workflow Integration Logs
 
 - [ ] **Workflow node executions logged**
-  - Grep: `grep '"operation":"workflow_node"' .glyphnova/logs/integration.log | wc -l`
+  - Grep: `grep '"operation":"workflow_node"' ./workspace/logs/integration.log | wc -l`
   - Expected: Count equals number of node executions
 
 - [ ] **Workflow IDs logged**
-  - Grep: `grep '"operation":"workflow_node"' .glyphnova/logs/integration.log | jq -r '.workflow_id'`
+  - Grep: `grep '"operation":"workflow_node"' ./workspace/logs/integration.log | jq -r '.workflow_id'`
   - Expected: Workflow ID present for all node executions
 
 ---

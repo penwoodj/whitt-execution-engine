@@ -2,7 +2,7 @@
 
 ## Overview
 
-Validate that local memory storage system provides structured and unstructured memory, CRUD operations, versioning, and persistent storage in `.glyphnova/memory/` directory with ADR-0006 compliance.
+Validate that local memory storage system provides structured and unstructured memory, CRUD operations, versioning, and persistent storage in `./workspace/memory/` directory with ADR-0006 compliance.
 
 ---
 
@@ -44,7 +44,7 @@ cargo test --package agentsdk-memory -- --list | grep test_c
 ```
 
 ### Checkpoint 3: Persistence and Recovery
-- [ ] **Data persists to filesystem**: Files created in `.glyphnova/memory/`
+- [ ] **Data persists to filesystem**: Files created in `./workspace/memory/`
 - [ ] **Data survives restart**: Memory available after process restart
 - [ ] **Versioning works**: Multiple versions preserved with timestamps
 - [ ] **Directory structure created**: Correct hierarchy created automatically
@@ -52,11 +52,11 @@ cargo test --package agentsdk-memory -- --list | grep test_c
 **Verification Commands:**
 ```bash
 # Verify directory structure
-ls -la .glyphnova/memory/
+ls -la ./workspace/memory/
 # Expected: structured/, unstructured/, versions/ directories exist
 
 # Verify file persistence
-find .glyphnova/memory/ -type f | wc -l
+find ./workspace/memory/ -type f | wc -l
 # Expected: Files created based on test data
 
 # Test persistence across restart
@@ -159,12 +159,12 @@ cargo test --package agentsdk-memory performance_test
 - [ ] **Structured memory persisted to filesystem**
   - Test: `test_structured_persistence()`
   - Command: `cargo test --package agentsdk-memory test_structured_persistence`
-  - Expected: PASS, file exists in `.glyphnova/memory/structured/`
+  - Expected: PASS, file exists in `./workspace/memory/structured/`
 
 - [ ] **Unstructured memory persisted to filesystem**
   - Test: `test_unstructured_persistence()`
   - Command: `cargo test --package agentsdk-memory test_unstructured_persistence`
-  - Expected: PASS, file exists in `.glyphnova/memory/unstructured/`
+  - Expected: PASS, file exists in `./workspace/memory/unstructured/`
 
 - [ ] **Data survives process restart**
   - Test: `test_survive_restart()`
@@ -337,10 +337,10 @@ cargo test --package agentsdk-memory performance_test
 
 ### Local Memory First
 
-- [ ] **Memory stored in `.glyphnova/memory/` directory**
+- [ ] **Memory stored in `./workspace/memory/` directory**
   - Test: `test_storage_location()`
   - Command: `cargo test --package agentsdk-memory test_storage_location`
-  - Expected: All files in `.glyphnova/memory/` hierarchy
+  - Expected: All files in `./workspace/memory/` hierarchy
 
 - [ ] **No external storage dependencies**
   - Test: `test_local_only_storage()`
@@ -416,43 +416,43 @@ cargo test --package agentsdk-memory performance_test
 ### Log Format
 
 - [ ] **Logs follow structured JSON format**
-  - Grep: `jq -r '.level' .glyphnova/logs/memory.log | sort | uniq -c`
+  - Grep: `jq -r '.level' ./workspace/logs/memory.log | sort | uniq -c`
   - Expected: Counts for debug, info, warn, error levels
 
 - [ ] **All operations include trace ID**
-  - Grep: `grep -o '"trace_id":"[^"]*"' .glyphnova/logs/memory.log | wc -l`
+  - Grep: `grep -o '"trace_id":"[^"]*"' ./workspace/logs/memory.log | wc -l`
   - Expected: Count equals number of operations
 
 - [ ] **Timestamps are ISO 8601 format**
-  - Grep: `grep -oP '"timestamp":"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z"' .glyphnova/logs/memory.log | wc -l`
+  - Grep: `grep -oP '"timestamp":"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z"' ./workspace/logs/memory.log | wc -l`
   - Expected: All timestamps match format
 
 ### Operation Logs
 
 - [ ] **Create operations logged**
-  - Grep: `grep '"operation":"create"' .glyphnova/logs/memory.log | wc -l`
+  - Grep: `grep '"operation":"create"' ./workspace/logs/memory.log | wc -l`
   - Expected: Count equals number of create operations
 
 - [ ] **Read operations logged**
-  - Grep: `grep '"operation":"read"' .glyphnova/logs/memory.log | wc -l`
+  - Grep: `grep '"operation":"read"' ./workspace/logs/memory.log | wc -l`
   - Expected: Count equals number of read operations
 
 - [ ] **Update operations logged**
-  - Grep: `grep '"operation":"update"' .glyphnova/logs/memory.log | wc -l`
+  - Grep: `grep '"operation":"update"' ./workspace/logs/memory.log | wc -l`
   - Expected: Count equals number of update operations
 
 - [ ] **Delete operations logged**
-  - Grep: `grep '"operation":"delete"' .glyphnova/logs/memory.log | wc -l`
+  - Grep: `grep '"operation":"delete"' ./workspace/logs/memory.log | wc -l`
   - Expected: Count equals number of delete operations
 
 ### Error Logs
 
 - [ ] **Errors include full error context**
-  - Grep: `grep '"level":"error"' .glyphnova/logs/memory.log | jq -r '.message'`
+  - Grep: `grep '"level":"error"' ./workspace/logs/memory.log | jq -r '.message'`
   - Expected: Descriptive error messages with details
 
 - [ ] **Errors include stack traces in debug mode**
-  - Grep: `grep '"level":"error"' .glyphnova/logs/memory.log | jq -r '.stack_trace' | head -1`
+  - Grep: `grep '"level":"error"' ./workspace/logs/memory.log | jq -r '.stack_trace' | head -1`
   - Expected: Stack trace present when log level is debug
 
 ---
@@ -550,7 +550,7 @@ cargo test --package agentsdk-memory performance_test
   - Expected: Memory usage < 100MB for 10000 items
 
 - [ ] **Disk usage efficient**
-  - Command: `du -sh .glyphnova/memory/`
+  - Command: `du -sh ./workspace/memory/`
   - Expected: < 1GB for 10000 items with compression
 
 ---
@@ -565,7 +565,7 @@ cargo test --package agentsdk-memory performance_test
 - [ ] Performance meets all targets
 
 ### ADR-0006 Compliant
-- [ ] Local memory storage in `.glyphnova/memory/`
+- [ ] Local memory storage in `./workspace/memory/`
 - [ ] No external storage dependencies
 - [ ] Versioned references maintained
 - [ ] Content hashes recorded for all operations

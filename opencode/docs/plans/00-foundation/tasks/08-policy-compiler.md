@@ -202,8 +202,8 @@ logging:
     workflow: error  # Duplicate key - should use last
 tool_permissions:
   file_operations:
-    read: { enabled: true }
-    read: { enabled: false }
+    read: { # presence = enabled }
+    read: { disabled: true }
 "#;
     let spec = parse_yaml(yaml).unwrap();
     let policy = compile_policies(&spec).unwrap();

@@ -224,7 +224,7 @@ PROPTEST_NUMBER_OF_TESTS=1000 cargo test --lib queue::tests::invariants
 
 **Configuration:**
 ```yaml
-pipeline:
+agentic_workflow:
   execution_mode: serial
   steps:
     - name: step_1
@@ -240,7 +240,7 @@ pipeline:
 
 **Configuration:**
 ```yaml
-pipeline:
+agentic_workflow:
   execution_mode: parallel
   max_concurrency: 4
   steps:
@@ -258,7 +258,7 @@ pipeline:
 
 **Configuration:**
 ```yaml
-pipeline:
+agentic_workflow:
   execution_mode: hybrid
   steps:
     - name: setup_step  # Serial
@@ -320,6 +320,7 @@ cargo test --lib scheduler::tests::concurrency_limits
 **Configuration:**
 ```yaml
 loop:
+  # v2: step type inferred from keys (generative_entity, tool, when, sub_workflow, loop)
   type: fixed_count
   iterations: 5
   body:
@@ -335,6 +336,7 @@ loop:
 **Configuration:**
 ```yaml
 loop:
+  # v2: step type inferred from keys (generative_entity, tool, when, sub_workflow, loop)
   type: conditional
   condition: ${result.score} < 0.9
   body:
@@ -350,6 +352,7 @@ loop:
 **Configuration:**
 ```yaml
 loop:
+  # v2: step type inferred from keys (generative_entity, tool, when, sub_workflow, loop)
   type: iterator
   variable: item
   collection: ${items}
@@ -366,6 +369,7 @@ loop:
 **Configuration:**
 ```yaml
 loop:
+  # v2: step type inferred from keys (generative_entity, tool, when, sub_workflow, loop)
   type: retry
   max_attempts: 3
   backoff_ms: 1000
@@ -382,6 +386,7 @@ loop:
 **Configuration:**
 ```yaml
 loop:
+  # v2: step type inferred from keys (generative_entity, tool, when, sub_workflow, loop)
   type: convergence
   convergence_criteria:
     - metric: score
@@ -401,6 +406,7 @@ loop:
 **Configuration:**
 ```yaml
 loop:
+  # v2: step type inferred from keys (generative_entity, tool, when, sub_workflow, loop)
   type: timeout
   timeout_ms: 30000
   body:
@@ -469,6 +475,7 @@ branch:
 **Configuration:**
 ```yaml
 branch:
+  # v2: step type inferred from keys (generative_entity, tool, when, sub_workflow, loop)
   type: switch
   expression: ${result.category}
   cases:
@@ -604,6 +611,7 @@ cargo test --lib retry::tests::retry_on_specific_errors
 ```yaml
 step:
   name: delete_files
+  # v2: step type inferred from keys (generative_entity, tool, when, sub_workflow, loop)
   type: dangerous
   requires_approval: true
   operation: delete
@@ -616,6 +624,7 @@ step:
 ```yaml
 step:
   name: delete_files
+  # v2: step type inferred from keys (generative_entity, tool, when, sub_workflow, loop)
   type: dangerous
   requires_approval: true
   operation: delete

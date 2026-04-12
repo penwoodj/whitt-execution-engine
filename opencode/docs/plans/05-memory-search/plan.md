@@ -28,7 +28,7 @@
 **Plane 1: Local Memory (Primary)**
 - Structured memory: Key-value stores, document collections, metadata
 - Unstructured memory: Free-text blobs, logs, conversation history
-- Storage location: `.glyphnova/memory/` with versioned references
+- Storage location: `./workspace/memory/` with versioned references
 - Search: Hybrid (exact + semantic) over local content
 
 **Plane 2: External Search (Secondary)**

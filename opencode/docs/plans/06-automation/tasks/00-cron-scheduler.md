@@ -666,7 +666,7 @@ mod tests {
             created_at: Utc::now(),
             last_run: None,
             next_run: Utc::now(),
-            enabled: true,
+            # presence = enabled,
         };
 
         store.save_schedule(&schedule).await.unwrap();
@@ -692,7 +692,7 @@ mod tests {
             created_at: Utc::now(),
             last_run: None,
             next_run: Utc::now(),
-            enabled: true,
+            # presence = enabled,
         };
 
         store.save_schedule(&schedule1).await.unwrap();
@@ -910,7 +910,7 @@ mod tests {
             created_at: Utc::now(),
             last_run: None,
             next_run: Utc::now(),
-            enabled: true,
+            # presence = enabled,
         };
 
         store.save_schedule(&schedule).await.unwrap();
@@ -936,7 +936,7 @@ mod tests {
             created_at: Utc::now(),
             last_run: None,
             next_run: Utc::now(),
-            enabled: true,
+            # presence = enabled,
         };
 
         store.save_schedule(&schedule1).await.unwrap();

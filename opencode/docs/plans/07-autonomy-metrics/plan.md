@@ -388,7 +388,7 @@ glyphnova-engine/
 - `InterventionEvent` structure
 - `InterventionContext` for capturing state
 - `InterventionReason` for reason tracking
-- Structured logging to `.glyphnova/interventions/`
+- Structured logging to `./workspace/interventions/`
 - Analysis logic (trends, frequency)
 
 **Estimated Time**: 5 days
@@ -441,7 +441,7 @@ glyphnova-engine/
 - `Checkpoint` structure (workflow state, metrics, intervention history)
 - Periodic checkpoint generation (configurable interval)
 - Event-triggered checkpoints (on intervention, on stop condition)
-- Storage in `.glyphnova/checkpoints/`
+- Storage in `./workspace/checkpoints/`
 - Restoration logic
 
 **Estimated Time**: 5 days
@@ -655,11 +655,11 @@ metrics:
     quantiles: [0.5, 0.95, 0.99]
 export:
   prometheus:
-    enabled: true
+    # presence = enabled
     port: 9090
   json:
-    enabled: true
-    path: ".glyphnova/metrics.json"
+    # presence = enabled
+    path: "./workspace/metrics.json"
 ```
 
 ---

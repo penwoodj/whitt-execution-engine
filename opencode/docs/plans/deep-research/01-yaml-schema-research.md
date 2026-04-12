@@ -176,7 +176,7 @@ Error reporting should provide detailed diagnostics including file path, line nu
 **Evidence sources**:
 - Rust compiler HIR/MIR design: https://rustc-dev-guide.rust-lang.org/the-compiler.html
 - IR design patterns: https://www.cs.cornell.edu/andru/papers/pldi94.pdf
-- Foundation research report: `.glyphnova/docs/reports/roadmap/research/foundation-research-report.md`
+- Foundation research report: `./workspace/docs/reports/roadmap/research/foundation-research-report.md`
 
 **Summary**:
 A multi-stage IR design (HIR → THIR → MIR) following Rust compiler patterns is optimal for complex workflows, enabling separate concerns, type safety, and optimization opportunities.
@@ -193,7 +193,7 @@ A multi-stage IR design (HIR → THIR → MIR) following Rust compiler patterns 
 **Evidence sources**:
 - Schema-aware compression research: `opencode/docs/research/academic-papers/schema-compression/xml-json-compression.md`
 - Incremental update patterns: https://www.microsoft.com/en-us/research/publication/incremental-computation/
-- Foundation research report: `.glyphnova/docs/reports/roadmap/research/foundation-research-research.md`
+- Foundation research report: `./workspace/docs/reports/roadmap/research/foundation-research-research.md`
 
 **Summary**:
 Schema-aware incremental updates significantly improve performance by leveraging schema knowledge to validate only changed portions of YAML workflows, rather than re-parsing entire documents.
@@ -858,9 +858,9 @@ grep -A 5 "Recommendation 4:" opencode/docs/plans/deep-research/01-yaml-schema-r
 ### Task 1: Complete serde_yaml vs Manual Parsing Comparison
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/yaml-serde-v0.10-benchmark.json`
-- Create: `.glyphnova/plans/research/evidence/nom-v7-performance.md`
-- Create: `.glyphnova/plans/research/evidence/parsing-comparison-analysis.md`
+- Create: `./workspace/plans/research/evidence/yaml-serde-v0.10-benchmark.json`
+- Create: `./workspace/plans/research/evidence/nom-v7-performance.md`
+- Create: `./workspace/plans/research/evidence/parsing-comparison-analysis.md`
 
 - [ ] **Step 1: Research serde_yaml performance benchmarks**
 
@@ -886,7 +886,7 @@ Expected output: `parsing-comparison-analysis.md` document with clear recommenda
 
 - [ ] **Step 4: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ && git commit -m "feat: add yaml parsing comparison evidence"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add yaml parsing comparison evidence"`
 Expected: Git commit successful
 
 ---
@@ -894,8 +894,8 @@ Expected: Git commit successful
 ### Task 2: Complete Schema Validation Strategy Research
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/jsonschema-rs-benchmark.json`
-- Create: `.glyphnova/plans/research/evidence/schema-validation-comparison.md`
+- Create: `./workspace/plans/research/evidence/jsonschema-rs-benchmark.json`
+- Create: `./workspace/plans/research/evidence/schema-validation-comparison.md`
 
 - [ ] **Step 1: Research jsonschema-rs library**
 
@@ -921,7 +921,7 @@ Expected output: `schema-validation-comparison.md` document with clear recommend
 
 - [ ] **Step 4: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ && git commit -m "feat: add schema validation comparison evidence"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add schema validation comparison evidence"`
 Expected: Git commit successful
 
 ---
@@ -929,7 +929,7 @@ Expected: Git commit successful
 ### Task 3: Complete YAML→Rust Type Mapping Research
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/type-mapping-patterns.md`
+- Create: `./workspace/plans/research/evidence/type-mapping-patterns.md`
 
 - [ ] **Step 1: Research serde derive macros**
 
@@ -955,7 +955,7 @@ Expected output: `type-mapping-patterns.md` document with concrete examples
 
 - [ ] **Step 4: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ && git commit -m "feat: add yaml-to-rust type mapping evidence"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add yaml-to-rust type mapping evidence"`
 Expected: Git commit successful
 
 ---
@@ -963,7 +963,7 @@ Expected: Git commit successful
 ### Task 4: Complete Schema Evolution Research
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/schema-evolution-strategies.md`
+- Create: `./workspace/plans/research/evidence/schema-evolution-strategies.md`
 
 - [ ] **Step 1: Research Semantic Versioning specification**
 
@@ -989,7 +989,7 @@ Expected output: `schema-evolution-strategies.md` document with clear recommenda
 
 - [ ] **Step 4: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ && git commit -m "feat: add schema evolution strategies evidence"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add schema evolution strategies evidence"`
 Expected: Git commit successful
 
 ---
@@ -997,8 +997,8 @@ Expected: Git commit successful
 ### Task 5: Complete Error Reporting Research
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/miette-diagnostic-library.md`
-- Create: `.glyphnova/plans/research/evidence/error-reporting-best-practices.md`
+- Create: `./workspace/plans/research/evidence/miette-diagnostic-library.md`
+- Create: `./workspace/plans/research/evidence/error-reporting-best-practices.md`
 
 - [ ] **Step 1: Research miette diagnostic library**
 
@@ -1024,7 +1024,7 @@ Expected output: `error-reporting-best-practices.md` document with concrete exam
 
 - [ ] **Step 4: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ && git commit -m "feat: add error reporting evidence"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add error reporting evidence"`
 Expected: Git commit successful
 
 ---
@@ -1032,7 +1032,7 @@ Expected: Git commit successful
 ### Task 6: Complete Multi-Stage IR Design Research
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/multi-stage-ir-design.md`
+- Create: `./workspace/plans/research/evidence/multi-stage-ir-design.md`
 
 - [ ] **Step 1: Research Rust compiler IR design**
 
@@ -1045,7 +1045,7 @@ Expected output: Understanding of Rust compiler IR design and patterns
 - [ ] **Step 2: Review foundation research report IR recommendations**
 
 Evidence sources:
-- Foundation research report: `.glyphnova/docs/reports/roadmap/research/foundation-research-report.md`
+- Foundation research report: `./workspace/docs/reports/roadmap/research/foundation-research-report.md`
 
 Expected output: Understanding of foundation research IR recommendations
 
@@ -1057,7 +1057,7 @@ Expected output: `multi-stage-ir-design.md` document with concrete recommendatio
 
 - [ ] **Step 4: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ && git commit -m "feat: add multi-stage ir design evidence"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add multi-stage ir design evidence"`
 Expected: Git commit successful
 
 ---
@@ -1065,7 +1065,7 @@ Expected: Git commit successful
 ### Task 7: Complete Schema-Aware Incremental Updates Research
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/incremental-validation-research.md`
+- Create: `./workspace/plans/research/evidence/incremental-validation-research.md`
 
 - [ ] **Step 1: Research schema-aware compression**
 
@@ -1083,7 +1083,7 @@ Expected output: `incremental-validation-research.md` document with clear recomm
 
 - [ ] **Step 3: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ && git commit -m "feat: add incremental validation evidence"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add incremental validation evidence"`
 Expected: Git commit successful
 
 ---
@@ -1092,7 +1092,7 @@ Expected: Git commit successful
 
 **Files:**
 - Modify: `opencode/docs/plans/deep-research/01-yaml-schema-research.md`
-- Create: `.glyphnova/plans/research/validation/yaml-schema-validation-report.md`
+- Create: `./workspace/plans/research/validation/yaml-schema-validation-report.md`
 
 - [ ] **Step 1: Run all validation scripts**
 
@@ -1122,7 +1122,7 @@ Expected output: `yaml-schema-validation-report.md` document with validation sum
 
 - [ ] **Step 6: Commit validation report**
 
-Run: `git add .glyphnova/plans/research/validation/ && git commit -m "feat: add yaml schema research validation report"`
+Run: `git add ./workspace/plans/research/validation/ && git commit -m "feat: add yaml schema research validation report"`
 Expected: Git commit successful
 
 ---
@@ -1155,7 +1155,7 @@ Expected: Git commit successful
 5. **jsonschema-rs**: https://docs.rs/jsonschema/latest/jsonschema/
 6. **miette**: https://docs.rs/miette/latest/miette/
 7. **Rust Compiler IR Design**: https://rustc-dev-guide.rust-lang.org/the-compiler.html
-8. **Foundation Research Report**: `.glyphnova/docs/reports/roadmap/research/foundation-research-report.md`
+8. **Foundation Research Report**: `./workspace/docs/reports/roadmap/research/foundation-research-report.md`
 9. **Schema-Aware Compression**: `opencode/docs/research/academic-papers/schema-compression/xml-json-compression.md`
 10. **ADR-0001**: Foundation Phase Architecture Decision
 

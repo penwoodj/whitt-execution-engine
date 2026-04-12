@@ -384,28 +384,28 @@ execution:
 tool_permissions:
   file_operations:
     read:
-      enabled: true
+      # presence = enabled
     write:
-      enabled: false
+      disabled: true
     delete:
-      enabled: false
+      disabled: true
   web_operations:
     fetch:
-      enabled: false
+      disabled: true
     scrape:
-      enabled: false
+      disabled: true
   shell_operations:
     exec:
-      enabled: false
+      disabled: true
 
 logging:
-  enabled: true
+  # presence = enabled
   default: info
   output:
     console:
-      enabled: true
+      # presence = enabled
     file:
-      enabled: false
+      disabled: true
   errors:
     log_parsing_errors: true
 
@@ -494,28 +494,28 @@ execution:
 tool_permissions:
   file_operations:
     read:
-      enabled: true
+      # presence = enabled
     write:
-      enabled: false
+      disabled: true
     delete:
-      enabled: false
+      disabled: true
   web_operations:
     fetch:
-      enabled: false
+      disabled: true
     scrape:
-      enabled: false
+      disabled: true
   shell_operations:
     exec:
-      enabled: false
+      disabled: true
 
 logging:
-  enabled: true
+  # presence = enabled
   default: info
   output:
     console:
-      enabled: true
+      # presence = enabled
     file:
-      enabled: false
+      disabled: true
   errors:
     log_parsing_errors: true
 "#;

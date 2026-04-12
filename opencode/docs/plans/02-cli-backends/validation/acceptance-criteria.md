@@ -14,7 +14,7 @@ This document defines the overall acceptance criteria for Phase 2: CLI & LLM Bac
 - [ ] **FR-CLI-005:** User can manage configuration: `glyphnova config show/set/validate`
 - [ ] **FR-CLI-006:** CLI supports multiple output formats: `--output {plain,json,table}`
 - [ ] **FR-CLI-007:** CLI provides tab completion for all commands
-- [ ] **FR-CLI-008:** Configuration loads from `~/.glyphnova/config.yaml`
+- [ ] **FR-CLI-008:** Configuration loads from `~/./workspace/config.yaml`
 
 ### LLM Backends
 - [ ] **FR-LLM-001:** System supports LM Studio backend (localhost:1234)

@@ -1283,7 +1283,7 @@ cargo build --release
 ### Task 1: Document All Crate Versions and Rationale
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/crate-versions-rationale.md`
+- Create: `./workspace/plans/research/evidence/crate-versions-rationale.md`
 
 - [ ] **Step 1: Research each crate's current version and release notes**
 
@@ -1311,7 +1311,7 @@ Expected output: `crate-versions-rationale.md` document
 
 - [ ] **Step 4: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ && git commit -m "feat: add crate versions rationale evidence"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add crate versions rationale evidence"`
 Expected: Git commit successful
 
 ---
@@ -1319,7 +1319,7 @@ Expected: Git commit successful
 ### Task 2: Document Integration Patterns for Each Crate
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/crate-integration-patterns.md`
+- Create: `./workspace/plans/research/evidence/crate-integration-patterns.md`
 
 - [ ] **Step 1: Research integration patterns for each crate**
 
@@ -1347,7 +1347,7 @@ Expected output: `crate-integration-patterns.md` document
 
 - [ ] **Step 4: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ && git commit -m "feat: add crate integration patterns evidence"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add crate integration patterns evidence"`
 Expected: Git commit successful
 
 ---
@@ -1355,7 +1355,7 @@ Expected: Git commit successful
 ### Task 3: Document Known Limitations and Workarounds
 
 **Files:**
-- Create: `.glyphnova/plans/research/evidence/crate-limitations-workarounds.md`
+- Create: `./workspace/plans/research/evidence/crate-limitations-workarounds.md`
 
 - [ ] **Step 1: Research known limitations for each crate**
 
@@ -1383,7 +1383,7 @@ Expected output: `crate-limitations-workarounds.md` document
 
 - [ ] **Step 4: Commit evidence artifacts**
 
-Run: `git add .glyphnova/plans/research/evidence/ && git commit -m "feat: add crate limitations workarounds evidence"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add crate limitations workarounds evidence"`
 Expected: Git commit successful
 
 ---
@@ -1427,7 +1427,7 @@ Expected: Git commit successful
 
 **Files:**
 - Modify: `opencode/docs/plans/deep-research/02-rust-ecosystem-research.md`
-- Create: `.glyphnova/plans/research/validation/rust-ecosystem-validation-report.md`
+- Create: `./workspace/plans/research/validation/rust-ecosystem-validation-report.md`
 
 - [ ] **Step 1: Run all validation scripts**
 
@@ -1457,7 +1457,7 @@ Expected output: `rust-ecosystem-validation-report.md` document
 
 - [ ] **Step 6: Commit validation report**
 
-Run: `git add .glyphnova/plans/research/validation/ && git commit -m "feat: add rust ecosystem research validation report"`
+Run: `git add ./workspace/plans/research/validation/ && git commit -m "feat: add rust ecosystem research validation report"`
 Expected: Git commit successful
 
 ---

@@ -449,39 +449,39 @@ cargo bench --bench provenance_bench bench_query_trace_id
 ### Trace Recording Logs
 
 - [ ] **Trace creation logged**
-  - Grep: `grep '"operation":"trace_create"' .glyphnova/logs/provenance.log | wc -l`
+  - Grep: `grep '"operation":"trace_create"' ./workspace/logs/provenance.log | wc -l`
   - Expected: Count equals number of traces created
 
 - [ ] **Trace IDs logged**
-  - Grep: `grep '"operation":"trace_create"' .glyphnova/logs/provenance.log | jq -r '.trace_id'`
+  - Grep: `grep '"operation":"trace_create"' ./workspace/logs/provenance.log | jq -r '.trace_id'`
   - Expected: Trace ID present for all creations
 
 - [ ] **Timestamps logged in ISO 8601 format**
-  - Grep: `grep '"operation":"trace_create"' .glyphnova/logs/provenance.log | jq -r '.timestamp'`
+  - Grep: `grep '"operation":"trace_create"' ./workspace/logs/provenance.log | jq -r '.timestamp'`
   - Expected: ISO 8601 format for all timestamps
 
 ### Query Logs
 
 - [ ] **Query operations logged**
-  - Grep: `grep '"operation":"query"' .glyphnova/logs/provenance.log | wc -l`
+  - Grep: `grep '"operation":"query"' ./workspace/logs/provenance.log | wc -l`
   - Expected: Count equals number of queries
 
 - [ ] **Query parameters logged**
-  - Grep: `grep '"operation":"query"' .glyphnova/logs/provenance.log | jq -r '.query'`
+  - Grep: `grep '"operation":"query"' ./workspace/logs/provenance.log | jq -r '.query'`
   - Expected: Query parameters present
 
 - [ ] **Query duration logged**
-  - Grep: `grep '"operation":"query"' .glyphnova/logs/provenance.log | jq -r '.duration_ms'`
+  - Grep: `grep '"operation":"query"' ./workspace/logs/provenance.log | jq -r '.duration_ms'`
   - Expected: Duration in milliseconds
 
 ### Timeline Logs
 
 - [ ] **Timeline generation logged**
-  - Grep: `grep '"operation":"timeline_generate"' .glyphnova/logs/provenance.log | wc -l`
+  - Grep: `grep '"operation":"timeline_generate"' ./workspace/logs/provenance.log | wc -l`
   - Expected: Count equals number of timeline generations
 
 - [ ] **Timeline format logged**
-  - Grep: `grep '"operation":"timeline_generate"' .glyphnova/logs/provenance.log | jq -r '.format'`
+  - Grep: `grep '"operation":"timeline_generate"' ./workspace/logs/provenance.log | jq -r '.format'`
   - Expected: Format present (e.g., mermaid)
 
 ---

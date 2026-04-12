@@ -457,39 +457,39 @@ cargo bench --bench scraping_bench bench_extraction
 ### robots.txt Logs
 
 - [ ] **robots.txt fetch attempts logged**
-  - Grep: `grep '"operation":"robots_fetch"' .glyphnova/logs/scraping.log | wc -l`
+  - Grep: `grep '"operation":"robots_fetch"' ./workspace/logs/scraping.log | wc -l`
   - Expected: Count equals number of fetch attempts
 
 - [ ] **robots.txt parse results logged**
-  - Grep: `grep '"operation":"robots_parse"' .glyphnova/logs/scraping.log | wc -l`
+  - Grep: `grep '"operation":"robots_parse"' ./workspace/logs/scraping.log | wc -l`
   - Expected: Count equals number of parse operations
 
 - [ ] **robots.txt decisions logged**
-  - Grep: `grep '"operation":"robots_check"' .glyphnova/logs/scraping.log | jq -r '.decision'`
+  - Grep: `grep '"operation":"robots_check"' ./workspace/logs/scraping.log | jq -r '.decision'`
   - Expected: Decision present for all checks
 
 ### Extraction Logs
 
 - [ ] **Extraction attempts logged**
-  - Grep: `grep '"operation":"extract"' .glyphnova/logs/scraping.log | wc -l`
+  - Grep: `grep '"operation":"extract"' ./workspace/logs/scraping.log | wc -l`
   - Expected: Count equals number of extractions
 
 - [ ] **Extraction status logged**
-  - Grep: `grep '"operation":"extract"' .glyphnova/logs/scraping.log | jq -r '.status'`
+  - Grep: `grep '"operation":"extract"' ./workspace/logs/scraping.log | jq -r '.status'`
   - Expected: Status present for all extractions
 
 - [ ] **Extraction duration logged**
-  - Grep: `grep '"operation":"extract"' .glyphnova/logs/scraping.log | jq -r '.duration_ms'`
+  - Grep: `grep '"operation":"extract"' ./workspace/logs/scraping.log | jq -r '.duration_ms'`
   - Expected: Duration in milliseconds
 
 ### Error Logs
 
 - [ ] **Scope violations logged**
-  - Grep: `grep '"event":"scope_violation"' .glyphnova/logs/scraping.log | wc -l`
+  - Grep: `grep '"event":"scope_violation"' ./workspace/logs/scraping.log | wc -l`
   - Expected: Count equals number of violations
 
 - [ ] **robots.txt errors logged**
-  - Grep: `grep '"event":"robots_error"' .glyphnova/logs/scraping.log | jq -r '.error'`
+  - Grep: `grep '"event":"robots_error"' ./workspace/logs/scraping.log | jq -r '.error'`
   - Expected: Error details present for all errors
 
 ---

@@ -2313,7 +2313,7 @@ impl Default for CheckpointConfig {
         Self {
             frequency: 10,
             max_checkpoints: 100,
-            compression_enabled: true,
+            compression_# presence = enabled,
         }
     }
 }
