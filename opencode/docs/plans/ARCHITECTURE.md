@@ -14,7 +14,7 @@ The AgentSDK Execution Engine is a **compiler-centered, local-first agentic orch
 2. Compiles them through a typed pipeline: YAML → WorkflowSpec → WorkflowIR
 3. Executes WorkflowIR against local LLM backends (LM Studio, Ollama, llama.cpp)
 4. Provides dual execution: Direct (development) and Code Generation (production)
-5. Persists all artifacts in `.glyphnova/` system-of-record
+5. Persists all artifacts in `./workspace/` system-of-record
 
 **NOT** a thin chat wrapper. NOT a simple YAML executor. This is a compiler-runtime system.
 
@@ -78,7 +78,7 @@ The AgentSDK Execution Engine is a **compiler-centered, local-first agentic orch
 ## 3. Compiler Pipeline
 
 ```
-YAML Source (1705-line schema)
+YAML Source (801-line schema)
         │
         ▼
 ┌──────────────────┐
@@ -268,10 +268,10 @@ ${workspace.codebase}      → Resolved to workspace path
 
 ---
 
-## 8. Directory Layout (.glyphnova/)
+## 8. Directory Layout (workspace/)
 
 ```
-.glyphnova/
+workspace/
 ├── workflows/              # Workflow specs (versioned)
 │   └── {workflow_id}/
 │       ├── spec.yml        # Workflow definition

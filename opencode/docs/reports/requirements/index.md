@@ -3,7 +3,7 @@
 **Version**: 4.0  
 **Date**: 2026-04-03  
 **Last Updated**: 2026-04-03  
-**Schema Version**: 1.0.0 (Unified)
+**Schema Version**: 2.0.0 (Unified)
 
 ---
 
@@ -21,7 +21,7 @@
 - **Domain Organization**: 19 major domains logically organized
 - **Self-Documenting**: Schema structure conveys meaning without memorization
 
-**Schema File**: [unified-workflow-schema.yml](./unified-workflow-schema.yml)
+**Schema File**: [unified-workflow-schema.yml](./unifying-schema/unified-workflow-schema.yml)
 
 **Coverage Analysis**: [example-workflows/requirements-coverage-analysis.md](./example-workflows/requirements-coverage-analysis.md)
 

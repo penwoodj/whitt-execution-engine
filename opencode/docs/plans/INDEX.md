@@ -355,7 +355,7 @@ wiremock = "0.6"  # Mock HTTP for backend testing
 
 ## References
 
-- **Schema**: `opencode/docs/reports/requirements/unified-workflow-schema.yml` (1705 lines)
+- **Schema**: `opencode/docs/reports/requirements/unifying-schema/unified-workflow-schema.yml` (801 lines)
 - **ADRs**: `opencode/docs/reports/roadmap/adr-0000` through `adr-0008`
 - **Example Workflows**: `opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/` (53 files)
 - **v1.0 Plans**: `opencode/docs/reports/initial-plans/` (8 plans, all 0% complete)
