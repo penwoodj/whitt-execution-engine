@@ -68,10 +68,10 @@ This index organizes the transpiler requirements into logical groupings with imp
 - [ADR-0002: MVP Queue and Scheduler](../roadmap/adr-0002-mvp-queue-scheduler-safety.yml) - ChatSession, queue lifecycle, human gating
 
 **Requirements Documents**:
-- [01-core-functionality.md](./01-core-functionality.md) - Primary purpose and key attributes
-- [02-yaml-schema.md](./02-yaml-schema.md) - Schema characteristics and elements
-- [04-tech-stack.md](./04-tech-stack.md) - Selected libraries and rationale
-- [07-project-structure.md](./07-project-structure.md) - Repository layout and branching
+- Core functionality, schema, tech stack, and project structure requirements are covered by ADR-0001 and the unified schema rather than standalone docs. See:
+  - [Unified Schema](./unifying-schema/unified-workflow-schema.yml) — single source of truth
+  - [ADR-0001: Foundation Compiler Contract](../roadmap/adr-0001-foundation-compiler-contract.yml) — architecture
+  - [Schema Requirements](./unifying-schema/unified-schema-requirements.md) — schema-specific requirements
 
 **Implementation Order**: 1-4  
 **Dependencies**: None (foundation phase)  
@@ -99,9 +99,11 @@ This index organizes the transpiler requirements into logical groupings with imp
 - [ADR-0003: CLI and Backends](../roadmap/adr-0003-cli-backends-networking-boundary.yml) - CLI surface, provider abstraction
 
 **Requirements Documents**:
-- [03-agentic-capabilities.md](./03-agentic-capabilities.md) - Tools, permissions, loops, multi-agent spawning
-- [05-llm-providers.md](./05-llm-providers.md) - Provider support and hardware acceleration
-- [08-readme-content.md](./08-readme-content.md) - Documentation and examples
+- Agentic capabilities and LLM provider requirements are covered by ADR-0002, ADR-0003, and the 52 categorized example workflows. See:
+  - [52 Example Workflows](./example-workflows/requirements-oriented-auto/) — practical demonstrations
+  - [ADR-0002: MVP Queue and Scheduler](../roadmap/adr-0002-mvp-queue-scheduler-safety.yml) — execution semantics
+  - [ADR-0003: CLI and Backends](../roadmap/adr-0003-cli-backends-networking-boundary.yml) — provider abstraction
+  - [README Content](./example-workflows/README.md) — documentation and examples guide
 
 **Implementation Order**: 5-8  
 **Dependencies**: Phase 1 (foundation)  
@@ -129,8 +131,9 @@ This index organizes the transpiler requirements into logical groupings with imp
 - [ADR-0004: Glyphnova UI](../roadmap/adr-0004-glyphnova-ui-control-plane.yml) - Desktop shell over runtime
 
 **Requirements Documents**:
-- [05-llm-providers.md](./05-llm-providers.md) - Provider support and hardware acceleration
-- [04-tech-stack.md](./04-tech-stack.md) - llama.cpp bindings, Vulkan support
+- Provider abstraction and hardware acceleration covered by ADR-0003. See:
+  - [ADR-0003: CLI and Backends](../roadmap/adr-0003-cli-backends-networking-boundary.yml)
+  - [Model Router Research](./model-router/) — provider comparison and routing strategy
 
 **Implementation Order**: 9-11  
 **Dependencies**: Phase 1, Phase 2 (MVP queue)  
@@ -155,8 +158,10 @@ This index organizes the transpiler requirements into logical groupings with imp
 - [ADR-0006: Memory and Search](../roadmap/adr-0006-memory-search-scraping.yml) - Local memory, retrieval, scraping
 
 **Requirements Documents**:
-- [03-agentic-capabilities.md](./03-agentic-capabilities.md) - Loop control, validation, multi-agent spawning
-- [12-advanced-features.md](./12-advanced-features.md) - Detailed loop and multi-agent specifications
+- Advanced agentic features (loops, validation, multi-agent) are demonstrated across the 52 example workflows and specified in ADR-0005. See:
+  - [ADR-0005: Quality Loops and Benchmarks](../roadmap/adr-0005-quality-loops-benchmarks-artifact-workflows.yml) — loop and benchmark design
+  - [05-Loops-and-Convergence](./example-workflows/requirements-oriented-auto/05-loops-convergence/) — loop examples
+  - [12-Error-Handling-Retries](./example-workflows/requirements-oriented-auto/12-error-handling-retries/) — retry patterns
 
 **Implementation Order**: 12-16  
 **Dependencies**: Phase 1, Phase 2, Phase 3  
@@ -180,8 +185,10 @@ This index organizes the transpiler requirements into logical groupings with imp
 - [ADR-0008: Autonomy and Metrics](../roadmap/adr-0008-autonomy-and-metrics.yml) - Objective measurements
 
 **Requirements Documents**:
-- [12-advanced-features.md](./12-advanced-features.md) - Model sweep workflows, benchmarking metrics
-- [15-configuration-defaults.md](./15-configuration-defaults.md) - Profiling and metrics configuration
+- Benchmarking requirements are specified in the 20 userflow documents. See:
+  - [MVP Summary Report](./benchmark-100-model-userflows/mvp-summary-report.md) — 3-phase benchmark plan
+  - [UF01-UF20 Userflow Specs](./benchmark-100-model-userflows/) — detailed userflow specifications
+  - [ADR-0005: Quality Loops and Benchmarks](../roadmap/adr-0005-quality-loops-benchmarks-artifact-workflows.yml) — benchmark harness
 
 **Implementation Order**: 17-20  
 **Dependencies**: Phase 1, Phase 2, Phase 3, Phase 4  
@@ -203,8 +210,9 @@ This index organizes the transpiler requirements into logical groupings with imp
 - [ADR-0008: Autonomy and Metrics](../roadmap/adr-0008-autonomy-and-metrics.yml) - Autonomous loops, metrics
 
 **Requirements Documents**:
-- [12-advanced-features.md](./12-advanced-features.md) - Loop control (deferred features)
-- [15-configuration-defaults.md](./15-configuration-defaults.md) - Default loop configuration
+- Automation and scheduling requirements covered by ADR-0007 and ADR-0008. See:
+  - [ADR-0007: Cron and Git Refinement](../roadmap/adr-0007-cron-git-refinement.yml) — scheduled workflows
+  - [ADR-0008: Autonomy and Metrics](../roadmap/adr-0008-autonomy-and-metrics.yml) — autonomous loops
 
 **Implementation Order**: 21-24  
 **Dependencies**: Phase 1, Phase 2, Phase 3, Phase 4, Phase 5  
@@ -227,8 +235,9 @@ This index organizes the transpiler requirements into logical groupings with imp
 - [ADR-0004: Glyphnova UI](../roadmap/adr-0004-glyphnova-ui-control-plane.yml) - Desktop shell, queue visualization
 
 **Requirements Documents**:
-- [08-readme-content.md](./08-readme-content.md) - UI-related documentation
-- [15-configuration-defaults.md](./15-configuration-defaults.md) - UI defaults
+- UI and desktop shell requirements covered by ADR-0004. See:
+  - [ADR-0004: Glyphnova UI](../roadmap/adr-0004-glyphnova-ui-control-plane.yml) — desktop shell design
+  - [Phase 3 Plan](../../plans/03-glyphnova-ui/plan.md) — Glyphnova implementation plan
 
 **Implementation Order**: 25-28  
 **Dependencies**: Phase 1, Phase 2, Phase 3  
