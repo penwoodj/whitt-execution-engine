@@ -57,7 +57,7 @@
 | `models."identifier".min_allowed.ram` | percentage | "9%" | Phase 0 | - | Minimum requirements validated at start |
 | `models."identifier".min_allowed.vram` | percentage | "2.4GB" | Phase 0 | - | - |
 | `models."identifier".min_allowed.attention_tokens` | integer | 73500 | Phase 0 | - | Useful minimum enforced |
-| `models."identifier".allocation_strategy` | enum | "dynamic" | Phase 0 | - | Resource allocation mode applied |
+| `models."identifier".ram_allocation.strategy` | enum | "dynamic" | Phase 0 | - | Resource allocation mode applied |
 | `models."identifier".model_memory.cache_size` | enum | "min" | Phase 0 | - | KV cache size configured |
 | `models."identifier".model_memory.kv_cache_quantization` | enum | "auto" | Phase 0 | - | Quantization applied to memory |
 | `models."identifier".model_memory.attention_context` | enum | "auto" | Phase 0 | - | Context size source resolved |
@@ -518,7 +518,9 @@
 
 **Owner Phase**: Phase 0 (Foundation - documentation)
 
-**Schema Fields**:
+**Note (v2.0)**: This section was removed from the unified schema v2.0. The `features_demonstrated` key is no longer used in workflow definitions.
+
+**Schema Fields** (v1 reference, preserved for historical context):
 | Feature | Type | Implementation Phase | Example Workflows | Acceptance Criteria |
 |---------|------|---------------------|-------------------|-------------------|
 | `features_demonstrated.model_configuration` | boolean | Phase 0 | `01-basic-model-selection-providers.yaml` | Feature working |

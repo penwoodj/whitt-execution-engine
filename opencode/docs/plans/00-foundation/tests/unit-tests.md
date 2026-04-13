@@ -174,7 +174,9 @@ fn test_model_config() {
         },
         max_allowed: ResourceLimits::default(),
         min_allowed: ResourceLimits::default(),
-        allocation_strategy: "dynamic".to_string(),
+        ram_allocation: RamAllocation {
+            strategy: AllocationStrategy::Dynamic,
+        },
         model_memory: ModelMemory::default(),
         execution: ExecutionTimeouts::default(),
         thinking: ThinkingConfig::default(),
@@ -187,7 +189,7 @@ fn test_model_config() {
 
     assert_eq!(model.name, "test_model");
     assert_eq!(model.framework, FrameworkType::Agentsdk);
-    assert_eq!(model.allocation_strategy, "dynamic");
+    assert_eq!(model.ram_allocation.strategy, AllocationStrategy::Dynamic);
 }
 
 #[test]
@@ -238,7 +240,7 @@ fn test_step_config() {
         model: Some("${models.primary}".to_string()),
         model_overrides: None,
         prompt: Some("Test prompt".to_string()),
-        input_variables: None,
+        inputs: None,
         file_operations: None,
         context: None,
         output: None,

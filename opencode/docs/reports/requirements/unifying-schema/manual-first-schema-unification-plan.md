@@ -149,6 +149,7 @@ workflow_execution_strategy:
     isolated_environments: { ... }
   synchronization:
     enabled: true
+    # Note (v2.0): In v2.0, omit enabled: (presence=enabled by default) or use disabled: true
     barrier_sync_enabled: false
     lock_free_timeout_secs: 30
     conflict_resolution: last_writer_wins | merge_results | fail_on_conflict
@@ -227,6 +228,7 @@ logging:
     log_file: /workspace/logs/workflow.log
     file_rotation:
       enabled: true
+      # Note (v2.0): In v2.0, omit enabled: (presence=enabled by default) or use disabled: true
       max_size_mb: 100
       max_files: 10
     include_timestamps: true
@@ -351,9 +353,12 @@ logging:
       output_type: log
       format: json
 
+> **Note (v2.0 update):** The `enabled:` pattern was replaced with presence=enabled convention in the unified schema v2.0. Features are enabled by including their configuration; use `disabled: true` to explicitly disable.
+
 # ─── Additional Missing Sections (Add from Examples) ─────────────
 rag:
   enabled: true
+  # Note (v2.0): In v2.0, omit enabled: (presence=enabled by default) or use disabled: true
   backend: faiss | chroma | qdrant | pgvector
   config:
     knowledge_base_path: /workspace/rag/knowledge_base
@@ -370,10 +375,11 @@ rag:
       enabled: true
       interval_days: 7
 
-tools:
+  tools:
   file:
     read:
       enabled: true
+      # Note (v2.0): In v2.0, omit enabled: (presence=enabled by default) or use disabled: true
       require_confirmation: false
       allowed_paths: [./src, ./config]
     write:

@@ -65,7 +65,7 @@ User initiates benchmark session.
 
 ### Step 4: Execute 8-Prompt Workflow
 - **Action**: Run steps sequentially, passing outputs between steps via variables
-- **Schema Properties Used**: `agentic_workflow.steps`, `input_variables`, `output`
+- **Schema Properties Used**: `agentic_workflow.steps`, `inputs`, `output`
 - **Input**: Loaded model, workflow YAML, model_overrides
 - **Output**: Per-step results (response text, timing, tokens)
 - **Error Handling**: On step failure: save what we have, continue to next step with null input. On model timeout: skip remaining steps.
@@ -122,7 +122,7 @@ User initiates benchmark session.
 |---------|-------------------|----------------|
 | Serial model processing | Yes (`load_unload: one_at_a_time`) | None |
 | Model lifecycle | Yes (`model_lifecycle`) | None |
-| Variable passing between steps | Yes (`input_variables`) | None |
+| Variable passing between steps | Yes (`inputs`) | None |
 | Per-model output files | Yes (`output.file_output.path`) | None |
 | Progress tracking | Partially | `checkpointing.triggers` |
 | Checkpoint/resume | Yes (`checkpointing.time_travel`) | None |

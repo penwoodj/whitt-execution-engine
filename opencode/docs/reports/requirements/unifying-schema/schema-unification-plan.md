@@ -49,7 +49,7 @@
 | **Concurrent requests** | `concurrent_requests: 2` | Not shown | Manual adds concurrency limits per model |
 | **Cache size** | `model_memory_cache_size: "min"` (enum: min|medium|max) | `execution.memory.load_unload_strategy` | Manual's cache enum ≈ examples' load/unload strategies |
 | **Thinking budget** | `thinking.budget_tokens: 4096` | Not shown | Manual adds reasoning token budget |
-| **Guards** | `guards.enabled: true`, `guards.enforcement_policy: block` | Not shown | Manual adds input/output guards |
+| **Guards** | `guards.enabled: true` (Note: v2.0 uses presence=enabled convention), `guards.enforcement_policy: block` | Not shown | Manual adds input/output guards |
 
 **Resolution**: Merge both approaches - keep examples' simple structure, add manual's detailed constraints as optional fields.
 
@@ -66,7 +66,7 @@
 | **Timeout** | `timeout.total: 4h`, `timeout.tool_call: 30m`, `timeout.step: 8m`, `timeout.model.load_into_memory: 45s`, `timeout.model.time_to_processing_after_loaded: 10000ms` | `execution.timeout_secs`, `step.timeout_secs`, `tool_execution.timeout_secs` | Manual has granular timeout types; examples have fewer |
 | **Error handling** | `error_handling.default_action: retry`, `error_handling.max_retries_per_step: 3`, `error_handling.retry_backoff_multiplier: 2.0` | `retry.default.max_attempts`, `retry.backoff_strategy` | Manual's `error_handling` ≈ examples' `retry` but with more control |
 | **Sub-workflow** | `sub_workflow.inherit_policy`, `sub_workflow.override_policy`, `sub_workflow.reference_resolution`, `sub_workflow.isolated_environments` | `execution.sub_workflow_isolation.inherit_policy`, `execution.allow_nested_references`, `execution.circular_reference_detection` | Manual splits sub-workflow config; examples combine into execution section |
-| **Synchronization** | `synchronization.enabled: true`, `synchronization.barrier_sync_enabled: false`, `synchronization.lock_free_timeout_secs: 30`, `synchronization.conflict_resolution: last_writer_wins` | Not shown explicitly (implied in nested workflows) | Manual adds explicit sync control |
+| **Synchronization** | `synchronization.enabled: true` (Note: v2.0 uses presence=enabled convention), `synchronization.barrier_sync_enabled: false`, `synchronization.lock_free_timeout_secs: 30`, `synchronization.conflict_resolution: last_writer_wins` | Not shown explicitly (implied in nested workflows) | Manual adds explicit sync control |
 | **Checkpoint** | `checkpoint.level: timetravel`, `checkpoint.output: "./chat-file-...md"`, `checkpoint.timeback: 5h`, `checkpoint.max_size: 1000lns`, `checkpoint.interval.after_time: 5m`, `checkpoint.interval.after_steps: [...]` | `checkpoint.enabled`, `checkpoint.interval_steps` | Manual has richer checkpoint config (time travel, max size, time-based intervals) |
 
 **Resolution**: Manual's `workflow_execution_strategy` should replace flat `execution` structure, or both should coexist with migration path.

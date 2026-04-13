@@ -124,6 +124,7 @@ execution:
 ```yaml
 model_routing:
   enabled: true
+  # Note (v2.0): In v2.0, omit enabled: (presence=enabled by default) or use disabled: true
   strategy: task_category_based
 
   routing_rules:
@@ -175,6 +176,7 @@ model_routing:
 ```yaml
 model_metrics:
   enabled: true
+  # Note (v2.0): In v2.0, omit enabled: (presence=enabled by default) or use disabled: true
   collect:
     - tokens_per_second
     - latency_ms
@@ -293,6 +295,7 @@ fallback:
 
   cloud_fallback:
     enabled: true
+    # Note (v2.0): In v2.0, omit enabled: (presence=enabled by default) or use disabled: true
     models:
       - openai://gpt-4
     use_when: all_local_failed

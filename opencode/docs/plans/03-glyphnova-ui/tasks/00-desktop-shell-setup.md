@@ -1,4 +1,6 @@
 # Task 00: Desktop Shell Setup
+# Note (v2.0): This directory (glyphnova-ui) and its contents were moved to the whitt repository
+# This task file is preserved for historical reference to the v1 UI setup
 
 **Estimated Time:** 5 days
 **Priority:** Critical - Foundation for all UI work

@@ -183,6 +183,8 @@ loops:
     stop_on: manual_termination
 ```
 
+> **Note (v2.0 update):** The `enabled:` pattern was replaced with presence=enabled convention in the unified schema v2.0. Features are enabled by including their configuration; use `disabled: true` to explicitly disable.
+
 ### 2. RAG Schema
 
 ```yaml
@@ -258,6 +260,8 @@ web_operations:
     output_format: json
 ```
 
+> **Note (v2.0 update):** The `enabled:` pattern was replaced with presence=enabled convention in the unified schema v2.0. Features are enabled by including their configuration; use `disabled: true` to explicitly disable.
+
 ### 4. Explicit Model Routing Schema
 
 ```yaml
@@ -282,6 +286,7 @@ model_routing:
 
   failure_history:
     enabled: true
+    # Note (v2.0): In v2.0, omit enabled: (presence=enabled by default) or use disabled: true
     max_entries: 100
     adjust_on_failure: true
     adjust_on_success: true

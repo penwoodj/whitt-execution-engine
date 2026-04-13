@@ -733,7 +733,8 @@ If Phase 7 introduces issues:
 
 Potential future enhancements (out of scope for Phase 7):
 
-1. Reinforcement learning for adaptive autonomy levels
+ 1. Reinforcement learning for adaptive autonomy levels
+     > **v2.0 Note:** Adaptive autonomy levels removed to simplify. v2 uses fixed Low/Medium/High levels instead.
 2. Predictive analytics for anticipating interventions
 3. Multi-agent coordination with shared autonomy
 4. Human-in-the-loop optimization of confidence thresholds

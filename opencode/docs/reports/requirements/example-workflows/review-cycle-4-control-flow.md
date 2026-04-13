@@ -66,6 +66,7 @@ loops:
 **Recommendation**: Consistent loop-pipeline integration:
 ```yaml
 # Option A: Loop as wrapper around pipeline steps
+# Note (v2.0): pipeline: replaced with agentic_workflow: in unified schema
 pipeline:
   - step: analyze
     loop:

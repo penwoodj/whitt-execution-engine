@@ -100,6 +100,7 @@ tools:
     default_command: ["cargo", "test"]
     default_timeout_secs: 300
 
+# Note (v2.0): pipeline: replaced with agentic_workflow: in unified schema
 pipeline:
   - step: run_tests
     tool: test_runner
@@ -323,6 +324,8 @@ permissions:
 
 ---
 
+> **Note (v2.0 update):** The `enabled:` pattern was replaced with presence=enabled convention in the unified schema v2.0. Features are enabled by including their configuration; use `disabled: true` to explicitly disable.
+
 ### 9. Dynamic Permission Changes
 
 **Gap**: Can permissions change during workflow execution?
@@ -364,6 +367,7 @@ permissions:
 permissions:
   audit:
     enabled: true
+    # Note (v2.0): In v2.0, omit enabled: (presence=enabled by default) or use disabled: true
     log_all_operations: true
     log_denials: true
     audit_file: ./workspace/audit/permissions.log

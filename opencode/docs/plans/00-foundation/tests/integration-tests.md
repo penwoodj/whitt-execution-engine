@@ -266,7 +266,8 @@ models:
     min_allowed:
       ram: 9%
       vram: 2.4GB
-    allocation_strategy: dynamic
+    ram_allocation:
+      strategy: dynamic
     execution:
       load_into_memory: 45s
       time_to_first_response: 1m

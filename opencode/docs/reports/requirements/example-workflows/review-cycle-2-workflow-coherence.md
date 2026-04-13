@@ -345,6 +345,8 @@ state_management:
 
 ---
 
+> **Note (v2.0 update):** The `enabled:` pattern was replaced with presence=enabled convention in the unified schema v2.0. Features are enabled by including their configuration; use `disabled: true` to explicitly disable.
+
 ### 2. Error Handling Strategy
 
 **Missing**: What happens when a step fails?
