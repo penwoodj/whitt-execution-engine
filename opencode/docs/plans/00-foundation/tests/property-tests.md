@@ -333,12 +333,10 @@ fn valid_workflow_spec() -> impl Strategy<Value = WorkflowSpec> {
                 root_path: "/workspace".to_string(),
                 ..Default::default()
             },
-            features: FeaturesDemonstrated::default(),
-            execution: WorkflowExecutionStrategy::default(),
-            tool_permissions: ToolPermissionsConfig::default(),
-            logging: LoggingConfig::default(),
-            agentic_workflow: None,
-            pipeline: None,
+                execution: WorkflowExecutionStrategy::default(),
+                tool_permissions: ToolPermissionsConfig::default(),
+                logging: LoggingConfig::default(),
+                agentic_workflow: None,
         }
     })
 }

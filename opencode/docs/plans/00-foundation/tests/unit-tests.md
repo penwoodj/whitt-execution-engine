@@ -295,12 +295,10 @@ fn test_workflow_spec_serialization() {
             root_path: "/test".to_string(),
             ..Default::default()
         },
-        features: FeaturesDemonstrated::default(),
         execution: WorkflowExecutionStrategy::default(),
         tool_permissions: ToolPermissionsConfig::default(),
         logging: LoggingConfig::default(),
         agentic_workflow: None,
-        pipeline: None,
     };
 
     // Test serialization to JSON
