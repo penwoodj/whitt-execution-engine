@@ -1,4 +1,4 @@
-# YAML to Rust AgentSDK Framework
+# Whitt Execution Engine
 
 A declarative workflow engine for defining, executing, and optimizing AI-powered workflows with local LLMs.
   
@@ -882,7 +882,7 @@ agentic_workflow:
 
 ```bash
 # Execute workflow directly for development
-yaml-to-rust-agentsdk run my_workflow.yml
+whitt-execution-engine run my_workflow.yml
 
 # View logs
 cat /workspace/logs/my_workflow.log
@@ -895,7 +895,7 @@ cat /workspace/output/analysis.json
 
 ```bash
 # Generate Rust code from workflow
-yaml-to-rust-agentsdk generate my_workflow.yml
+whitt-execution-engine generate my_workflow.yml
 
 # Build the generated code
 cd ./target/release

@@ -138,7 +138,7 @@ This phase DEPENDS on ALL prior phases being COMPLETE:
 **Verification**: Before starting Phase 7, verify that all prior phases pass their integration tests:
 
 ```bash
-cd /home/jon/code/yaml-to-rust-agentsdk
+cd /home/jon/code/whitt-execution-engine
 cargo test --all-phases  # Assuming test organization by phase
 ```
 

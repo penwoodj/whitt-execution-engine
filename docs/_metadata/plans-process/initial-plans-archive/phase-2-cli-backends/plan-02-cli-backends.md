@@ -726,14 +726,14 @@ cargo test --test provider_proptest
 
 ```bash
 # Execute workflow directly
-yaml-to-rust-agentsdk run workflow.yml --verbose
+whitt-execution-engine run workflow.yml --verbose
 
 # Generate Rust code
-yaml-to-rust-agentsdk generate workflow.yml --output ./generated
+whitt-execution-engine generate workflow.yml --output ./generated
 cd ./generated && cargo build --release
 
 # Validate workflow
-yaml-to-rust-agentsdk validate workflow.yml
+whitt-execution-engine validate workflow.yml
 ```
 
 ### Use implement.sh Script

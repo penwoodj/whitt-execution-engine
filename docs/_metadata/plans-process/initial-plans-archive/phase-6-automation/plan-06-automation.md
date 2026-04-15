@@ -763,37 +763,37 @@ cargo test --test git_experiment_e2e
 
 ```bash
 # Schedule cron job
-yaml-to-rust-agentsdk schedule --workflow workflow.yml --cron "0 9 * * 1-5" --branch experiment-001
+whitt-execution-engine schedule --workflow workflow.yml --cron "0 9 * * 1-5" --branch experiment-001
 
 # List scheduled jobs
-yaml-to-rust-agentsdk schedule --list
+whitt-execution-engine schedule --list
 
 # Cancel scheduled job
-yaml-to-rust-agentsdk schedule --cancel <job-id>
+whitt-execution-engine schedule --cancel <job-id>
 
 # Create merge proposal
-yaml-to-rust-agentsdk merge-proposal --branch experiment-001 --target main
+whitt-execution-engine merge-proposal --branch experiment-001 --target main
 
 # View merge proposal
-yaml-to-rust-agentsdk merge-proposal --view <proposal-id>
+whitt-execution-engine merge-proposal --view <proposal-id>
 
 # Approve merge proposal
-yaml-to-rust-agentsdk merge-proposal --approve <proposal-id>
+whitt-execution-engine merge-proposal --approve <proposal-id>
 
 # Capture manual refinement
-yaml-to-rust-agentsdk refinement --add --proposal <proposal-id> --comment "Improve error handling"
+whitt-execution-engine refinement --add --proposal <proposal-id> --comment "Improve error handling"
 
 # View experiment results
-yaml-to-rust-agentsdk experiment --results --workflow <workflow-id> --compare
+whitt-execution-engine experiment --results --workflow <workflow-id> --compare
 
 # Rollback experiment
-yaml-to-rust-agentsdk experiment --rollback <experiment-id>
+whitt-execution-engine experiment --rollback <experiment-id>
 
 # Cleanup experiment
-yaml-to-rust-agentsdk experiment --cleanup <experiment-id>
+whitt-execution-engine experiment --cleanup <experiment-id>
 
 # Compile scheduling policy
-yaml-to-rust-agentsdk compile-schedule --policy scheduling.yml
+whitt-execution-engine compile-schedule --policy scheduling.yml
 ```
 
 ### Use implement.sh Script

@@ -89,9 +89,9 @@ The goal is to provide a **production-ready, type-safe, high-performance framewo
 
 Join the community:
 
-- **GitHub**: https://github.com/penwoodj/yaml-to-rust-agentsdk
-- **Issues**: https://github.com/penwoodj/yaml-to-rust-agentsdk/issues
-- **Discussions**: https://github.com/penwoodj/yaml-to-rust-agentsdk/discussions
+- **GitHub**: https://github.com/penwoodj/whitt-execution-engine
+- **Issues**: https://github.com/penwoodj/whitt-execution-engine/issues
+- **Discussions**: https://github.com/penwoodj/whitt-execution-engine/discussions
 
 ---
 

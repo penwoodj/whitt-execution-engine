@@ -500,7 +500,7 @@ cargo clippy -- -D warnings
 cargo fmt -- --check
 
 # 5. LSP diagnostics clean
-lsp_diagnostics filePath=/home/jon/code/yaml-to-rust-agentsdk/src/ severity=all
+lsp_diagnostics filePath=/home/jon/code/whitt-execution-engine/src/ severity=all
 
 # 6. All verification layers pass
 # See acceptance-criteria.md for details

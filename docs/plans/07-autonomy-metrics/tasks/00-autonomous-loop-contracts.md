@@ -892,7 +892,7 @@ pub mod autonomy;
 ### Step 8: Run all tests
 
 ```bash
-cd /home/jon/code/yaml-to-rust-agentsdk
+cd /home/jon/code/whitt-execution-engine
 cargo test autonomy::contracts --verbose
 ```
 

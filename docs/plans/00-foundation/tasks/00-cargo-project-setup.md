@@ -246,7 +246,7 @@ Run build verification:
 cargo build
 
 # Expected output:
-# Compiling yaml-to-rust-agentsdk v0.1.0
+# Compiling whitt-execution-engine v0.1.0
 # Finished dev [unoptimized + debuginfo] target(s) in X.XXs
 ```
 

@@ -103,8 +103,8 @@ This Code of Conduct is adapted from the [Contributor Covenant](https://www.cont
 For questions about this Code of Conduct:
 
 - **Email**: [your.email@example.com](mailto:your.email@example.com)
-- **GitHub Issues**: https://github.com/penwoodj/yaml-to-rust-agentsdk/issues
-- **Project Discussions**: https://github.com/penwoodj/yaml-to-rust-agentsdk/discussions
+- **GitHub Issues**: https://github.com/penwoodj/whitt-execution-engine/issues
+- **Project Discussions**: https://github.com/penwoodj/whitt-execution-engine/discussions
 
 ---
 

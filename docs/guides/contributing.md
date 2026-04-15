@@ -34,11 +34,11 @@ Be respectful, inclusive, and constructive. See [CODE_OF_CONDUCT.md](CODE_OF_CON
 
 ```bash
 # Fork and clone the repository
-git clone https://github.com/YOUR_USERNAME/yaml-to-rust-agentsdk.git
-cd yaml-to-rust-agentsdk
+git clone https://github.com/YOUR_USERNAME/whitt-execution-engine.git
+cd whitt-execution-engine
 
 # Add upstream remote
-git remote add upstream https://github.com/penwoodj/yaml-to-rust-agentsdk.git
+git remote add upstream https://github.com/penwoodj/whitt-execution-engine.git
 
 # Build in debug mode
 cargo build
@@ -482,7 +482,7 @@ Look for issues labeled `good first issue` or `help wanted` to get started.
 ## Project Structure
 
 ```
-yaml-to-rust-agentsdk/
+whitt-execution-engine/
 ├── src/                    # Source code
 │   ├── main.rs            # CLI entry point
 │   ├── lib.rs             # Library API
@@ -526,8 +526,8 @@ yaml-to-rust-agentsdk/
 
 ## Contact
 
-- **Issues**: https://github.com/penwoodj/yaml-to-rust-agentsdk/issues
-- **Discussions**: https://github.com/penwoodj/yaml-to-rust-agentsdk/discussions
+- **Issues**: https://github.com/penwoodj/whitt-execution-engine/issues
+- **Discussions**: https://github.com/penwoodj/whitt-execution-engine/discussions
 - **Email**: your.email@example.com
 
 ---

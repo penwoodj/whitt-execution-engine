@@ -419,7 +419,7 @@ pub mod risk;
 ### Step 6: Run all tests
 
 ```bash
-cd /home/jon/code/yaml-to-rust-agentsdk
+cd /home/jon/code/whitt-execution-engine
 cargo test risk --verbose
 ```
 

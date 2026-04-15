@@ -31,8 +31,8 @@ Welcome to the YAML to Rust AgentSDK framework! This guide will help you get sta
 
 ```bash
 # Clone repository
-git clone https://github.com/penwoodj/yaml-to-rust-agentsdk.git
-cd yaml-to-rust-agentsdk
+git clone https://github.com/penwoodj/whitt-execution-engine.git
+cd whitt-execution-engine
 
 # Build in debug mode
 cargo build
@@ -49,7 +49,7 @@ cargo run -- run opencode/docs/reports/requirements/example-workflows/requiremen
 ## Project Structure
 
 ```
-yaml-to-rust-agentsdk/
+whitt-execution-engine/
 ├── src/                          # Source code
 │   ├── main.rs                  # CLI entry point (not yet implemented)
 │   ├── lib.rs                   # Library API surface (not yet implemented)
@@ -148,7 +148,7 @@ cargo watch -- run -- run my_workflow.yml
 cargo build --release
 
 # Run release build
-./target/release/yaml-to-rust-agentsdk --run my_workflow.yml
+./target/release/whitt-execution-engine --run my_workflow.yml
 ```
 
 **Release Build Characteristics**:
@@ -249,7 +249,7 @@ cargo run -- run my_workflow.yml
 cargo build
 
 # Start GDB
-gdb target/debug/yaml-to-rust-agentsdk
+gdb target/debug/whitt-execution-engine
 
 # GDB commands
 (gdb) break main.rs:42
@@ -536,8 +536,8 @@ RUST_LOG=memory cargo run -- run my_workflow.yml
 
 ### Asking Questions
 
-- **GitHub Discussions**: https://github.com/penwoodj/yaml-to-rust-agentsdk/discussions
-- **Issues**: https://github.com/penwoodj/yaml-to-rust-agentsdk/issues
+- **GitHub Discussions**: https://github.com/penwoodj/whitt-execution-engine/discussions
+- **Issues**: https://github.com/penwoodj/whitt-execution-engine/issues
 
 ### Reporting Bugs
 

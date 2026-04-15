@@ -507,7 +507,7 @@ async fn main() -> Result<(), anyhow::Error> {
 ### Step 7: Run all tests
 
 ```bash
-cd /home/jon/code/yaml-to-rust-agentsdk
+cd /home/jon/code/whitt-execution-engine
 cargo test cli --verbose
 ```
 

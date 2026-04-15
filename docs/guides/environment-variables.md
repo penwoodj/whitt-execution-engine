@@ -40,12 +40,12 @@ Environment variables can be configured through:
 ```bash
 # Using OpenAI
 export OPENAI_API_KEY=sk-proj-abc123...
-yaml-to-rust-agentsdk run workflow.yml
+whitt-execution-engine run workflow.yml
 
 # Using Custom Server (Ollama)
 export CUSTOM_SERVER_URL=http://localhost:11434/v1
 export CUSTOM_SERVER_KEY=bearer-token-here
-yaml-to-rust-agentsdk run workflow.yml
+whitt-execution-engine run workflow.yml
 ```
 
 ---
@@ -77,7 +77,7 @@ ollama serve
 export OLLAMA_HOST=http://localhost:11434
 
 # Run workflow
-yaml-to-rust-agentsdk run workflow.yml
+whitt-execution-engine run workflow.yml
 ```
 
 ---
@@ -104,7 +104,7 @@ yaml-to-rust-agentsdk run workflow.yml
 export LMSTUDIO_HOST=http://localhost:1234/v1
 
 # Run workflow
-yaml-to-rust-agentsdk run workflow.yml
+whitt-execution-engine run workflow.yml
 ```
 
 ---
@@ -135,7 +135,7 @@ export LLAMACPP_CONTEXT_SIZE=4096
 export LLAMACPP_GPU_LAYERS=99
 
 # Run workflow
-yaml-to-rust-agentsdk run workflow.yml
+whitt-execution-engine run workflow.yml
 ```
 
 ---
@@ -160,7 +160,7 @@ yaml-to-rust-agentsdk run workflow.yml
 export JINAAI_API_KEY=jina-abc123...
 
 # Run workflow
-yaml-to-rust-agentsdk run workflow.yml
+whitt-execution-engine run workflow.yml
 ```
 
 ---
@@ -198,7 +198,7 @@ export LOGS_DIR=/tmp/my-workspace/logs
 export OUTPUT_DIR=/tmp/my-workspace/output
 
 # Run workflow
-yaml-to-rust-agentsdk run workflow.yml
+whitt-execution-engine run workflow.yml
 ```
 
 ---
@@ -237,7 +237,7 @@ export MAX_RETRY_ATTEMPTS=5
 export LOG_LEVEL=debug
 
 # Run workflow
-yaml-to-rust-agentsdk run workflow.yml
+whitt-execution-engine run workflow.yml
 ```
 
 ---
@@ -270,7 +270,7 @@ export ALLOWED_SHELL_COMMANDS=cargo,rustc,git,ls,cat
 export ALLOWED_FILE_PATHS=./src,./config,./output
 
 # Run workflow
-yaml-to-rust-agentsdk run workflow.yml
+whitt-execution-engine run workflow.yml
 ```
 
 **Warning**: In production environments, always set `REQUIRE_TOOL_CONFIRMATION=false` with proper `ALLOWED_*` restrictions to prevent unauthorized operations.
@@ -302,7 +302,7 @@ export MODEL_MEMORY_MB=8192
 export UNLOAD_UNUSED_MODELS=true
 
 # Run workflow
-yaml-to-rust-agentsdk run workflow.yml
+whitt-execution-engine run workflow.yml
 ```
 
 **Tip**: For 16GB RAM systems:
@@ -350,7 +350,7 @@ export ENABLE_PROFILING=true
 export PROFILES_DIR=../workspace/profiles
 
 # Run workflow
-yaml-to-rust-agentsdk run workflow.yml
+whitt-execution-engine run workflow.yml
 ```
 
 ---
@@ -416,7 +416,7 @@ Enable debug mode to troubleshoot:
 export DEBUG_MODE=true
 export LOG_LEVEL=trace
 
-yaml-to-rust-agentsdk run workflow.yml
+whitt-execution-engine run workflow.yml
 ```
 
 Check logs for detailed information:

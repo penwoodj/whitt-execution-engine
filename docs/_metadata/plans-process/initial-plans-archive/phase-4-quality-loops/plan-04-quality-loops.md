@@ -716,13 +716,13 @@ cargo test --test repair_e2e
 
 ```bash
 # Run generate-verify-repair loop on workflow
-yaml-to-rust-agentsdk quality-loop workflow.yml --verifiers code,docs --max-iterations 5
+whitt-execution-engine quality-loop workflow.yml --verifiers code,docs --max-iterations 5
 
 # Run benchmark suite
-yaml-to-rust-agentsdk benchmark suite.yml --output ./benchmarks
+whitt-execution-engine benchmark suite.yml --output ./benchmarks
 
 # Generate quality report
-yaml-to-rust-agentsdk report quality --type file-type --format html
+whitt-execution-engine report quality --type file-type --format html
 
 # View quality metrics dashboard
 # (Access via Glyphnova UI)

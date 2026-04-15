@@ -220,7 +220,7 @@ cargo tarpaulin --out Html --output-dir coverage/
 
 **Layer 1: LSP Diagnostics**
 ```bash
-lsp_diagnostics filePath=/home/jon/code/yaml-to-rust-agentsdk/src/ severity=all
+lsp_diagnostics filePath=/home/jon/code/whitt-execution-engine/src/ severity=all
 # Expected: No errors
 ```
 **Acceptance:** ✅ No errors on all source files

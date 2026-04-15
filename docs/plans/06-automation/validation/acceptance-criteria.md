@@ -1363,7 +1363,7 @@ agentic_workflow:
       prompt: "Test"
 "#).unwrap();
 
-    let mut cmd = Command::cargo_bin("yaml-to-rust-agentsdk").unwrap();
+    let mut cmd = Command::cargo_bin("whitt-execution-engine").unwrap();
     let assert = cmd
         .args(["schedule", workflow_file.path().to_str().unwrap()])
         .assert();
@@ -1383,14 +1383,14 @@ fn list_command_functional() {
     let workflow_file = temp_dir.child("test_workflow.yml");
     workflow_file.write_str("workflow_id: test_workflow\nname: Test\n").unwrap();
 
-    let mut schedule_cmd = Command::cargo_bin("yaml-to-rust-agentsdk").unwrap();
+    let mut schedule_cmd = Command::cargo_bin("whitt-execution-engine").unwrap();
     schedule_cmd
         .args(["schedule", workflow_file.path().to_str().unwrap()])
         .assert()
         .success();
 
     // List all workflows
-    let mut list_cmd = Command::cargo_bin("yaml-to-rust-agentsdk").unwrap();
+    let mut list_cmd = Command::cargo_bin("whitt-execution-engine").unwrap();
     let assert = list_cmd.arg("list").assert();
 
     assert.success();
@@ -1399,7 +1399,7 @@ fn list_command_functional() {
     assert!(output.contains("test_workflow"));
 
     // List specific workflow
-    let mut list_filter_cmd = Command::cargo_bin("yaml-to-rust-agentsdk").unwrap();
+    let mut list_filter_cmd = Command::cargo_bin("whitt-execution-engine").unwrap();
     let assert = list_filter_cmd
         .args(["list", "--workflow-id", "test_workflow"])
         .assert();
@@ -1418,14 +1418,14 @@ fn cancel_command_functional() {
     workflow_file.write_str("workflow_id: test_workflow\nname: Test\n").unwrap();
 
     // Schedule workflow
-    let mut schedule_cmd = Command::cargo_bin("yaml-to-rust-agentsdk").unwrap();
+    let mut schedule_cmd = Command::cargo_bin("whitt-execution-engine").unwrap();
     schedule_cmd
         .args(["schedule", workflow_file.path().to_str().unwrap()])
         .assert()
         .success();
 
     // Cancel workflow
-    let mut cancel_cmd = Command::cargo_bin("yaml-to-rust-agentsdk").unwrap();
+    let mut cancel_cmd = Command::cargo_bin("whitt-execution-engine").unwrap();
     let assert = cancel_cmd
         .args(["cancel", "test_workflow"])
         .assert();
@@ -1444,7 +1444,7 @@ fn experiment_command_functional() {
     let workflow_file = temp_dir.child("test_workflow.yml");
     workflow_file.write_str("workflow_id: test_workflow\nname: Test\n").unwrap();
 
-    let mut cmd = Command::cargo_bin("yaml-to-rust-agentsdk").unwrap();
+    let mut cmd = Command::cargo_bin("whitt-execution-engine").unwrap();
     let assert = cmd
         .args(["experiment", "experiment-1", workflow_file.path().to_str().unwrap()])
         .assert();
@@ -1463,7 +1463,7 @@ fn merge_command_functional() {
     let workflow_file = temp_dir.child("test_workflow.yml");
     workflow_file.write_str("workflow_id: test_workflow\nname: Test\n").unwrap();
 
-    let mut cmd = Command::cargo_bin("yaml-to-rust-agentsdk").unwrap();
+    let mut cmd = Command::cargo_bin("whitt-execution-engine").unwrap();
     let assert = cmd
         .args(["merge", "experiment-1", "main"])
         .assert();
@@ -1480,7 +1480,7 @@ fn refine_command_functional() {
     let temp_dir = assert_fs::TempDir::new().unwrap();
 
     // Approve action
-    let mut approve_cmd = Command::cargo_bin("yaml-to-rust-agentsdk").unwrap();
+    let mut approve_cmd = Command::cargo_bin("whitt-execution-engine").unwrap();
     let assert = approve_cmd
         .args([
             "refine",
@@ -1496,7 +1496,7 @@ fn refine_command_functional() {
     assert!(output.contains("Refinement") || output.contains("Approved"));
 
     // Reject action
-    let mut reject_cmd = Command::cargo_bin("yaml-to-rust-agentsdk").unwrap();
+    let mut reject_cmd = Command::cargo_bin("whitt-execution-engine").unwrap();
     let assert = reject_cmd
         .args([
             "refine",
@@ -1512,7 +1512,7 @@ fn refine_command_functional() {
     assert!(output.contains("Refinement") || output.contains("Rejected"));
 
     // Modify action
-    let mut modify_cmd = Command::cargo_bin("yaml-to-rust-agentsdk").unwrap();
+    let mut modify_cmd = Command::cargo_bin("whitt-execution-engine").unwrap();
     let assert = modify_cmd
         .args([
             "refine",
@@ -1534,7 +1534,7 @@ fn refine_command_functional() {
 fn rollback_command_functional() {
     let temp_dir = assert_fs::TempDir::new().unwrap();
 
-    let mut cmd = Command::cargo_bin("yaml-to-rust-agentsdk").unwrap();
+    let mut cmd = Command::cargo_bin("whitt-execution-engine").unwrap();
     let assert = cmd
         .args([
             "rollback",
@@ -1555,7 +1555,7 @@ fn rollback_command_functional() {
 #[test]
 fn cli_error_handling() {
     // Invalid workflow file
-    let mut cmd = Command::cargo_bin("yaml-to-rust-agentsdk").unwrap();
+    let mut cmd = Command::cargo_bin("whitt-execution-engine").unwrap();
     let assert = cmd
         .args(["schedule", "nonexistent.yml"])
         .assert();
@@ -1569,7 +1569,7 @@ fn cli_error_handling() {
     let invalid_file = temp_dir.child("invalid.yml");
     invalid_file.write_str("invalid: yaml").unwrap();
 
-    let mut cmd = Command::cargo_bin("yaml-to-rust-agentsdk").unwrap();
+    let mut cmd = Command::cargo_bin("whitt-execution-engine").unwrap();
     let assert = cmd
         .args(["schedule", invalid_file.path().to_str().unwrap()])
         .assert();

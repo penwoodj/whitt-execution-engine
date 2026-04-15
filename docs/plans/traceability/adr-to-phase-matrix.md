@@ -315,13 +315,13 @@
 **Compliance Test**:
 - Test: Inspect queue from CLI
 - Expected: Queue listing shows all items
-- Command: `yaml-to-rust-agentsdk queue list`
+- Command: `whitt-execution-engine queue list`
 - Result: All items displayed
 
 **Verification Method**:
 - Test: Enqueue workflow from CLI
 - Expected: Workflow added to queue
-- Command: `yaml-to-rust-agentsdk queue add workflow.yaml`
+- Command: `whitt-execution-engine queue add workflow.yaml`
 - Result: Workflow in queue
 
 ### Constraint 8: Dual execution modes: Execution Engine (direct) and Code Generator (Rust compilation)
@@ -333,13 +333,13 @@
 **Compliance Test**:
 - Test: Execute workflow in direct mode
 - Expected: YAML → WorkflowIR → Execution without compilation
-- Command: `yaml-to-rust-agentsdk run workflow.yaml`
+- Command: `whitt-execution-engine run workflow.yaml`
 - Result: Workflow executes directly
 
 **Verification Method**:
 - Test: Execute workflow in code generation mode
 - Expected: YAML → WorkflowIR → Rust Code → Compile → Execution
-- Command: `yaml-to-rust-agentsdk generate workflow.yaml`
+- Command: `whitt-execution-engine generate workflow.yaml`
 - Result: Rust code generated and compiled
 
 ---
@@ -493,7 +493,7 @@
 **Compliance Test**:
 - Test: Launch UI and verify both components
 - Expected: Rust backend and web frontend running
-- Command: `yaml-to-rust-agentsdk ui`
+- Command: `whitt-execution-engine ui`
 - Result: Both components started
 
 **Verification Method**:

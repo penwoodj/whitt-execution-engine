@@ -867,40 +867,40 @@ cargo test --test metrics_e2e
 
 ```bash
 # Define autonomous loop contract
-yaml-to-rust-agentsdk autonomy --define --contract contract.yml
+whitt-execution-engine autonomy --define --contract contract.yml
 
 # Validate autonomous loop contract
-yaml-to-rust-agentsdk autonomy --validate --contract contract.yml
+whitt-execution-engine autonomy --validate --contract contract.yml
 
 # Activate autonomous workflow
-yaml-to-rust-agentsdk autonomy --activate --workflow workflow.yml --contract contract.yml
+whitt-execution-engine autonomy --activate --workflow workflow.yml --contract contract.yml
 
 # Override autonomous workflow (pause)
-yaml-to-rust-agentsdk override --pause --workflow <workflow-id> --reason "Manual review needed"
+whitt-execution-engine override --pause --workflow <workflow-id> --reason "Manual review needed"
 
 # Override autonomous workflow (stop)
-yaml-to-rust-agentsdk override --stop --workflow <workflow-id> --reason "Critical safety concern"
+whitt-execution-engine override --stop --workflow <workflow-id> --reason "Critical safety concern"
 
 # Resume paused workflow
-yaml-to-rust-agentsdk override --resume --workflow <workflow-id>
+whitt-execution-engine override --resume --workflow <workflow-id>
 
 # View interventions
-yaml-to-rust-agentsdk interventions --list --workflow <workflow-id>
+whitt-execution-engine interventions --list --workflow <workflow-id>
 
 # View metrics
-yaml-to-rust-agentsdk metrics --workflow <workflow-id> --export prometheus
+whitt-execution-engine metrics --workflow <workflow-id> --export prometheus
 
 # List checkpoints
-yaml-to-rust-agentsdk checkpoints --list --workflow <workflow-id>
+whitt-execution-engine checkpoints --list --workflow <workflow-id>
 
 # Restore checkpoint
-yaml-to-rust-agentsdk checkpoints --restore <checkpoint-id>
+whitt-execution-engine checkpoints --restore <checkpoint-id>
 
 # Assess autonomy risk
-yaml-to-rust-agentsdk autonomy --assess --workflow <workflow-id>
+whitt-execution-engine autonomy --assess --workflow <workflow-id>
 
 # Set autonomy scope boundaries
-yaml-to-rust-agentsdk autonomy --set-boundaries --max-duration 1h --max-iterations 100
+whitt-execution-engine autonomy --set-boundaries --max-duration 1h --max-iterations 100
 
 # View dashboard
 # (Access via Glyphnova UI)

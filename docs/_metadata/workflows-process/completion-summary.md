@@ -125,7 +125,7 @@
 
 **Overall Status**: ✅ **COMPLETE AND PRODUCTION-READY**
 
-All 53 workflow examples in `requirements-oriented-auto/` (19 categories) plus 1 manual brainstorm reference in `manual/` successfully demonstrate the complete YAML schema for the yaml-to-rust-agentsdk transpiler.
+All 53 workflow examples in `requirements-oriented-auto/` (19 categories) plus 1 manual brainstorm reference in `manual/` successfully demonstrate the complete YAML schema for the whitt-execution-engine transpiler.
 
 1. **Execution modes** (parallel, serial, hybrid)
 2. **Model management** (multi-provider, auto-routing, fallback)
@@ -210,4 +210,4 @@ example-workflows/
 
 ✅ **All requested work completed successfully**
 
-The yaml-to-rust-agentsdk transpiler example workflow suite is complete, validated, and ready for implementation. All 53 workflow examples across 19 categories demonstrate the full range of transpiler capabilities, including dual execution modes (Execution Engine vs Code Generator) as requested and documented in requirements, roadmap, and README.
+The whitt-execution-engine transpiler example workflow suite is complete, validated, and ready for implementation. All 53 workflow examples across 19 categories demonstrate the full range of transpiler capabilities, including dual execution modes (Execution Engine vs Code Generator) as requested and documented in requirements, roadmap, and README.

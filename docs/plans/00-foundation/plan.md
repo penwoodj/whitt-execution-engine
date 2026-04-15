@@ -315,7 +315,7 @@ Phase 0 has NO external dependencies. All external services use in-memory test f
 ### lsp_diagnostics
 ```bash
 # Run on all modified files
-lsp_diagnostics filePath=/home/jon/code/yaml-to-rust-agentsdk/src/ severity=all
+lsp_diagnostics filePath=/home/jon/code/whitt-execution-engine/src/ severity=all
 
 # Expected output:
 # - No errors
@@ -339,7 +339,7 @@ cargo test
 cargo build --release
 
 # Expected output:
-# - Compiling yaml-to-rust-agentsdk v0.1.0
+# - Compiling whitt-execution-engine v0.1.0
 # - Finished release [optimized] target(s) in X.XXs
 # - No warnings (or only justified ones)
 ```

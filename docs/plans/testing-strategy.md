@@ -8,7 +8,7 @@
 
 ## Purpose
 
-This document defines the multi-layer testing strategy for yaml-to-rust-agentsdk. Each layer is a **requirement**, not optional. Tests must be implemented incrementally and verified continuously — past tests run in batches on every change to prevent regression.
+This document defines the multi-layer testing strategy for whitt-execution-engine. Each layer is a **requirement**, not optional. Tests must be implemented incrementally and verified continuously — past tests run in batches on every change to prevent regression.
 
 ---
 

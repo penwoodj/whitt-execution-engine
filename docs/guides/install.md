@@ -94,8 +94,8 @@ cargo --version
 
 ```bash
 # Clone the repository
-git clone https://github.com/penwoodj/yaml-to-rust-agentsdk.git
-cd yaml-to-rust-agentsdk
+git clone https://github.com/penwoodj/whitt-execution-engine.git
+cd whitt-execution-engine
 ```
 
 ### Build from Source
@@ -117,7 +117,7 @@ cargo run -- --help
 cargo build --release
 
 # Run from release build
-./target/release/yaml-to-rust-agentsdk --help
+./target/release/whitt-execution-engine --help
 ```
 
 **Release Build Features**:
@@ -130,10 +130,10 @@ cargo build --release
 
 ```bash
 # Install directly from crates.io (when available)
-cargo install yaml-to-rust-agentsdk
+cargo install whitt-execution-engine
 
 # Verify installation
-yaml-to-rust-agentsdk --help
+whitt-execution-engine --help
 ```
 
 ---
@@ -429,7 +429,7 @@ rustc --version
 cargo build --release
 
 # Run with --help flag
-./target/release/yaml-to-rust-agentsdk --help
+./target/release/whitt-execution-engine --help
 
 # Expected output: Usage information
 ```
@@ -542,7 +542,7 @@ softwareupdate --all --install
 **Issue**: Binary not trusted (Gatekeeper)
 **Solution**: Allow binary to run
 ```bash
-xattr -cr ./target/release/yaml-to-rust-agentsdk
+xattr -cr ./target/release/whitt-execution-engine
 ```
 
 ### Windows (WSL2)
@@ -569,10 +569,10 @@ export WORKSPACE_ROOT=/tmp/workspace
 
 ```bash
 # Remove source directory
-rm -rf yaml-to-rust-agentsdk
+rm -rf whitt-execution-engine
 
 # Remove binary (if installed via cargo)
-cargo uninstall yaml-to-rust-agentsdk
+cargo uninstall whitt-execution-engine
 
 # Remove workspace (optional)
 rm -rf ./workspace
@@ -631,7 +631,7 @@ rm -rf ~/.cargo ~/.rustup
 - **Documentation**: [README.md](README.md)
 - **Environment Variables**: [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md)
 - **Example Workflows**: `opencode/docs/reports/requirements/example-workflows/`
-- **Issues**: https://github.com/penwoodj/yaml-to-rust-agentsdk/issues
+- **Issues**: https://github.com/penwoodj/whitt-execution-engine/issues
 
 ---
 

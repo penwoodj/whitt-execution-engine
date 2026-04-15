@@ -364,7 +364,7 @@ pub mod stop_conditions;
 ### Step 6: Run all tests
 
 ```bash
-cd /home/jon/code/yaml-to-rust-agentsdk
+cd /home/jon/code/whitt-execution-engine
 cargo test stop_conditions --verbose
 ```
 

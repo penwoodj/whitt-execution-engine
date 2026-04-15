@@ -90,7 +90,7 @@
 - **Functional impact**: None - framework selection preserved via provider
 
 #### 9. `.glyphnova` → Moved to Whitt Repo
-- **v1 status**: Present in yaml-to-rust-agentsdk
+- **v1 status**: Present in whitt-execution-engine
 - **v2.0 status**: Moved to separate whitt repository
 - **Rationale**: Project-specific asset; not core to schema
 - **Functional impact**: None - schema unaffected

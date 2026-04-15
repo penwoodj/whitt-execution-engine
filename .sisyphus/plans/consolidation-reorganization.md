@@ -24,8 +24,8 @@
 - `model_routing_data.csv` — routing data
 
 **Target**: `~/code/model-router/` (repo exists, has chatgpt-ideas/, opencode-ideas/, etc.)
-- Move to `~/code/model-router/inspiration-reports/yaml-to-rust-agentsdk/` to preserve provenance
-- Delete from yaml-to-rust-agentsdk after move
+- Move to `~/code/model-router/inspiration-reports/whitt-execution-engine/` to preserve provenance
+- Delete from whitt-execution-engine after move
 
 **Additional**: Search entire project for model routing, model override, sub-workflow model override references in schemas/docs. Move those too or annotate with migration notes.
 

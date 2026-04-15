@@ -1090,7 +1090,7 @@ pub fn create_action_span(workflow_id: &str, action_type: &str) -> tracing::Span
 ### Step 8: Run all tests
 
 ```bash
-cd /home/jon/code/yaml-to-rust-agentsdk
+cd /home/jon/code/whitt-execution-engine
 cargo test metrics --verbose
 ```
 

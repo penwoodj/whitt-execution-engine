@@ -84,12 +84,12 @@ cargo build --release 2>&1 | grep -i "error"  # Should be empty
 ### Task 1: Create Phase 8 Directory Structure
 
 **Files:**
-- Create: `/home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/plan.md`
+- Create: `/home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/plan.md`
 
 - [ ] **Step 1: Create the Phase 8 directory**
 
 ```bash
-mkdir -p /home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation
+mkdir -p /home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation
 ```
 
 - [ ] **Step 2: Write master plan.md**
@@ -101,7 +101,7 @@ mkdir -p /home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-valid
 - [ ] **Step 3: Verify directory structure**
 
 ```bash
-ls -la /home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/
+ls -la /home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/
 ```
 
 - [ ] **Step 4: Commit Phase 8 initialization**
@@ -116,7 +116,7 @@ git commit -m "feat: initialize Phase 8 Final Validation plan directory"
 ### Task 2: Write Validation File 00 - System Log Verification
 
 **Files:**
-- Create: `/home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/00-system-log-verification.md`
+- Create: `/home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/00-system-log-verification.md`
 
 - [ ] **Step 1: Create validation file 00**
 
@@ -125,7 +125,7 @@ Write the complete validation file with all test procedures, expected results, a
 - [ ] **Step 2: Verify file was created**
 
 ```bash
-ls -l /home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/00-system-log-verification.md
+ls -l /home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/00-system-log-verification.md
 ```
 
 - [ ] **Step 3: Commit validation file 00**
@@ -140,7 +140,7 @@ git commit -m "feat: add validation file 00 - system log verification"
 ### Task 3: Write Validation File 01 - Unit Test Verification
 
 **Files:**
-- Create: `/home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/01-unit-test-verification.md`
+- Create: `/home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/01-unit-test-verification.md`
 
 - [ ] **Step 1: Create validation file 01**
 
@@ -154,7 +154,7 @@ Write the complete validation file with:
 - [ ] **Step 2: Verify file was created**
 
 ```bash
-ls -l /home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/01-unit-test-verification.md
+ls -l /home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/01-unit-test-verification.md
 ```
 
 - [ ] **Step 3: Commit validation file 01**
@@ -169,7 +169,7 @@ git commit -m "feat: add validation file 01 - unit test verification"
 ### Task 4: Write Validation File 02 - Integration Test Verification
 
 **Files:**
-- Create: `/home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/02-integration-test-verification.md`
+- Create: `/home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/02-integration-test-verification.md`
 
 - [ ] **Step 1: Create validation file 02**
 
@@ -183,7 +183,7 @@ Write the complete validation file with:
 - [ ] **Step 2: Verify file was created**
 
 ```bash
-ls -l /home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/02-integration-test-verification.md
+ls -l /home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/02-integration-test-verification.md
 ```
 
 - [ ] **Step 3: Commit validation file 02**
@@ -198,7 +198,7 @@ git commit -m "feat: add validation file 02 - integration test verification"
 ### Task 5: Write Validation File 03 - CLI Live Testing
 
 **Files:**
-- Create: `/home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/03-cli-live-testing.md`
+- Create: `/home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/03-cli-live-testing.md`
 
 - [ ] **Step 1: Create validation file 03**
 
@@ -219,7 +219,7 @@ Write the complete validation file with:
 - [ ] **Step 2: Verify file was created**
 
 ```bash
-ls -l /home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/03-cli-live-testing.md
+ls -l /home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/03-cli-live-testing.md
 ```
 
 - [ ] **Step 3: Commit validation file 03**
@@ -234,7 +234,7 @@ git commit -m "feat: add validation file 03 - CLI live testing"
 ### Task 6: Write Validation File 04 - Workflow Execution Tests
 
 **Files:**
-- Create: `/home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/04-workflow-execution-tests.md`
+- Create: `/home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/04-workflow-execution-tests.md`
 
 - [ ] **Step 1: Create validation file 04**
 
@@ -265,7 +265,7 @@ Write the complete validation file with:
 - [ ] **Step 2: Verify file was created**
 
 ```bash
-ls -l /home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/04-workflow-execution-tests.md
+ls -l /home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/04-workflow-execution-tests.md
 ```
 
 - [ ] **Step 3: Commit validation file 04**
@@ -280,7 +280,7 @@ git commit -m "feat: add validation file 04 - workflow execution tests"
 ### Task 7: Write Validation File 05 - Benchmark 5 Model
 
 **Files:**
-- Create: `/home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/05-benchmark-5-model.md`
+- Create: `/home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/05-benchmark-5-model.md`
 
 - [ ] **Step 1: Create validation file 05**
 
@@ -298,7 +298,7 @@ Write the complete validation file with:
 - [ ] **Step 2: Verify file was created**
 
 ```bash
-ls -l /home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/05-benchmark-5-model.md
+ls -l /home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/05-benchmark-5-model.md
 ```
 
 - [ ] **Step 3: Commit validation file 05**
@@ -313,7 +313,7 @@ git commit -m "feat: add validation file 05 - benchmark 5 model"
 ### Task 8: Write Validation File 06 - Benchmark 20 Model
 
 **Files:**
-- Create: `/home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/06-benchmark-20-model.md`
+- Create: `/home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/06-benchmark-20-model.md`
 
 - [ ] **Step 1: Create validation file 06**
 
@@ -332,7 +332,7 @@ Write the complete validation file with:
 - [ ] **Step 2: Verify file was created**
 
 ```bash
-ls -l /home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/06-benchmark-20-model.md
+ls -l /home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/06-benchmark-20-model.md
 ```
 
 - [ ] **Step 3: Commit validation file 06**
@@ -347,7 +347,7 @@ git commit -m "feat: add validation file 06 - benchmark 20 model"
 ### Task 9: Write Validation File 07 - Benchmark 50 Model
 
 **Files:**
-- Create: `/home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/07-benchmark-50-model.md`
+- Create: `/home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/07-benchmark-50-model.md`
 
 - [ ] **Step 1: Create validation file 07**
 
@@ -367,7 +367,7 @@ Write the complete validation file with:
 - [ ] **Step 2: Verify file was created**
 
 ```bash
-ls -l /home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/07-benchmark-50-model.md
+ls -l /home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/07-benchmark-50-model.md
 ```
 
 - [ ] **Step 3: Commit validation file 07**
@@ -382,7 +382,7 @@ git commit -m "feat: add validation file 07 - benchmark 50 model"
 ### Task 10: Write Validation File 08 - Benchmark 120 Model
 
 **Files:**
-- Create: `/home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/08-benchmark-120-model.md`
+- Create: `/home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/08-benchmark-120-model.md`
 
 - [ ] **Step 1: Create validation file 08**
 
@@ -403,7 +403,7 @@ Write the complete validation file with:
 - [ ] **Step 2: Verify file was created**
 
 ```bash
-ls -l /home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/08-benchmark-120-model.md
+ls -l /home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/08-benchmark-120-model.md
 ```
 
 - [ ] **Step 3: Commit validation file 08**
@@ -418,7 +418,7 @@ git commit -m "feat: add validation file 08 - benchmark 120 model"
 ### Task 11: Write Validation File 09 - Workflow Generation Test
 
 **Files:**
-- Create: `/home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/09-workflow-generation-test.md`
+- Create: `/home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/09-workflow-generation-test.md`
 
 - [ ] **Step 1: Create validation file 09**
 
@@ -462,7 +462,7 @@ Write the complete validation file with:
 - [ ] **Step 2: Verify file was created**
 
 ```bash
-ls -l /home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/09-workflow-generation-test.md
+ls -l /home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/09-workflow-generation-test.md
 ```
 
 - [ ] **Step 3: Commit validation file 09**
@@ -477,7 +477,7 @@ git commit -m "feat: add validation file 09 - workflow generation test"
 ### Task 12: Write Validation File 10 - Cross-Phase Regression
 
 **Files:**
-- Create: `/home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/10-cross-phase-regression.md`
+- Create: `/home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/10-cross-phase-regression.md`
 
 - [ ] **Step 1: Create validation file 10**
 
@@ -510,7 +510,7 @@ Write the complete validation file with:
 - [ ] **Step 2: Verify file was created**
 
 ```bash
-ls -l /home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/10-cross-phase-regression.md
+ls -l /home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/10-cross-phase-regression.md
 ```
 
 - [ ] **Step 3: Commit validation file 10**
@@ -525,7 +525,7 @@ git commit -m "feat: add validation file 10 - cross-phase regression"
 ### Task 13: Write Validation File 11 - Final Signoff
 
 **Files:**
-- Create: `/home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/11-final-signoff.md`
+- Create: `/home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/11-final-signoff.md`
 
 - [ ] **Step 1: Create validation file 11**
 
@@ -568,7 +568,7 @@ Write the complete validation file with:
 - [ ] **Step 2: Verify file was created**
 
 ```bash
-ls -l /home/jon/code/yaml-to-rust-agentsdk/opencode/docs/plans/08-final-validation/11-final-signoff.md
+ls -l /home/jon/code/whitt-execution-engine/opencode/docs/plans/08-final-validation/11-final-signoff.md
 ```
 
 - [ ] **Step 3: Commit validation file 11**

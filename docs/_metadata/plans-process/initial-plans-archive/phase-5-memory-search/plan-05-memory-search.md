@@ -730,23 +730,23 @@ cargo test --test search_e2e
 
 ```bash
 # Store artifact in memory
-yaml-to-rust-agentsdk memory store --type structured --key "workflow:123" --file workflow.yml
+whitt-execution-engine memory store --type structured --key "workflow:123" --file workflow.yml
 
 # Search memory
-yaml-to-rust-agentsdk search --query "workflow for data processing" --mode hybrid
+whitt-execution-engine search --query "workflow for data processing" --mode hybrid
 
 # Run external search (with policy approval)
-yaml-to-rust-agentsdk search --external --query "Rust async patterns" --require-approval
+whitt-execution-engine search --external --query "Rust async patterns" --require-approval
 
 # Scrape web page (with policy approval)
-yaml-to-rust-agentsdk scrape --url https://example.com --require-approval
+whitt-execution-engine scrape --url https://example.com --require-approval
 
 # Run garbage collection
-yaml-to-rust-agentsdk memory gc --preview
-yaml-to-rust-agentsdk memory gc --execute
+whitt-execution-engine memory gc --preview
+whitt-execution-engine memory gc --execute
 
 # View provenance
-yaml-to-rust-agentsdk provenance --operation search-123
+whitt-execution-engine provenance --operation search-123
 ```
 
 ### Use implement.sh Script

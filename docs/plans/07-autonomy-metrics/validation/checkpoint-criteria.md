@@ -3198,7 +3198,7 @@ use assert_cmd::Command;
 
 #[test]
 fn test_cli_list_autonomous_tasks() {
-    let mut cmd = Command::cargo_bin("yaml-to-rust-agentsdk").unwrap();
+    let mut cmd = Command::cargo_bin("whitt-execution-engine").unwrap();
     cmd.args(["autonomy", "list"])
         .assert()
         .success()
@@ -3207,7 +3207,7 @@ fn test_cli_list_autonomous_tasks() {
 
 #[test]
 fn test_cli_pause_autonomous_task() {
-    let mut cmd = Command::cargo_bin("yaml-to-rust-agentsdk").unwrap();
+    let mut cmd = Command::cargo_bin("whitt-execution-engine").unwrap();
     cmd.args(["autonomy", "pause", "task_123"])
         .assert()
         .success()
