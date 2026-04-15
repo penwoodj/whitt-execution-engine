@@ -219,10 +219,8 @@ workflow:
     save_to: "./benchmark-results/medium-scale"
     format: "json"
 
-  concurrency:
-    max_parallel_models: 4           # Max models loaded simultaneously
-    max_parallel_requests: 16         # Max prompts across all models
-    memory_limit_gb: 32               # GPU memory budget
+  # Concurrency via existing workflow_execution_strategy.parallel fields
+  # and provider-level hosting.requests.max_concurrent_requests
 
 steps:
   - name: discover_models
@@ -339,17 +337,14 @@ workflow:
     save_to: "./benchmark-results/large-scale"
     format: "json"
 
-  concurrency:
-    max_parallel_models: 6           # Max models in GPU/CPU memory
-    max_parallel_requests: 32         # Max concurrent prompts
-    memory_limit_gb: 64               # Total system memory budget
-    checkpoint_interval_secs: 300      # Save state every 5 minutes
+  # Concurrency via existing workflow_execution_strategy.parallel fields
+  # and provider-level hosting.requests.max_concurrent_requests
 
-  fault_tolerance:
-    retry_max_attempts: 3
-    retry_backoff_secs: [5, 15, 60]      # Exponential backoff
-    skip_failed_models: true            # Continue benchmark if one model fails to load
-    checkpoint_on_error: true           # Save state before any failure
+  # Fault tolerance via existing unified schema fields:
+  #   agentic_workflow.retry.max_attempts: 3
+  #   agentic_workflow.retry.backoff: exponential
+  #   agentic_workflow.retry.step.checkpoint_after_retry: true
+  #   providers.*.hosting.skip_on_load_failure: true
 
 steps:
   - name: discover_models
@@ -468,37 +463,35 @@ workflow:
     save_to: string           # Output directory path (required)
     format: string            # "json" or "yaml" (required)
 
-  concurrency:
-    max_parallel_models: number         # Max models loaded simultaneously (NEW)
-    max_parallel_requests: number        # Max concurrent requests (NEW)
-    memory_limit_gb: number            # Total memory budget in GB (NEW)
-
-  fault_tolerance:                         # NEW section
-    retry_max_attempts: number        # Max retries per operation
-    retry_backoff_secs: [number,...] # Exponential backoff sequence
-    skip_failed_models: boolean        # Continue if model fails
-    checkpoint_on_error: boolean       # Save state before any failure
-    checkpoint_interval_secs: number    # Checkpoint interval in seconds
+  # Fault tolerance uses EXISTING unified schema fields:
+  #   retry.max_attempts + retry.backoff (in agentic_workflow.retry)
+  #   retry.step.checkpoint_after_retry: true (in agentic_workflow.retry.step)
+  #   providers.*.hosting.skip_on_load_failure: true (NEW single field)
+  #   workflow_execution_strategy.timeout.per_operation (timeouts)
+  #   when.after_step_fails hooks (error routing)
 ```
 
-### New Schema Additions
+### Schema Fields Used (All Existing Except One)
 
-**Concurrency Fields:**
+**Existing fields that handle fault tolerance:**
 ```yaml
-concurrency:
-  max_parallel_models: number         # NEW: Max models loaded simultaneously
-  max_parallel_requests: number        # NEW: Max concurrent prompts
-  memory_limit_gb: number            # NEW: Total memory budget
-```
+# In agentic_workflow.retry:
+retry:
+  max_attempts: 3
+  backoff: exponential
+  delay_ms: 5000
+  step:
+    checkpoint_after_retry: true
 
-**Fault Tolerance Section:** (NEW)
-```yaml
-fault_tolerance:
-  retry_max_attempts: number        # NEW: Max retry attempts
-  retry_backoff_secs: [number,...] # NEW: Backoff sequence in seconds
-  skip_failed_models: boolean        # NEW: Skip failed models vs. fail workflow
-  checkpoint_on_error: boolean       # NEW: Save checkpoint on any error
-  checkpoint_interval_secs: number    # NEW: Seconds between checkpoints
+# In providers.<name>.hosting:
+hosting:
+  skip_on_load_failure: true           # NEW: Only genuinely new field
+
+# In workflow_execution_strategy.parallel:
+parallel:
+  max_models: 3                        # Already exists
+  max_threads: 4                        # Already exists
+  parallel_group_timeout_secs: 600     # Already exists
 ```
 
 ---
@@ -593,7 +586,7 @@ fault_tolerance:
 
 1. Implement custom tools for benchmark-specific operations
 2. Add concurrency fields to unified schema
-3. Add fault_tolerance section to unified schema
+3. Evaluate whether concurrency fields need extension (see schema-additions-needed.md)
 4. Implement parallel group timeout in workflow engine
 5. Add checkpointing support to workflow engine
 6. Create benchmark result aggregation and ranking logic

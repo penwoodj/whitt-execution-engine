@@ -2,124 +2,128 @@
 
 ## Overview
 
-Based on restored requirements specifications (specs 12, 14, 15, 20, 21, 22), this document identifies schema additions needed to the unified workflow schema v2.0.
+Based on restored requirements specifications (specs 12, 14, 15, 20, 21, 22), this document identifies schema additions needed for the unified workflow schema v2.0.
 
 ---
 
-## Schema Additions Required
+## 1. Fault Tolerance: NO NEW SECTION NEEDED
 
-### 1. Fault Tolerance Section
+**Conclusion:** The unified schema already handles fault tolerance through existing fields. A separate `fault_tolerance:` section would duplicate and conflict with these.
 
-**Required By:** Spec 14 (Constraints and Assumptions)
+### Existing Schema Coverage
 
-**Rationale:** Fault tolerance is critical for production-grade workflow execution. The unified schema currently lacks explicit fault tolerance configuration.
+| Fault Tolerance Need | Unified Schema Field | Location |
+|---------------------|---------------------|----------|
+| **Retry attempts** | `retry.max_attempts: 10` | `agentic_workflow.retry` (workflow-level) |
+| **Retry attempts (per-step)** | `retry.step.max_attempts: 3` | `agentic_workflow.retry.step` (step defaults) |
+| **Backoff strategy** | `retry.backoff: exponential` | `agentic_workflow.retry` |
+| **Backoff timing** | `retry.delay_ms: 5000`, `retry.step.base_ms: 1000`, `retry.step.max_ms: 30000` | `agentic_workflow.retry` |
+| **Jitter** | `retry.step.jitter: 0.2` | `agentic_workflow.retry.step` |
+| **Retry escalation level** | `retry.level: workflow_restart` | `agentic_workflow.retry` (6 levels) |
+| **Checkpoint after retry** | `retry.step.checkpoint_after_retry: true` | `agentic_workflow.retry.step` |
+| **Provider-level retry** | `providers.<name>.requests.retry.max_retries: 3` | `providers` section |
+| **Provider-level backoff** | `providers.<name>.requests.retry.backoff: exponential` | `providers` section |
+| **Timeout per operation** | `workflow_execution_strategy.timeout.per_operation.*` | `workflow_execution_strategy` |
+| **Loop failure handling** | `loop.validation.tolerance`, `loop.count.max_iterations` | Step-level `loop` key |
+| **Hook-based error routing** | `when.after_step_fails.gwt` (given/when/then) | Step-level `when` hooks |
+| **Skip remaining on fatal** | `when.after_step_starts: [fail, skip_remaining]` | Step-level `when` hooks |
+| **Model execution timeout** | `models.<name>.execution.timeout.*` | `models` section |
 
-**Addition:**
+### One Genuinely New Field
+
+**`skip_failed_models`** — the ability to continue a benchmark workflow when a specific model fails to load, while still recording the failure.
+
+This doesn't fit in `retry` (it's not about retrying) or `when` hooks (it's a model-level policy). Proposed addition:
 
 ```yaml
-fault_tolerance:
-  retry_max_attempts: number        # Maximum retry attempts per operation
-  retry_backoff_secs: [number,...] # Exponential backoff sequence in seconds
-  skip_failed_models: boolean        # Continue workflow if model fails vs. fail entire workflow
-  checkpoint_on_error: boolean       # Save checkpoint before any error (not just on failure)
-  checkpoint_interval_secs: number    # Save state at regular intervals (not just on error)
+# In providers section, under hosting:
+providers:
+  lmstudio:
+    hosting:
+      skip_on_load_failure: true         # NEW: Continue workflow if this provider's model fails to load
 ```
 
-**Default Values (from spec 14):**
-```yaml
-fault_tolerance:
-  retry_max_attempts: 3
-  retry_backoff_secs: [5, 15, 60]  # 5s → 15s → 60s exponential
-  skip_failed_models: true
-  checkpoint_on_error: true
-  checkpoint_interval_secs: 60  # 1 minute
-```
+This is a single field, not a whole section.
 
-**Schema Section Location:** Add as new top-level section in `unified-workflow-schema.yml`, adjacent to existing `concurrency:` section.
+### Why a Separate Section Would Be Harmful
 
-**Related Unified Schema Fields:**
-- `steps.type.loop.on_consecutive_failures` - Stop after N consecutive failures
-- `steps.type.loop.on_empty_iterations` - What to do when condition false/empty
-- `steps.type.loop.on_max_iterations` - Action on reaching iteration limit
-- `workflow.execution.retry_max_attempts` - Retry logic for operations
-- `workflow.execution.retry_backoff_secs` - Backoff sequence
-- `workflow.state_management.checkpoint_interval_secs` - How often to save state
+1. **Ambiguity**: Two places to configure retry (`fault_tolerance.retry_max_attempts` vs `retry.max_attempts`) — which takes priority?
+2. **Conflict**: Different defaults in different sections would cause undefined behavior
+3. **Violates schema principle**: "One way to do each thing" (see unified-workflow-schema.yml line 10)
+4. **Maintenance burden**: Every change to retry logic would need updating in two places
 
 ---
 
-### 2. Enhanced Concurrency Section
+## 2. Enhanced Concurrency: UNDER REVIEW
 
-**Required By:** Spec 20 (Complete YAML Benchmark Examples) and Spec 15 (Configuration Defaults)
+**Status:** User reviewing whether to extend unified schema or remove from examples.
 
-**Rationale:** The current `concurrency:` section lacks fine-grained control needed for production benchmarking and resource management.
+### Current Schema Coverage
 
-**Addition:**
+| Concurrency Need | Unified Schema Field | Location |
+|-----------------|---------------------|----------|
+| **Max parallel threads** | `workflow_execution_strategy.parallel.max_threads: 4` | `workflow_execution_strategy.parallel` |
+| **Max parallel models** | `workflow_execution_strategy.parallel.max_models: 3` | `workflow_execution_strategy.parallel` |
+| **Max parallel steps** | `workflow_execution_strategy.parallel.max_steps: 2` | `workflow_execution_strategy.parallel` |
+| **Parallel group timeout** | `workflow_execution_strategy.parallel.parallel_group_timeout_secs: 600` | `workflow_execution_strategy.parallel` |
+| **Load balancing strategy** | `workflow_execution_strategy.parallel.load_balancing.strategy` | `workflow_execution_strategy.parallel` |
+| **Max concurrent models (provider)** | `providers.<name>.hosting.max_concurrent_models: 3` | `providers` section |
+| **Max concurrent requests (provider)** | `providers.<name>.requests.max_concurrent_requests: 5` | `providers` section |
+| **Rate limiting (provider)** | `providers.<name>.requests.rate_limit_per_minute: 60` | `providers` section |
+| **Resource limits (model)** | `models.<name>.max_allowed.concurrent_requests: 2` | `models` section |
+| **Memory pressure handling** | `workflow_execution_strategy.memory.pressure_handling.*` | `workflow_execution_strategy.memory` |
+| **Processing mode** | `workflow_execution_strategy.processing: parallel` | `workflow_execution_strategy` |
 
-```yaml
-concurrency:
-  max_parallel_models: number         # NEW: Max models loaded simultaneously
-  max_parallel_requests: number        # NEW: Max concurrent prompts across all models
-  memory_limit_gb: number            # NEW: Total system memory budget
-```
+### Potentially New Fields Under Review
 
-**Default Values (from spec 20):**
-```yaml
-concurrency:
-  workflow_level: 4            # Existing: Max concurrent workflows
-  model_level: 1                # NEW: Max models loaded at once
-  step_level: 16               # Existing: Max parallel steps
-  max_total_requests: 64         # NEW: Global request cap
-  max_requests_per_model: 8        # NEW: Per-model request limit
-  max_total_loaded_models: 2       # NEW: Max models in memory at once
-  memory_limit_gb: 16            # NEW: 16GB total memory budget
-```
+| Proposed Field | Overlaps With | Verdict |
+|---------------|--------------|---------|
+| `max_parallel_models` | `workflow_execution_strategy.parallel.max_models` | **DUPLICATE** — same field, different name |
+| `max_parallel_requests` | `providers.*.requests.max_concurrent_requests` | **DIFFERENT SCOPE** — provider-level vs global cap |
+| `memory_limit_gb` | `workflow_execution_strategy.memory.ram_allocation.max_allowed` | **DIFFERENT FORMAT** — GB vs percentage |
 
-**Schema Section Location:** Extend existing `concurrency:` section in `unified-workflow-schema.yml` with new fields.
+### Open Questions (Awaiting User Decision)
 
-**Related Unified Schema Fields:**
-- `workflow.execution.timeout_secs` - Respect concurrency limits
-- `workflow.memory.strategy` - Apply memory-aware model loading
-- `models.*.n_batch` - Adjust batch size based on concurrency limits
-- `models.*.n_ctx` - Reduce context if multiple models loaded
+1. **Global vs per-provider**: Should request limits be global (`max_parallel_requests: 64`) or stay per-provider?
+2. **GB vs percentage**: Memory limits currently use percentages. Should we add GB format?
+3. **Model count vs resource limits**: `max_models: 3` already exists. Is that sufficient?
+
+**Decision needed before modifying unified schema.**
 
 ---
 
 ## Implementation Priority
 
-### High Priority: Fault Tolerance
+### High Priority: Fix Benchmark Examples
 
-1. **Add fault_tolerance section to unified schema**
-2. Update schema parser to recognize fault_tolerance fields
-3. Implement retry logic in workflow engine
-4. Add checkpoint hooks that fire on errors (not just interval-based)
-5. Update validation to enforce fault_tolerance constraints
+Update `benchmark-yaml-examples.md` to use existing schema fields instead of proposed (now rejected) `fault_tolerance:` section. Replace:
+- `fault_tolerance.retry_max_attempts` → `agentic_workflow.retry.max_attempts`
+- `fault_tolerance.retry_backoff_secs` → `agentic_workflow.retry.backoff: exponential` + `delay_ms`
+- `fault_tolerance.skip_failed_models` → `providers.*.hosting.skip_on_load_failure`
+- `fault_tolerance.checkpoint_on_error` → `retry.step.checkpoint_after_retry`
+- `fault_tolerance.checkpoint_interval_secs` → Use `when` hooks for periodic checkpointing
 
-### High Priority: Enhanced Concurrency
+### Medium Priority: Concurrency Decision
 
-1. Add 3 new fields to concurrency section
-2. Implement resource-aware model loading (respect memory_limit_gb)
-3. Add request throttling (max_parallel_requests, max_requests_per_model)
-4. Add model unloading when approaching memory limits
-5. Update documentation and examples to use new concurrency controls
+Await user decision on whether to extend concurrency fields or keep current schema structure.
 
 ---
 
 ## Verification
 
-Once these additions are integrated into unified-schema.yml, verify:
+After fixing benchmark examples, verify:
 
-1. **Schema validation**: All new fields validate successfully
-2. **Example workflows**: All 52 example workflows validate without errors
-3. **Backward compatibility**: Existing workflows without new fields still work (all optional)
-4. **Documentation**: All docs updated to reference new schema fields
-5. **Testing**: Unit tests for fault tolerance and concurrency logic
+1. All benchmark YAML uses only existing unified schema fields
+2. No references to proposed `fault_tolerance:` section remain
+3. All 52 example workflows still validate
+4. Documentation accurately reflects schema capabilities
 
 ---
 
 ## Related Documents
 
-- [Unified Workflow Schema](./unifying-schema/unified-workflow-schema.yml) - Target file to update
-- [Advanced Agentic Features](./advanced-agentic-features.md) - Spec defining loop termination edge cases
-- [Benchmark YAML Examples](./benchmark-yaml-examples.md) - Spec demonstrating concurrency needs
-- [Configuration Defaults](./configuration-defaults.md) - Spec defining default values
-- [Requirements Index](./index.md) - Central requirements tracking (already updated)
+- [Unified Workflow Schema](./unifying-schema/unified-workflow-schema.yml) — Source of truth (801 lines)
+- [Advanced Agentic Features](./advanced-agentic-features.md) — Loop termination edge cases
+- [Benchmark YAML Examples](./benchmark-yaml-examples.md) — Needs fix to use existing fields
+- [Configuration Defaults](./configuration-defaults.md) — Default values
+- [Requirements Index](./index.md) — Central tracking

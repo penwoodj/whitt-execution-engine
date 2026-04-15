@@ -102,30 +102,20 @@ Index of all requirements documentation for AutoAgents SDK. Organized by impleme
 | **logging:** | 100% | None | Hierarchical logging complete |
 | **state_management:** | 100% | None | Checkpointing and persistence complete |
 | **parallel_group:** | 100% | None | Parallel execution groups complete |
-| **concurrency:** | 80% | 20% | workflow-level, model-level, step-level defined; fault_tolerance, checkpoint_interval missing |
-| **fault_tolerance:** | 100% | None | Fault handling section in spec 14 covers this |
+| **concurrency:** | 80% | 20% | workflow-level, model-level, step-level defined; skip_on_load_failure field missing |
+| **fault tolerance:** | 100% | None | Covered by existing retry, when hooks, timeout fields (see schema-additions-needed.md) |
 
 **Gaps:**
-1. **Missing fault_tolerance in unified schema**: Spec 14 describes fault tolerance (retry, backoff, skip_failed, checkpoint_on_error) but these fields don't exist in unified-schema.yml
-2. **Missing concurrency fields in unified schema**: Spec 20 introduces concurrency limits (max_parallel_models, max_parallel_requests) but these don't exist in unified-schema.yml
+1. **Missing `skip_on_load_failure` in providers section**: New field needed so benchmarks can continue when a model fails to load
+2. **Concurrency coverage evaluation pending**: User reviewing whether current `workflow_execution_strategy.parallel` fields are sufficient or need extension
 
-**Schema Additions Needed:**
-- Add `fault_tolerance` section to unified schema:
+**Schema Addition (Single Field):**
+- Add `skip_on_load_failure: boolean` to `providers.<name>.hosting` section:
   ```yaml
-  fault_tolerance:
-    retry_max_attempts: number
-    retry_backoff_secs: [number,...]
-    skip_failed_models: boolean
-    checkpoint_on_error: boolean
-    checkpoint_interval_secs: number
-  ```
-
-- Add concurrency fields to unified schema:
-  ```yaml
-  concurrency:
-    max_parallel_models: number
-    max_parallel_requests: number
-    memory_limit_gb: number
+  providers:
+    lmstudio:
+      hosting:
+        skip_on_load_failure: true    # Continue workflow if this provider's model fails to load
   ```
 
 ---
@@ -146,7 +136,7 @@ Index of all requirements documentation for AutoAgents SDK. Organized by impleme
 **Revamped:**
 - ✅ [requirements/index.md](./index.md) - Updated to include all new specs and traceability
 - ✅ All new specs linked from central index
-- ✅ Schema gaps identified (fault_tolerance, concurrency additions needed)
+- ✅ Schema gaps identified (skip_on_load_failure field needed; concurrency under review)
 
 **Status**: Foundation requirements complete (24/24 core specs). Advanced requirements and schema additions pending.
 
@@ -169,7 +159,8 @@ Index of all requirements documentation for AutoAgents SDK. Organized by impleme
 
 ### Blockers
 
-1. **Schema additions for fault_tolerance and concurrency** - Required before implementing specs 14, 20
+1. **Schema addition for `skip_on_load_failure`** - Single new field for benchmark fault tolerance
+2. **Concurrency evaluation** - User reviewing whether current parallel fields sufficient
 2. **Treadle integration** - HITL support for persistent workflows
 3. **Memory & Search** - Vector DB with RAG operations
 4. **Autonomy metrics** - Self-improvement loops
@@ -202,4 +193,4 @@ Index of all requirements documentation for AutoAgents SDK. Organized by impleme
 **In Progress**: 4 (17%)
 **Blocked**: 0
 
-**Documentation Coverage**: 95% (fault_tolerance, concurrency additions pending)
+**Documentation Coverage**: 95% (skip_on_load_failure field addition pending, concurrency evaluation pending)
