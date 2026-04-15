@@ -262,15 +262,8 @@ impl ManagerAgent {
         // Decompose task
         let subtasks = self.decompose_task(&task).await?;
 
-        // Execute subtasks in parallel
-        let results = futures::future::join_all(
-            subtasks.iter().map(|subtask| {
-                let agent = self.select_specialist(subtask);
-                async move {
-                    agent.execute_subtask(subtask.clone()).await
-                }
-            })
-        ).await;
+        // Multi-agent parallel execution moved to agent-queue project
+
 
         // Synthesize results
         self.synthesize_results(results).await
@@ -745,13 +738,12 @@ cargo test agent::multi_agent::vote
 cargo test agent::multi_agent::collect
 cargo test agent::multi_agent::average
 
-# Verify parallel execution
-cargo test agent::multi_agent::parallel
+# Parallel execution tests moved to agent-queue project
 ```
 
 **Expected outcome**:
 - All coordination strategies work correctly
-- Parallel execution works
+- Parallel execution moved to agent-queue project
 - Results are correct for each strategy
 
 **Integration point**: Phase 2 (Multi-Agent Coordination)

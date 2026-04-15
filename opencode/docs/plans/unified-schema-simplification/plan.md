@@ -925,7 +925,7 @@ agentic_workflow:             # Level 2 = per-step defaults live here
 | `models` | ✅ definitions | ❌ | ✅ `generative_entity` reference | Steps reference, don't define |
 | `sub_workflows` | ✅ definitions | ❌ | ✅ `sub_workflow:` reference | Steps reference, don't define |
 | `ram_allocation` | ✅ `workflow_execution_strategy` | ❌ | ❌ | Engine-level resource management |
-| `parallel_group` | ❌ | ❌ | ✅ | Only on steps |
+| `parallel_group` | → moved to agent-queue | ❌ | ❌ | Only on steps (moved) |
 | `depends_on` | ❌ | ❌ | ✅ | Only on steps |
 | `requires` | ❌ | ❌ | ✅ | Only on steps |
 | `user_input` | ✅ `agentic_workflow.user_inputs` | ❌ | ✅ direct on step | Both workflow and step level |
@@ -1139,7 +1139,7 @@ steps:
 
 ## Phase 4: Remove Advanced Scheduling
 
-Remove `workflow_execution_strategy.advanced_scheduling`. Scheduling expressed through workflow structure (step ordering, parallel_group, depends_on, route_to).
+Remove `workflow_execution_strategy.advanced_scheduling`. Scheduling expressed through workflow structure (step ordering, depends_on, route_to) — parallel_group moved to agent-queue.
 
 ### Validation
 - [ ] No features lost
@@ -1417,14 +1417,14 @@ steps:
 **What `orchestration:` does currently:** Defines step coordination, sub-agent orchestration, event handling, validation aggregation, and checkpoint coordination.
 
 **Why it's questionable as top-level:**
-- Step coordination is already handled by `depends_on`, `parallel_group`, and `route_to` on steps
+- Step coordination is already handled by `depends_on` and `route_to` on steps (parallel_group moved to agent-queue)
 - Sub-agent orchestration is just sub-workflow invocation (already in Phase 2C)
 - Event handling is covered by `when` hooks
 - Validation aggregation is covered by validation loop convergence criteria
 - Checkpoint coordination is covered by checkpoint actions in hooks
 
 **Decision: Remove top-level `orchestration:`. Features absorbed into:**
-- `depends_on` / `parallel_group` / `route_to` → step coordination
+- `depends_on` / `route_to` → step coordination (parallel_group moved to agent-queue)
 - `sub_workflows:` → sub-agent/sub-workflow definitions
 - `when:` hooks → event handling
 - Loop validation criteria → validation aggregation

@@ -89,7 +89,7 @@ Phase 0 owns these sections of the unified schema:
   8. `min_allowed.cpu`: 0-100% (default: 49%)
   9. `min_allowed.gpu`: 0-100% (default: 74%)
   10. `min_allowed.attention_tokens`: 1-1,000,000 (default: 73,500)
-  11. `max_concurrent_requests`: 1-10 (default: 2)
+  # 11. `max_concurrent_requests`: 1-10 (default: 2) — kept for provider-level concurrency
 
 ---
 

@@ -13,6 +13,8 @@
 
 ## Rust Definitions
 
+> **Note**: Parallel execution features (`ParallelExecutionStrategy`, `ParallelStep`, parallel struct definitions) have moved to the [agent-queue](https://github.com/penwoodj/agent-queue) project. This file describes historical execution mode implementations.
+
 ### `src/execution_mode/serial.rs`
 
 ```rust

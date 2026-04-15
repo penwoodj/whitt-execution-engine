@@ -9,7 +9,9 @@
 
 **Result**: ✅ ALL FUNCTIONAL CAPABILITIES PRESERVED THROUGH V2.0 SIMPLIFICATION
 
-> **Note (v2.0 update)**: The unified schema v2.0 intentionally simplified several v1 patterns while preserving all functional capabilities. This simplification removed redundant/unnecessary features:
+  > **Note (v2.0 update)**: The unified schema v2.0 intentionally simplified several v1 patterns while preserving all functional capabilities. This simplification removed redundant/unnecessary features.
+
+  > **Note (parallel execution migration)**: Parallel execution features (`parallel_group`, `max_parallel`, `max_concurrent`, `concurrency_limits`, etc.) have moved to the [agent-queue](https://github.com/penwoodj/agent-queue) project. References to these features in this document describe historical schema capabilities.
 
 - **`enabled:` pattern** → Replaced with presence=enabled convention (feature enabled by including configuration)
 - **`pipeline:` format** → Unified into `agentic_workflow` array/object syntax
@@ -147,7 +149,7 @@
 **Location**: Unified schema `models` section
 **Features**:
 - global_config_path support
-- default_model_router
+- default_model_router <!-- Model routing features moved to ~/code/model-router/ -->
 - Per-model configuration with all manual features:
   - name (variable reference)
   - host.type (lmstudio/ollama/llama_cpp_with_vulkan)
@@ -186,7 +188,7 @@
   - Panels for categorization
 - steps (named step keys as identifiers)
   - generative_entity (model reference)
-  - model_overrides (any model property override)
+  - model_overrides (any model property override) <!-- Model routing features moved to ~/code/model-router/ -->
   - prompt (multi-line with variable interpolation)
   - input_variables (step-specific variables)
   - user_inputs (step-specific user input)
@@ -199,9 +201,8 @@
 **Status**: ✅ PRESERVED
 **Location**: Unified schema `workflow_execution_strategy` section
 **Features**:
-- processing (serial/parallel/hybrid)
+- processing (serial/hybrid - parallel moved to agent-queue)
 - memory_pressure_handling (strategy, memory_threshold_percent, throttle_factor, on_oom)
-- parallel (enabled, algorithm, load_balancing, max_threads, max_models, max_concurrent_requests, max_steps)
 - timeout (total, tool_call, step, operation_timeout_secs, sub_workflow_timeout_secs, time_to_first_result_secs, timeout_strategy, model timeouts)
 - error_handling (default_action, max_retries_per_step, retry_backoff_multiplier, escalate_to_model_after, error_handling_modes, max_retry_delay_secs, min_retry_delay_secs, retry_on_timeout, retry_on_rate_limit, rate_limit_backoff_strategy)
 - sub_workflow (inherit_policy.enabled, inherit_from_parent, override_allowed, reference_resolution.strategy, reference_resolution.caching, reference_resolution.version_conflict_resolution, reference_resolution.validate_exists, isolated_environments, memory_sharing, file_system_isolation, state_sharing, circular_reference_detection, max_depth, max_parallel_workflows)

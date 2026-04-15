@@ -101,13 +101,13 @@ Index of all requirements documentation for AutoAgents SDK. Organized by impleme
 | **outputs:** | 100% | None | Capture and format sections complete |
 | **logging:** | 100% | None | Hierarchical logging complete |
 | **state_management:** | 100% | None | Checkpointing and persistence complete |
-| **parallel_group:** | 100% | None | Parallel execution groups complete |
+| **parallel_group:** | 100% | None | [MOVED TO AGENT-QUEUE] Parallel execution groups complete |
 | **concurrency:** | 80% | 20% | workflow-level, model-level, step-level defined; skip_on_load_failure field missing |
 | **fault tolerance:** | 100% | None | Covered by existing retry, when hooks, timeout fields (see schema-additions-needed.md) |
 
 **Gaps:**
 1. **Missing `skip_on_load_failure` in providers section**: New field needed so benchmarks can continue when a model fails to load
-2. **Concurrency coverage evaluation pending**: User reviewing whether current `workflow_execution_strategy.parallel` fields are sufficient or need extension
+ 2. **Concurrency coverage evaluation pending**: User reviewing whether current `workflow_execution_strategy.parallel` fields are sufficient or need extension [MOVED TO AGENT-QUEUE]
 
 **Schema Addition (Single Field):**
 - Add `skip_on_load_failure: boolean` to `providers.<name>.hosting` section:

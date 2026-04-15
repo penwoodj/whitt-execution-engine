@@ -25,9 +25,9 @@ Reviewed all requirements from workflow-example-requirements.yml against current
 - ✅ Dynamic parallelization with memory constraint (ex01, ex03)
 - ✅ Serial execution (ex02)
 - ✅ Persistent models (ex01 - model stays loaded)
-- ✅ Auto model routing (ex02)
+- ✅ Auto model routing (ex02) <!-- Model routing features moved to ~/code/model-router/ -->
 - ✅ Multiple providers (LM Studio, llama.cpp, Ollama) - ex01, ex02
-- ❌ Explicit model routing configuration at workflow level - PARTIALLY COVERED (ex02 has priority_adjustment, but not explicit routing rules)
+- ❌ Explicit model routing configuration at workflow level - PARTIALLY COVERED (ex02 has priority_adjustment, but not explicit routing rules) <!-- Model routing features moved to ~/code/model-router/ -->
 
 **Loops and Control Flow**
 - ✅ Count-based loops - NOT EXPLICITLY SHOWN

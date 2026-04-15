@@ -253,53 +253,9 @@ s.push_str("hello");
 - Parallel execution research: Foundation research report
 
 **Summary**:
-Parallel execution strategies enable processing multiple workflows or agents concurrently, improving throughput.
+Parallel execution strategies moved to agent-queue project.
 
-**Strategies**:
 
-**Strategy 1: Use tokio::spawn for concurrent tasks**:
-```rust
-let mut handles = vec![];
-
-for workflow in workflows {
-    let handle = tokio::spawn(async move {
-        execute_workflow(workflow).await
-    });
-    handles.push(handle);
-}
-
-for handle in handles {
-    handle.await??;
-}
-```
-
-**Strategy 2: Use tokio::spawn_blocking for CPU-bound work**:
-```rust
-let result = tokio::task::spawn_blocking(|| {
-    // CPU-bound work
-    process_large_dataset()
-}).await?;
-```
-
-**Strategy 3: Use futures::stream for streaming processing**:
-```rust
-use futures::stream::{self, StreamExt};
-
-let results = stream::iter(workflows)
-    .map(|workflow| execute_workflow(workflow))
-    .buffer_unordered(10)
-    .collect::<Vec<_>>()
-    .await;
-```
-
-**Benchmarks**:
-- tokio::spawn: 10K concurrent workflows
-- spawn_blocking: Efficient CPU-bound work
-- Stream processing: 100K workflows/sec streaming
-
----
-
-### Finding 6: Caching Strategies
 
 **Evidence sources**:
 - Caching strategies: https://en.wikipedia.org/wiki/Cache_replacement_policies

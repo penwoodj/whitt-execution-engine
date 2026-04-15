@@ -20,10 +20,8 @@ description: "Default workflow description"
 tags: []
 
 workflow:
-  type: "sequential"  # sequential | parallel | hybrid
-  concurrency:
-    max_concurrent_steps: 4
-    max_parallel_models: 1
+  type: "sequential"  # sequential only — parallel moved to agent-queue
+  # concurrency: → moved to agent-queue project
 
   execution:
     timeout_secs: 300        # 5 minutes default
@@ -101,6 +99,8 @@ steps:
 - `timeout_secs`: Default 300 seconds (5 minutes per loop)
 
 ### Parallel Step Defaults
+
+> **Note**: Parallel execution features (`parallel_group`, `max_parallel_workflows`, `parallel_group_timeout_secs`) have moved to the [agent-queue](https://github.com/penwoodj/agent-queue) project. This section describes historical schema defaults.
 
 ```yaml
 steps:
@@ -481,9 +481,7 @@ defaults:
     type: "sequential"
     timeout_secs: 300
     retries: 3
-    concurrency:
-      max_concurrent_steps: 4
-      max_parallel_models: 1
+    # concurrency: → moved to agent-queue project
 
   backends:
     lmstudio:

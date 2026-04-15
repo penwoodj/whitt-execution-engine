@@ -188,6 +188,8 @@ Removed. Scheduling expressed through workflow structure (depends_on, parallel_g
 
 ## 9. Input Requirements
 
+> **Note**: Parallel execution features have moved to the [agent-queue](https://github.com/penwoodj/agent-queue) project. References to `depends_on`, `parallel_group`, `route_to` describe historical manual schema capabilities.
+
 ### 9.1 Workflow-Level `inputs`
 Typed inputs with name, description, type (string default, number, boolean, object, list types), and default values. Replaces `input_variables`.
 

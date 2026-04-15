@@ -773,7 +773,7 @@
 
 **Verification Method**:
 - Check: Verify different chats don't interfere
-- Command: Run 2 workflows concurrently, check artifacts
+- Command: Run 2 workflows sequentially (parallel execution moved to agent-queue), check artifacts
 - Result: Separate directories, no interference
 
 ---
@@ -905,9 +905,9 @@
 
 ---
 
-## R33: Model Lifecycle (Load/Unload Models, Multiple Instances, Multiple Models in Parallel)
+## R33: Model Lifecycle (Load/Unload Models, Multiple Instances)
 
-**Definition**: Model lifecycle management with loading, unloading, multiple instances, parallel execution
+**Definition**: Model lifecycle management with loading, unloading, multiple instances (parallel execution moved to agent-queue)
 
 **Owner Phase**: Phase 2 (MVP Execution)
 

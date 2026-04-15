@@ -219,8 +219,8 @@ workflow:
     save_to: "./benchmark-results/medium-scale"
     format: "json"
 
-  # Concurrency via existing workflow_execution_strategy.parallel fields
-  # and provider-level hosting.requests.max_concurrent_requests
+  # Concurrency moved to agent-queue project
+  # Provider-level max_concurrent_requests stays in providers section
 
 steps:
   - name: discover_models
@@ -337,8 +337,8 @@ workflow:
     save_to: "./benchmark-results/large-scale"
     format: "json"
 
-  # Concurrency via existing workflow_execution_strategy.parallel fields
-  # and provider-level hosting.requests.max_concurrent_requests
+  # Concurrency moved to agent-queue project
+  # Provider-level max_concurrent_requests stays in providers section
 
   # Fault tolerance via existing unified schema fields:
   #   agentic_workflow.retry.max_attempts: 3
@@ -487,11 +487,8 @@ retry:
 hosting:
   skip_on_load_failure: true           # NEW: Only genuinely new field
 
-# In workflow_execution_strategy.parallel:
-parallel:
-  max_models: 3                        # Already exists
-  max_threads: 4                        # Already exists
-  parallel_group_timeout_secs: 600     # Already exists
+# workflow_execution_strategy.parallel: → moved to agent-queue project
+# Provider-level concurrency stays in providers section
 ```
 
 ---
@@ -528,9 +525,11 @@ parallel:
 6. **report_generator** - Create summary tables, rankings, comparison matrix
 7. **checkpoint_saver** - Save workflow state for recovery
 
-### Execution Engine Features
+  ### Execution Engine Features
 
-1. **Parallel step groups**: `parallel_group` for concurrent prompts
+  > **Note**: Parallel execution features have moved to the [agent-queue](https://github.com/penwoodj/agent-queue) project.
+
+  1. **Parallel step groups**: `parallel_group` for concurrent prompts
 2. **Parallel sub-workflows**: Sub-workflows for per-model prompt execution
 3. **Parallel group timeout**: `parallel_group_timeout_secs` for bounding wave duration
 4. **Fault tolerance**: Retry logic, checkpointing, skip-on-failure

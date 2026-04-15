@@ -774,6 +774,8 @@ pub struct Step {
     #[serde(default)]
     pub user_input: Option<UserInput>,
 
+    /// > **Note**: Parallel execution features have moved to the [agent-queue](https://github.com/penwoodj/agent-queue) project. The following structs describe historical parallel execution capabilities.
+
     /// Step dependencies (require before execution)
     #[serde(default)]
     pub depends_on: Option<Vec<DependencyConfig>>,

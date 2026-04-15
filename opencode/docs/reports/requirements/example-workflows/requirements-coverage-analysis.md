@@ -193,15 +193,8 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `loop.infinite_config`: max_iterations, max_memory, timeout, checkpoint_interval, log_interval
 **Examples**: 01-basic-model-selection-providers.yaml (validation), 04-convergence-reduction-aggregation.yaml (convergence), 01-for-loops-explicit-iteration.yaml (all loop types), 01-user-input-prompts-validation.yaml (validation)
 
-### 9. Dynamic Parallelization with Memory Constraints
-**Status**: ✅ FULLY COVERED
-**Unified Schema Elements**:
-- `workflow_execution_strategy.processing: parallel | serial | hybrid`
-- `workflow_execution_strategy.parallel.enabled`, `max_threads`, `max_models`, `max_concurrent_requests`
-- `memory.allocation.max_allowed: ram, vram, cpu, gpu, attention_tokens`
-- `adaptive.resource_monitoring.enabled`
-- `adaptive.concurrency_adjustment.enabled`
-**Examples**: all 52 categorized examples
+### 9. Dynamic Parallelization: MOVED TO AGENT-QUEUE
+**Status**: Parallel execution features moved to agent-queue project
 
 ### 10. Serial Execution with Model Loading/Unloading
 **Status**: ✅ FULLY COVERED
@@ -241,7 +234,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `retry.retry_on_status`, `log_attempts`
 **Examples**: all 52 categorized examples
 
-### 14. Failure History and Auto Model Routing
+### 14. Failure History and Auto Model Routing <!-- Model routing features moved to ~/code/model-router/ -->
 **Status**: ✅ FULLY COVERED
 **Unified Schema Elements**:
 - `models.default_model_router: automatic | manual | smart_routing`
@@ -249,7 +242,7 @@ The unified workflow schema (`unified-workflow-schema.yml`) consolidates all fea
 - `models."model-name".host.type`
 **Examples**: 02-model-parameters-tuning.yaml, 01-web-fetch-scrape.yaml, 01-user-input-prompts-validation.yaml, 01-complex-orchestration-sub-agents.yaml
 
-### 15. Explicit Auto Model Routing in Schema
+### 15. Explicit Auto Model Routing in Schema <!-- Model routing features moved to ~/code/model-router/ -->
 **Status**: ✅ FULLY COVERED
 **Unified Schema Elements**:
 - `models.default_model_router`

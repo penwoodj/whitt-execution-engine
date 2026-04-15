@@ -12,7 +12,7 @@
 
 ## Phase Overview
 
-This phase implements the core execution engine for the AgentSDK: a persistent job queue and scheduler that manages ChatSession work containers with human-gated safety controls. The scheduler orchestrates workflow execution through step executors, loop runners, branch evaluators, and parallel execution, with comprehensive logging, metrics, and error handling.
+This phase implements the core execution engine for the AgentSDK: a persistent job queue and scheduler that manages ChatSession work containers with human-gated safety controls. The scheduler orchestrates workflow execution through step executors, loop runners, and branch evaluators (parallel execution moved to agent-queue), with comprehensive logging, metrics, and error handling.
 
 **Estimated Time:** 8-10 weeks
 
@@ -80,8 +80,8 @@ This phase implements the core execution engine for the AgentSDK: a persistent j
                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Execution Modes Engine                         │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────┐                 │
-│  │  Serial  │  │ Parallel │  │   Hybrid     │                 │
+│  ┌──────────┐                    ┌──────────────┐                 │
+│  │  Serial  │  Parallel moved to │   Hybrid     │                 │
 │  └──────────┘  └──────────┘  └──────────────┘                 │
 └───────────────────────────┬─────────────────────────────────────┘
                             │
@@ -98,9 +98,9 @@ This phase implements the core execution engine for the AgentSDK: a persistent j
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Control Flow                                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
-│  │ Loop Runner  │  │Branch Eval   │  │Parallel Exec │           │
-│  │ 6 loop types │  │Conditional   │  │Concurrency  │           │
-│  │              │  │Event routing │  │constraints   │           │
+│  │ Loop Runner  │  │Branch Eval   │  │Parallel moved│           │
+│  │ 6 loop types │  │Conditional   │  │to agent-queue│           │
+│  │              │  │Event routing │  │             │           │
 │  └──────────────┘  └──────────────┘  └──────────────┘           │
 └───────────────────────────┬─────────────────────────────────────┘
                             │
@@ -161,11 +161,11 @@ src/
     mod.rs              # Control flow module
     loop.rs             # Loop runner (6 loop types)
     branch.rs           # Branch evaluator
-    parallel.rs         # Parallel executor
+    # parallel.rs         # Parallel executor (moved to agent-queue)
   execution_mode/
     mod.rs              # Execution mode module
     serial.rs           # Serial execution
-    parallel.rs         # Parallel execution
+    # parallel.rs         # Parallel execution (moved to agent-queue)
     hybrid.rs           # Hybrid execution strategy
   safety/
     mod.rs              # Safety/gating module
@@ -189,7 +189,7 @@ tests/
     queue_storage_test.rs
     loop_runner_test.rs
     branch_evaluator_test.rs
-    parallel_executor_test.rs
+    # parallel_executor_test.rs (moved to agent-queue)
     retry_test.rs
   property/
     state_machine_invariants_test.rs
@@ -213,14 +213,14 @@ This phase implements the following sections of the schema:
 - **dependencies**: Step dependency specifications
 - **branches**: Conditional branching definitions
 - **loops**: All 6 loop types (count, foreach, while, validation, retry, infinite)
-- **parallel_groups**: Parallel execution group definitions
+- # **parallel_groups**: Parallel execution group definitions (moved to agent-queue)
 
 ### Section 5: Workflow Execution Strategy (partial)
-- **execution_modes**: Serial, parallel, hybrid execution strategies
+- **execution_modes**: Serial, hybrid execution strategies (parallel moved to agent-queue)
 - **retry_policy**: Retry configuration with backoff strategies
 - **error_handling**: Error escalation and recovery mechanisms
 - **checkpointing**: Execution checkpoint configuration
-- **concurrency_limits**: Worker pool and parallel group concurrency
+- # **concurrency_limits**: Worker pool and parallel group concurrency (moved to agent-queue)
 - **synchronization**: Step coordination mechanisms
 
 ### Section 7: Logging Configuration
@@ -322,13 +322,13 @@ Before executing operations with external impact:
 
 ## Verification Layers
 
-1. **State Machine Validation**: Ensure all state transitions are valid and complete
-2. **Storage Consistency**: Verify sled storage operations are atomic and recoverable
-3. **Execution Correctness**: Test that steps execute in correct order with proper inputs
-4. **Concurrency Safety**: Verify worker pool and parallel execution are race-free
-5. **Resource Management**: Ensure channels, tasks, and storage are properly cleaned up
-6. **Error Recovery**: Test retry logic, error handling, and graceful degradation
-7. **Human Gating**: Verify classification accuracy and gate enforcement
+  1. **State Machine Validation**: Ensure all state transitions are valid and complete
+  2. **Storage Consistency**: Verify sled storage operations are atomic and recoverable
+  3. **Execution Correctness**: Test that steps execute in correct order with proper inputs
+  4. **Concurrency Safety**: Verify worker pool is race-free (parallel execution moved to agent-queue)
+  5. **Resource Management**: Ensure channels, tasks, and storage are properly cleaned up
+  6. **Error Recovery**: Test retry logic, error handling, and graceful degradation
+  7. **Human Gating**: Verify classification accuracy and gate enforcement
 
 ---
 
@@ -365,7 +365,7 @@ Before executing operations with external impact:
 - Task 04: Step Executor
 - Task 05: Loop Runner
 - Task 06: Branch Evaluator
-- Task 07: Parallel Executor
+# - Task 07: Parallel Executor (moved to agent-queue)
 
 **Safety & Controls (Week 7)**
 - Task 08: Human Gating

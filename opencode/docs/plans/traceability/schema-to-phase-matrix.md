@@ -172,8 +172,8 @@
 | `pipeline[].output.*` | object | - | Phase 1 | - | Output configuration applied |
 | `pipeline[].retry.*` | object | - | Phase 1 | - | Retry strategy applied |
 | `pipeline[].branches.*` | object | - | Phase 1 | - | Branches configured |
-| `pipeline[].parallel_group` | string | - | Phase 1 | `01-parallel-groups-execution.yaml` | Parallel execution grouped |
-| `pipeline[].max_parallel` | integer | - | Phase 1 | - | Concurrency limit enforced |
+| `pipeline[].parallel_group` | string | - | - | Moved to agent-queue | Parallel execution grouped |
+| `pipeline[].max_parallel` | integer | - | - | Moved to agent-queue | Concurrency limit enforced |
 | `pipeline[].timeout_secs` | integer | - | Phase 1 | - | Step timeout enforced |
 | `pipeline[].depends_on` | array | - | Phase 1 | - | Dependencies ordered |
 | `pipeline[].loop.*` | object | - | Phase 1 | `01-for-loops-explicit-iteration.yaml` | Loop semantics applied |
@@ -181,12 +181,12 @@
 **Test Coverage**:
 - Pipeline format tested with simple workflows
 - `01-llm-inference-steps.yaml` - Basic pipeline steps
-- `01-parallel-groups-execution.yaml` - Parallel execution
+- `01-parallel-groups-execution.yaml` - Moved to agent-queue
 
 **Phase 1 Validation**:
 - Pipeline compiled to WorkflowIR
 - Dependency graph built from depends_on
-- Parallel groups identified
+- Parallel groups identified (moved to agent-queue)
 - Loop types validated
 
 ---
@@ -200,12 +200,12 @@
 |--------|------|----------|---------------------|-------------------|
 | `workflow_execution_strategy.load_unload` | enum | "one_at_a_time" | Phase 1 | All workflows | Model lifecycle managed |
 | `workflow_execution_strategy.processing` | enum | "parallel" | Phase 1 | All workflows | Execution mode applied |
-| `workflow_execution_strategy.parallel.enabled` | boolean | true | Phase 1 | - | Parallelization enabled |
-| `workflow_execution_strategy.parallel.algorithm` | enum | "round_robin" | Phase 1 | - | Scheduling algorithm applied |
-| `workflow_execution_strategy.parallel.load_balancing.strategy` | enum | "least_loaded" | Phase 1 | - | Load balancing configured |
-| `workflow_execution_strategy.parallel.max_threads` | integer | 4 | Phase 1 | - | Thread limit enforced |
-| `workflow_execution_strategy.parallel.max_models` | integer | 3 | Phase 1 | - | Model concurrency limited |
-| `workflow_execution_strategy.parallel.max_concurrent_requests` | integer | 2 | Phase 1 | - | Request throttling |
+| `workflow_execution_strategy.parallel.*` | - | Moved to agent-queue | - | - | Parallelization moved |
+| `workflow_execution_strategy.parallel.*` | - | Moved to agent-queue | - | - | Scheduling moved |
+| `workflow_execution_strategy.parallel.*` | - | Moved to agent-queue | - | - | Load balancing moved |
+| `workflow_execution_strategy.parallel.*` | - | Moved to agent-queue | - | - | Thread limit moved |
+| `workflow_execution_strategy.parallel.*` | - | Moved to agent-queue | - | - | Model concurrency moved |
+| `workflow_execution_strategy.parallel.*` | - | Moved to agent-queue | - | - | Request throttling moved |
 | `workflow_execution_strategy.memory.*` | object | - | Phase 1 | - | Memory management applied |
 | `workflow_execution_strategy.memory.pressure_handling.strategy` | enum | "throttle" | Phase 1 | - | Pressure handling active |
 | `workflow_execution_strategy.timeout.*` | object | - | Phase 1 | - | Timeouts enforced |

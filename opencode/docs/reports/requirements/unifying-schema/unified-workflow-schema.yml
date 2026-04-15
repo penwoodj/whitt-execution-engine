@@ -45,6 +45,10 @@ providers:
       retry:                              # provider-level retry
         max_retries: 3                    # number
         backoff: exponential              # exponential | linear | fixed
+        initial_delay: "1s"
+        max_delay: "30s"
+        multiplier: 2.0
+        jitter: true
 
   ollama:
     config_file: "./providers/ollama.yml" # file path overrides inline config
@@ -245,16 +249,19 @@ agentic_workflow:
   retry:
     max_attempts: 10
     backoff: exponential                 # exponential | linear | fixed
-    delay_ms: 5000
+    initial_delay: "1s"                  # first retry wait duration
+    max_delay: "30s"                     # retry wait ceiling
+    multiplier: 2.0                      # backoff multiplier
+    jitter: true                         # randomize retry wait to avoid thundering herd
     level: workflow_restart              # workflow_restart | workflow_unload | step_restart | step_unload | prompt_restart | tools_retry
 
     step:                                # DEFAULTS for all steps (overridable per-step)
       max_attempts: 3
       backoff: linear                    # exponential | linear | fixed (DEFAULT for steps: linear)
-      delay_ms: 1000
-      base_ms: 1000
-      max_ms: 30000
-      jitter: 0.2                        # number, 0-1
+      initial_delay: "1s"
+      max_delay: "30s"
+      multiplier: 2.0
+      jitter: true
       level: step_restart
       adjustment_strategy: loosen_tolerance  # loosen_tolerance | increase_prompt_detail | simplify_task
       tolerance_adjustment: 0.15
@@ -298,8 +305,12 @@ agentic_workflow:
       retry:
         max_attempts: 5
         backoff: linear
+        initial_delay: "1s"
+        max_delay: "30s"
+        multiplier: 2.0
+        jitter: true
       depends_on: []
-      parallel_group: analysis_group
+      # parallel_group: → moved to agent-queue
       when:
         before_step_starts:
           log:
@@ -472,7 +483,7 @@ agentic_workflow:
       generative_entity: "${models.primary-analyzer}"
       prompt: "Generate detailed quality report"
       requires: [check_results]
-      parallel_group: final_group
+      # parallel_group: → moved to agent-queue
       when:
         after_step_succeeds:
           append_to: "./workspace/output/quality_report.yaml"
@@ -491,16 +502,8 @@ agentic_workflow:
 # ══════════════════════════════════════════════════════════════════
 workflow_execution_strategy:
   load_unload: one_at_a_time              # one_at_a_time | lazy | eager
-  processing: parallel                    # serial | parallel | hybrid
-
-  parallel:
-    algorithm: round_robin                # round_robin | priority_queue | shortest_job_first | longest_job_first
-    load_balancing:
-      strategy: least_loaded              # random | least_loaded | ip_hash
-    max_threads: 4
-    max_models: 3
-    max_steps: 2
-    parallel_group_timeout_secs: 600
+  # processing: removed — execution is serial by definition
+  # parallel: → moved to agent-queue project
 
   memory:
     ram_allocation:
@@ -539,9 +542,10 @@ workflow_execution_strategy:
       max_attempts_per_workflow: 10
       backoff_strategy:
         type: exponential                 # exponential | linear | fixed
-        base_delay_ms: 1000
-        max_delay_ms: 30000
-        jitter_factor: 0.2
+        initial_delay: "1s"
+        max_delay: "30s"
+        multiplier: 2.0
+        jitter: true
     escalation:
       escalate_to_model_after: 3
       notify_on_failure: true
@@ -556,7 +560,7 @@ workflow_execution_strategy:
       strategy: local_first               # local_first | hierarchical | registry_only
       cache_ttl_secs: 3600
       on_version_conflict: error          # error | warn_and_continue | use_latest
-    max_parallel_workflows: 4
+    # max_parallel_workflows: → moved to agent-queue
     inherit_policy:
       inherit_from_parent: [runtime, review, scope, concurrency, logging]
       override_allowed: [review, efficiency, logging]

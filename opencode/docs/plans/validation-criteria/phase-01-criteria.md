@@ -234,68 +234,32 @@ agentic_workflow:
 
 **Execution Order:** step_1 → step_2 → step_3
 
-### Parallel Execution
+### Parallel Execution: MOVED TO AGENT-QUEUE
 
-**Definition:** Steps execute simultaneously (limited by concurrency)
+**Status:** Parallel execution features moved to agent-queue project.
 
-**Configuration:**
-```yaml
-agentic_workflow:
-  execution_mode: parallel
-  max_concurrency: 4
-  steps:
-    - name: step_1
-    - name: step_2
-    - name: step_3
-    - name: step_4
-```
+### Hybrid Execution: MOVED TO AGENT-QUEUE
 
-**Execution Order:** All steps start simultaneously (up to max_concurrency)
+**Status:** Hybrid execution features moved to agent-queue project.
 
-### Hybrid Execution
-
-**Definition:** Serial and parallel execution mixed
-
-**Configuration:**
-```yaml
-agentic_workflow:
-  execution_mode: hybrid
-  steps:
-    - name: setup_step  # Serial
-    - group: parallel_group
-      steps:
-        - name: parallel_step_1  # Parallel
-        - name: parallel_step_2  # Parallel
-    - name: cleanup_step  # Serial
-```
-
-**Execution Order:**
-1. setup_step (serial)
-2. parallel_step_1, parallel_step_2 (parallel)
-3. cleanup_step (serial)
-
-### Verification Commands
+### Verification Commands:
 
 ```bash
 # Test serial execution
 cargo test --lib scheduler::tests::serial_execution
 
-# Test parallel execution
-cargo test --lib scheduler::tests::parallel_execution
-
-# Test hybrid execution
-cargo test --lib scheduler::tests::hybrid_execution
-
-# Test concurrency limits
-cargo test --lib scheduler::tests::concurrency_limits
+# Parallel and hybrid execution tests moved to agent-queue
+# cargo test --lib scheduler::tests::parallel_execution
+# cargo test --lib scheduler::tests::hybrid_execution
+# cargo test --lib scheduler::tests::concurrency_limits
 ```
 
-### Pass Criteria
+### Pass Criteria:
 
 - [ ] Serial execution respects step order
-- [ ] Parallel execution respects concurrency limits
-- [ ] Hybrid execution mixes serial/parallel correctly
-- [ ] No race conditions in parallel execution
+- [ ] Parallel execution respects concurrency limits (moved to agent-queue)
+- [ ] Hybrid execution mixes serial/parallel correctly (moved to agent-queue)
+- [ ] No race conditions in parallel execution (moved to agent-queue)
 - [ ] Resource limits enforced (CPU, memory)
 
 ### Evidence Required

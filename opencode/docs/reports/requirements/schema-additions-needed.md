@@ -54,41 +54,9 @@ This is a single field, not a whole section.
 
 ---
 
-## 2. Enhanced Concurrency: UNDER REVIEW
+## 2. Enhanced Concurrency: MOVED TO AGENT-QUEUE
 
-**Status:** User reviewing whether to extend unified schema or remove from examples.
-
-### Current Schema Coverage
-
-| Concurrency Need | Unified Schema Field | Location |
-|-----------------|---------------------|----------|
-| **Max parallel threads** | `workflow_execution_strategy.parallel.max_threads: 4` | `workflow_execution_strategy.parallel` |
-| **Max parallel models** | `workflow_execution_strategy.parallel.max_models: 3` | `workflow_execution_strategy.parallel` |
-| **Max parallel steps** | `workflow_execution_strategy.parallel.max_steps: 2` | `workflow_execution_strategy.parallel` |
-| **Parallel group timeout** | `workflow_execution_strategy.parallel.parallel_group_timeout_secs: 600` | `workflow_execution_strategy.parallel` |
-| **Load balancing strategy** | `workflow_execution_strategy.parallel.load_balancing.strategy` | `workflow_execution_strategy.parallel` |
-| **Max concurrent models (provider)** | `providers.<name>.hosting.max_concurrent_models: 3` | `providers` section |
-| **Max concurrent requests (provider)** | `providers.<name>.requests.max_concurrent_requests: 5` | `providers` section |
-| **Rate limiting (provider)** | `providers.<name>.requests.rate_limit_per_minute: 60` | `providers` section |
-| **Resource limits (model)** | `models.<name>.max_allowed.concurrent_requests: 2` | `models` section |
-| **Memory pressure handling** | `workflow_execution_strategy.memory.pressure_handling.*` | `workflow_execution_strategy.memory` |
-| **Processing mode** | `workflow_execution_strategy.processing: parallel` | `workflow_execution_strategy` |
-
-### Potentially New Fields Under Review
-
-| Proposed Field | Overlaps With | Verdict |
-|---------------|--------------|---------|
-| `max_parallel_models` | `workflow_execution_strategy.parallel.max_models` | **DUPLICATE** — same field, different name |
-| `max_parallel_requests` | `providers.*.requests.max_concurrent_requests` | **DIFFERENT SCOPE** — provider-level vs global cap |
-| `memory_limit_gb` | `workflow_execution_strategy.memory.ram_allocation.max_allowed` | **DIFFERENT FORMAT** — GB vs percentage |
-
-### Open Questions (Awaiting User Decision)
-
-1. **Global vs per-provider**: Should request limits be global (`max_parallel_requests: 64`) or stay per-provider?
-2. **GB vs percentage**: Memory limits currently use percentages. Should we add GB format?
-3. **Model count vs resource limits**: `max_models: 3` already exists. Is that sufficient?
-
-**Decision needed before modifying unified schema.**
+**Status:** Concurrency features moved to agent-queue project. No changes needed in unified schema.
 
 ---
 

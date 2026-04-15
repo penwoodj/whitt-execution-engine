@@ -8,6 +8,8 @@
 
 ## 1. Design Philosophy: Manual as Foundation
 
+> **Note**: Parallel execution features have moved to the [agent-queue](https://github.com/penwoodj/agent-queue) project. References to `execution.max_parallel`, `execution.parallel_group`, `max_parallel_steps`, `execution.mode: parallel` describe historical manual schema capabilities.
+
 ### 1.1 Why Manual Schema Structure is Superior
 
 **Advantages of Manual Design:**
@@ -44,14 +46,14 @@
 
 ### 2.1 Core Mappings
 
-| Example Feature | Manual Schema Location | Notes |
-|-----------------|------------------------|-------|
-| `execution.mode: parallel` | `workflow_execution_strategy.processing: parallel` | Direct 1:1 mapping |
+ | Example Feature | Manual Schema Location | Notes |
+ |-----------------|------------------------|-------|
+ | `execution.mode: parallel` | `workflow_execution_strategy.processing: parallel` | Moved to agent-queue project |
 | `execution.memory.max_allocated_memory_mb` | `workflow_execution_strategy.memory_pressure_handling` + add `max_allocated_memory_mb` | Manual groups memory differently, need to add |
 | `execution.memory.model_memory_mb` | Model-specific: `models."name".max_allowed.ram%` | Manual uses percentages, need to support both |
-| `execution.memory.load_unload_strategy` | `workflow_execution_strategy.load_unload` | Direct mapping |
-| `execution.max_parallel` | `workflow_execution_strategy.parallel.max_steps` | Add if not present |
-| `execution.timeout_secs` | `workflow_execution_strategy.timeout.total` | Manual has granular timeouts |
+ | `execution.memory.load_unload_strategy` | `workflow_execution_strategy.load_unload` | Direct mapping |
+ | `execution.max_parallel` | Moved to agent-queue project | No longer in unified schema |
+ | `execution.timeout_secs` | `workflow_execution_strategy.timeout.total` | Manual has granular timeouts |
 | `retry.default.max_attempts` | `workflow_execution_strategy.error_handling.max_retries_per_step` | Manual nests under error_handling |
 | `logging.global.level` | Need to add full logging section to manual | Manual doesn't show this section |
 | `agentic_workflow: - step:` (legacy: `pipeline:`) | `agentic_workflow.steps: { step_name: ... }` | Manual uses object, examples use array |
@@ -120,13 +122,8 @@ agentic_workflow:
 workflow_execution_strategy:
   load_unload: one_at_a_time | lazy | eager | adaptive
   memory_pressure_handling: throttle | swap | fail_fast | graceful_degradation
-  processing: parallel | serial | hybrid
-  parallel:
-    algorithm: round_robin | priority_queue | shortest_job_first | longest_job_first
-    max_threads: 4
-    max_models: 3
-    max_concurrent_requests: 2
-    max_steps: 2
+  processing: serial  # parallel moved to agent-queue
+  # parallel: → moved to agent-queue project
   timeout:
     total: 4h
     tool_call: 30m

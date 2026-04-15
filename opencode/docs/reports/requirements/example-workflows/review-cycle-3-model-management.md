@@ -120,7 +120,7 @@ execution:
    - **Gap**: No per-model configuration for fallback (different backend, parameters)
    - **Question**: Does fallback inherit original model's settings?
 
-**Recommendation**: Explicit routing configuration:
+**Recommendation**: Explicit routing configuration: <!-- Model routing features moved to ~/code/model-router/ -->
 ```yaml
 model_routing:
   enabled: true

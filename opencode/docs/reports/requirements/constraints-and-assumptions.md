@@ -75,8 +75,7 @@ This document articulates the constraints and assumptions underpinning the AutoA
 
 **Implications**:
 - No worker pools, message queues, or cluster coordination initially
-- Parallelism limited to within one process (tokio tasks, threads)
-- Concurrency: Multiple workflows can run in parallel across processes, not within
+- Concurrency: Multiple workflows can run sequentially within one process (parallel execution moved to agent-queue)
 - Future enhancement: Distributed execution can add complexity (gRPC, consensus, fault tolerance)
 
 ---
@@ -255,7 +254,7 @@ vulkan-rs = { version = "0.1", optional = true }
 - **Documentation quality**: Focused scope enables comprehensive docs
 
 **Out of Scope (Deferred to Future Phases):**
-- Multi-provider abstraction (beyond current `model_router`)
+- Multi-provider abstraction (beyond current `model_router`) <!-- Model routing features moved to ~/code/model-router/ -->
 - Distributed workflow execution (worker pools, message queues)
 - Real-time monitoring (metrics collection, tracing, dashboards)
 - Advanced scheduling (event-driven triggers, cron workflows)

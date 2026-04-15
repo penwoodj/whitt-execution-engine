@@ -29,8 +29,8 @@
 | Aspect | Manual Schema | Example Workflows | Gap Analysis |
 |--------|---------------|-------------------|----------------|
 | **Top-level sections** | `agentic_workflow`, `workflow_execution_strategy`, `models`, `pipeline`, `providers` | `models`, `execution`, `logging`, `pipeline`, `workflow_registry`, `orchestration` | Manual uses custom `workflow_execution_strategy` that maps to examples' `execution` |
-| **Models section** | Under root, with `allowed_processors`, `max_allowed`, `min_allowed`, `attention_tokens` | Under root, simpler: `provider`, `model`, `backend`, `gpu_layers` | Manual adds detailed resource constraints (RAM%, VRAM%, CPU%) |
-| **Execution section** | Nested under `workflow_execution_strategy` with sub-objects (load_unload, memory_pressure_handling, processing, parallel, timeout, error_handling, sub_workflow, synchronization, checkpoint) | Flat under `execution`: `mode`, `memory`, `max_parallel`, `max_parallel_steps`, `timeout`, `concurrency_limits` | Manual is more hierarchical with 10 sub-sections; examples are flatter |
+| **Parallel config** | Moved to agent-queue project | `execution.max_parallel`, `execution.parallel_group`, `max_parallel_steps` | Parallel config removed from unified schema || **Models section** | Under root, with `allowed_processors`, `max_allowed`, `min_allowed`, `attention_tokens` | Under root, simpler: `provider`, `model`, `backend`, `gpu_layers` | Manual adds detailed resource constraints (RAM%, VRAM%, CPU%) |
+ | **Execution section** | Nested under `workflow_execution_strategy` with sub-objects (load_unload, memory_pressure_handling, processing, timeout, error_handling, sub_workflow, synchronization, checkpoint) | Flat under `execution`: `mode`, `memory`, `max_parallel`, `max_parallel_steps`, `timeout`, `concurrency_limits` | Manual is more hierarchical with 9 sub-sections (parallel removed); examples are flatter |
 | **Logging** | Not shown in manual (cut off at line 1254) | Separate section with `global`, `scopes`, `output_type`, `format` | Manual has `agentic_workflow.hardcoded_values` for interpolation |
 
 **Key Difference**: Manual uses nested `workflow_execution_strategy.*` while examples use flat `execution.*` structure.
@@ -57,12 +57,12 @@
 
 ### 2.3 Execution Strategy Differences
 
-| Feature | Manual Schema | Example Workflows | Gap Analysis |
-|----------|---------------|-------------------|----------------|
-| **Processing strategy** | `workflow_execution_strategy.processing: parallel` | `execution.mode: parallel|serial|hybrid` | **1:1 mapping** - same concept, different path |
-| **Load/unload strategy** | `load_unload: one_at_a_time` | `execution.memory.load_unload_strategy` | Same concept, nested differently |
-| **Memory pressure** | `memory_pressure_handling: throttle` | `adaptive.memory_pressure_handling` | Manual has this at top level; examples nest under `adaptive` |
-| **Parallel config** | `parallel.algorithm: round_robin`, `parallel.max_threads: 4`, `parallel.max_models: 3`, `parallel.max_concurrent_requests: 2`, `parallel.max_steps: 2` | `execution.max_parallel`, `execution.parallel_group`, `max_parallel_steps` | Manual has 5 parallel config fields; examples have 3 |
+ | Feature | Manual Schema | Example Workflows | Gap Analysis |
+ |----------|---------------|-------------------|----------------|
+ | **Processing strategy** | `workflow_execution_strategy.processing: serial` | `execution.mode: parallel|serial|hybrid` | Manual now serial-only; parallel moved to agent-queue |
+ | **Load/unload strategy** | `load_unload: one_at_a_time` | `execution.memory.load_unload_strategy` | Same concept, nested differently |
+ | **Memory pressure** | `memory_pressure_handling: throttle` | `adaptive.memory_pressure_handling` | Manual has this at top level; examples nest under `adaptive` |
+ | **Parallel config** | Moved to agent-queue project | `execution.max_parallel`, `execution.parallel_group`, `max_parallel_steps` | Parallel config removed from unified schema |
 | **Timeout** | `timeout.total: 4h`, `timeout.tool_call: 30m`, `timeout.step: 8m`, `timeout.model.load_into_memory: 45s`, `timeout.model.time_to_processing_after_loaded: 10000ms` | `execution.timeout_secs`, `step.timeout_secs`, `tool_execution.timeout_secs` | Manual has granular timeout types; examples have fewer |
 | **Error handling** | `error_handling.default_action: retry`, `error_handling.max_retries_per_step: 3`, `error_handling.retry_backoff_multiplier: 2.0` | `retry.default.max_attempts`, `retry.backoff_strategy` | Manual's `error_handling` ≈ examples' `retry` but with more control |
 | **Sub-workflow** | `sub_workflow.inherit_policy`, `sub_workflow.override_policy`, `sub_workflow.reference_resolution`, `sub_workflow.isolated_environments` | `execution.sub_workflow_isolation.inherit_policy`, `execution.allow_nested_references`, `execution.circular_reference_detection` | Manual splits sub-workflow config; examples combine into execution section |
@@ -473,9 +473,9 @@
    - Pros: Organized, groups related concepts
    - Cons: More nesting, longer property paths
 
-2. **Flatten structure** (`execution.processing_mode`, `execution.memory_handling`, `execution.parallelization`)
-   - Pros: Simpler, shorter paths
-   - Cons: Flat structure, less grouping
+ 2. **Flatten structure** (`execution.processing_mode`, `execution.memory_handling`)
+    - Pros: Simpler, shorter paths
+    - Cons: Flat structure, less grouping (parallelization moved to agent-queue)
 
 3. **Hybrid approach** (Layer 1 flat, Layer 2 nested)
    - Pros: Best of both worlds
