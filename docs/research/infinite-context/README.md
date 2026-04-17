@@ -59,7 +59,8 @@ For integration into execution engines, see:
 - [SDK Integration](./sdk-integration.md) - YAML-to-Rust-Agent SDK execution engine
 - [Implementation Plan](./implementation-plan.md) - 8-week rollout plan (phase-by-phase)
 - [Tradeoff Analysis](./tradeoffs.md) - Detailed comparison matrix
-- [Complete Guide](./COMPLETE.md) - Full documentation index with quick start
+- [Complete Guide](./COMPLETE.md) - Full documentation with implementation checklists
+- [Configuration Schema](./configuration-schema.md) - Schema placement for infinite context features
 
 ## References
 

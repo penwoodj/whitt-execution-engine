@@ -33,10 +33,6 @@ example-workflows/
 
 ## Review Cycles
 
-8 review cycles document schema quality, completeness, and comprehensibility:
-
-## Review Cycles
-
 11 review cycles document schema quality, completeness, and comprehensibility:
 
 | Cycle | Focus | Examples |
@@ -49,8 +45,8 @@ example-workflows/
 
 ## Schema Reference
 
-- **Unified Schema**: `../unifying-schema/unified-workflow-schema.yml`
-- **Requirements Index**: `../index.md`
+- **Unified Schema**: `../schema/unified-workflow-schema.yml`
+- **Requirements Index**: `../requirements/index.md`
 
 ---
 
