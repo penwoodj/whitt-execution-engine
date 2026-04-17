@@ -1,4 +1,8 @@
-**AutoAgents SDK Tool Abstraction**
+# Requirements
+
+For the full requirements index, see [index.md](./index.md).
+
+## AutoAgents SDK Tool Abstraction
 
 All 53 workflow examples leverage the AutoAgents SDK for:
 - **Multi-provider model support** - LM Studio, Ollama, llama.cpp, OpenAI
@@ -9,6 +13,4 @@ All 53 workflow examples leverage the AutoAgents SDK for:
 - **Stateful conversations** - Sliding memory windows for context management
 
 **Implementation Note**: This abstraction layer (tool calling interface) is complete and functional.
----
-
 
