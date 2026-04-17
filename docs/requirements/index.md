@@ -22,9 +22,9 @@ Index of all requirements documentation for AutoAgents SDK. Organized by impleme
 ### Core Requirements (Phase 1)
 
 | # | Requirement | Priority | Status | Document | Description |
-|---|-------------|----------|--------|----------|-------------|
-| 1 | Unified Workflow Schema v2.0 | P0 | ✅ | [unified-workflow-schema.yml](./unifying-schema/unified-workflow-schema.yml) | Single source of truth for workflow structure |
-| 2 | Schema Validation | P0 | ✅ | [unified-schema-requirements.md](./unifying-schema/unified-schema-requirements.md) | Validation rules and requirements |
+|---|-------------|----------|--------|-------------|
+| 1 | Unified Workflow Schema v2.0 | P0 | ✅ | [unified-workflow-schema.yml](../schema/unified-workflow-schema.yml) | Single source of truth for workflow structure |
+| 2 | Schema Validation | P0 | ✅ | [unified-schema-requirements.md](../schema/unified-schema-requirements.md) | Validation rules and requirements |
 | 3 | Example Workflows | P0 | ✅ | [example-workflows/README.md](./example-workflows/README.md) | 53 categorized workflows covering all features |
 | 4 | Model Router | P0 | ✅ | [model-router/README.md](./model-router/README.md) | Multi-provider model abstraction |
 | 5 | Transpiler Architecture | P0 | ✅ | [transpiler_architecture.md](../plans/transpiler/transpiler_architecture.md) | 7-layer transpiler design |

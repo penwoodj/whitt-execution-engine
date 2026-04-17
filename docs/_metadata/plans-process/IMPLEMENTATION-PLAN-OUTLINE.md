@@ -33,7 +33,7 @@
 
 **Key tasks**: 12 tasks + integration/unit/property tests + acceptance criteria + checkpoint criteria
 
-### Phase 1 — MVP Queue & Scheduler (`plans/01-mvp-queue/`)
+### Phase 1 — Core Execution Engine (`plans/01-core-execution-engine/`)
 **Scope**: Persistent queue storage, priority queue, round-robin/fair-share scheduler, queue persistence, cancellation, timeout.
 
 **v2 schema alignment status**: ✅ Updated
@@ -41,7 +41,7 @@
 
 **Key tasks**: Queue storage, scheduler, priority management, persistence
 
-### Phase 2 — CLI & Backends (`plans/02-cli-backends/`)
+### Phase 2 — CLI & LLM Backend Integration (`plans/02-cli-and-llm-backend-integration/`)
 **Scope**: CLI foundation, LLM backend trait, provider backends (LM Studio, Ollama, llama.cpp, OpenAI), tool permissions, tool execution, sub-workflow execution, code generation, RAG integration, self-improvement loop.
 
 **v2 schema alignment status**: ✅ Updated
@@ -138,8 +138,8 @@
 
 | Gap | Location | Priority | Status |
 |-----|----------|----------|--------|
-| Rust crate name `glyphnova::` | `plans/02-cli-backends/tasks/` (15+ files) | LOW | Requires actual code rename |
-| Directory `03-glyphnova-ui/` | `plans/03-glyphnova-ui/` | LOW | Cosmetic, rename pending |
+| Rust crate name `whitt::` | `plans/02-cli-and-llm-backend-integration/tasks/` (15+ files) | LOW | Requires actual code rename |
+| Directory `03-glyphnova-ui/` | `plans/03-glyphnova-ui/` | LOW | Historical, phase removed |
 | ADR-0004 filename | `reports/roadmap/adr-0004-glyphnova-ui-control-plane.yml` | LOW | Title + filename rename pending |
 | `schema_version: 1.0` | `plans/05-memory-search/tasks/00-local-memory-storage.md` | MEDIUM | Pending |
 | `input_variables` in traceability | `plans/traceability/schema-to-phase-matrix.md` | MEDIUM | Pending |
@@ -151,14 +151,11 @@
 ## Implementation Dependencies
 
 ```
-00-foundation ──→ 01-mvp-queue ──→ 02-cli-backends ──→ 04-quality-loops
+00-foundation ──→ 01-core-execution-engine ──→ 02-cli-and-llm-backend-integration ──→ 04-quality-loops
                                                       ↓
-                              05-memory-search ──→ 06-automation ──→ 07-autonomy-metrics
-                                                                       ↓
-                                                              08-final-validation
-                              
-deep-research/ feeds into ALL phases (parallel research)
-03-glyphnova-ui can start after 02-cli-backends (needs backend API)
+                               05-memory-search ──→ 06-automation ──→ 07-autonomy-metrics
+                                                                        ↓
+                                                               08-final-validation
 ```
 
 ---

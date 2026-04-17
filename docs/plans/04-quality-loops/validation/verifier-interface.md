@@ -990,4 +990,4 @@
 
 **Document Version:** 1.0
 **Last Updated:** 2026-04-07
-**Plan Location:** `/home/jon/code/whitt-execution-engine/opencode/docs/plans/04-quality-loops/validation/verifier-interface.md`
+**Plan Location:** `/home/jon/code/whitt-execution-engine/docs/plans/04-quality-loops/validation/verifier-interface.md`

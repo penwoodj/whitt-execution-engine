@@ -70,13 +70,13 @@ opencode/docs/plans/
 │       ├── integration-tests.md
 │       └── property-tests.md
 │
-├── 01-mvp-queue/                     # PHASE 1: MVP QUEUE & SCHEDULER
+├── 01-core-execution-engine/                     # PHASE 1: CORE EXECUTION ENGINE
 │   ├── plan.md
 │   ├── tasks/
 │   ├── validation/
 │   └── tests/
 │
-├── 02-cli-backends/                  # PHASE 2: CLI & LLM BACKENDS
+├── 02-cli-and-llm-backend-integration/                  # PHASE 2: CLI & LLM BACKEND INTEGRATION
 │   ├── plan.md
 │   ├── tasks/
 │   ├── validation/

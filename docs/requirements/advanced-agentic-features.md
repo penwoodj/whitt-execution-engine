@@ -246,7 +246,7 @@ steps:
 
 ## Related Documents
 
-- [Unified Workflow Schema](./unifying-schema/unified-workflow-schema.yml) — Source of truth
+- [Unified Workflow Schema](../schema/unified-workflow-schema.yml) — Source of truth
 - [Benchmark YAML Examples](./benchmark-yaml-examples.md) — Serial workflow examples
 - [Configuration Defaults](./configuration-defaults.md) — Default values
 - [Parallel Execution](../agent-queue/docs/parallel-execution.md) — Moved to agent-queue project

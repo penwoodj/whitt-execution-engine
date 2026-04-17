@@ -1261,6 +1261,5 @@ agentic_workflow:
 ---
 
 ## See Also
-- [Unified Workflow Schema](../requirements/unifying-schema/unified-workflow-schema.yml) - Single source of truth
-- [Schema Requirements](../requirements/unifying-schema/unified-schema-requirements.md) - All requirements
-- [Schema Consolidation Report](../requirements/unifying-schema/schema-consolidated-report.md) - Unification process
+- [Unified Workflow Schema](../schema/unified-workflow-schema.yml) - Single source of truth
+- [Schema Integration Plan](./hooks-integration-plan.md) - Integration plan for hooks

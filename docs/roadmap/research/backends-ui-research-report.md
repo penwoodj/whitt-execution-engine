@@ -144,7 +144,7 @@ const count = await invoke('increment_counter');
 ```json
 {
   "bundle": {
-    "identifier": "com.glyphnova.app",
+    "identifier": "com.whitt.app",
     "icon": ["icons/icon.png"],
     "resources": ["resources/*"]
   },

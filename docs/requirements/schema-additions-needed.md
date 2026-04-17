@@ -90,7 +90,7 @@ After fixing benchmark examples, verify:
 
 ## Related Documents
 
-- [Unified Workflow Schema](./unifying-schema/unified-workflow-schema.yml) — Source of truth (801 lines)
+- [Unified Workflow Schema](../schema/unified-workflow-schema.yml) — Source of truth
 - [Advanced Agentic Features](./advanced-agentic-features.md) — Loop termination edge cases
 - [Benchmark YAML Examples](./benchmark-yaml-examples.md) — Needs fix to use existing fields
 - [Configuration Defaults](./configuration-defaults.md) — Default values
