@@ -832,7 +832,7 @@ whitt-execution-engine compile-schedule --policy scheduling.yml
 
 - **tokio-cron-scheduler**: [docs.rs/tokio-cron-scheduler](https://docs.rs/tokio-cron-scheduler) - Rust cron scheduler
 - **git-worktree**: [git-scm.com/docs/git-worktree](https://git-scm.com/docs/git-worktree) - Multiple working trees
-- **GitHub Actions**: [docs.github.com/actions](https://docs.github.com/actions) - CI patterns
+- **GitHub Actions**: [docs.github.com/en/actions](https://docs.github.com/en/actions) - CI patterns
 - **criterion**: [docs.rs/criterion](https://docs.rs/criterion) - Benchmark comparison
 - **MLflow**: [mlflow.org](https://www.mlflow.org) - Experiment tracking
 - **pre-commit**: [pre-commit.com](https://pre-commit.com) - Validation before merge

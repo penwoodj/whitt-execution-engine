@@ -382,8 +382,8 @@ When referencing this research, please cite:
 ### Academic Papers Referenced
 
 1. **Reducing Token Usage of State-in-Context Agents** - ICPC 2026  
-   Hrubec, N., Cito, J.  
-   [PDF](https://conf.researchr.org/details/icpc-2026/)
+    Hrubec, N., Cito, J.  
+    (Search ICPC 2026 proceedings for current paper link)
 
 2. **ALPINE: Adaptive Pruning for Code LLMs** - FSE 2025  
    Saad, M., López, J. A. H., Chen, B., Varró, D., Sharma, T.  

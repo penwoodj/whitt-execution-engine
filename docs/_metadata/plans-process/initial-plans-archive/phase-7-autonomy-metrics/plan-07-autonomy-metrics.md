@@ -128,7 +128,7 @@ From `requirements.md` and `schema-consolidated-report.md`:
 - [OpenAI autonomy](https://github.com/openai) - Safety patterns
 - [AutoGPT patterns](https://github.com) - Autonomous agent patterns
 - [BabyAGI](https://github.com) - Autonomous task management
-- [LangChain autonomy](https://langchain.com) - Autonomous workflow patterns
+- [LangChain autonomy](https://python.langchain.com/) - Autonomous workflow patterns
 
 **Expected Findings**:
 - Autonomous loop contract definitions
@@ -170,7 +170,7 @@ From `requirements.md` and `schema-consolidated-report.md`:
 **Research Question**: What human override and intervention logging patterns maintain safety while enabling autonomy?
 
 **Recommended Sources**:
-- [GitHub Actions](https://docs.github.com/actions) - Manual approval patterns
+- [GitHub Actions](https://docs.github.com/en/actions) - Manual approval patterns
 - [CI/CD safety](https://owasp.org) - Human intervention patterns
 - [Audit logging](https://nvlpubs.nist.gov) - Audit log standards
 - [Incident response](https://en.wikipedia.org/wiki/Incident_response) - Intervention patterns
@@ -946,7 +946,7 @@ whitt-execution-engine autonomy --set-boundaries --max-duration 1h --max-iterati
 - **Grafana**: [grafana.com](https://grafana.com) - Visualization
 - **MLflow**: [mlflow.org](https://mlflow.org) - Experiment tracking
 - **NIST Audit Logging**: [nvlpubs.nist.gov](https://nvlpubs.nist.gov) - Audit standards
-- **LangChain**: [langchain.com](https://langchain.com) - Autonomous workflow patterns
+- **LangChain**: [python.langchain.com/](https://python.langchain.com/) - Autonomous workflow patterns
 - **D3.js**: [d3js.org](https://d3js.org) - Data visualization
 
 ### Tool and Plugin References

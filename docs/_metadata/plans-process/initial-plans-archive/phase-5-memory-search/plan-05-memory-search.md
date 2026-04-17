@@ -185,8 +185,8 @@ From `requirements.md` and `schema-consolidated-report.md`:
 **Research Question**: What external search APIs are available with policy-friendly terms?
 
 **Recommended Sources**:
-- [DuckDuckGo API](https://duckduckgo.com/api) - Privacy-friendly search
-- [Brave Search API](https://brave.com/search/api) - Private search API
+- [DuckDuckGo API](https://duckduckgo.com/duckduckgo-help-pages/features/duckduckgo-api) - Privacy-friendly search
+- [Brave Search API](https://brave.com/search/api/) - Private search API
 - [Google Custom Search API](https://developers.google.com/custom-search/v1/overview) - Google search (with policy gates)
 - [Bing Search API](https://www.microsoft.com/en-us/bing/apis/bing-web-search-api) - Bing search (with policy gates)
 - [Serper.dev](https://serper.dev) - Google Search API wrapper
@@ -786,7 +786,7 @@ whitt-execution-engine provenance --operation search-123
 - **SQLite**: [sqlite.org](https://www.sqlite.org) - Embedded relational database
 - **RocksDB**: [rocksdb.org](https://rocksdb.org) - Embedded key-value store
 - **robots.txt RFC**: [RFC 9309](https://datatracker.ietf.org/doc/html/rfc9309) - Robots exclusion protocol
-- **DuckDuckGo API**: [duckduckgo.com/api](https://duckduckgo.com/api) - Privacy-friendly search
+- **DuckDuckGo API**: [duckduckgo.com/api](https://duckduckgo.com/duckduckgo-help-pages/features/duckduckgo-api) - Privacy-friendly search
 - **OpenTelemetry**: [opentelemetry.io](https://opentelemetry.io) - Observability and tracing
 - **W3C PROV**: [w3.org/TR/prov-overview](https://www.w3.org/TR/prov-overview/) - Provenance data model
 
