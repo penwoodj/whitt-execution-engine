@@ -7,6 +7,10 @@
 
 This folder contains comprehensive research on advanced features, emerging technologies, and future directions for the YAML workflow minifier and LLM integration system. The research is organized into atomic, actionable notes that can inform product roadmap and technical decisions.
 
+## Quick Reference
+
+- **[Quick Reference Summary](./QUICK-REFERENCE.md)** - Fast overview of all research findings with links to detailed documents
+
 ## Research Documents
 
 ### 1. Advanced Transpiler Features
