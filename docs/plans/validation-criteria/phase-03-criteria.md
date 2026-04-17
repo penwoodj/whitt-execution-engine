@@ -406,7 +406,7 @@ PROPTEST_NUMBER_OF_TESTS=100 cargo test --lib property_based
 **Commands:**
 ```bash
 # Verify UI scope logs
-cargo run --bin glyphnova -- 2>&1 | jq -e 'select(.scope == "ui")'
+cargo run --bin whitt -- 2>&1 | jq -e 'select(.scope == "ui")'
 ```
 
 **Evidence:**

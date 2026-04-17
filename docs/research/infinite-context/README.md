@@ -56,7 +56,7 @@ This research explores three major approaches to solve these problems:
 For integration into execution engines, see:
 - [Integration Schema](./integration-schema.md) - Proposed Rust architecture and data structures
 - [Agent-Queue Integration](./agent-queue-integration.md) - Multi-agent workflow orchestration
-- [SDK Integration](./sdk-integration.md) - YAML-to-Rust-Agent SDK execution engine
+- [SDK Integration](./sdk-integration.md) - Whitt Execution Engine SDK execution engine
 - [Implementation Plan](./implementation-plan.md) - 8-week rollout plan (phase-by-phase)
 - [Tradeoff Analysis](./tradeoffs.md) - Detailed comparison matrix
 - [Complete Guide](./COMPLETE.md) - Full documentation with implementation checklists

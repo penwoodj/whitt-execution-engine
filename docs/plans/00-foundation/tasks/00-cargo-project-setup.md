@@ -162,7 +162,7 @@ jobs:
 Create library root with module declarations:
 
 ```rust
-//! YAML to Rust AgentSDK - Foundation Phase
+//! Whitt Execution Engine - Foundation Phase
 //!
 //! This crate provides the foundational infrastructure for the AgentSDK Execution Engine:
 //! - Schema types for the unified workflow specification
@@ -223,13 +223,13 @@ Each stub should contain:
 Create CLI entry point placeholder:
 
 ```rust
-//! YAML to Rust AgentSDK CLI
+//! Whitt Execution Engine CLI
 //!
 //! Phase 0 placeholder - full CLI implementation in Phase 3
 
 fn main() {
-    println!("YAML to Rust AgentSDK - Phase 0 Foundation");
-    println!("See opencode/docs/plans/00-foundation/plan.md for implementation plan");
+    println!("Whitt Execution Engine - Phase 0 Foundation");
+    println!("See ../plan.md for implementation plan");
 }
 ```
 

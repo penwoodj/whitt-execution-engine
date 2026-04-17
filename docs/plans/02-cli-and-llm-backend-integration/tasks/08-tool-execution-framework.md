@@ -638,7 +638,7 @@ git commit -m "feat(tools): add tool execution engine with permission checks"
 
 ```rust
 // tests/tools/execution_test.rs
-use glyphnova::tools::{
+use whitt_execution_engine::tools::{
     ToolRegistry, ToolExecutor, PermissionManager, PermissionConfig, Policy,
     ToolInput, builtin::FileReadTool,
 };
@@ -664,7 +664,7 @@ async fn test_tool_execution() {
 
     let output = executor.execute("file.read", input).await.unwrap();
 
-    assert_eq!(output.status, glyphnova::tools::ToolStatus::Success);
+    assert_eq!(output.status, whitt_execution_engine::tools::ToolStatus::Success);
 }
 
 #[tokio::test]
@@ -685,7 +685,7 @@ async fn test_permission_denied() {
 
     let output = executor.execute("file.read", input).await.unwrap();
 
-    assert_eq!(output.status, glyphnova::tools::ToolStatus::Error);
+    assert_eq!(output.status, whitt_execution_engine::tools::ToolStatus::Error);
     assert!(output.metadata.as_ref().unwrap().error_message.is_some());
 }
 ```

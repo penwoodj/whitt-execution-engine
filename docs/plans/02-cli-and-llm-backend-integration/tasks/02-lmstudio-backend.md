@@ -238,7 +238,7 @@ git commit -m "feat(backends): add LM Studio backend implementation"
 
 ```rust
 // tests/backends/lmstudio_test.rs
-use glyphnova::backends::{LMStudioBackend, types::*};
+use whitt_execution_engine::backends::{LMStudioBackend, types::*};
 use wiremock::{
     matchers::{method, path},
     Mock, MockServer, ResponseTemplate,

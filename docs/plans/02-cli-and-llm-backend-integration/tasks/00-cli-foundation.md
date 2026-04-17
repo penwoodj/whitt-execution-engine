@@ -53,7 +53,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(name = "glyphnova")]
+#[command(name = "whitt")]
 #[command(about = "AgentSDK Execution Engine - Orchestrate AI agents with workflows", long_about = None)]
 #[command(version)]
 pub struct Cli {
@@ -217,19 +217,19 @@ impl std::fmt::Display for OutputFormat {
 
 ```rust
 // tests/cli/commands_test.rs
-use glyphnova::cli::{Cli, Commands};
+use whitt_execution_engine::cli::{Cli, Commands};
 use clap::Parser;
 
 #[test]
 fn test_cli_parse_basic_run() {
-    let args = vec!["glyphnova", "run", "workflow.yaml"];
+    let args = vec!["whitt", "run", "workflow.yaml"];
     let cli = Cli::try_parse_from(args).unwrap();
     assert!(matches!(cli.command, Commands::Run { .. }));
 }
 
 #[test]
 fn test_cli_parse_with_options() {
-    let args = vec!["glyphnova", "run", "workflow.yaml", "--dry-run", "--mode", "direct"];
+    let args = vec!["whitt", "run", "workflow.yaml", "--dry-run", "--mode", "direct"];
     let cli = Cli::try_parse_from(args).unwrap();
     if let Commands::Run { dry_run, mode, .. } = cli.command {
         assert!(dry_run);
@@ -242,7 +242,7 @@ fn test_cli_parse_with_options() {
 #[test]
 fn test_cli_parse_global_options() {
     let args = vec![
-        "glyphnova",
+        "whitt",
         "--config", "/tmp/config.yaml",
         "--output", "json",
         "--verbose",
@@ -250,20 +250,20 @@ fn test_cli_parse_global_options() {
     ];
     let cli = Cli::try_parse_from(args).unwrap();
     assert_eq!(cli.config, Some("/tmp/config.yaml".into()));
-    assert_eq!(cli.output, glyphnova::cli::OutputFormat::Json);
+    assert_eq!(cli.output, whitt_execution_engine::cli::OutputFormat::Json);
     assert!(cli.verbose);
 }
 
 #[test]
 fn test_cli_parse_queue_add() {
-    let args = vec!["glyphnova", "queue", "add", "workflow.yaml", "--priority", "8"];
+    let args = vec!["whitt", "queue", "add", "workflow.yaml", "--priority", "8"];
     let cli = Cli::try_parse_from(args).unwrap();
     assert!(matches!(cli.command, Commands::Queue { .. }));
 }
 
 #[test]
 fn test_cli_parse_config_set() {
-    let args = vec!["glyphnova", "config", "set", "providers.default", "ollama"];
+    let args = vec!["whitt", "config", "set", "providers.default", "ollama"];
     let cli = Cli::try_parse_from(args).unwrap();
     assert!(matches!(cli.command, Commands::Config { .. }));
 }
@@ -566,7 +566,7 @@ dirs = "5.0"
 
 ```rust
 // tests/cli/config_test.rs
-use glyphnova::cli::config::{load_config, save_config, validate_config};
+use whitt_execution_engine::cli::config::{load_config, save_config, validate_config};
 
 #[test]
 fn test_load_default_config() {
@@ -614,7 +614,7 @@ fn test_validate_config() {
 
 #[test]
 fn test_config_defaults() {
-    let config = glyphnova::cli::config::Config::default();
+    let config = whitt_execution_engine::cli::config::Config::default();
     assert_eq!(config.providers.lmstudio.host, "localhost");
     assert_eq!(config.providers.lmstudio.port, 1234);
     assert_eq!(config.rag.retrieval_limit, 5);
@@ -953,7 +953,7 @@ fn write_table<W: Write>(writer: &mut W, headers: &[&str], rows: &[Vec<String>])
 
 ```rust
 // tests/cli/output_test.rs
-use glyphnova::cli::output::{OutputFormatter, OutputData, create_formatter};
+use whitt_execution_engine::cli::output::{OutputFormatter, OutputData, create_formatter};
 
 #[test]
 fn test_plain_formatter() {
@@ -1415,7 +1415,7 @@ pub use config::{ConfigArgs, ConfigSubcommand, ShowArgs, SetArgs};
 
 ```rust
 // tests/cli/commands_test.rs (extended)
-use glyphnova::cli::commands::*;
+use whitt_execution_engine::cli::commands::*;
 use tempfile::NamedTempFile;
 use std::path::PathBuf;
 
@@ -1434,7 +1434,7 @@ fn test_run_command_with_valid_workflow() {
     tokio_test::block_on(async {
         let formatter = run::execute(&args).await.unwrap();
         let mut output = Vec::new();
-        formatter.write(&mut output, &glyphnova::cli::output::OutputData::Success {
+        formatter.write(&mut output, &whitt_execution_engine::cli::output::OutputData::Success {
             message: "test".to_string(),
         }).unwrap();
     });

@@ -1,4 +1,4 @@
-# Implementation Plan: Infinite Context for YAML-to-Rust-Agent SDK
+# Implementation Plan: Infinite Context for Whitt Execution Engine SDK
 
 ## Executive Summary
 

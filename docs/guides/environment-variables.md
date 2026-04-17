@@ -1,6 +1,6 @@
 # Environment Variables
 
-This document describes all environment variables supported by the YAML to Rust AgentSDK framework.
+This document describes all environment variables supported by the Whitt Execution Engine framework.
 
 ## Overview
 

@@ -251,7 +251,7 @@ pub type Result<T> = std::result::Result<T, LlmError>;
 
 ```rust
 // tests/backends/types_test.rs
-use glyphnova::backends::types::*;
+use whitt_execution_engine::backends::types::*;
 
 #[test]
 fn test_chat_request_serialization() {
@@ -485,7 +485,7 @@ impl LlmBackend for MockBackend {
 
 ```rust
 // tests/backends/trait_test.rs
-use glyphnova::backends::{LlmBackend, trait::MockBackend, types::*};
+use whitt_execution_engine::backends::{LlmBackend, trait::MockBackend, types::*};
 use tokio_test::block_on;
 
 #[test]
@@ -732,7 +732,7 @@ async-stream = "0.3"
 
 ```rust
 // tests/backends/streaming_test.rs
-use glyphnova::backends::streaming::{parse_sse_stream, parse_ndjson_stream};
+use whitt_execution_engine::backends::streaming::{parse_sse_stream, parse_ndjson_stream};
 use bytes::Bytes;
 use futures::StreamExt;
 

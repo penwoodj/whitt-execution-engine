@@ -2644,7 +2644,7 @@ use anyhow::{Context, Result};
 
 #[derive(Parser)]
 #[command(name = "whitt-execution-engine")]
-#[command(about = "YAML to Rust AgentSDK - Declarative workflow engine")]
+#[command(about = "Whitt Execution Engine - Declarative workflow engine")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

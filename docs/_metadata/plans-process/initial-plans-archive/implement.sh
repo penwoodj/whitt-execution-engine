@@ -1,5 +1,5 @@
 #!/bin/bash
-# implement.sh - Implementation automation script for YAML to Rust AgentSDK initial plans
+# implement.sh - Implementation automation script for Whitt Execution Engine initial plans
 #
 # Usage:
 #   ./implement.sh start <plan-id>           # Start a new plan
@@ -450,7 +450,7 @@ EOF
 # Show usage
 show_usage() {
     cat <<EOF
-${BLUE}implement.sh${NC} - Implementation automation script for YAML to Rust AgentSDK
+${BLUE}implement.sh${NC} - Implementation automation script for Whitt Execution Engine
 
 ${YELLOW}USAGE:${NC}
   $0 start <plan-id>           Start a new plan

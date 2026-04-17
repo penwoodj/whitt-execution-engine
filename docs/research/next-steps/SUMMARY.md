@@ -374,8 +374,8 @@ When referencing this research, please cite:
   author={Research Team},
   year={2026},
   month={March},
-  institution={YAML to Rust AgentSDK},
-  url={https://github.com/openai/yaml-to-local-rust-agentsdk/tree/main/next-steps}
+  institution={Whitt Execution Engine},
+  url={https://github.com/jon-whitt/whitt-execution-engine/tree/main/docs/research/next-steps}
 }
 ```
 

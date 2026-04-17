@@ -417,7 +417,7 @@ git commit -m "feat(tools): add permission manager with guardrails"
 
 ```rust
 // tests/tools/permissions_test.rs
-use glyphnova::tools::{
+use whitt_execution_engine::tools::{
     PermissionManager, PermissionConfig, Policy, ToolPermissions, GuardrailsConfig,
 };
 use std::collections::{HashSet, HashMap};

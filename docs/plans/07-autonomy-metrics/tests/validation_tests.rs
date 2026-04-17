@@ -1,6 +1,6 @@
-use glyphnova_engine::autonomy::*;
-use glyphnova_engine::override_controls::*;
-use glyphnova_engine::risk::*;
+use whitt_execution_engine::autonomy::*;
+use whitt_execution_engine::override_controls::*;
+use whitt_execution_engine::risk::*;
 
 #[test]
 fn test_bounded_execution_always_terminates() {
@@ -71,7 +71,7 @@ fn test_scope_boundaries_enforced() {
         allowed_actions: vec!["deploy".to_string(), "verify".to_string()],
         forbidden_workflows: vec!["delete_data".to_string()],
         forbidden_actions: vec!["delete".to_string()],
-        resource_limits: glyphnova_engine::risk::ResourceLimits {
+        resource_limits: whitt_execution_engine::risk::ResourceLimits {
             max_cpu_cores: 10.0,
             max_memory_gb: 32.0,
             max_cost_usd: 100.0,
@@ -94,7 +94,7 @@ fn test_risk_assessment_blocks_dangerous_actions() {
         allowed_actions: vec!["deploy".to_string()],
         forbidden_workflows: vec![],
         forbidden_actions: vec![],
-        resource_limits: glyphnova_engine::risk::ResourceLimits {
+        resource_limits: whitt_execution_engine::risk::ResourceLimits {
             max_cpu_cores: 10.0,
             max_memory_gb: 32.0,
             max_cost_usd: 100.0,
@@ -109,9 +109,9 @@ fn test_risk_assessment_blocks_dangerous_actions() {
         &[0.5, 0.6, 0.55],
     );
 
-    assert_eq!(assessment.impact, glyphnova_engine::risk::RiskImpact::Critical);
+    assert_eq!(assessment.impact, whitt_execution_engine::risk::RiskImpact::Critical);
     assert!(matches!(
         assessment.severity,
-        glyphnova_engine::risk::RiskSeverity::High | glyphnova_engine::risk::RiskSeverity::Critical
+        whitt_execution_engine::risk::RiskSeverity::High | whitt_execution_engine::risk::RiskSeverity::Critical
     ));
 }

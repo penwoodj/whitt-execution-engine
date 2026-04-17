@@ -29,7 +29,7 @@ Complete documentation on extending LLM context windows to effectively infinite 
 ### Architecture & Integration
 9. **[Integration Schema](./integration-schema.md)** - Rust implementation design
 10. **[Agent-Queue Integration](./agent-queue-integration.md)** - Multi-agent workflow support
-11. **[SDK Integration](./sdk-integration.md)** - YAML-to-Rust-Agent SDK execution engine
+11. **[SDK Integration](./sdk-integration.md)** - Whitt Execution Engine SDK execution engine
 12. **[Implementation Plan](./implementation-plan.md)** - 8-week rollout plan
 
 ---

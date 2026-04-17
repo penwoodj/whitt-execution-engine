@@ -905,7 +905,7 @@ cargo test autonomy::contracts --verbose
 **File**: `tests/autonomy/integration_test.rs`
 
 ```rust
-use glyphnova_engine::autonomy::*;
+use whitt_execution_engine::autonomy::*;
 use std::collections::HashMap;
 
 #[test]

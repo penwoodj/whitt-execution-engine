@@ -364,7 +364,7 @@ cargo test confidence --verbose
 **File**: `tests/confidence/integration_test.rs`
 
 ```rust
-use glyphnova_engine::confidence::*;
+use whitt_execution_engine::confidence::*;
 
 #[test]
 fn test_confidence_workflow() {

@@ -1,4 +1,4 @@
-# YAML to Rust AgentSDK Schema - Consolidated Requirements and Features
+# Whitt Execution Engine Schema - Consolidated Requirements and Features
 
 **Date**: 2026-03-08
 **Version**: 1.0
@@ -1113,7 +1113,7 @@ The schema is designed for extensibility:
 
 ## Conclusion
 
-The YAML to Rust AgentSDK schema is comprehensive, production-ready, and demonstrates:
+The Whitt Execution Engine schema is comprehensive, production-ready, and demonstrates:
 
 1. **Complete Coverage**: All 35+ requirements fully demonstrated
 2. **Flexibility**: Supports multiple execution modes, strategies, and configurations

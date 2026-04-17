@@ -563,7 +563,7 @@
 
 ---
 
-## R22: YAML to Rust AgentSDK Execution Target
+## R22: Whitt Execution Engine Execution Target
 
 **Definition**: YAML compiles to Rust code targeting AgentSDK
 

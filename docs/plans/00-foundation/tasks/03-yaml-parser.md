@@ -352,7 +352,7 @@ cargo test parser_test
 # Expected: test result: ok. X passed
 
 # 3. Parse example workflows
-# Parse a few workflows from opencode/docs/reports/requirements/example-workflows/
+# Parse a few workflows from ../../requirements/example-workflows/
 ```
 
 **Checkpoint Criteria:**

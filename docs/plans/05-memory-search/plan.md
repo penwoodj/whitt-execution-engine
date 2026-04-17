@@ -115,7 +115,7 @@ agent-sdk/
 └── ui/
     └── memory-browser/          # UI integration
 
-glyphnova/memory/                 # Local storage directory
+whitt/memory/                 # Local storage directory
 ├── structured/
 │   ├── collections/
 │   └── documents/

@@ -531,7 +531,7 @@ cargo test dashboard --verbose
 **File**: `tests/dashboard/integration_test.rs`
 
 ```rust
-use glyphnova_engine::dashboard::*;
+use whitt_execution_engine::dashboard::*;
 use std::time::Duration;
 
 #[tokio::test]

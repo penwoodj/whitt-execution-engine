@@ -552,7 +552,7 @@ cargo test intervention --verbose
 **File**: `tests/intervention/integration_test.rs`
 
 ```rust
-use glyphnova_engine::intervention::*;
+use whitt_execution_engine::intervention::*;
 
 #[test]
 fn test_full_intervention_workflow() {

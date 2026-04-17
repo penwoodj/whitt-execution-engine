@@ -1149,7 +1149,7 @@ Remove `workflow_execution_strategy.advanced_scheduling`. Scheduling expressed t
 
 ## Phase 5: Remove Adaptive Behavior (Moved to Model Router)
 
-Remove ALL adaptive behavior features from this schema. **Dynamic scaling and adaptive resource management are handled by the model router project**, not the YAML-to-Rust AgentSDK. The AgentSDK is a straight execution engine — no adaptive features.
+Remove ALL adaptive behavior features from this schema. **Dynamic scaling and adaptive resource management are handled by the model router project**, not the Whitt Execution Engine. The AgentSDK is a straight execution engine — no adaptive features.
 
 The following adaptive features are REMOVED from `unified-workflow-schema.yml` and should be moved to the model router repository documentation:
 - Resource monitoring (cpu, memory, gpu, io, network)
@@ -1455,7 +1455,7 @@ Performance optimization (cache, batching, prefetching) belongs in `workflow_exe
 
 ### 9E: Remove `adaptive:` Entirely — Moved to Model Router
 
-Adaptive behavior is NOT part of the YAML-to-Rust AgentSDK. The AgentSDK is a straight execution engine. ALL adaptive features (resource monitoring, memory pressure handling, concurrency adjustment, performance-based scheduling) are removed and moved to the model router repository documentation. See Phase 5 for details.
+Adaptive behavior is NOT part of the Whitt Execution Engine. The AgentSDK is a straight execution engine. ALL adaptive features (resource monitoring, memory pressure handling, concurrency adjustment, performance-based scheduling) are removed and moved to the model router repository documentation. See Phase 5 for details.
 
 ### 9F: Remove `features_demonstrated:` Entirely
 

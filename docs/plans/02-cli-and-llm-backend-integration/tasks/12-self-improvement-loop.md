@@ -642,7 +642,7 @@ git commit -m "feat(self_improvement): add workflow diff generator"
 
 ```rust
 // tests/self_improvement/loop_test.rs
-use glyphnova::self_improvement::{
+use whitt_execution_engine::self_improvement::{
     ExecutionLog, ExecutionLogger, ExecutionAnalyzer, DiffGenerator,
     StepExecution, ExecutionStatus, WorkflowIR, StepIR,
 };

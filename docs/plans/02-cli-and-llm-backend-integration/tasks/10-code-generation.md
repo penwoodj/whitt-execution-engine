@@ -133,7 +133,7 @@ serde_json = "1.0"
 anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-glyphnova-sdk = {{ path = "../../.." }}
+whitt-execution-engine = {{ path = "../../.." }}
 "#,
             project_name
         )
@@ -185,8 +185,8 @@ git commit -m "feat(codegen): add code generator"
 {% extends "base.rs.askama" %}
 
 {% block imports %}
-use glyphnova_sdk::backends::LlmBackend;
-use glyphnova_sdk::tools::ToolExecutor;
+use whitt_execution_engine::backends::LlmBackend;
+use whitt_execution_engine::tools::ToolExecutor;
 {% endblock %}
 
 {% block main %}
@@ -238,16 +238,16 @@ async fn execute_step_{{ step.id }}(
 
     // Construct messages for LLM
     let messages = vec![
-        glyphnova_sdk::backends::types::Message::System {
+        whitt_execution_engine::backends::types::Message::System {
             content: "You are a helpful assistant.".to_string(),
         },
-        glyphnova_sdk::backends::types::Message::User {
+        whitt_execution_engine::backends::types::Message::User {
             content: prompt.to_string(),
         },
     ];
 
     // Execute chat completion
-    let request = glyphnova_sdk::backends::types::ChatRequest {
+    let request = whitt_execution_engine::backends::types::ChatRequest {
         model: "default".to_string(),
         messages,
         tools: None,
@@ -309,8 +309,8 @@ git commit -m "feat(codegen): add Askama templates for code generation"
 
 ```rust
 // tests/codegen/generator_test.rs
-use glyphnova::codegen::{CodeGenerator, GeneratedCode};
-use glyphnova::ir::{WorkflowIR, StepIR};
+use whitt_execution_engine::codegen::{CodeGenerator, GeneratedCode};
+use whitt_execution_engine::ir::{WorkflowIR, StepIR};
 use tempfile::TempDir;
 
 #[test]

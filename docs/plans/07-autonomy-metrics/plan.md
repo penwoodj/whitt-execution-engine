@@ -182,7 +182,7 @@ cargo test --all-phases  # Assuming test organization by phase
 ### Files to Create
 
 ```
-glyphnova-engine/
+whitt-execution-engine/
 ├── src/
 │   ├── autonomy/
 │   │   ├── mod.rs
@@ -262,7 +262,7 @@ glyphnova-engine/
 ### Files to Modify
 
 ```
-glyphnova-engine/
+whitt-execution-engine/
 ├── src/
 │   ├── lib.rs                   # Expose autonomy module
 │   ├── execution/
@@ -488,8 +488,8 @@ glyphnova-engine/
 **Goal**: Expose autonomy controls and metrics viewing through the CLI.
 
 **Key Deliverables**:
-- CLI commands: `glyphnova autonomy start`, `glyphnova autonomy pause`, `glyphnova autonomy stop`
-- CLI commands: `glyphnova metrics view`, `glyphnova metrics export`
+- CLI commands: `whitt autonomy start`, `whitt autonomy pause`, `whitt autonomy stop`
+- CLI commands: `whitt metrics view`, `whitt metrics export`
 - UI integration for displaying autonomy status
 - Interactive mode for override controls
 

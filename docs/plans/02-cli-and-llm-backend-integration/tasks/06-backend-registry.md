@@ -296,7 +296,7 @@ git commit -m "feat(backends): add backend registry with health monitoring and f
 
 ```rust
 // tests/backends/registry_test.rs
-use glyphnova::backends::{
+use whitt_execution_engine::backends::{
     BackendRegistry, create_registry_from_config, MockBackend,
     types::HealthStatus,
 };
@@ -336,7 +336,7 @@ async fn test_registry_health_check() {
 
 #[tokio::test]
 async fn test_registry_from_config() {
-    let config = glyphnova::cli::config::ProvidersConfig::default();
+    let config = whitt_execution_engine::cli::config::ProvidersConfig::default();
 
     // This will fail without actual backends running, but tests the structure
     let result = create_registry_from_config(&config).await;

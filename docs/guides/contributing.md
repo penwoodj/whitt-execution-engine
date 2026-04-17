@@ -1,4 +1,4 @@
-# Contributing to YAML to Rust AgentSDK
+# Contributing to Whitt Execution Engine
 
 Thank you for your interest in contributing! This guide will help you get started.
 

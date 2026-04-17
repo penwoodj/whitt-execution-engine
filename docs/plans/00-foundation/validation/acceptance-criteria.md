@@ -58,7 +58,7 @@ cargo test parser_test
 # Expected: All tests pass
 
 # Parse example workflows
-for file in opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/**/*.yml; do
+for file in ../../requirements/example-workflows/requirements-oriented-auto/**/*.yml; do
     if [ -f "$file" ]; then
         cargo run --bin parse-check -- "$file" || true
     fi

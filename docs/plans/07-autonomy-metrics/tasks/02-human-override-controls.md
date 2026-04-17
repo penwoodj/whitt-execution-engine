@@ -596,7 +596,7 @@ cargo test override --verbose
 **File**: `tests/override/integration_test.rs`
 
 ```rust
-use glyphnova_engine::override_controls::*;
+use whitt_execution_engine::override_controls::*;
 
 #[tokio::test]
 async fn test_full_override_workflow() {

@@ -432,7 +432,7 @@ cargo test risk --verbose
 **File**: `tests/risk/integration_test.rs`
 
 ```rust
-use glyphnova_engine::risk::*;
+use whitt_execution_engine::risk::*;
 
 #[test]
 fn test_risk_assessment_workflow() {

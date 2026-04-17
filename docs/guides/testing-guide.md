@@ -1,6 +1,6 @@
 # Testing Guide
 
-This guide explains how to test the 53 example workflows included with the YAML to Rust AgentSDK framework.
+This guide explains how to test the 53 example workflows included with the Whitt Execution Engine framework.
 
 ## Table of Contents
 

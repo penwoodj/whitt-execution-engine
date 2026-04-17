@@ -1103,7 +1103,7 @@ cargo test metrics --verbose
 **File**: `tests/metrics/benchmark_test.rs`
 
 ```rust
-use glyphnova_engine::metrics::*;
+use whitt_execution_engine::metrics::*;
 use std::time::Instant;
 
 #[test]
@@ -1163,7 +1163,7 @@ cargo test metrics::benchmark -- --nocapture
 **File**: `tests/metrics/integration_test.rs`
 
 ```rust
-use glyphnova_engine::metrics::*;
+use whitt_execution_engine::metrics::*;
 use std::time::Duration;
 
 #[test]

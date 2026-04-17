@@ -538,11 +538,11 @@ git commit -m "feat(rag): add context injection"
 
 ```rust
 // tests/rag/rag_test.rs
-use glyphnova::rag::{
+use whitt_execution_engine::rag::{
     DocumentIndexer, Document, DocumentMetadata, EmbeddingGenerator,
     DocumentRetriever, ContextInjection,
 };
-use glyphnova::backends::MockBackend;
+use whitt_execution_engine::backends::MockBackend;
 use std::sync::Arc;
 use tempfile::TempDir;
 

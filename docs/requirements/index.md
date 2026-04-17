@@ -29,11 +29,11 @@ Index of all requirements documentation for AutoAgents SDK. Organized by impleme
 | 4 | Model Router | P0 | ✅ | [model-router/README.md](./model-router/README.md) | Multi-provider model abstraction |
 | 5 | Transpiler Architecture | P0 | ✅ | [transpiler_architecture.md](../plans/transpiler/transpiler_architecture.md) | 7-layer transpiler design |
 | 6 | Transpiler Implementation | P1 | 🔄 | [transpiler_implementation_plan.yml](../plans/transpiler/transpiler_implementation_plan.yml) | Code generation and templates |
-| 7 | YAML Parser Integration | P1 | ⏳ | [llamacpp-backend-task.md](../plans/02-cli-backends/tasks/04-llamacpp-backend.md) | llama.cpp backend with Vulkan |
-| 8 | OpenAI Backend | P1 | ⏳ | [openai-backend-task.md](../plans/02-cli-backends/tasks/05-openai-backend.md) | OpenAI API integration |
-| 9 | Ollama Backend | P1 | ⏳ | [ollama-backend-task.md](../plans/02-cli-backends/tasks/03-ollama-backend.md) | Ollama provider implementation |
-| 10 | LLM Backend Trait | P0 | ✅ | [llm-backend-trait-task.md](../plans/02-cli-backends/tasks/01-llm-backend-trait.md) | Unified provider abstraction |
-| 11 | Model Discovery | P0 | ✅ | [model-discovery-task.md](../plans/02-cli-backends/tasks/00-model-discovery.md) | Provider model enumeration |
+| 7 | YAML Parser Integration | P1 | ⏳ | [llamacpp-backend-task.md](../plans/02-cli-and-llm-backend-integration/tasks/04-llamacpp-backend.md) | llama.cpp backend with Vulkan |
+| 8 | OpenAI Backend | P1 | ⏳ | [openai-backend-task.md](../plans/02-cli-and-llm-backend-integration/tasks/05-openai-backend.md) | OpenAI API integration |
+| 9 | Ollama Backend | P1 | ⏳ | [ollama-backend-task.md](../plans/02-cli-and-llm-backend-integration/tasks/03-ollama-backend.md) | Ollama provider implementation |
+| 10 | LLM Backend Trait | P0 | ✅ | [llm-backend-trait-task.md](../plans/02-cli-and-llm-backend-integration/tasks/01-llm-backend-trait.md) | Unified provider abstraction |
+| 11 | Model Discovery | P0 | ✅ | [model-discovery-task.md](../plans/02-cli-and-llm-backend-integration/tasks/00-model-discovery.md) | Provider model enumeration |
 | 12 | Configuration Defaults | P0 | ✅ | [configuration-defaults.md](./configuration-defaults.md) | Default values for all components |
 | 13 | CLI Implementation | P1 | 🔄 | [cli-foundation-task.md](../plans/00-foundation/tasks/00-cli-foundation.md) | Command-line interface |
 

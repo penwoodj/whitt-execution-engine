@@ -279,7 +279,7 @@ git commit -m "feat(backends): add OpenAI backend implementation"
 
 ```rust
 // tests/backends/openai_test.rs
-use glyphnova::backends::{OpenAIBackend, types::*};
+use whitt_execution_engine::backends::{OpenAIBackend, types::*};
 use wiremock::{
     matchers::{header, method, path},
     Mock, MockServer, ResponseTemplate,

@@ -1,6 +1,6 @@
 # Installation Guide
 
-This guide walks you through installing the YAML to Rust AgentSDK framework on Linux, macOS, and Windows.
+This guide walks you through installing the Whitt Execution Engine framework on Linux, macOS, and Windows.
 
 ## Table of Contents
 

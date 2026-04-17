@@ -13,7 +13,7 @@
 
 ## Overview
 
-This plan implements the foundation architecture for the YAML to Rust AgentSDK transpiler, establishing:
+This plan implements the foundation architecture for the Whitt Execution Engine transpiler, establishing:
 - Canonical execution unit: typed `WorkflowSpec` and compiled `WorkflowIR`
 - YAML DSL authoring surface with schema validation
 - Local-first system-of-record under `./workspace/`

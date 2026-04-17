@@ -1,6 +1,6 @@
 # Developer Guide
 
-Welcome to the YAML to Rust AgentSDK framework! This guide will help you get started with development.
+Welcome to the Whitt Execution Engine framework! This guide will help you get started with development.
 
 ## Table of Contents
 

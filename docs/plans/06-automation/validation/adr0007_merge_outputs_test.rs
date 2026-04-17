@@ -35,7 +35,7 @@ async fn test_proposals_written_to_artifact_directory() {
 
     // Verify proposal was written to artifact directory
     // Note (v2.0): .glyphnova path moved to whitt repository
-    let artifact_dir = temp_dir.path().join(".glyphnova/merge-proposals");
+    let artifact_dir = temp_dir.path().join("./workspace/merge-proposals");
     assert!(artifact_dir.exists(), "Artifact directory should exist");
 
     let proposal_dir = artifact_dir.join(&metadata.id);

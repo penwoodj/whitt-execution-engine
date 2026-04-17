@@ -377,7 +377,7 @@ cargo test stop_conditions --verbose
 **File**: `tests/stop_conditions/integration_test.rs`
 
 ```rust
-use glyphnova_engine::stop_conditions::*;
+use whitt_execution_engine::stop_conditions::*;
 
 #[test]
 fn test_stop_condition_evaluation() {

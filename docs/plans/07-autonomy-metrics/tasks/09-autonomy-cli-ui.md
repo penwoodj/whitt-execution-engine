@@ -31,7 +31,7 @@ Expose autonomy controls and metrics viewing through the CLI. This provides oper
 
 ```rust
 use clap::{Parser, Subcommand};
-use glyphnova_engine::autonomy::*;
+use whitt_execution_engine::autonomy::*;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -151,7 +151,7 @@ impl AutonomyCommand {
 
 ```rust
 use clap::{Parser, Subcommand};
-use glyphnova_engine::metrics::*;
+use whitt_execution_engine::metrics::*;
 
 #[derive(Parser)]
 pub struct MetricsCommand {
@@ -243,7 +243,7 @@ fn get_metric_value(name: &str) -> String {
 
 ```rust
 use clap::{Parser, Subcommand};
-use glyphnova_engine::override_controls::*;
+use whitt_execution_engine::override_controls::*;
 
 #[derive(Parser)]
 pub struct OverrideCommand {
@@ -396,7 +396,7 @@ impl OverrideCommand {
 
 ```rust
 use clap::Parser;
-use glyphnova_engine::dashboard::*;
+use whitt_execution_engine::dashboard::*;
 
 #[derive(Parser)]
 pub struct DashboardCommand {
@@ -463,10 +463,10 @@ pub use dashboard::*;
 
 ```rust
 use clap::{Parser, Subcommand};
-use glyphnova_engine::cli::*;
+use whitt_execution_engine::cli::*;
 
 #[derive(Parser)]
-#[command(name = "glyphnova")]
+#[command(name = "whitt")]
 #[command(about = "AgentSDK Execution Engine", long_about = None)]
 struct Cli {
     #[command(subcommand)]
@@ -489,7 +489,7 @@ enum Commands {
 async fn main() -> Result<(), anyhow::Error> {
     let cli = Cli::parse();
 
-    let override_handler = glyphnova_engine::override_controls::OverrideHandler::new();
+    let override_handler = whitt_execution_engine::override_controls::OverrideHandler::new();
 
     match cli.command {
         Commands::Autonomy(cmd) => cmd.execute().await?,
@@ -520,7 +520,7 @@ cargo test cli --verbose
 **File**: `tests/cli/integration_test.rs`
 
 ```rust
-use glyphnova_engine::cli::*;
+use whitt_execution_engine::cli::*;
 
 #[test]
 fn test_cli_command_parsing() {

@@ -376,7 +376,7 @@ cargo test checkpoint --verbose
 **File**: `tests/checkpoint/integration_test.rs`
 
 ```rust
-use glyphnova_engine::checkpoint::*;
+use whitt_execution_engine::checkpoint::*;
 
 #[test]
 fn test_checkpoint_workflow() {

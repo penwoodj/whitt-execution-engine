@@ -1,7 +1,7 @@
 # Compiler vs Direct Transpiler: Comprehensive Architecture Analysis
 
 **Date**: 2026-03-08
-**Project**: YAML to Rust Agent SDK Transpiler
+**Project**: Whitt Execution Engine Transpiler
 **Context**: Decision between simple HashMap-based generation vs full compiler pipeline
 
 ---

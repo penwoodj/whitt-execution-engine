@@ -7,11 +7,11 @@ This document defines the overall acceptance criteria for Phase 2: CLI & LLM Bac
 ## Functional Requirements
 
 ### CLI Interface
-- [ ] **FR-CLI-001:** User can run workflows via CLI: `glyphnova run workflow.yaml`
-- [ ] **FR-CLI-002:** User can generate code from workflows: `glyphnova generate workflow.yaml`
-- [ ] **FR-CLI-003:** User can manage workflow queue: `glyphnova queue add/list/remove/clear`
-- [ ] **FR-CLI-004:** User can query status: `glyphnova status [--queue-id ID]`
-- [ ] **FR-CLI-005:** User can manage configuration: `glyphnova config show/set/validate`
+- [ ] **FR-CLI-001:** User can run workflows via CLI: `whitt run workflow.yaml`
+- [ ] **FR-CLI-002:** User can generate code from workflows: `whitt generate workflow.yaml`
+- [ ] **FR-CLI-003:** User can manage workflow queue: `whitt queue add/list/remove/clear`
+- [ ] **FR-CLI-004:** User can query status: `whitt status [--queue-id ID]`
+- [ ] **FR-CLI-005:** User can manage configuration: `whitt config show/set/validate`
 - [ ] **FR-CLI-006:** CLI supports multiple output formats: `--output {plain,json,table}`
 - [ ] **FR-CLI-007:** CLI provides tab completion for all commands
 - [ ] **FR-CLI-008:** Configuration loads from `~/./workspace/config.yaml`

@@ -13,7 +13,7 @@
 
 ## Overview
 
-This plan implements CLI interface, backend provider abstraction, networking boundary controls, and tool node support for the YAML to Rust AgentSDK transpiler.
+This plan implements CLI interface, backend provider abstraction, networking boundary controls, and tool node support for the Whitt Execution Engine transpiler.
 
 **Key Features**:
 - **CLI-first approach**: Rich command-line interface for all runtime operations

@@ -1,4 +1,4 @@
-# Research Document: Upstream Success Factors for YAML-to-Rust Agentic Workflow Execution Engine
+# Research Document: Upstream Success Factors for Whitt Execution Engine
 
 **Generated:** April 11, 2026  
 **Updated:** April 11, 2026 (Deep research cycle — crates verified, ecosystem re-evaluated)

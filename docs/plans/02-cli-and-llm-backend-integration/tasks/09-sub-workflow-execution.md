@@ -435,8 +435,8 @@ git commit -m "feat(workflows): add workflow composition with validation"
 
 ```rust
 // tests/workflows/subworkflow_test.rs
-use glyphnova::workflows::{WorkflowGraph, WorkflowComposer, CompositionReport};
-use glyphnova::ir::{WorkflowIR, StepIR};
+use whitt_execution_engine::workflows::{WorkflowGraph, WorkflowComposer, CompositionReport};
+use whitt_execution_engine::ir::{WorkflowIR, StepIR};
 
 #[test]
 fn test_workflow_graph_cycle_detection() {

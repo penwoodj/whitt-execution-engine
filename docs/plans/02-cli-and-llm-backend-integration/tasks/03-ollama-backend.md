@@ -420,7 +420,7 @@ git commit -m "feat(backends): add Ollama backend implementation"
 
 ```rust
 // tests/backends/ollama_test.rs
-use glyphnova::backends::{OllamaBackend, types::*};
+use whitt_execution_engine::backends::{OllamaBackend, types::*};
 use wiremock::{
     matchers::{method, path},
     Mock, MockServer, ResponseTemplate,

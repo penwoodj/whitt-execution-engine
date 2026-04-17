@@ -268,7 +268,7 @@ git commit -m "feat(backends): add llama.cpp backend implementation"
 
 ```rust
 // tests/backends/llamacpp_test.rs
-use glyphnova::backends::{LlamaCppBackend, types::*};
+use whitt_execution_engine::backends::{LlamaCppBackend, types::*};
 use wiremock::{
     matchers::{method, path},
     Mock, MockServer, ResponseTemplate,

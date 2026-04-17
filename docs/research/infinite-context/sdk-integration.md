@@ -1,4 +1,4 @@
-# Integration with YAML-to-Rust-Agent SDK Execution Engine
+# Integration with Whitt Execution Engine SDK Execution Engine
 
 ## Executive Summary
 
