@@ -21,7 +21,7 @@
 - [ ] **Step 1: Write the failing test for contract parsing**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::contract::{parse_contract, AutonomyContract, Goal};
+use whitt_execution_engine::autonomy::contract::{parse_contract, AutonomyContract, Goal};
 
 #[test]
 fn test_parse_contract_with_all_fields() {
@@ -343,7 +343,7 @@ git commit -m "feat(CP01): implement autonomous loop contract parsing and valida
 - [ ] **Step 1: Write the failing test for metrics collection**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::metrics::{
+use whitt_execution_engine::autonomy::metrics::{
     MetricsCollector, MetricType, Counter, Gauge, Histogram, Summary
 };
 use std::time::Duration;
@@ -662,7 +662,7 @@ Expected: PASS
 ```rust
 #[tokio::test]
 async fn test_metrics_hook_in_task_execution() {
-    use yaml_to_rust_agentsdk::execution::{Task, TaskRunner};
+    use whitt_execution_engine::execution::{Task, TaskRunner};
 
     let collector = MetricsCollector::new();
     let mut runner = TaskRunner::with_metrics(collector.clone());
@@ -705,7 +705,7 @@ git commit -m "feat(CP02): implement metrics collection hooks for all execution 
 - [ ] **Step 1: Write the failing test for override controls**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::override::{
+use whitt_execution_engine::autonomy::override::{
     OverrideController, OverrideCommand, OverrideReason
 };
 use tokio::time::{sleep, Duration};
@@ -1031,7 +1031,7 @@ git commit -m "feat(CP03): implement human override controls to block/restart au
 - [ ] **Step 1: Write the failing test for intervention logging**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::intervention::{
+use whitt_execution_engine::autonomy::intervention::{
     InterventionLogger, InterventionType, InterventionContext
 };
 use std::time::SystemTime;
@@ -1441,7 +1441,7 @@ git commit -m "feat(CP04): implement intervention event capture with full contex
 - [ ] **Step 1: Write the failing test for dashboard rendering**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::dashboard::{
+use whitt_execution_engine::autonomy::dashboard::{
     DashboardRenderer, DashboardData, SuccessMetrics, RegressionMetrics
 };
 
@@ -1828,7 +1828,7 @@ git commit -m "feat(CP05): implement success/regression dashboards with real-tim
 - [ ] **Step 1: Write the failing test for stop condition evaluation**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::stop_conditions::{
+use whitt_execution_engine::autonomy::stop_conditions::{
     StopConditionEvaluator, StopCondition, StopConditionType, StopConditionResult
 };
 use std::time::{Duration, Instant};
@@ -2197,7 +2197,7 @@ git commit -m "feat(CP06): implement stop condition evaluation and loop terminat
 - [ ] **Step 1: Write the failing test for checkpoint generation**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::checkpoint::{
+use whitt_execution_engine::autonomy::checkpoint::{
     CheckpointManager, Checkpoint, CheckpointMetadata
 };
 
@@ -2550,7 +2550,7 @@ git commit -m "feat(CP07): implement checkpoint generation and restoration"
 - [ ] **Step 1: Write the failing test for scope enforcement**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::scope::{
+use whitt_execution_engine::autonomy::scope::{
     ScopeEnforcer, AutonomyScope, ScopeViolation, ActionType
 };
 
@@ -2875,7 +2875,7 @@ git commit -m "feat(CP08): implement autonomy scope boundary enforcement"
 - [ ] **Step 1: Write the failing test for confidence thresholds**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::confidence::{
+use whitt_execution_engine::autonomy::confidence::{
     ConfidenceEvaluator, ConfidenceResult, ActionSafety
 };
 
@@ -3193,7 +3193,7 @@ git commit -m "feat(CP09): implement confidence threshold enforcement for unsafe
 - [ ] **Step 1: Write the failing test for CLI integration**
 
 ```rust
-use yaml_to_rust_agentsdk::cli::AutonomyCommands;
+use whitt_execution_engine::cli::AutonomyCommands;
 use assert_cmd::Command;
 
 #[test]

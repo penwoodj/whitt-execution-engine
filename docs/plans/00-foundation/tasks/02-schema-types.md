@@ -2762,7 +2762,7 @@ pub use schema::WorkflowSpec;
 Create `tests/schema_test.rs`:
 
 ```rust
-use yaml_to_rust_agentsdk::schema::*;
+use whitt_execution_engine::schema::*;
 
 #[test]
 fn test_workflow_identification() {

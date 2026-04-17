@@ -318,7 +318,7 @@ sdk:
 - [ ] Install Ollama
 - [ ] Install llama.cpp with Vulkan
 - [ ] Install ChromaDB
-- [ ] Clone yaml-to-rust-agent SDK
+- [ ] Clone whitt-execution-engine SDK
 
 ### Phase 2: Core (Week 2-3)
 - [ ] Implement ContextOrchestrator

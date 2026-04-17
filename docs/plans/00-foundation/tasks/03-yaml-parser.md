@@ -188,7 +188,7 @@ agentic_workflow:
 Create `tests/parser_test.rs`:
 
 ```rust
-use yaml_to_rust_agentsdk::parser::{parse_workflow, parse_workflow_str, validate_workflow};
+use whitt_execution_engine::parser::{parse_workflow, parse_workflow_str, validate_workflow};
 
 #[test]
 fn test_parse_minimal_workflow() {

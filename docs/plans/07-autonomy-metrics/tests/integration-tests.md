@@ -36,11 +36,11 @@ Integration tests cover multi-component workflows:
 - [ ] **Step 1: Write full autonomous loop test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::contract::{parse_contract, AutonomyContract};
-use yaml_to_rust_agentsdk::autonomy::executor::AutonomousLoop;
-use yaml_to_rust_agentsdk::autonomy::metrics::MetricsCollector;
-use yaml_to_rust_agentsdk::autonomy::checkpoint::CheckpointManager;
-use yaml_to_rust_agentsdk::autonomy::override::{OverrideController, OverrideCommand, OverrideReason};
+use whitt_execution_engine::autonomy::contract::{parse_contract, AutonomyContract};
+use whitt_execution_engine::autonomy::executor::AutonomousLoop;
+use whitt_execution_engine::autonomy::metrics::MetricsCollector;
+use whitt_execution_engine::autonomy::checkpoint::CheckpointManager;
+use whitt_execution_engine::autonomy::override::{OverrideController, OverrideCommand, OverrideReason};
 use tokio::time::{sleep, Duration};
 
 #[tokio::test]
@@ -237,7 +237,7 @@ Expected: PASS
 ```rust
 #[tokio::test]
 async fn test_intervention_capture_during_loop() {
-    use yaml_to_rust_agentsdk::autonomy::intervention::{InterventionLogger, InterventionType};
+    use whitt_execution_engine::autonomy::intervention::{InterventionLogger, InterventionType};
 
     let yaml = r#"
 goals:
@@ -324,8 +324,8 @@ git commit -m "test(IT1): add full autonomous loop integration tests"
 - [ ] **Step 1: Write metrics pipeline test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::metrics::{MetricsCollector, MetricSnapshot};
-use yaml_to_rust_agentsdk::autonomy::metrics::types::{MetricType, Counter, Gauge, Histogram};
+use whitt_execution_engine::autonomy::metrics::{MetricsCollector, MetricSnapshot};
+use whitt_execution_engine::autonomy::metrics::types::{MetricType, Counter, Gauge, Histogram};
 
 #[tokio::test]
 async fn test_metrics_pipeline_workflow() {
@@ -509,11 +509,11 @@ git commit -m "test(IT2): add metrics pipeline integration tests"
 - [ ] **Step 1: Write dashboard data flow test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::dashboard::{
+use whitt_execution_engine::autonomy::dashboard::{
     DashboardRenderer, DashboardData, SuccessMetrics, RegressionMetrics
 };
-use yaml_to_rust_agentsdk::autonomy::metrics::MetricsCollector;
-use yaml_to_rust_agentsdk::autonomy::dashboard::AnomalyDetector;
+use whitt_execution_engine::autonomy::metrics::MetricsCollector;
+use whitt_execution_engine::autonomy::dashboard::AnomalyDetector;
 
 #[tokio::test]
 async fn test_dashboard_data_flow_from_metrics() {
@@ -725,12 +725,12 @@ git commit -m "test(IT3): add dashboard data flow integration tests"
 - [ ] **Step 1: Write override during execution test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::contract::{parse_contract, AutonomyContract};
-use yaml_to_rust_agentsdk::autonomy::executor::AutonomousLoop;
-use yaml_to_rust_agentsdk::autonomy::metrics::MetricsCollector;
-use yaml_to_rust_agentsdk::autonomy::checkpoint::CheckpointManager;
-use yaml_to_rust_agentsdk::autonomy::override::{OverrideController, OverrideCommand, OverrideReason};
-use yaml_to_rust_agentsdk::autonomy::override::ExecutionState;
+use whitt_execution_engine::autonomy::contract::{parse_contract, AutonomyContract};
+use whitt_execution_engine::autonomy::executor::AutonomousLoop;
+use whitt_execution_engine::autonomy::metrics::MetricsCollector;
+use whitt_execution_engine::autonomy::checkpoint::CheckpointManager;
+use whitt_execution_engine::autonomy::override::{OverrideController, OverrideCommand, OverrideReason};
+use whitt_execution_engine::autonomy::override::ExecutionState;
 
 #[tokio::test]
 async fn test_override_during_execution_workflow() {
@@ -1015,11 +1015,11 @@ git commit -m "test(IT4): add override during execution integration tests"
 - [ ] **Step 1: Write checkpoint restore workflow test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::contract::{parse_contract, AutonomyContract};
-use yaml_to_rust_agentsdk::autonomy::executor::AutonomousLoop;
-use yaml_to_rust_agentsdk::autonomy::metrics::MetricsCollector;
-use yaml_to_rust_agentsdk::autonomy::checkpoint::{CheckpointManager, CheckpointMetadata, CheckpointType};
-use yaml_to_rust_agentsdk::autonomy::checkpoint::CheckpointRestorer;
+use whitt_execution_engine::autonomy::contract::{parse_contract, AutonomyContract};
+use whitt_execution_engine::autonomy::executor::AutonomousLoop;
+use whitt_execution_engine::autonomy::metrics::MetricsCollector;
+use whitt_execution_engine::autonomy::checkpoint::{CheckpointManager, CheckpointMetadata, CheckpointType};
+use whitt_execution_engine::autonomy::checkpoint::CheckpointRestorer;
 
 #[tokio::test]
 async fn test_checkpoint_restore_workflow() {
@@ -1321,11 +1321,11 @@ git commit -m "test(IT5): add checkpoint restore integration tests"
 - [ ] **Step 1: Write low risk to high autonomy test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::contract::{parse_contract, AutonomyContract, AutonomyLevel};
-use yaml_to_rust_agentsdk::autonomy::risk::{RiskAssessor, RiskProfile};
-use yaml_to_rust_agentsdk::autonomy::confidence::{ConfidenceEvaluator, ActionContext, ActionType};
-use yaml_to_rust_agentsdk::autonomy::executor::AutonomousLoop;
-use yaml_to_rust_agentsdk::autonomy::metrics::MetricsCollector;
+use whitt_execution_engine::autonomy::contract::{parse_contract, AutonomyContract, AutonomyLevel};
+use whitt_execution_engine::autonomy::risk::{RiskAssessor, RiskProfile};
+use whitt_execution_engine::autonomy::confidence::{ConfidenceEvaluator, ActionContext, ActionType};
+use whitt_execution_engine::autonomy::executor::AutonomousLoop;
+use whitt_execution_engine::autonomy::metrics::MetricsCollector;
 
 #[tokio::test]
 async fn test_low_risk_allows_high_autonomy() {

@@ -39,7 +39,7 @@ Unit tests cover individual components in isolation:
 - [ ] **Step 1: Write contract parsing test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::contract::{parse_contract, AutonomyContract, AutonomyLevel};
+use whitt_execution_engine::autonomy::contract::{parse_contract, AutonomyContract, AutonomyLevel};
 
 #[test]
 fn test_parse_valid_contract() {
@@ -139,7 +139,7 @@ Expected: PASS
 - [ ] **Step 3: Write goal validation test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::contract::{Goal, GoalType};
+use whitt_execution_engine::autonomy::contract::{Goal, GoalType};
 
 #[test]
 fn test_goal_type_parsing() {
@@ -302,7 +302,7 @@ Expected: PASS
 - [ ] **Step 7: Write stop condition validation test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::contract::StopConditionType;
+use whitt_execution_engine::autonomy::contract::StopConditionType;
 
 #[test]
 fn test_stop_condition_type_parsing() {
@@ -374,7 +374,7 @@ git commit -m "test(UT1): add contract parsing and validation unit tests"
 - [ ] **Step 1: Write counter tests**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::metrics::{MetricsCollector, Counter};
+use whitt_execution_engine::autonomy::metrics::{MetricsCollector, Counter};
 
 #[tokio::test]
 async fn test_counter_increment() {
@@ -490,7 +490,7 @@ Expected: PASS
 - [ ] **Step 5: Write histogram tests**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::metrics::HistogramSummary;
+use whitt_execution_engine::autonomy::metrics::HistogramSummary;
 
 #[tokio::test]
 async fn test_histogram_observe() {
@@ -616,7 +616,7 @@ git commit -m "test(UT2): add metrics types unit tests"
 - [ ] **Step 1: Write pause command test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::override::{
+use whitt_execution_engine::autonomy::override::{
     OverrideController, OverrideCommand, OverrideReason, ExecutionState
 };
 
@@ -871,7 +871,7 @@ git commit -m "test(UT3): add override event handling unit tests"
 - [ ] **Step 1: Write intervention event creation test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::intervention::{
+use whitt_execution_engine::autonomy::intervention::{
     InterventionLogger, InterventionType, InterventionContext
 };
 
@@ -1097,7 +1097,7 @@ git commit -m "test(UT4): add intervention event structure unit tests"
 - [ ] **Step 1: Write iteration stop condition test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::stop_conditions::{
+use whitt_execution_engine::autonomy::stop_conditions::{
     StopConditionEvaluator, StopCondition, StopConditionType, ExecutionContext
 };
 use std::time::Duration;
@@ -1474,7 +1474,7 @@ git commit -m "test(UT5): add stop condition evaluation unit tests"
 - [ ] **Step 1: Write periodic checkpoint test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::checkpoint::{
+use whitt_execution_engine::autonomy::checkpoint::{
     CheckpointManager, CheckpointMetadata, CheckpointType
 };
 
@@ -1761,7 +1761,7 @@ git commit -m "test(UT6): add checkpoint generation unit tests"
 - [ ] **Step 1: Write risk probability test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::risk::{RiskAssessor, RiskProfile, Probability};
+use whitt_execution_engine::autonomy::risk::{RiskAssessor, RiskProfile, Probability};
 
 #[test]
 fn test_risk_probability_low() {
@@ -2004,7 +2004,7 @@ git commit -m "test(UT7): add risk assessment model unit tests"
 - [ ] **Step 1: Write confidence threshold computation test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::confidence::{
+use whitt_execution_engine::autonomy::confidence::{
     ConfidenceEvaluator, ConfidenceThreshold, ActionContext, ActionType
 };
 

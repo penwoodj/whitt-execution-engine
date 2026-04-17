@@ -46,8 +46,8 @@ Each criterion has specific test requirements and acceptance tests defined below
 - [ ] **Step 1: Write ADR compliance test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::contract::{parse_contract, validate_contract};
-use yaml_to_rust_agentsdk::autonomy::contract::validator::ValidationError;
+use whitt_execution_engine::autonomy::contract::{parse_contract, validate_contract};
+use whitt_execution_engine::autonomy::contract::validator::ValidationError;
 
 #[test]
 fn test_adr_compliance_all_loops_have_stop_conditions() {
@@ -194,7 +194,7 @@ Expected: PASS
 ```rust
 #[test]
 fn test_adr_compliance_scope_boundaries_enforced() {
-    use yaml_to_rust_agentsdk::autonomy::scope::{ScopeEnforcer, AutonomyScope, ActionType};
+    use whitt_execution_engine::autonomy::scope::{ScopeEnforcer, AutonomyScope, ActionType};
 
     let enforcer = ScopeEnforcer::new();
 
@@ -231,7 +231,7 @@ Expected: PASS
 ```rust
 #[test]
 fn test_adr_compliance_risk_assessment_before_autonomous_actions() {
-    use yaml_to_rust_agentsdk::autonomy::confidence::{
+    use whitt_execution_engine::autonomy::confidence::{
         ConfidenceEvaluator, ActionContext, ActionType
     };
 
@@ -290,7 +290,7 @@ git commit -m "test(AC1): add ADR-0008 compliance acceptance tests"
 - [ ] **Step 1: Write bounded goals test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::contract::{parse_contract, Goal};
+use whitt_execution_engine::autonomy::contract::{parse_contract, Goal};
 
 #[test]
 fn test_goals_have_clear_acceptance_criteria() {
@@ -372,7 +372,7 @@ checkpoint_frequency: 10
 
 #[test]
 fn test_goal_completion_terminates_loop() {
-    use yaml_to_rust_agentsdk::autonomy::executor::AutonomousLoop;
+    use whitt_execution_engine::autonomy::executor::AutonomousLoop;
 
     let yaml = r#"
 goals:
@@ -412,8 +412,8 @@ Expected: PASS all bounded goals tests
 ```rust
 #[test]
 fn test_goal_progress_tracked() {
-    use yaml_to_rust_agentsdk::autonomy::executor::AutonomousLoop;
-    use yaml_to_rust_agentsdk::autonomy::metrics::MetricsCollector;
+    use whitt_execution_engine::autonomy::executor::AutonomousLoop;
+    use whitt_execution_engine::autonomy::metrics::MetricsCollector;
 
     let yaml = r#"
 goals:
@@ -532,7 +532,7 @@ git commit -m "test(AC2): add bounded goals acceptance tests"
 - [ ] **Step 1: Write human override test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::override::{
+use whitt_execution_engine::autonomy::override::{
     OverrideController, OverrideCommand, OverrideReason
 };
 
@@ -649,7 +649,7 @@ async fn test_override_during_execution() {
 
 #[tokio::test]
 async fn test_override_during_checkpoint() {
-    use yaml_to_rust_agentsdk::autonomy::checkpoint::CheckpointManager;
+    use whitt_execution_engine::autonomy::checkpoint::CheckpointManager;
 
     let controller = OverrideController::new();
     let checkpoint_manager = CheckpointManager::new();
@@ -753,7 +753,7 @@ git commit -m "test(AC3): add human override availability acceptance tests"
 - [ ] **Step 1: Write usefulness metrics test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::metrics::{MetricsCollector, MetricType};
+use whitt_execution_engine::autonomy::metrics::{MetricsCollector, MetricType};
 
 #[tokio::test]
 async fn test_usefulness_metrics_captured() {
@@ -852,7 +852,7 @@ Expected: PASS
 ```rust
 #[tokio::test]
 async fn test_intervention_rate_metrics_captured() {
-    use yaml_to_rust_agentsdk::autonomy::intervention::{InterventionLogger, InterventionType};
+    use whitt_execution_engine::autonomy::intervention::{InterventionLogger, InterventionType};
 
     let logger = InterventionLogger::new();
 
@@ -883,7 +883,7 @@ async fn test_intervention_rate_metrics_captured() {
 
 #[tokio::test]
 async fn test_intervention_rate_by_autonomy_level() {
-    use yaml_to_rust_agentsdk::autonomy::intervention::{InterventionLogger, InterventionType};
+    use whitt_execution_engine::autonomy::intervention::{InterventionLogger, InterventionType};
 
     let logger = InterventionLogger::new();
 
@@ -939,7 +939,7 @@ Expected: PASS
 ```rust
 #[tokio::test]
 async fn test_repair_rate_metrics_captured() {
-    use yaml_to_rust_agentsdk::autonomy::intervention::{InterventionLogger, InterventionType};
+    use whitt_execution_engine::autonomy::intervention::{InterventionLogger, InterventionType};
 
     let logger = InterventionLogger::new();
 
@@ -1009,7 +1009,7 @@ git commit -m "test(AC4): add metrics capture acceptance tests"
 - [ ] **Step 1: Write success dashboard test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::dashboard::{
+use whitt_execution_engine::autonomy::dashboard::{
     DashboardRenderer, DashboardData, SuccessMetrics
 };
 
@@ -1088,7 +1088,7 @@ Expected: PASS
 - [ ] **Step 3: Write regression dashboard test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::dashboard::{DashboardData, RegressionMetrics};
+use whitt_execution_engine::autonomy::dashboard::{DashboardData, RegressionMetrics};
 
 #[tokio::test]
 async fn test_regression_dashboard_renders() {
@@ -1122,7 +1122,7 @@ Expected: PASS
 - [ ] **Step 5: Write anomaly detection test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::dashboard::{AnomalyDetector, AnomalySeverity};
+use whitt_execution_engine::autonomy::dashboard::{AnomalyDetector, AnomalySeverity};
 
 #[tokio::test]
 async fn test_anomaly_detection_triggers_alerts() {
@@ -1254,7 +1254,7 @@ git commit -m "test(AC5): add dashboard real-time data and anomaly detection acc
 - [ ] **Step 1: Write time stop condition test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::stop_conditions::{
+use whitt_execution_engine::autonomy::stop_conditions::{
     StopConditionEvaluator, StopCondition, StopConditionType, ExecutionContext
 };
 use std::time::Duration;
@@ -1569,7 +1569,7 @@ git commit -m "test(AC6): add stop conditions acceptance tests"
 - [ ] **Step 1: Write periodic checkpoint test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::checkpoint::{CheckpointManager, CheckpointMetadata, CheckpointType};
+use whitt_execution_engine::autonomy::checkpoint::{CheckpointManager, CheckpointMetadata, CheckpointType};
 
 #[tokio::test]
 async fn test_periodic_checkpoint_generation() {
@@ -1705,7 +1705,7 @@ Expected: PASS
 - [ ] **Step 7: Write checkpoint restoration test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::checkpoint::CheckpointRestorer;
+use whitt_execution_engine::autonomy::checkpoint::CheckpointRestorer;
 
 #[tokio::test]
 async fn test_checkpoint_restoration_produces_equivalent_state() {
@@ -1880,7 +1880,7 @@ git commit -m "test(AC7): add checkpoint restoration acceptance tests"
 - [ ] **Step 1: Write low risk to high autonomy test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::confidence::{
+use whitt_execution_engine::autonomy::confidence::{
     ConfidenceEvaluator, ActionContext, ActionType, ConfidenceResult
 };
 
@@ -2011,7 +2011,7 @@ Expected: PASS
 ```rust
 #[tokio::test]
 async fn test_intervention_history_influences_risk() {
-    use yaml_to_rust_agentsdk::autonomy::intervention::InterventionLogger;
+    use whitt_execution_engine::autonomy::intervention::InterventionLogger;
 
     let logger = InterventionLogger::new();
 
@@ -2074,7 +2074,7 @@ git commit -m "test(AC8): add risk assessment acceptance tests"
 - [ ] **Step 1: Write Layer 1 - Contract Validation test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::contract::{parse_contract, validate_contract};
+use whitt_execution_engine::autonomy::contract::{parse_contract, validate_contract};
 
 #[test]
 fn test_layer1_contract_validation_passes() {
@@ -2110,7 +2110,7 @@ Expected: PASS
 - [ ] **Step 3: Write Layer 2 - Scope Enforcement test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::scope::{ScopeEnforcer, AutonomyScope, ActionType};
+use whitt_execution_engine::autonomy::scope::{ScopeEnforcer, AutonomyScope, ActionType};
 
 #[tokio::test]
 async fn test_layer2_scope_enforcement_passes() {
@@ -2143,7 +2143,7 @@ Expected: PASS
 - [ ] **Step 5: Write Layer 3 - Confidence Evaluation test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::confidence::{ConfidenceEvaluator, ActionContext, ActionType};
+use whitt_execution_engine::autonomy::confidence::{ConfidenceEvaluator, ActionContext, ActionType};
 
 #[tokio::test]
 async fn test_layer3_confidence_evaluation_passes() {
@@ -2179,7 +2179,7 @@ Expected: PASS
 - [ ] **Step 7: Write Layer 4 - Stop Condition Evaluation test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::stop_conditions::{StopConditionEvaluator, StopCondition, StopConditionType, ExecutionContext};
+use whitt_execution_engine::autonomy::stop_conditions::{StopConditionEvaluator, StopCondition, StopConditionType, ExecutionContext};
 use std::time::Duration;
 
 #[tokio::test]
@@ -2218,7 +2218,7 @@ Expected: PASS
 - [ ] **Step 9: Write Layer 5 - Checkpoint Integrity test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::checkpoint::{CheckpointManager, CheckpointRestorer, CheckpointMetadata, CheckpointType};
+use whitt_execution_engine::autonomy::checkpoint::{CheckpointManager, CheckpointRestorer, CheckpointMetadata, CheckpointType};
 
 #[tokio::test]
 async fn test_layer5_checkpoint_integrity_passes() {
@@ -2254,7 +2254,7 @@ Expected: PASS
 - [ ] **Step 11: Write Layer 6 - Override Availability test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::override::{OverrideController, OverrideCommand, OverrideReason};
+use whitt_execution_engine::autonomy::override::{OverrideController, OverrideCommand, OverrideReason};
 
 #[tokio::test]
 async fn test_layer6_override_availability_passes() {
@@ -2289,7 +2289,7 @@ Expected: PASS
 - [ ] **Step 13: Write Layer 7 - Metrics Accuracy test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::metrics::MetricsCollector;
+use whitt_execution_engine::autonomy::metrics::MetricsCollector;
 
 #[tokio::test]
 async fn test_layer7_metrics_accuracy_passes() {

@@ -274,7 +274,7 @@ bincode = "1.3"
 Create `tests/error_test.rs`:
 
 ```rust
-use yaml_to_rust_agentsdk::Error;
+use whitt_execution_engine::Error;
 
 #[test]
 fn test_parse_error() {

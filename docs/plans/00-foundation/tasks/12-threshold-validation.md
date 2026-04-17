@@ -204,8 +204,8 @@ pub fn validate_concurrent_requests(value: u32) -> Result<()> {
 Create `tests/threshold_test.rs`:
 
 ```rust
-use yaml_to_rust_agentsdk::validation::thresholds::*;
-use yaml_to_rust_agentsdk::schema::{ResourceLimit, ResourceLimits};
+use whitt_execution_engine::validation::thresholds::*;
+use whitt_execution_engine::schema::{ResourceLimit, ResourceLimits};
 
 #[test]
 fn test_get_all_thresholds() {

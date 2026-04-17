@@ -32,9 +32,9 @@ Mock strategies provide:
 
 ```rust
 use mockall::mock;
-use yaml_to_rust_agentsdk::autonomy::executor::{AutonomousLoop, IterationResult};
-use yaml_to_rust_agentsdk::autonomy::contract::AutonomyContract;
-use yaml_to_rust_agentsdk::autonomy::metrics::MetricsCollector;
+use whitt_execution_engine::autonomy::executor::{AutonomousLoop, IterationResult};
+use whitt_execution_engine::autonomy::contract::AutonomyContract;
+use whitt_execution_engine::autonomy::metrics::MetricsCollector;
 use std::sync::Arc;
 use std::collections::HashSet;
 
@@ -237,7 +237,7 @@ git commit -m "test(Mock1): add mock autonomous workflow strategy"
 
 ```rust
 use mockall::mock;
-use yaml_to_rust_agentsdk::autonomy::metrics::{MetricsCollector, HistogramSummary};
+use whitt_execution_engine::autonomy::metrics::{MetricsCollector, HistogramSummary};
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
@@ -510,8 +510,8 @@ git commit -m "test(Mock2): add mock metrics collector strategy"
 
 ```rust
 use mockall::mock;
-use yaml_to_rust_agentsdk::autonomy::risk::{RiskAssessor, RiskProfile, Probability, Impact, Severity};
-use yaml_to_rust_agentsdk::autonomy::contract::AutonomyLevel;
+use whitt_execution_engine::autonomy::risk::{RiskAssessor, RiskProfile, Probability, Impact, Severity};
+use whitt_execution_engine::autonomy::contract::AutonomyLevel;
 
 #[automock]
 pub trait RiskAssessor: Send + Sync {
@@ -680,7 +680,7 @@ git commit -m "test(Mock3): add mock risk assessor strategy"
 
 ```rust
 use mockall::mock;
-use yaml_to_rust_agentsdk::autonomy::checkpoint::{
+use whitt_execution_engine::autonomy::checkpoint::{
     CheckpointManager, CheckpointMetadata, CheckpointType, RestoreError
 };
 use std::sync::Arc;
@@ -942,7 +942,7 @@ git commit -m "test(Mock4): add mock checkpoint store strategy"
 
 ```rust
 use mockall::mock;
-use yaml_to_rust_agentsdk::autonomy::override::{OverrideController, OverrideCommand, OverrideReason, OverrideEvent};
+use whitt_execution_engine::autonomy::override::{OverrideController, OverrideCommand, OverrideReason, OverrideEvent};
 use std::sync::Arc;
 use std::collections::VecDeque;
 use tokio::sync::{broadcast, RwLock};
@@ -1155,8 +1155,8 @@ git commit -m "test(Mock5): add mock override event stream strategy"
 
 ```rust
 use super::*;
-use yaml_to_rust_agentsdk::autonomy::contract::AutonomyContract;
-use yaml_to_rust_agentsdk::autonomy::executor::AutonomousLoop;
+use whitt_execution_engine::autonomy::contract::AutonomyContract;
+use whitt_execution_engine::autonomy::executor::AutonomousLoop;
 
 #[cfg(test)]
 mod integration_tests {

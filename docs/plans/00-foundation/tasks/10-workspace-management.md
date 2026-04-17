@@ -92,8 +92,8 @@ impl WorkspaceManager {
 Create `tests/workspace_test.rs`:
 
 ```rust
-use yaml_to_rust_agentsdk::workspace::*;
-use yaml_to_rust_agentsdk::schema::WorkspaceConfig;
+use whitt_execution_engine::workspace::*;
+use whitt_execution_engine::schema::WorkspaceConfig;
 use tempfile::TempDir;
 
 #[test]

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Proper schema placement for infinite context integration in yaml-to-rust-agent SDK.
+Proper schema placement for infinite context integration in whitt-execution-engine SDK.
 
 ## Schema Structure
 

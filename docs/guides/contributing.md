@@ -258,7 +258,7 @@ Add integration tests in `tests/` directory:
 
 ```rust
 // tests/integration_test.rs
-use yaml_to_rust_agentsdk::*;
+use whitt_execution_engine::*;
 
 #[tokio::test]
 async fn test_execute_simple_workflow() {
@@ -327,7 +327,7 @@ Document all public APIs:
 /// # Examples
 ///
 /// ```
-/// use yaml_to_rust_agentsdk::parse_workflow;
+/// use whitt_execution_engine::parse_workflow;
 ///
 /// let yaml = r#"
 /// workflow_id: test

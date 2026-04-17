@@ -313,7 +313,7 @@ pub fn extract_variables(input: &str) -> Vec<String> {
 Create `tests/interpolation_test.rs`:
 
 ```rust
-use yaml_to_rust_agentsdk::interpolation::*;
+use whitt_execution_engine::interpolation::*;
 
 #[test]
 fn test_parse_time_interpolation() {

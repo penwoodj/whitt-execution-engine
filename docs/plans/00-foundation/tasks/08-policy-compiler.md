@@ -128,8 +128,8 @@ fn compile_tool_permissions_policy(spec: &WorkflowSpec) -> Result<ToolPermission
 Create `tests/policy_test.rs`:
 
 ```rust
-use yaml_to_rust_agentsdk::policy::*;
-use yaml_to_rust_agentsdk::parser::parse_workflow;
+use whitt_execution_engine::policy::*;
+use whitt_execution_engine::parser::parse_workflow;
 
 #[test]
 fn test_compile_logging_policy() {

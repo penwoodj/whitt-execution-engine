@@ -32,9 +32,9 @@ For any contract with stop conditions, the autonomous loop terminates within max
 - [ ] **Step 1: Write boundedness property test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::contract::{AutonomyContract, AutonomyLevel};
-use yaml_to_rust_agentsdk::autonomy::executor::AutonomousLoop;
-use yaml_to_rust_agentsdk::autonomy::metrics::MetricsCollector;
+use whitt_execution_engine::autonomy::contract::{AutonomyContract, AutonomyLevel};
+use whitt_execution_engine::autonomy::executor::AutonomousLoop;
+use whitt_execution_engine::autonomy::metrics::MetricsCollector;
 use proptest::prelude::*;
 
 prop_compose! {
@@ -257,7 +257,7 @@ For any execution state, override commands are functional.
 - [ ] **Step 1: Write override availability property test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::override::{
+use whitt_execution_engine::autonomy::override::{
     OverrideController, OverrideCommand, OverrideReason, ExecutionState
 };
 use proptest::prelude::*;
@@ -438,7 +438,7 @@ For any execution, metrics are non-negative and monotonic.
 - [ ] **Step 1: Write metrics non-negative property test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::metrics::MetricsCollector;
+use whitt_execution_engine::autonomy::metrics::MetricsCollector;
 use proptest::prelude::*;
 
 prop_compose! {
@@ -677,8 +677,8 @@ For any checkpoint, restore produces equivalent state.
 - [ ] **Step 1: Write checkpoint integrity property test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::checkpoint::{CheckpointManager, CheckpointMetadata, CheckpointType};
-use yaml_to_rust_agentsdk::autonomy::checkpoint::CheckpointRestorer;
+use whitt_execution_engine::autonomy::checkpoint::{CheckpointManager, CheckpointMetadata, CheckpointType};
+use whitt_execution_engine::autonomy::checkpoint::CheckpointRestorer;
 use proptest::prelude::*;
 
 prop_compose! {
@@ -877,9 +877,9 @@ For any risk profile, autonomy level is appropriate.
 - [ ] **Step 1: Write risk assessment property test**
 
 ```rust
-use yaml_to_rust_agentsdk::autonomy::risk::{RiskAssessor, RiskProfile, InterventionRecord};
-use yaml_to_rust_agentsdk::autonomy::scope::ActionType;
-use yaml_to_rust_agentsdk::autonomy::contract::AutonomyLevel;
+use whitt_execution_engine::autonomy::risk::{RiskAssessor, RiskProfile, InterventionRecord};
+use whitt_execution_engine::autonomy::scope::ActionType;
+use whitt_execution_engine::autonomy::contract::AutonomyLevel;
 use proptest::prelude::*;
 
 prop_compose! {

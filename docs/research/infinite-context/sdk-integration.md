@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-**Objective**: Integrate infinite context capabilities into the yaml-to-rust-agent SDK's execution engine
+**Objective**: Integrate infinite context capabilities into the whitt-execution-engine SDK's execution engine
 
 **Current State**: SDK uses direct LLM calls with fixed context windows
 
@@ -388,7 +388,7 @@ workflow:
 
 ```bash
 # Run workflow
-yaml-to-rust-agent execute workflow:process_large_document.yaml
+whitt-execution-engine execute workflow:process_large_document.yaml
 
 # SDK automatically:
 # 1. Indexes the large document into vector store
@@ -568,27 +568,27 @@ sdk:
 
 ```bash
 # Execute workflow with context
-yaml-to-rust-agent execute \
+whitt-execution-engine execute \
   --workflow process_large_document.yaml \
   --context-strategy auto \
   --document ./large_document.txt
 
 # Index documents for RAG
-yaml-to-rust-agent index \
+whitt-execution-engine index \
   --path ./documents/ \
   --chunk-size 512 \
   --overlap 64 \
   --collection documents
 
 # Query knowledge base
-yaml-to-rust-agent query \
+whitt-execution-engine query \
   --query "What are the key findings?" \
   --collection documents \
   --top-k 5 \
   --model llama3.2
 
 # Execute with RLM
-yaml-to-rust-agent execute \
+whitt-execution-engine execute \
   --workflow codebase_analysis.yaml \
   --context-strategy rlm \
   --max-depth 1 \
@@ -774,7 +774,7 @@ async fn test_rlm_workflow() {
 ```toml
 # Cargo.toml
 [dependencies]
-yaml-to-rust-agent = { path = "." }
+whitt-execution-engine = { path = "." }
 
 # Add context engine dependencies
 tokio = "1.35"
@@ -829,16 +829,16 @@ sdk:
 
 ```bash
 # 1. Run existing workflows (should still work)
-yaml-to-rust-agent execute workflow:existing.yaml
+whitt-execution-engine execute workflow:existing.yaml
 
 # 2. Test new context-aware workflows
-yaml-to-rust-agent execute workflow:new_context_aware.yaml
+whitt-execution-engine execute workflow:new_context_aware.yaml
 
 # 3. Index documents for RAG
-yaml-to-rust-agent index --path ./documents/
+whitt-execution-engine index --path ./documents/
 
 # 4. Test RAG
-yaml-to-rust-agent query --query "Test query" --collection documents
+whitt-execution-engine query --query "Test query" --collection documents
 ```
 
 ---

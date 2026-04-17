@@ -183,7 +183,7 @@ pub enum BackoffStrategyIR {
 Create `tests/ir_test.rs`:
 
 ```rust
-use yaml_to_rust_agentsdk::ir::*;
+use whitt_execution_engine::ir::*;
 
 #[test]
 fn test_workflow_id() {

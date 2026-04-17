@@ -92,9 +92,9 @@ pub fn validate_step_references(ir: &WorkflowIR) -> Result<()> {
 Create `tests/dag_test.rs`:
 
 ```rust
-use yaml_to_rust_agentsdk::compiler::*;
-use yaml_to_rust_agentsdk::parser::parse_workflow;
-use yaml_to_rust_agentsdk::validation::*;
+use whitt_execution_engine::compiler::*;
+use whitt_execution_engine::parser::parse_workflow;
+use whitt_execution_engine::validation::*;
 
 #[test]
 fn test_validate_dag_linear() {
@@ -117,7 +117,7 @@ fn test_validate_dag_parallel() {
 #[test]
 fn test_circular_dependency() {
     // Create IR with circular dependency manually
-    use yaml_to_rust_agentsdk::ir::*;
+    use whitt_execution_engine::ir::*;
     let mut steps = std::collections::HashMap::new();
 
     let id1 = StepId::new("step_1");

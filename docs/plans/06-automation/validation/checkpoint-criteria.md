@@ -2205,9 +2205,9 @@ pub struct WorkflowSpec {
 }
 
 impl WorkflowSpec {
-    pub fn from_yaml(yaml: &str) -> Result<Self, yaml_to_rust_agentsdk::Error> {
+    pub fn from_yaml(yaml: &str) -> Result<Self, whitt_execution_engine::Error> {
         serde_yaml::from_str(yaml)
-            .map_err(|e| yaml_to_rust_agentsdk::Error::ParseError(e.to_string()))
+            .map_err(|e| whitt_execution_engine::Error::ParseError(e.to_string()))
     }
 }
 

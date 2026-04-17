@@ -245,8 +245,8 @@ fn compile_execution_mode(spec: &WorkflowExecutionStrategy) -> ExecutionMode {
 Create `tests/compiler_test.rs`:
 
 ```rust
-use yaml_to_rust_agentsdk::compiler::*;
-use yaml_to_rust_agentsdk::parser::parse_workflow;
+use whitt_execution_engine::compiler::*;
+use whitt_execution_engine::parser::parse_workflow;
 
 #[test]
 fn test_compile_minimal_workflow() {

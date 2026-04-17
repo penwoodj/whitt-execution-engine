@@ -143,8 +143,8 @@ impl DefaultValues {
 Create `tests/defaults_test.rs`:
 
 ```rust
-use yaml_to_rust_agentsdk::defaults::*;
-use yaml_to_rust_agentsdk::parser::parse_workflow;
+use whitt_execution_engine::defaults::*;
+use whitt_execution_engine::parser::parse_workflow;
 
 #[test]
 fn test_system_defaults() {

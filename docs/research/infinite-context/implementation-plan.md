@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-**Objective**: Integrate infinite context capabilities (RLM, RAG, Infini-Attention) into yaml-to-rust-agent SDK execution engine
+**Objective**: Integrate infinite context capabilities (RLM, RAG, Infini-Attention) into whitt-execution-engine SDK execution engine
 
 **Timeline**: 3-phase implementation (6-8 weeks total)
 
@@ -14,7 +14,7 @@
 
 ### Existing Execution Engine
 
-The yaml-to-rust-agent SDK currently has:
+The whitt-execution-engine SDK currently has:
 
 ```rust
 // Existing components
@@ -1032,7 +1032,7 @@ mod benchmarks {
 - [ ] Install Ollama (`curl -fsSL https://ollama.ai/install.sh | sh`)
 - [ ] Install llama.cpp with Vulkan support
 - [ ] Install ChromaDB (`pip install chromadb`)
-- [ ] Clone yaml-to-rust-agent SDK
+- [ ] Clone whitt-execution-engine SDK
 
 ### Configuration
 - [ ] Set up `config/context_engine.yaml`
