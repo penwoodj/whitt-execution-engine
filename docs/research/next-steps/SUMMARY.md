@@ -54,8 +54,8 @@ This folder contains comprehensive research on advanced transpiler features, eme
 
 | Study | Token Reduction | Accuracy Loss | Source |
 |-------|-----------------|-----------------|--------|
-| ICPC 2026 | 42% | 12% | [reducing-token-minification.md](../academic-papers/llm-token-optimization/reducing-token-minification.md) |
-| ALPINE | 3× | 1.9% | [alpine-pruning.md](../academic-papers/llm-token-optimization/alpine-pruning.md) |
+| ICPC 2026 | 42% | 12% | [reducing-token-minification.md](https://github.com/openai/academic-papers/blob/main/llm-token-optimization/reducing-token-minification.md) |
+| ALPINE | 3× | 1.9% | [alpine-pruning.md](https://github.com/openai/academic-papers/blob/main/llm-token-optimization/alpine-pruning.md) |
 
 **Implication**: Aggressive minification is viable when paired with robust validation.
 
@@ -67,8 +67,8 @@ This folder contains comprehensive research on advanced transpiler features, eme
 
 | Method | Compression Ratio | Source |
 |--------|------------------|--------|
-| Schema-Aware | 80% | [xml-json-compression.md](../academic-papers/schema-compression/xml-json-compression.md) |
-| Schema-Less | 20% | [xml-json-compression.md](../academic-papers/schema-compression/xml-json-compression.md) |
+| Schema-Aware | 80% | [xml-json-compression.md](https://github.com/openai/academic-papers/blob/main/schema-compression/xml-json-compression.md) |
+| Schema-Less | 20% | [xml-json-compression.md](https://github.com/openai/academic-papers/blob/main/schema-compression/xml-json-compression.md) |
 
 **Implication**: YAML minifier must leverage schema knowledge for optimal compression.
 
@@ -232,7 +232,7 @@ This folder contains comprehensive research on advanced transpiler features, eme
 ### Identified Gaps
 
 1. **No Well-Known Queryable Compression for JSON/YAML**
-   - Source: [sjson-succinct-representation.md](../academic-papers/schema-compression/sjson-succinct-representation.md)
+   - Source: [sjson-succinct-representation.md](https://github.com/openai/academic-papers/blob/main/schema-compression/sjson-succinct-representation.md)
    - Opportunity: Design queryable, token-efficient YAML representation
 
 2. **Limited Research on Workflow-Specific Formal Verification**

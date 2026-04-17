@@ -6,12 +6,12 @@ Complete documentation for Whitt Execution Engine, organized by purpose.
 
 - [_metadata/](./_metadata/) - Review cycles, schema process, plans process, reports
 - [guides/](./guides/) - Contributing, developer-guide, environment-variables, install, testing-guide
-- [plans/](./plans/) - 00-foundation through 08-final-validation, deep-research, initial-research, traceability, transpiler, validation-criteria, testing-strategy.md, ARCHITECTURE.md, github-actions-improvements.md
-- [requirements/](./requirements/) - Benchmark userflows, requirements.md, index.md, critical-evaluation.md
+- [plans/](./plans/) - 00-foundation through 08-final-validation, deep-research, traceability, transpiler, validation-criteria, testing-strategy.md, ARCHITECTURE.md
+- [requirements/](./requirements/) - Benchmark userflows, index.md, critical-evaluation.md
 - [research/](./research/) - infinite-context/, next-steps/, upstream-success-factors.md
-- [roadmap/](./roadmap/) - ADR-0000 through ADR-0008 yml files, research/ subfolder, roadmap-README.md
+- [roadmap/](./roadmap/) - ADR-0000 through ADR-0008, research plans, research/ subfolder
 - [schema/](./schema/) - unified-workflow-schema.yml, hooks-semantics.md, hooks-integration-plan.md
-- [workflows/](./workflows/) - examples/ with chatgpt/, manual/, requirements-oriented-auto/; workflows-README.md
+- [workflows/](./workflows/) - examples/ with chatgpt/, manual/, requirements-oriented-auto/
 
 ## Quick Start
 

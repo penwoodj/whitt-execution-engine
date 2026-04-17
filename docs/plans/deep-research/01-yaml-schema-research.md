@@ -191,7 +191,7 @@ A multi-stage IR design (HIR → THIR → MIR) following Rust compiler patterns 
 ### Finding 8: Schema-Aware Incremental Updates Improve Performance
 
 **Evidence sources**:
-- Schema-aware compression research: `opencode/docs/research/academic-papers/schema-compression/xml-json-compression.md`
+- Schema-aware compression research: `https://github.com/openai/academic-papers/blob/main/schema-compression/xml-json-compression.md`
 - Incremental update patterns: https://www.microsoft.com/en-us/research/publication/incremental-computation/
 - Foundation research report: `./workspace/docs/reports/roadmap/research/foundation-research-research.md`
 
@@ -1067,10 +1067,10 @@ Expected: Git commit successful
 **Files:**
 - Create: `./workspace/plans/research/evidence/incremental-validation-research.md`
 
-- [ ] **Step 1: Research schema-aware compression**
+ - [ ] **Step 1: Research schema-aware compression**
 
 Evidence sources:
-- Schema-aware compression research: `opencode/docs/research/academic-papers/schema-compression/xml-json-compression.md`
+- Schema-aware compression research: `https://github.com/openai/academic-papers/blob/main/schema-compression/xml-json-compression.md`
 - Incremental update patterns: https://www.microsoft.com/en-us/research/publication/incremental-computation/
 
 Expected output: Understanding of schema-aware compression and incremental update patterns
@@ -1156,7 +1156,7 @@ Expected: Git commit successful
 6. **miette**: https://docs.rs/miette/latest/miette/
 7. **Rust Compiler IR Design**: https://rustc-dev-guide.rust-lang.org/the-compiler.html
 8. **Foundation Research Report**: `./workspace/docs/reports/roadmap/research/foundation-research-report.md`
-9. **Schema-Aware Compression**: `opencode/docs/research/academic-papers/schema-compression/xml-json-compression.md`
+9. **Schema-Aware Compression**: `https://github.com/openai/academic-papers/blob/main/schema-compression/xml-json-compression.md`
 10. **ADR-0001**: Foundation Phase Architecture Decision
 
 ---
