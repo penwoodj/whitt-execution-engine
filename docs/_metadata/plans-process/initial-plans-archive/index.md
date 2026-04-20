@@ -46,34 +46,34 @@ This index provides navigation to all implementation plans in the `initial-plans
   - **Estimated Time**: 6-8 weeks
 
 ### Phase 4: Quality Loops & Benchmarks
-- **[plan-04-quality-loops.md](./phase-4-quality-loops/plan-04-quality-loops.md)**
+- **[plan-03-quality-loops.md](./phase-4-quality-loops/plan-03-quality-loops.md)**
   - **Description**: Quality loops, artifact workflows, and benchmark-driven file-type expansion
   - **Related ADR**: ADR-0005
-  - **Related Research**: research-plan-04-quality-memory-search
+  - **Related Research**: research-plan-03-quality-memory-search
   - **Status**: Not Started
   - **Estimated Time**: 8-10 weeks
 
 ### Phase 5: Memory & Search
-- **[plan-05-memory-search.md](./phase-5-memory-search/plan-05-memory-search.md)**
+- **[plan-04-memory-search.md](./phase-5-memory-search/plan-04-memory-search.md)**
   - **Description**: Local memory retrieval, web search, and web scraping
   - **Related ADR**: ADR-0006
-  - **Related Research**: research-plan-04-quality-memory-search
+  - **Related Research**: research-plan-03-quality-memory-search
   - **Status**: Not Started
   - **Estimated Time**: 10-12 weeks
 
 ### Phase 6: Automation
-- **[plan-06-automation.md](./phase-6-automation/plan-06-automation.md)**
+- **[plan-05-automation.md](./phase-6-automation/plan-05-automation.md)**
   - **Description**: Cron execution, git-branch experimentation, and workflow refinement
   - **Related ADR**: ADR-0007
-  - **Related Research**: research-plan-05-automation-autonomy-metrics
+  - **Related Research**: research-plan-04-automation-autonomy-metrics
   - **Status**: Not Started
   - **Estimated Time**: 8-10 weeks
 
 ### Phase 7: Autonomy & Metrics
-- **[plan-07-autonomy-metrics.md](./phase-7-autonomy-metrics/plan-07-autonomy-metrics.md)**
+- **[plan-06-autonomy-metrics.md](./phase-7-autonomy-metrics/plan-06-autonomy-metrics.md)**
   - **Description**: Autonomous loops and metrics-driven FE and BE UX expansion
   - **Related ADR**: ADR-0008
-  - **Related Research**: research-plan-05-automation-autonomy-metrics
+  - **Related Research**: research-plan-04-automation-autonomy-metrics
   - **Status**: Not Started
   - **Estimated Time**: 10-12 weeks
 

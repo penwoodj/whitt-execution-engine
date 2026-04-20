@@ -299,7 +299,7 @@ model_routing:
 ### High Priority
 1. Create example ex05-rag-crud-operations.yml
 2. Create example ex06-web-scraping-to-rag.yml
-3. Create example ex07-web-forum-search.yml
+3. Create example ex06-web-forum-search.yml
 4. Create example ex08-convergence-loops.yml
 5. Create example ex09-infinite-loops.yml
 

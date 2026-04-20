@@ -230,7 +230,7 @@ Depth 6:             UF20 (End-to-End)
 | uf12-model-provider-abstraction.md | 147 | Unified provider API |
 | uf13-progress-tracking-and-checkpointing.md | 128 | Crash recovery, progress display |
 | uf14-validation-and-quality-scoring.md | 151 | Automated quality scoring |
-| uf15-resource-monitoring-and-adaptation.md | 152 | VRAM/RAM/temp monitoring + adaptation |
+| uf14-resource-monitoring-and-adaptation.md | 152 | VRAM/RAM/temp monitoring + adaptation |
 | uf16-configuration-management.md | 148 | Config layering, validation, defaults |
 | uf17-benchmark-report-generation.md | 153 | Rankings, stats, recommendations |
 | uf18-cleanup-and-teardown.md | 118 | Graceful shutdown, resource free |

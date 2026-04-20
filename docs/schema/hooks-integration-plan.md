@@ -1,4 +1,4 @@
-# Hooks Integration Plan
+# 🔗 Hooks Integration Plan
 
 **Created**: 2026-04-15
 **Status**: PLANNING
@@ -6,13 +6,13 @@
 
 ---
 
-## Purpose
+## 📋 Purpose
 
 Plan for integrating the hooks system defined in `hooks-semantics.md` into the unified schema. Phased approach — hooks added incrementally with each implementation phase.
 
 ---
 
-## Current State
+## 📊 Current State
 
 - Steps have `when:` hooks (6 lifecycle events: before_step_starts, during_step_streaming, after_step_succeeds, after_step_fails, after_step_aborts, after_step_completes)
 - No hooks on models, providers, or workflows
@@ -20,7 +20,7 @@ Plan for integrating the hooks system defined in `hooks-semantics.md` into the u
 
 ---
 
-## Phase 1: Schema Additions (Documentation)
+## 📝 Phase 1: Schema Additions (Documentation)
 
 ### Step 1.1: Add model-level hooks to schema
 
@@ -78,7 +78,7 @@ Add to existing `when:` structure:
 
 ---
 
-## Phase 2: Rust Implementation
+## 🦀 Phase 2: Rust Implementation
 
 ### Step 2.1: Define HookAction enum
 
@@ -131,7 +131,7 @@ Workflow defaults merged with step overrides. Additive for same trigger — both
 
 ---
 
-## Phase 3: Integration Tests
+## 🧪 Phase 3: Integration Tests
 
 - Test each hook trigger fires at correct lifecycle point
 - Test hook action execution (log file created, variable set, etc.)
@@ -141,14 +141,14 @@ Workflow defaults merged with step overrides. Additive for same trigger — both
 
 ---
 
-## Phase 4: Downstream Doc Updates
+## 📝 Phase 4: Downstream Doc Updates
 
 After schema changes:
 - [ ] Update `docs/requirements/configuration-defaults.md` with hook defaults
 - [ ] Update `docs/requirements/constraints-and-assumptions.md` with hook constraints
 - [ ] Update `docs/plans/traceability/schema-to-phase-matrix.md` with hook fields
 - [ ] Update `docs/roadmap/` with hook integration milestone
-- [ ] Add hook examples to `docs/workflows/examples/` in `18-hooks-lifecycle/`
+- [ ] Add hook examples to `docs/workflows/examples/` in `17-hooks-lifecycle/`
 
 ---
 
@@ -164,3 +164,15 @@ After schema changes:
 | `src/hooks/mod.rs` | Module definition |
 | `docs/requirements/configuration-defaults.md` | Hook defaults |
 | `docs/plans/traceability/schema-to-phase-matrix.md` | Hook field mapping |
+
+---
+
+## 🔗 Related Documentation
+
+| Document | Description |
+|----------|-------------|
+| [README.md](./README.md) | Schema documentation |
+| [hooks-semantics.md](./hooks-semantics.md) - Hook semantics and execution order |
+| [unified-workflow-schema.yml](./unified-workflow-schema.yml) - Complete schema definition |
+| [../guides/](../guides/) | Development guides |
+| [../workflows/examples/](../workflows/examples/) - Workflow examples |

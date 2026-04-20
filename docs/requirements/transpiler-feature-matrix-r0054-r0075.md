@@ -172,7 +172,7 @@ The transpiler's internal schema definition system aligns with the unified workf
 
 - **R0054**: Partially implemented (schema.rs exists, but not all node types defined)
 - **R0075**: Not yet implemented (docs.rs module stub exists but generator logic incomplete)
-- Both planned for **Phase 04: Quality Loops** (foundation work)
+- Both planned for **Phase 03: Quality Loops** (foundation work)
 
 ---
 

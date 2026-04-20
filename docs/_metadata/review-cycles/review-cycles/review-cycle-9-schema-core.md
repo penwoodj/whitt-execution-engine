@@ -37,7 +37,7 @@
 - **Recommendation**: Add decision flowchart in comments
 
 ### 6. Loop Type Selection
-- **Files**: `05-loops-convergence/01-for-loops-explicit-iteration.yaml`
+- **Files**: `04-loops-convergence/01-for-loops-explicit-iteration.yaml`
 - **Question**: When to use `for` vs `foreach` vs `while`?
 - **Concern**: No comparison guide
 - **Recommendation**: Add loop selection matrix in README
@@ -49,31 +49,31 @@
 - **Recommendation**: Add path configuration section in each file
 
 ### 8. Error Handling Defaults
-- **Files**: `12-error-handling-retries/01-retry-strategies-backoff.yaml`
+- **Files**: `11-error-handling-retries/01-retry-strategies-backoff.yaml`
 - **Question**: What happens if no retry config specified?
 - **Concern**: Default behavior not documented
 - **Recommendation**: Add "default behavior" comment in each step
 
 ### 9. Logging Verbosity Levels
-- **Files**: `13-logging-monitoring/01-hierarchical-logging-system.yaml`
+- **Files**: `12-logging-monitoring/01-hierarchical-logging-system.yaml`
 - **Question**: What's difference between `debug`, `info`, `warning`?
 - **Concern**: No semantic explanation of levels
 - **Recommendation**: Add level semantics table
 
 ### 10. Checkpoint Frequency
-- **Files**: `14-checkpointing-state/01-checkpointing-save-restore.yaml`
+- **Files**: `13-checkpointing-state/01-checkpointing-save-restore.yaml`
 - **Question**: When do checkpoints happen automatically?
 - **Concern**: Trigger conditions unclear
 - **Recommendation**: Add trigger decision tree
 
 ### 11. Resource Allocation Units
-- **Files**: `15-resource-management/01-memory-allocation-strategies.yaml`
+- **Files**: `14-resource-management/01-memory-allocation-strategies.yaml`
 - **Question**: What units for `ram: 13%` vs `vram: 3.7GB`?
 - **Concern**: Mixed percentage and absolute units
 - **Recommendation**: Add unit convention explanation
 
 ### 12. Tool Permission Scope
-- **Files**: `16-tool-permissions/01-allow-deny-lists-scopes.yaml`
+- **Files**: `15-tool-permissions/01-allow-deny-lists-scopes.yaml`
 - **Question**: Are permissions global or per-step?
 - **Concern**: Scope inheritance unclear
 - **Recommendation**: Add scope hierarchy diagram

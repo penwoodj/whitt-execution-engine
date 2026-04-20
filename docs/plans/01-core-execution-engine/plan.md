@@ -419,7 +419,7 @@ At each checkpoint:
 
 ---
 
-## Dependencies
+## 🔗 Dependencies
 
 **Phase 0 Deliverables (must be complete):**
 - `src/spec.rs`: WorkflowSpec struct with YAML schema definitions
@@ -443,7 +443,7 @@ At each checkpoint:
 
 ---
 
-## Success Criteria
+## ✅ Success Criteria
 
 Phase 1 is complete when:
 1. All 12 tasks are implemented and tested
@@ -452,7 +452,7 @@ Phase 1 is complete when:
 4. All property tests pass
 5. Checkpoint criteria validated at each checkpoint
 6. Acceptance criteria validated at Phase 1 completion
-7. At least 10 of the 53 example workflows can execute end-to-end
+7. At least 10 of the 50 example workflows can execute end-to-end
 8. Human gating system correctly classifies and gates operations
 9. Persistent storage survives process crashes and recovers state
 10. Graceful shutdown with proper cleanup of all resources
@@ -464,7 +464,7 @@ Phase 1 is complete when:
 - ADR-0002: Human-Gated Safety & CLI-First Design
 - Workflow Schema: sections 3, 4, 5(partial), 7, 8, 9, 10(partial)
 - Phase 0 deliverables: WorkflowSpec, WorkflowIR, storage layer
-- Example workflows: requirements-oriented-auto/ directory (53 workflows)
+- Example workflows: requirements-oriented-auto/ directory (50 workflows)
 
 ---
 

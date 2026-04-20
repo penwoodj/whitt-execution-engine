@@ -98,7 +98,7 @@
 |----------|---------------|-------------------|----------------|
 | **Logging location** | Not shown (cut off) | `logging: { global, scopes, output_type, format, console, log_file }` | Manual has no logging shown; examples have full logging config |
 | **Scopes** | Not shown | `logging.scopes: { execution, memory, tool, validation, agent, state_management }` | Examples have hierarchical scopes; manual may need to add this |
-| **Hierarchical output** | Not shown | `logging_parameters: { workflow_level, step_level, tool_level, agent_level }` (13-logging-monitoring/01-hierarchical-logging-system.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml) | Some examples have nested logging parameters |
+| **Hierarchical output** | Not shown | `logging_parameters: { workflow_level, step_level, tool_level, agent_level }` (12-logging-monitoring/01-hierarchical-logging-system.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml) | Some examples have nested logging parameters |
 
 **Resolution**: Adopt examples' logging structure fully, as manual doesn't complete this section.
 
@@ -160,24 +160,24 @@
 
 | Feature | Description | Impact | Priority |
 |----------|-------------|--------|----------|
-| **Complete logging section** | `logging.global`, `logging.scopes`, `logging_parameters` (13-logging-monitoring/01-hierarchical-logging-system.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml) | Full hierarchical logging | CRITICAL |
+| **Complete logging section** | `logging.global`, `logging.scopes`, `logging_parameters` (12-logging-monitoring/01-hierarchical-logging-system.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml) | Full hierarchical logging | CRITICAL |
 | **Nested logging hierarchy** | 8-9 levels: global → workflow → step → agent → tool → file → API → state → performance | Fine-grained observability | HIGH |
-| **RAG configuration** | `rag.enabled`, `rag.backend`, `rag.config` (08-rag-operations/01-document-indexing-retrieval.yaml, 08-rag-operations/02-rag-generation-context-aware.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml) | Knowledge base management | HIGH |
-| **RAG operations** | add, query, update, delete with filters (08-rag-operations/01-document-indexing-retrieval.yaml) | Knowledge base CRUD | HIGH |
-| **Web operations with URL params** | `web_fetch`, `web_scrape`, `web_search` with full URL parameters (07-web-operations/03-url-parameters-requests.yaml) | External data access | MEDIUM |
-| **Script and CLI execution** | `script_run`, `cli_run` with env_vars, working_dir, timeout (09-script-cli/01-script-execution.yaml) | System integration | MEDIUM |
-| **File operations** | Explicit `file_operations` with read, write, delete, backup, archive (06-file-operations/01-file-read-write-batch.yaml) | Local file management | HIGH |
-| **Loop variations** | count, time, infinite, validation (exact/abstract), retry (05-loops-convergence/01-for-loops-explicit-iteration.yaml) | Diverse loop types | HIGH |
-| **Web scraping to RAG** | End-to-end web scrape → embed → RAG add pipeline (08-rag-operations/02-rag-generation-context-aware.yaml) | Knowledge base automation | MEDIUM |
+| **RAG configuration** | `rag.enabled`, `rag.backend`, `rag.config` (07-rag-operations/01-document-indexing-retrieval.yaml, 07-rag-operations/02-rag-generation-context-aware.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml) | Knowledge base management | HIGH |
+| **RAG operations** | add, query, update, delete with filters (07-rag-operations/01-document-indexing-retrieval.yaml) | Knowledge base CRUD | HIGH |
+| **Web operations with URL params** | `web_fetch`, `web_scrape`, `web_search` with full URL parameters (06-web-operations/03-url-parameters-requests.yaml) | External data access | MEDIUM |
+| **Script and CLI execution** | `script_run`, `cli_run` with env_vars, working_dir, timeout (08-script-cli/01-script-execution.yaml) | System integration | MEDIUM |
+| **File operations** | Explicit `file_operations` with read, write, delete, backup, archive (05-file-operations/01-file-read-write-batch.yaml) | Local file management | HIGH |
+| **Loop variations** | count, time, infinite, validation (exact/abstract), retry (04-loops-convergence/01-for-loops-explicit-iteration.yaml) | Diverse loop types | HIGH |
+| **Web scraping to RAG** | End-to-end web scrape → embed → RAG add pipeline (07-rag-operations/02-rag-generation-context-aware.yaml) | Knowledge base automation | MEDIUM |
 | **Prompt refinement procedures** | Multi-step prompt improvement loop (03-data-flow/01-workflow-level-variables.yaml) | Quality improvement | MEDIUM |
-| **Workflow registry** | `workflow_registry.registered_workflows` with discovery (10-sub-workflows/01-nested-workflow-references.yaml) | Dynamic workflow loading | MEDIUM |
-| **Workflow references** | 5 reference patterns (direct_import, inline_reference, registry_lookup, nested_execution, conditional_reference) (10-sub-workflows/01-nested-workflow-references.yaml) | Nested workflow orchestration | HIGH |
-| **Explicit CRUD operations** | `file_operations` with explicit operations (06-file-operations/01-file-read-write-batch.yaml) | Predictable file I/O | MEDIUM |
-| **Orchestration configuration** | `orchestration.sub_agent_relationships`, `interdependent_validations` (10-sub-workflows/01-nested-workflow-references.yaml, 17-user-inputs-ui/01-user-input-prompts-validation.yaml) | Complex coordination | HIGH |
+| **Workflow registry** | `workflow_registry.registered_workflows` with discovery (09-sub-workflows/01-nested-workflow-references.yaml) | Dynamic workflow loading | MEDIUM |
+| **Workflow references** | 5 reference patterns (direct_import, inline_reference, registry_lookup, nested_execution, conditional_reference) (09-sub-workflows/01-nested-workflow-references.yaml) | Nested workflow orchestration | HIGH |
+| **Explicit CRUD operations** | `file_operations` with explicit operations (05-file-operations/01-file-read-write-batch.yaml) | Predictable file I/O | MEDIUM |
+| **Orchestration configuration** | `orchestration.sub_agent_relationships`, `interdependent_validations` (09-sub-workflows/01-nested-workflow-references.yaml, 16-user-inputs-ui/01-user-input-prompts-validation.yaml) | Complex coordination | HIGH |
 | **Metrics collection** | `metrics.enabled`, `metrics.collect`, `metrics.output` (most examples) | Performance tracking | MEDIUM |
-| **Retry configuration** | `retry.default`, `retry.sub_agent_specific`, `retry.escalation` (01-model-configuration/03-model-lifecycle-management.yaml, 05-loops-convergence/01-for-loops-explicit-iteration.yaml, 03-data-flow/01-workflow-level-variables.yaml) | Flexible retry strategies | MEDIUM |
-| **Permission systems** | `permissions.global`, `permissions.agent_specific`, `tool_permissions`, `folder_permissions` (01-model-configuration/04-cost-tracking-budgets.yaml, 06-file-operations/01-file-read-write-batch.yaml) | Security and access control | HIGH |
-| **State management** | `state.save_interval_secs`, `state.checkpoint_interval_steps`, `state.state_file_path` (06-file-operations/01-file-read-write-batch.yaml) | Persistence and recovery | MEDIUM |
+| **Retry configuration** | `retry.default`, `retry.sub_agent_specific`, `retry.escalation` (01-model-configuration/03-model-lifecycle-management.yaml, 04-loops-convergence/01-for-loops-explicit-iteration.yaml, 03-data-flow/01-workflow-level-variables.yaml) | Flexible retry strategies | MEDIUM |
+| **Permission systems** | `permissions.global`, `permissions.agent_specific`, `tool_permissions`, `folder_permissions` (01-model-configuration/04-cost-tracking-budgets.yaml, 05-file-operations/01-file-read-write-batch.yaml) | Security and access control | HIGH |
+| **State management** | `state.save_interval_secs`, `state.checkpoint_interval_steps`, `state.state_file_path` (05-file-operations/01-file-read-write-batch.yaml) | Persistence and recovery | MEDIUM |
 
 **Total**: 18 major features in examples not present in manual
 

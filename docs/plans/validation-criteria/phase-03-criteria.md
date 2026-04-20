@@ -1,22 +1,21 @@
-# Phase 03: Glyphnova UI - Validation Criteria
+# Phase 03: Quality Loops - Validation Criteria
 
-**Phase Focus:** Desktop shell, queue visualization, scope indicators, navigation, drag-drop
-**Entry Criteria:** Phases 00, 01, and 02 complete
+**Phase Focus:** Generate-verify-repair loops, benchmarks, file-type matrix, quality reports
+**Entry Criteria:** Phases 00, 01, and 02 complete (Phase 03 optional)
 **Estimated Duration:** 3-4 weeks
-**Blocking for:** Phases 04, 05, 06, 07, 08
+**Blocking for:** Phases 04, 05, 06, 07
 
 ---
 
 ## Phase Overview
 
-Phase 03 implements the Glyphnova desktop UI. This phase provides a graphical interface for workflow management, queue visualization, and real-time monitoring. The UI displays scope indicators, enables safe navigation, and supports drag-drop operations for workflow composition.
+Phase 03 implements quality assurance loops. This phase provides generate-verify-repair workflows for iterative improvement, benchmarks with metadata, file-type quality tracking, and actionable quality reports. Quality loops automatically detect issues and suggest or apply repairs.
 
 **Critical Success Factors:**
-1. Desktop shell starts without crashing
-2. Queue visualization matches scheduler state
-3. Scope indicators display correctly
-4. Navigation is safe (no data loss)
-5. Drag-drop operations call scheduler APIs correctly
+1. Generate-verify-repair loops converge (no infinite loops)
+2. Benchmarks store with complete metadata
+3. File-type matrix tracks quality accurately
+4. Reports provide actionable insights
 
 ---
 
@@ -26,324 +25,296 @@ Phase 03 implements the Glyphnova desktop UI. This phase provides a graphical in
 
 **Verification Commands:**
 ```bash
-# Verify Phase 00 exit
+# Verify Phases 00-02 exit
 cargo test --test phase_00_integration -- --test-threads=1
-
-# Verify Phase 01 exit
 cargo test --test phase_01_integration -- --test-threads=1
-
-# Verify Phase 02 exit
 cargo test --test phase_02_integration -- --test-threads=1
 
 # Verify schema coverage
 cargo run --bin schema_audit -- --phase 0 --output phase_00_coverage.md
 cargo run --bin schema_audit -- --phase 1 --output phase_01_coverage.md
 cargo run --bin schema_audit -- --phase 2 --output phase_02_coverage.md
-# Expected: 100% coverage for all phases
 ```
 
 **Prerequisites:**
-- [ ] Phase 00 exit criteria verified (all 7 layers)
-- [ ] Phase 01 exit criteria verified (all 7 layers)
-- [ ] Phase 02 exit criteria verified (all 7 layers)
-- [ ] Schema coverage 100% for all phases (00, 01, 02)
-- [ ] ADR compliance verified for all phases
+- [ ] Phases 00, 01, 02 exit criteria verified (all 7 layers)
+- [ ] Schema coverage 100% for phases 00, 01, 02
+- [ ] ADR compliance verified for phases 00, 01, 02
 - [ ] Cross-phase regression clean (Phases 00+01+02)
-- [ ] Desktop development environment ready (GUI framework dependencies)
-- [ ] Scheduler APIs exposed for UI consumption
+- [ ] Benchmark infrastructure ready
 
 **Blocking Violations:**
 - Unresolved Phase 00, 01, or 02 failures
 - Schema coverage < 100% for any phase
-- ADR compliance violations
 - Cross-phase regression detected
-- Scheduler APIs not exposed
 
 ---
 
-## Desktop Shell
+## Generate-Verify-Repair Loops
 
-**Requirement:** Desktop shell starts without crashing
+**Requirement:** Generate-verify-repair loops converge (no infinite loops)
 
-### Shell Features
+### Loop Structure
 
-1. **Window Management:**
-   - Main window opens correctly
-   - Window resizing works
-   - Window minimization/maximization works
-   - Window close exits cleanly
+```
+Generate → Verify → Pass?
+               ↓
+           Repair → Generate
+```
 
-2. **Menu System:**
-   - File menu (New, Open, Save, Exit)
-   - Edit menu (Undo, Redo, Cut, Copy, Paste)
-   - View menu (Queue, Workflows, Settings)
-   - Help menu (Documentation, About)
+1. **Generate:** Produce artifact (code, config, document)
+2. **Verify:** Validate artifact against criteria
+3. **Pass?** If verification passes, exit loop
+4. **Repair:** If verification fails, generate repair
+5. **Repeat:** Go back to Generate
 
-3. **Status Bar:**
-   - Queue status indicator
-   - Scheduler status indicator
-   - Connection status indicator
-   - Error count display
+### Convergence Criteria
+
+1. **Max Iterations:** Loop terminates after N iterations
+2. **Convergence Threshold:** Verification score >= threshold
+3. **Stability:** No improvement for K iterations
+4. **Timeout:** Maximum time limit exceeded
 
 ### Verification Commands
 
 ```bash
-# Test desktop shell startup
-cargo test --lib ui::tests::shell_startup
-cargo test --lib ui::tests::window_management
-cargo test --lib ui::tests::menu_system
-cargo test --lib ui::tests::status_bar
+# Test generate-verify-repair loops
+cargo test --lib quality::tests::basic_gvr_loop
+cargo test --lib quality::tests::gvr_convergence
+cargo test --lib quality::tests::gvr_max_iterations
+cargo test --lib quality::tests::gvr_convergence_threshold
+cargo test --lib quality::tests::gvr_stability_check
+cargo test --lib quality::tests::gvr_timeout
 
-# Test clean exit
-cargo test --lib ui::tests::clean_exit
+# Test infinite loop prevention
+cargo test --lib quality::tests::infinite_loop_prevention
 ```
 
 ### Pass Criteria
 
-- [ ] Desktop shell starts without crashing
-- [ ] Window management works correctly
-- [ ] Menu system works correctly
-- [ ] Status bar displays correctly
-- [ ] Clean exit without data loss
+- [ ] Generate-verify-repair loops execute correctly
+- [ ] Loops converge (terminate) in all test cases
+- [ ] Max iterations respected
+- [ ] Convergence thresholds work
+- [ ] Stability checks work
+- [ ] Timeout enforced
+- [ ] No infinite loops
 
 ### Evidence Required
 
-- Shell startup test results
-- Window management test logs
-- Menu system test logs
-- Clean exit test logs
-- Screenshot of UI (manual verification)
+- Generate-verify-repair loop test results
+- Convergence metrics
+- Timeout test logs
+- Infinite loop prevention test logs
 
 ---
 
-## Queue Visualization
+## Benchmark Storage
 
-**Requirement:** Queue visualization matches scheduler state
+**Requirement:** Benchmarks store with complete metadata
 
-### Visualization Components
+### Benchmark Metadata
 
-1. **Queue List:**
-   - Displays all queued workflows
-   - Shows workflow name, status, priority
-   - Updates in real-time as workflows enqueue/dequeue
-   - Sortable by name, status, priority
-
-2. **Workflow Details:**
+1. **Workflow Metadata:**
    - Workflow ID
-   - Pipeline count
-   - Step count
-   - Execution mode (serial/parallel/hybrid)
-   - Current state (Queued, Running, Completed, Failed)
-
-3. **Progress Indicators:**
-   - Overall workflow progress (percentage)
-   - Pipeline-level progress
-   - Step-level progress
-   - Time elapsed/estimated
-
-### Verification Commands
-
-```bash
-# Test queue visualization
-cargo test --lib ui::tests::queue_list_display
-cargo test --lib ui::tests::workflow_details_display
-cargo test --lib ui::tests::progress_indicators
-
-# Test real-time updates
-cargo test --lib ui::tests::real_time_queue_updates
-
-# Test synchronization with scheduler
-cargo test --lib ui::tests::scheduler_state_sync
-```
-
-### Pass Criteria
-
-- [ ] Queue list displays all workflows correctly
-- [ ] Workflow details display accurately
-- [ ] Progress indicators update correctly
-- [ ] Real-time updates work without lag
-- [ ] Visualization matches scheduler state exactly
-
-### Evidence Required
-
-- Queue visualization test results
-- Real-time update test logs
-- Scheduler synchronization test logs
-- Screenshot of queue display (manual verification)
-
----
-
-## Scope Indicators
-
-**Requirement:** Scope indicators work correctly
-
-### Scope Indicator Types
-
-1. **Workflow Scope:**
    - Workflow name
-   - Workflow ID
    - Workflow version
+   - Workflow type (generation, verification, repair)
 
-2. **Pipeline Scope:**
-   - Pipeline name
-   - Pipeline ID
-   - Execution mode
+2. **Execution Metadata:**
+   - Timestamp
+   - Execution time
+   - Success/failure
+   - Error message (if failed)
 
-3. **Step Scope:**
-   - Step name
-   - Step ID
-   - Step type
+3. **Resource Metadata:**
+   - CPU usage
+   - Memory usage
+   - Network usage
+   - Disk I/O
 
-4. **Log Scope:**
-   - Current log scope (pipeline, step, model, tool, etc.)
-   - Log level filter (debug, info, warn, error)
+4. **Quality Metadata:**
+   - Verification score
+   - Repair count
+   - Iteration count
+   - Convergence metric
 
-5. **Variable Scope:**
-   - Available variables in current scope
-   - Variable values
+### Storage Format
+
+```json
+{
+  "benchmark_id": "uuid",
+  "workflow_id": "workflow_uuid",
+  "workflow_name": "test_workflow",
+  "workflow_version": "1.0.0",
+  "workflow_type": "generation",
+  "timestamp": "2026-04-06T10:00:00Z",
+  "execution_time_ms": 1234,
+  "success": true,
+  "error": null,
+  "cpu_usage_percent": 75.5,
+  "memory_usage_mb": 512,
+  "network_usage_bytes": 1024,
+  "disk_io_bytes": 2048,
+  "verification_score": 0.95,
+  "repair_count": 2,
+  "iteration_count": 5,
+  "convergence_metric": 0.98
+}
+```
 
 ### Verification Commands
 
 ```bash
-# Test scope indicators
-cargo test --lib ui::tests::workflow_scope_indicator
-cargo test --lib ui::tests::pipeline_scope_indicator
-cargo test --lib ui::tests::step_scope_indicator
-cargo test --lib ui::tests::log_scope_indicator
-cargo test --lib ui::tests::variable_scope_indicator
+# Test benchmark storage
+cargo test --lib quality::tests::benchmark_storage
+cargo test --lib quality::tests::benchmark_retrieval
+cargo test --lib quality::tests::benchmark_metadata_completeness
 
-# Test scope navigation
-cargo test --lib ui::tests::scope_navigation
+# Test benchmark querying
+cargo test --lib quality::tests::benchmark_query_by_workflow
+cargo test --lib quality::tests::benchmark_query_by_type
+cargo test --lib quality::tests::benchmark_query_by_score
 ```
 
 ### Pass Criteria
 
-- [ ] All scope indicators display correctly
-- [ ] Scope indicators update when navigating
-- [ ] Scope indicators show accurate information
-- [ ] Scope navigation works without data loss
+- [ ] Benchmarks stored with complete metadata
+- [ ] Metadata retrieval works correctly
+- [ ] All required fields present
+- [ ] Benchmark queries work correctly
+- [ ] No missing or null metadata fields
 
 ### Evidence Required
 
-- Scope indicator test results
-- Scope navigation test logs
-- Screenshot of scope indicators (manual verification)
+- Benchmark storage test results
+- Metadata completeness verification
+- Benchmark query test logs
 
 ---
 
-## Navigation
+## File-Type Matrix
 
-**Requirement:** Navigation is safe (no data loss)
+**Requirement:** File-type matrix tracks quality
 
-### Navigation Features
+### File Types
 
-1. **Workflow Navigation:**
-   - Navigate between workflows
-   - View workflow details
-   - No data loss when switching
+1. **YAML Files:** Workflow specifications
+2. **Rust Files:** Generated code
+3. **Markdown Files:** Documentation
+4. **JSON Files:** Configuration and metadata
+5. **Text Files:** Logs and reports
 
-2. **Pipeline Navigation:**
-   - Navigate between pipelines
-   - View pipeline details
-   - No data loss when switching
+### Quality Metrics
 
-3. **Step Navigation:**
-   - Navigate between steps
-   - View step details
-   - No data loss when switching
+1. **Syntax Validity:** File parses correctly
+2. **Semantic Correctness:** Content is semantically valid
+3. **Style Compliance:** Follows style guidelines
+4. **Coverage:** Test coverage (for code)
+5. **Documentation:** Documentation completeness
 
-4. **Back/Forward:**
-   - Back button returns to previous view
-   - Forward button returns to next view
-   - History preserved correctly
+### Matrix Structure
 
-5. **Breadcrumb Navigation:**
-   - Breadcrumbs show current location
-   - Clicking breadcrumb jumps to location
-   - Breadcrumbs update correctly
+| File Type | Total | Valid | Invalid | Quality Score | Avg Iterations |
+|-----------|-------|-------|---------|----------------|----------------|
+| YAML      | 53    | 50    | 3       | 0.94           | 2.1            |
+| Rust      | 25    | 23    | 2       | 0.92           | 1.8            |
+| Markdown  | 12    | 12    | 0       | 1.00           | 1.0            |
+| JSON      | 8     | 8     | 0       | 1.00           | 1.0            |
+| Text      | 5     | 5     | 0       | 1.00           | 1.0            |
 
 ### Verification Commands
 
 ```bash
-# Test navigation
-cargo test --lib ui::tests::workflow_navigation
-cargo test --lib ui::tests::pipeline_navigation
-cargo test --lib ui::tests::step_navigation
-cargo test --lib ui::tests::back_forward_navigation
-cargo test --lib ui::tests::breadcrumb_navigation
+# Test file-type matrix
+cargo test --lib quality::tests::file_type_matrix_tracking
+cargo test --lib quality::tests::file_type_matrix_aggregation
+cargo test --lib quality::tests::file_type_matrix_quality_scores
 
-# Test data loss prevention
-cargo test --lib ui::tests::no_data_loss_on_navigation
+# Test matrix updates
+cargo test --lib quality::tests::matrix_update_on_valid_file
+cargo test --lib quality::tests::matrix_update_on_invalid_file
 ```
 
 ### Pass Criteria
 
-- [ ] All navigation types work correctly
-- [ ] No data loss when navigating
-- [ ] Back/Forward preserves history
-- [ ] Breadcrumbs show correct path
-- [ ] Navigation is fast and responsive
+- [ ] File-type matrix tracks all file types
+- [ ] Quality scores calculated correctly
+- [ ] Matrix updates on valid/invalid files
+- [ ] Aggregation statistics accurate
+- [ ] Matrix queryable by file type
 
 ### Evidence Required
 
-- Navigation test results
-- Data loss prevention test logs
-- Screenshot of navigation (manual verification)
+- File-type matrix test results
+- Quality score calculations
+- Matrix aggregation logs
 
 ---
 
-## Drag-Drop Operations
+## Quality Reports
 
-**Requirement:** Drag-drop calls scheduler APIs correctly
+**Requirement:** Reports provide actionable insights
 
-### Drag-Drop Scenarios
+### Report Types
 
-1. **Workflow Reordering:**
-   - Drag workflow to reorder in queue
-   - Calls scheduler `requeue` API
-   - Priority updated correctly
+1. **Overall Quality Report:** Summary of all workflows
+2. **Workflow Quality Report:** Detailed report for single workflow
+3. **File-Type Quality Report:** Quality by file type
+4. **Trend Report:** Quality over time
 
-2. **Step Reordering:**
-   - Drag step to reorder in pipeline
-   - Calls scheduler `reorder_steps` API
-   - Step order updated correctly
+### Report Content
 
-3. **Workflow to Queue:**
-   - Drag workflow file to queue
-   - Calls scheduler `enqueue` API
-   - Workflow added to queue
+#### Overall Quality Report
 
-4. **Step to Pipeline:**
-   - Drag step template to pipeline
-   - Calls scheduler `add_step` API
-   - Step added to pipeline
+```markdown
+# Overall Quality Report
+
+## Summary
+- Total Workflows: 53
+- Valid Workflows: 50 (94.3%)
+- Invalid Workflows: 3 (5.7%)
+- Average Quality Score: 0.94
+- Average Iterations: 1.8
+
+## Issues
+1. workflow_04.yaml: Invalid syntax (line 42)
+2. workflow_12.yaml: Missing required field
+3. workflow_27.yaml: Schema validation error
+
+## Recommendations
+1. Fix syntax errors in workflow_04.yaml
+2. Add missing fields to workflow_12.yaml
+3. Resolve schema validation in workflow_27.yaml
+```
 
 ### Verification Commands
 
 ```bash
-# Test drag-drop operations
-cargo test --lib ui::tests::workflow_reordering
-cargo test --lib ui::tests::step_reordering
-cargo test --lib ui::tests::workflow_to_queue
-cargo test --lib ui::tests::step_to_pipeline
+# Test quality reports
+cargo test --lib quality::tests::overall_quality_report
+cargo test --lib quality::tests::workflow_quality_report
+cargo test --lib quality::tests::file_type_quality_report
+cargo test --lib quality::tests::trend_report
 
-# Test API calls
-cargo test --lib ui::tests::drag_drop_scheduler_api_calls
+# Test report actionability
+cargo test --lib quality::tests::report_actionability
+cargo test --lib quality::tests::report_recommendations
 ```
 
 ### Pass Criteria
 
-- [ ] All drag-drop operations work correctly
-- [ ] Correct scheduler APIs called
-- [ ] Priority/order updated correctly
-- [ ] Visual feedback during drag-drop
-- [ ] No data loss during drag-drop
+- [ ] All report types generated correctly
+- [ ] Reports include actionable insights
+- [ ] Recommendations specific and actionable
+- [ ] Trend data accurate
+- [ ] Report formatting correct
 
 ### Evidence Required
 
-- Drag-drop test results
-- Scheduler API call logs
-- Screenshot of drag-drop operation (manual verification)
+- Quality report test results
+- Sample quality reports
+- Actionability verification
 
 ---
 
@@ -370,7 +341,7 @@ cargo test --test '*' -- --test-threads=1
 
 **Evidence:**
 - All Phase 03 integration tests pass
-- UI components integrate correctly with scheduler
+- Quality loops integrate with scheduler
 
 ### Layer 3: Property Tests
 
@@ -380,61 +351,65 @@ PROPTEST_NUMBER_OF_TESTS=100 cargo test --lib property_based
 ```
 
 **Evidence:**
-- Navigation state invariants hold for 100 iterations
-- Drag-drop ordering invariants hold
+- Loop convergence invariants hold for 100 iterations
+- Metadata completeness invariants hold
 
 ### Layer 4: E2E Tests
 
 **Commands:**
 ```bash
-# Test UI workflow (manual)
-# 1. Start desktop shell
-# 2. Navigate queue
-# 3. View workflow details
-# 4. Drag-drop to reorder
-# 5. Navigate back
-# 6. Exit cleanly
+# Execute quality loop workflow
+cargo run --bin agentsdk -- run examples/workflows/quality_loop.yaml
+
+# Verify benchmark storage
+cargo run --bin quality -- list-benchmarks
+
+# Generate quality report
+cargo run --bin quality -- report --output quality_report.md
 ```
 
 **Evidence:**
-- Manual test checklist completed
-- Screenshot evidence collected
-- No crashes or data loss
+- Quality loops execute and converge
+- Benchmarks stored with metadata
+- Quality reports generated
 
 ### Layer 5: System Log Validation
 
 **Commands:**
 ```bash
-# Verify UI scope logs
-cargo run --bin whitt -- 2>&1 | jq -e 'select(.scope == "ui")'
+# Verify automation scope logs
+cargo run --bin agentsdk -- run examples/workflows/quality_loop.yaml 2>&1 | \
+  jq -e 'select(.scope == "automation")'
 ```
 
 **Evidence:**
-- UI scope logs emitted
+- Automation scope logs emitted
 - Logs include timestamp, scope, event, message
 
 ### Layer 6: Live CLI Verification
 
 **Commands:**
 ```bash
-# Not applicable for UI phase
-# Manual verification required
+# Test quality commands
+cargo run --bin agentsdk -- quality list-benchmarks
+cargo run --bin agentsdk -- quality report
+cargo run --bin agentsdk -- quality matrix
 ```
 
 **Evidence:**
-- Manual test checklist completed
-- UI verified to work correctly
+- Quality commands work
+- Output formatted correctly
 
 ### Layer 7: Benchmark Performance
 
 **Commands:**
 ```bash
-cargo bench --bench phase_03_benchmarks
+cargo bench --bench phase_04_benchmarks
 ```
 
 **Evidence:**
-- UI rendering performance acceptable
-- Drag-drop operations responsive
+- Quality loop performance acceptable
+- Benchmark storage performant
 - No performance regression > 10%
 
 ---
@@ -447,18 +422,12 @@ cargo bench --bench phase_03_benchmarks
 cargo test --test phase_00_integration -- --test-threads=1
 cargo test --test phase_01_integration -- --test-threads=1
 cargo test --test phase_02_integration -- --test-threads=1
-
-# Verify schema coverage
-cargo run --bin schema_audit -- --phase 0 --output phase_00_regression.md
-cargo run --bin schema_audit -- --phase 1 --output phase_01_regression.md
-cargo run --bin schema_audit -- --phase 2 --output phase_02_regression.md
 ```
 
 **Pass Criteria:**
 - [ ] All Phase 00 tests still pass
 - [ ] All Phase 01 tests still pass
 - [ ] All Phase 02 tests still pass
-- [ ] Schema coverage 100% for all phases
 
 ---
 
@@ -468,28 +437,28 @@ cargo run --bin schema_audit -- --phase 2 --output phase_02_regression.md
 
 ### Phase 03-Owned Fields
 
-**UISchema:**
-- window_title
-- window_width
-- window_height
-- theme
-- layout
+**QualitySchema:**
+- verification_criteria
+- repair_strategy
+- max_iterations
+- convergence_threshold
 
-**QueueVisualizationSchema:**
-- show_queue
-- show_workflow_details
-- show_progress
-- auto_refresh
+**BenchmarkSchema:**
+- benchmark_id
+- execution_time_ms
+- verification_score
+- repair_count
 
-**NavigationSchema:**
-- enable_back_forward
-- enable_breadcrumbs
-- preserve_history
+**QualityReportSchema:**
+- report_type
+- summary
+- issues
+- recommendations
 
 ### Verification Commands
 
 ```bash
-cargo run --bin schema_audit -- --phase 3 --output coverage_report.md
+cargo run --bin schema_audit -- --phase 4 --output coverage_report.md
 ```
 
 **Expected Output:**
@@ -501,12 +470,12 @@ cargo run --bin schema_audit -- --phase 3 --output coverage_report.md
 ## ADR Compliance
 
 **Relevant ADRs:**
-- ADR-007: UI Architecture
+- ADR-008: Quality Loop Architecture
 
 ### Verification Commands
 
 ```bash
-cargo run --bin adr_compliance -- --phase 3
+cargo run --bin adr_compliance -- --phase 4
 ```
 
 **Expected Output:**
@@ -524,27 +493,29 @@ cargo run --bin adr_compliance -- --phase 3
    - [ ] No features from later phases added
 
 2. **Architecture Drift:**
-   - [ ] UI matches ADR-007 architecture
-   - [ ] UI integrates correctly with scheduler
+   - [ ] Quality loops match ADR-008
 
 3. **Scope Creep:**
-   - [ ] Only UI features implemented
-   - [ ] No automation or autonomy features added
+   - [ ] Only quality loop features implemented
+   - [ ] No memory or search features added
 
 ---
 
 ## Evidence Storage
 
-**Location:** `results/phase_03/`
+**Location:** `results/phase_04/`
 
 **Contents:**
 - `unit_test_results.json`
 - `integration_test_output.log`
 - `property_test_results.json`
-- `e2e_manual_test_checklist.md` (manual UI tests)
-- `screenshots/` (UI screenshots)
-- `system_log_samples.json` (ui scope)
-- `benchmarks/` (UI performance)
+- `e2e_execution_logs/` (quality loop workflows)
+- `system_log_samples.json` (automation scope)
+- `cli_verification/` (quality commands)
+- `benchmarks/` (quality loop performance)
+- `benchmark_metadata/` (stored benchmark metadata)
+- `quality_reports/` (generated quality reports)
+- `file_type_matrix/` (file-type quality matrix)
 - `schema_coverage_report.md`
 - `adr_compliance_report.md`
 - `anti_goal_drift_checklist.md`
@@ -558,11 +529,10 @@ cargo run --bin adr_compliance -- --phase 3
 
 **Cannot exit Phase 03 if:**
 - Any verification layer fails
-- Desktop shell crashes on startup
-- Queue visualization doesn't match scheduler state
-- Scope indicators don't work
-- Navigation causes data loss
-- Drag-drop doesn't call scheduler APIs
+- Generate-verify-repair loops don't converge
+- Benchmark metadata incomplete
+- File-type matrix doesn't track quality
+- Reports not actionable
 - Any prior phase regression detected
 
 ---

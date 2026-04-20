@@ -7,61 +7,61 @@
 ## Review Scope (11 Areas)
 
 ### 1. Orchestration Entry Point
-- **Files**: `19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml`
+- **Files**: `18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml`
 - **Question**: Where does orchestration configuration start?
 - **Concern**: `orchestration:` is top-level but `sub_agent_orchestration:` is nested
 - **Recommendation**: Add visual hierarchy diagram showing top-level vs nested
 
 ### 2. Sub-Agent Definition Pattern
-- **Files**: `19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml`
+- **Files**: `18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml`
 - **Question**: What's minimum required for a sub-agent?
 - **Concern**: 30+ lines per sub-agent definition, no minimal example
 - **Recommendation**: Create minimal sub-agent example file
 
 ### 3. Interdependency Syntax
-- **Files**: `19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml`
+- **Files**: `18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml`
 - **Question**: How to read `depends_on: [doc_generator_sub, refactor_generator_sub]`?
 - **Concern**: Array syntax unclear - is order significant?
 - **Recommendation**: Add comment explaining dependency resolution
 
 ### 4. Validation Aggregation Strategy
-- **Files**: `19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml`
+- **Files**: `18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml`
 - **Question**: What's difference between `hierarchical` vs `conjunction` vs `disjunction`?
 - **Concern**: No semantic explanation of strategies
 - **Recommendation**: Add strategy comparison table
 
 ### 5. Guardrails Enforcement Policy
-- **Files**: `19-comprehensive-integration/02-guardrails-content-safety.yaml`
+- **Files**: `18-comprehensive-integration/02-guardrails-content-safety.yaml`
 - **Question**: When to use `block` vs `warn` vs `allow`?
 - **Concern**: No guidance on policy selection
 - **Recommendation**: Add decision matrix in comments
 
 ### 6. PII Redaction Patterns
-- **Files**: `19-comprehensive-integration/02-guardrails-content-safety.yaml`
+- **Files**: `18-comprehensive-integration/02-guardrails-content-safety.yaml`
 - **Question**: What patterns are available beyond built-in?
 - **Concern**: Custom regex patterns not explained
 - **Recommendation**: Add pattern customization examples
 
 ### 7. Toxicity Threshold Selection
-- **Files**: `19-comprehensive-integration/02-guardrails-content-safety.yaml`
+- **Files**: `18-comprehensive-integration/02-guardrails-content-safety.yaml`
 - **Question**: Why `severity_threshold: 0.7`? What's safe value?
 - **Concern**: No guidance on threshold tuning
 - **Recommendation**: Add threshold tuning guide
 
 ### 8. Business Rules Syntax
-- **Files**: `19-comprehensive-integration/02-guardrails-content-safety.yaml`
+- **Files**: `18-comprehensive-integration/02-guardrails-content-safety.yaml`
 - **Question**: How to write complex rules like `content_safety_score >= 0.95 && pii_detected == false`?
 - **Concern**: Only simple examples shown
 - **Recommendation**: Add compound rule examples
 
 ### 9. Validation Rule Severity
-- **Files**: `19-comprehensive-integration/02-guardrails-content-safety.yaml`
+- **Files**: `18-comprehensive-integration/02-guardrails-content-safety.yaml`
 - **Question**: What's practical difference between `error` vs `critical` vs `warning`?
 - **Concern**: Severity consequences not documented
 - **Recommendation**: Add severity impact table
 
 ### 10. Tool Use Guard Interaction
-- **Files**: `19-comprehensive-integration/02-guardrails-content-safety.yaml`
+- **Files**: `18-comprehensive-integration/02-guardrails-content-safety.yaml`
 - **Question**: How do `no_web_access` guards interact with `tool_permissions` section?
 - **Concern**: Two different permission systems
 - **Recommendation**: Clarify relationship between guardrails.tools and tool_permissions

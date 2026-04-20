@@ -5,7 +5,7 @@
 **Status**: Not Started
 **Created**: 2026-03-27
 **Related ADR**: ADR-0007 (Cron execution git-branch experimentation and refining workflows)
-**Related Research Plan**: research-plan-05-automation-autonomy-metrics.yml
+**Related Research Plan**: research-plan-04-automation-autonomy-metrics.yml
 **Estimated Time**: 8-10 weeks
 **Dependencies**: plan-00 (Foundation), plan-01 (MVP Queue), plan-02 (CLI & Backends), plan-03 (Glyphnova UI), plan-04 (Quality Loops), plan-05 (Memory & Search)
 
@@ -103,7 +103,7 @@ From `requirements.md` and `schema-consolidated-report.md`:
 
 ### Research Plan Review
 
-**research-plan-05-automation-autonomy-metrics.yml** is **COMPLETED** with 3 research domains (plan-06 uses domain 1):
+**research-plan-04-automation-autonomy-metrics.yml** is **COMPLETED** with 3 research domains (plan-06 uses domain 1):
 
 1. **Automation and Scheduling**: What scheduling patterns and git experimentation frameworks best support safe automation?
 
@@ -818,14 +818,14 @@ whitt-execution-engine compile-schedule --policy scheduling.yml
 
 ### Related Documents
 
-- **ADR-0007**: [Cron execution git-branch experimentation and refining workflows](../roadmap/adr-0007-cron-git-refinement.yml)
-- **Research Plan 05**: [Automation, autonomy, and metrics research](../roadmap/research-plan-05-automation-autonomy-metrics.yml)
+- **ADR-0007**: [Cron execution git-branch experimentation and refining workflows](../roadmap/adr-0006-cron-git-refinement.yml)
+- **Research Plan 05**: [Automation, autonomy, and metrics research](../roadmap/research-plan-04-automation-autonomy-metrics.yml)
 - **Plan 00**: [Foundation Compiler Contract](phase-0-foundation/plan-00-foundation.md)
 - **Plan 01**: [MVP Queue & Scheduler](phase-1-mvp-queue/plan-01-mvp-queue.md)
 - **Plan 02**: [CLI & Backends](phase-2-cli-backends/plan-02-cli-backends.md)
 - **Plan 03**: [Glyphnova UI](phase-3-glyphnova-ui/plan-03-glyphnova-ui.md)
-- **Plan 04**: [Quality Loops](phase-4-quality-loops/plan-04-quality-loops.md)
-- **Plan 05**: [Memory & Search](phase-5-memory-search/plan-05-memory-search.md)
+- **Plan 04**: [Quality Loops](phase-4-quality-loops/plan-03-quality-loops.md)
+- **Plan 05**: [Memory & Search](phase-5-memory-search/plan-04-memory-search.md)
 - **Requirements**: [schema-consolidated-report.md](../requirements/schema-consolidated-report.md)
 
 ### Implementation References

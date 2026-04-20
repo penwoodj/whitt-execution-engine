@@ -1,6 +1,6 @@
 # Workflow to Phase Matrix
 
-**Purpose**: Map all 53 example workflows to their testing phases based on feature requirements
+**Purpose**: Map all 50 example workflows to their testing phases based on feature requirements
 
 **Total Workflows**: 53
 **Total Categories**: 19
@@ -381,7 +381,7 @@
 
 ### 15. 01-for-loops-explicit-iteration.yaml
 
-**Path**: `05-loops-convergence/01-for-loops-explicit-iteration.yaml`
+**Path**: `04-loops-convergence/01-for-loops-explicit-iteration.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -413,7 +413,7 @@
 
 ### 16. 02-foreach-loops-data-collections.yaml
 
-**Path**: `05-loops-convergence/02-foreach-loops-data-collections.yaml`
+**Path**: `04-loops-convergence/02-foreach-loops-data-collections.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -441,7 +441,7 @@
 
 ### 17. 03-while-loops-conditional-termination.yaml
 
-**Path**: `05-loops-convergence/03-while-loops-conditional-termination.yaml`
+**Path**: `04-loops-convergence/03-while-loops-conditional-termination.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -469,7 +469,7 @@
 
 ### 18. 04-convergence-reduction-aggregation.yaml
 
-**Path**: `05-loops-convergence/04-convergence-reduction-aggregation.yaml`
+**Path**: `04-loops-convergence/04-convergence-reduction-aggregation.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -503,7 +503,7 @@
 
 ### 19. 01-file-read-write-batch.yaml
 
-**Path**: `06-file-operations/01-file-read-write-batch.yaml`
+**Path**: `05-file-operations/01-file-read-write-batch.yaml`
 
 **Owner Phases**: Phase 2
 
@@ -533,7 +533,7 @@
 
 ### 20. 02-file-permissions-backup.yaml
 
-**Path**: `06-file-operations/02-file-permissions-backup.yaml`
+**Path**: `05-file-operations/02-file-permissions-backup.yaml`
 
 **Owner Phases**: Phase 2
 
@@ -566,7 +566,7 @@
 
 ### 21. 01-web-fetch-scrape.yaml
 
-**Path**: `07-web-operations/01-web-fetch-scrape.yaml`
+**Path**: `06-web-operations/01-web-fetch-scrape.yaml`
 
 **Owner Phases**: Phase 2, Phase 5
 
@@ -602,7 +602,7 @@
 
 ### 22. 02-api-integration-rest.yaml
 
-**Path**: `07-web-operations/02-api-integration-rest.yaml`
+**Path**: `06-web-operations/02-api-integration-rest.yaml`
 
 **Owner Phases**: Phase 2
 
@@ -632,7 +632,7 @@
 
 ### 23. 03-url-parameters-requests.yaml
 
-**Path**: `07-web-operations/03-url-parameters-requests.yaml`
+**Path**: `06-web-operations/03-url-parameters-requests.yaml`
 
 **Owner Phases**: Phase 2
 
@@ -666,7 +666,7 @@
 
 ### 24. 01-document-indexing-retrieval.yaml
 
-**Path**: `08-rag-operations/01-document-indexing-retrieval.yaml`
+**Path**: `07-rag-operations/01-document-indexing-retrieval.yaml`
 
 **Owner Phases**: Phase 2, Phase 5
 
@@ -702,7 +702,7 @@
 
 ### 25. 02-rag-generation-context-aware.yaml
 
-**Path**: `08-rag-operations/02-rag-generation-context-aware.yaml`
+**Path**: `07-rag-operations/02-rag-generation-context-aware.yaml`
 
 **Owner Phases**: Phase 2, Phase 5
 
@@ -740,7 +740,7 @@
 
 ### 26. 01-script-execution.yaml
 
-**Path**: `09-script-cli/01-script-execution.yaml`
+**Path**: `08-script-cli/01-script-execution.yaml`
 
 **Owner Phases**: Phase 2
 
@@ -770,7 +770,7 @@
 
 ### 27. 02-cli-commands-environment.yaml
 
-**Path**: `09-script-cli/02-cli-commands-environment.yaml`
+**Path**: `08-script-cli/02-cli-commands-environment.yaml`
 
 **Owner Phases**: Phase 2
 
@@ -804,7 +804,7 @@
 
 ### 28. 01-nested-workflow-references.yaml
 
-**Path**: `10-sub-workflows/01-nested-workflow-references.yaml`
+**Path**: `09-sub-workflows/01-nested-workflow-references.yaml`
 
 **Owner Phases**: Phase 2
 
@@ -832,7 +832,7 @@
 
 ### 29. 02-workflow-composition-patterns.yaml
 
-**Path**: `10-sub-workflows/02-workflow-composition-patterns.yaml`
+**Path**: `09-sub-workflows/02-workflow-composition-patterns.yaml`
 
 **Owner Phases**: Phase 2
 
@@ -864,7 +864,7 @@
 
 ### 30. 01-event-based-branching.yaml
 
-**Path**: `11-conditional-branching/01-event-based-branching.yaml`
+**Path**: `10-conditional-branching/01-event-based-branching.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -892,7 +892,7 @@
 
 ### 31. 02-decision-logic-workflows.yaml
 
-**Path**: `11-conditional-branching/02-decision-logic-workflows.yaml`
+**Path**: `10-conditional-branching/02-decision-logic-workflows.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -924,7 +924,7 @@
 
 ### 32. 01-retry-strategies-backoff.yaml
 
-**Path**: `12-error-handling-retries/01-retry-strategies-backoff.yaml`
+**Path**: `11-error-handling-retries/01-retry-strategies-backoff.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -952,7 +952,7 @@
 
 ### 33. 02-error-propagation-escalation.yaml
 
-**Path**: `12-error-handling-retries/02-error-propagation-escalation.yaml`
+**Path**: `11-error-handling-retries/02-error-propagation-escalation.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -980,7 +980,7 @@
 
 ### 34. 03-graceful-failure-recovery.yaml
 
-**Path**: `12-error-handling-retries/03-graceful-failure-recovery.yaml`
+**Path**: `11-error-handling-retries/03-graceful-failure-recovery.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -1012,7 +1012,7 @@
 
 ### 35. 01-hierarchical-logging-system.yaml
 
-**Path**: `13-logging-monitoring/01-hierarchical-logging-system.yaml`
+**Path**: `12-logging-monitoring/01-hierarchical-logging-system.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -1040,7 +1040,7 @@
 
 ### 36. 02-metrics-collection.yaml
 
-**Path**: `13-logging-monitoring/02-metrics-collection.yaml`
+**Path**: `12-logging-monitoring/02-metrics-collection.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -1070,7 +1070,7 @@
 
 ### 37. 03-structured-output-formats.yaml
 
-**Path**: `13-logging-monitoring/03-structured-output-formats.yaml`
+**Path**: `12-logging-monitoring/03-structured-output-formats.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -1103,7 +1103,7 @@
 
 ### 38. 01-checkpointing-save-restore.yaml
 
-**Path**: `14-checkpointing-state/01-checkpointing-save-restore.yaml`
+**Path**: `13-checkpointing-state/01-checkpointing-save-restore.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -1133,7 +1133,7 @@
 
 ### 39. 02-state-management.yaml
 
-**Path**: `14-checkpointing-state/02-state-management.yaml`
+**Path**: `13-checkpointing-state/02-state-management.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -1166,7 +1166,7 @@
 
 ### 40. 01-memory-allocation-strategies.yaml
 
-**Path**: `15-resource-management/01-memory-allocation-strategies.yaml`
+**Path**: `14-resource-management/01-memory-allocation-strategies.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -1194,7 +1194,7 @@
 
 ### 41. 02-cpu-gpu-scheduling.yaml
 
-**Path**: `15-resource-management/02-cpu-gpu-scheduling.yaml`
+**Path**: `14-resource-management/02-cpu-gpu-scheduling.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -1223,7 +1223,7 @@
 
 ### 42. 03-resource-limits-throttling.yaml
 
-**Path**: `15-resource-management/03-resource-limits-throttling.yaml`
+**Path**: `14-resource-management/03-resource-limits-throttling.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -1255,7 +1255,7 @@
 
 ### 43. 01-allow-deny-lists-scopes.yaml
 
-**Path**: `16-tool-permissions/01-allow-deny-lists-scopes.yaml`
+**Path**: `15-tool-permissions/01-allow-deny-lists-scopes.yaml`
 
 **Owner Phases**: Phase 2
 
@@ -1283,7 +1283,7 @@
 
 ### 44. 02-fine-grained-step-control.yaml
 
-**Path**: `16-tool-permissions/02-fine-grained-step-control.yaml`
+**Path**: `15-tool-permissions/02-fine-grained-step-control.yaml`
 
 **Owner Phases**: Phase 2
 
@@ -1315,7 +1315,7 @@
 
 ### 45. 01-user-input-prompts-validation.yaml
 
-**Path**: `17-user-inputs-ui/01-user-input-prompts-validation.yaml`
+**Path**: `16-user-inputs-ui/01-user-input-prompts-validation.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -1343,7 +1343,7 @@
 
 ### 46. 02-interactive-user-feedback.yaml
 
-**Path**: `17-user-inputs-ui/02-interactive-user-feedback.yaml`
+**Path**: `16-user-inputs-ui/02-interactive-user-feedback.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -1375,7 +1375,7 @@
 
 ### 47. 01-pre-workflow-post-workflow-hooks.yaml
 
-**Path**: `18-hooks-lifecycle/01-pre-workflow-post-workflow-hooks.yaml`
+**Path**: `17-hooks-lifecycle/01-pre-workflow-post-workflow-hooks.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -1403,7 +1403,7 @@
 
 ### 48. 02-step-level-hooks.yaml
 
-**Path**: `18-hooks-lifecycle/02-step-level-hooks.yaml`
+**Path**: `17-hooks-lifecycle/02-step-level-hooks.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -1431,7 +1431,7 @@
 
 ### 49. 03-error-handling-hooks.yaml
 
-**Path**: `18-hooks-lifecycle/03-error-handling-hooks.yaml`
+**Path**: `17-hooks-lifecycle/03-error-handling-hooks.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -1459,7 +1459,7 @@
 
 ### 50. 04-lifecycle-events.yaml
 
-**Path**: `18-hooks-lifecycle/04-lifecycle-events.yaml`
+**Path**: `17-hooks-lifecycle/04-lifecycle-events.yaml`
 
 **Owner Phases**: Phase 1
 
@@ -1491,7 +1491,7 @@
 
 ### 51. 01-complex-orchestration-sub-agents.yaml
 
-**Path**: `19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml`
+**Path**: `18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml`
 
 **Owner Phases**: Phase 8
 
@@ -1521,7 +1521,7 @@
 
 ### 52. 02-guardrails-content-safety.yaml
 
-**Path**: `19-comprehensive-integration/02-guardrails-content-safety.yaml`
+**Path**: `18-comprehensive-integration/02-guardrails-content-safety.yaml`
 
 **Owner Phases**: Phase 8
 

@@ -1,6 +1,6 @@
-# Constraints and Assumptions
+# ⚙️ Constraints and Assumptions
 
-## Overview
+## 📊 Overview
 
 This document articulates the constraints and assumptions underpinning the AutoAgents SDK project. These decisions shape the architecture, scope, and implementation approach.
 
@@ -297,7 +297,7 @@ vulkan-rs = { version = "0.1", optional = true }
 
 **Testing Requirements:**
 - **Unit tests**: >90% code coverage for core modules
-- **Integration tests**: All example workflows (52 YAMLs) must pass
+- **Integration tests**: All example workflows (50 YAMLs) must pass
 - **Golden tests**: Snapshot testing for code generation
 - **Property tests**: `proptest` for parsers, validators, normalization
 - **Benchmarks**: `criterion` for performance regression detection
@@ -437,3 +437,12 @@ The AutoAgents SDK operates under these fundamental constraints:
 8. **Platform-constrained**: Linux primary, Windows/macOS secondary
 
 These constraints intentionally limit initial scope but provide a solid foundation for expansion (multi-provider, distributed execution, advanced scheduling) while ensuring quality and usability from day one.
+
+## 🔗 Related Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Requirements Index](./index.md) | Complete requirements documentation |
+| [Critical Evaluation](./critical-evaluation.md) | Tech stack decisions and choices |
+| [Advanced Agentic Features](./advanced-agentic-features.md) | Multi-agent spawning and loop termination |
+| [Configuration Defaults](./configuration-defaults.md) | Default values for all components |

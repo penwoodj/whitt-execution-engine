@@ -1,8 +1,8 @@
-# Developer Guide
+# 🚀 Developer Guide
 
-Welcome to the Whitt Execution Engine framework! This guide will help you get started with development.
+Welcome to Whitt Execution Engine framework! This guide will help you get started with development.
 
-## Table of Contents
+## 📋 Table of Contents
 
 1. [Quick Start](#quick-start)
 2. [Project Structure](#project-structure)
@@ -18,7 +18,7 @@ Welcome to the Whitt Execution Engine framework! This guide will help you get st
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
 
@@ -46,7 +46,7 @@ cargo run -- run opencode/docs/reports/requirements/example-workflows/requiremen
 
 ---
 
-## Project Structure
+## 🏗️ Project Structure
 
 ```
 whitt-execution-engine/
@@ -91,7 +91,7 @@ whitt-execution-engine/
 
 ---
 
-## Development Environment
+## 🛠️ Development Environment
 
 ### Recommended Tools
 
@@ -119,7 +119,7 @@ cargo install cargo-tree         # Dependency visualization
 
 ---
 
-## Building the Project
+## 🔨 Building the Project
 
 ### Debug Build (Fast Iteration)
 
@@ -173,7 +173,7 @@ cargo build --release --no-default-features
 
 ---
 
-## Running Tests
+## 🧪 Running Tests
 
 ### Unit Tests
 
@@ -221,7 +221,7 @@ cargo tarpaulin --out Html
 
 ---
 
-## Debugging
+## 🐛 Debugging
 
 ### Logging
 
@@ -286,7 +286,7 @@ pub fn validate_workflow(workflow: &WorkflowIR) -> Result<()> {
 
 ---
 
-## Code Organization
+## 🏗️ Code Organization
 
 ### Module Structure
 
@@ -361,7 +361,7 @@ pub async fn execute_parallel(steps: Vec<Step>) -> Result<Vec<Output>> {
 
 ---
 
-## Workflow Development
+## 📝 Workflow Development
 
 ### Creating Test Workflows
 
@@ -406,7 +406,7 @@ cargo run --validate opencode/docs/reports/requirements/example-workflows/requir
 
 ---
 
-## Common Tasks
+## ⚡ Common Tasks
 
 ### Adding a New Dependency
 
@@ -452,7 +452,7 @@ cargo fmt -- --check
 
 ---
 
-## Performance Profiling
+## ⚡ Performance Profiling
 
 ### Flame Graph
 
@@ -489,7 +489,7 @@ RUST_LOG=memory cargo run -- run my_workflow.yml
 
 ---
 
-## Best Practices
+## ✅ Best Practices
 
 ### Code Style
 
@@ -526,14 +526,6 @@ RUST_LOG=memory cargo run -- run my_workflow.yml
 
 ## Getting Help
 
-### Resources
-
-- **README**: [README.md](README.md)
-- **Contributing**: [CONTRIBUTING.md](CONTRIBUTING.md)
-- **Installation**: [INSTALL.md](INSTALL.md)
-- **Environment Variables**: [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md)
-- **Example Workflows**: `opencode/docs/reports/requirements/example-workflows/`
-
 ### Asking Questions
 
 - **GitHub Discussions**: https://github.com/penwoodj/whitt-execution-engine/discussions
@@ -541,17 +533,31 @@ RUST_LOG=memory cargo run -- run my_workflow.yml
 
 ### Reporting Bugs
 
-See [CONTRIBUTING.md](CONTRIBUTING.md#issue-reporting) for bug report template.
+See [contributing.md](./contributing.md) for bug report template.
 
 ---
 
 ## Next Steps
 
-1. Read [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow
-2. Review [Architecture Decisions](opencode/docs/reports/roadmap/) for design rationale
-3. Explore [Example Workflows](opencode/docs/reports/requirements/example-workflows/)
+1. Read [contributing.md](./contributing.md) for development workflow
+2. Review [Architecture Decisions](../roadmap/) for design rationale
+3. Explore [Example Workflows](../workflows/examples/)
 4. Choose a **first issue** to work on (look for "good first issue" label)
 5. Start coding!
+
+---
+
+## 🔗 Related Documentation
+
+| Document | Description |
+|----------|-------------|
+| [../README.md](../README.md) | Documentation index |
+| [contributing.md](./contributing.md) | Contribution guidelines |
+| [environment-variables.md](./environment-variables.md) | Configuration reference |
+| [testing-guide.md](./testing-guide.md) | Testing strategies |
+| [install.md](./install.md) | Installation guide |
+| [../schema/README.md](../schema/README.md) | Schema reference |
+| [../plans/README.md](../plans/README.md) | Implementation plans |
 
 ---
 

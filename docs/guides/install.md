@@ -1,8 +1,8 @@
-# Installation Guide
+# 📦 Installation Guide
 
-This guide walks you through installing the Whitt Execution Engine framework on Linux, macOS, and Windows.
+This guide walks you through installing Whitt Execution Engine framework on Linux, macOS, and Windows.
 
-## Table of Contents
+## 📋 Table of Contents
 
 1. [Prerequisites](#prerequisites)
 2. [Install Rust](#install-rust)
@@ -15,7 +15,7 @@ This guide walks you through installing the Whitt Execution Engine framework on 
 
 ---
 
-## Prerequisites
+## 📋 Prerequisites
 
 ### System Requirements
 
@@ -42,7 +42,7 @@ This guide walks you through installing the Whitt Execution Engine framework on 
 
 ---
 
-## Install Rust
+## 🦀 Install Rust
 
 ### Linux
 
@@ -88,7 +88,7 @@ cargo --version
 
 ---
 
-## Install the Framework
+## 🏗️ Install the Framework
 
 ### Clone the Repository
 
@@ -411,7 +411,7 @@ See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md) for all available confi
 
 ---
 
-## Verify Installation
+## ✅ Verify Installation
 
 ### 1. Verify Rust Installation
 
@@ -502,7 +502,7 @@ cat ./workspace/output/test_output
 
 ---
 
-## Platform-Specific Issues
+## 🔧 Platform-Specific Issues
 
 ### Linux
 
@@ -563,7 +563,7 @@ export WORKSPACE_ROOT=/tmp/workspace
 
 ---
 
-## Uninstall
+## 🗑️ Uninstall
 
 ### Uninstall the Framework
 
@@ -599,9 +599,9 @@ rm -rf ~/.cargo ~/.rustup
 
 ## Next Steps
 
-- [ ] Read [README.md](README.md) for framework overview
-- [ ] Review [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md) for configuration
-- [ ] Explore [example workflows](opencode/docs/reports/requirements/example-workflows/)
+- [ ] Read [../README.md](../README.md) for framework overview
+- [ ] Review [environment-variables.md](./environment-variables.md) for configuration
+- [ ] Explore [example workflows](../workflows/examples/)
 - [ ] Run your first workflow
 - [ ] Generate Rust code from your workflow
 
@@ -628,9 +628,9 @@ rm -rf ~/.cargo ~/.rustup
 
 ### Getting Help
 
-- **Documentation**: [README.md](README.md)
-- **Environment Variables**: [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md)
-- **Example Workflows**: `opencode/docs/reports/requirements/example-workflows/`
+- **Documentation**: [../README.md](../README.md)
+- **Environment Variables**: [environment-variables.md](./environment-variables.md)
+- **Example Workflows**: `../workflows/examples/`
 - **Issues**: https://github.com/penwoodj/whitt-execution-engine/issues
 
 ---
@@ -659,3 +659,16 @@ rm -rf ~/.cargo ~/.rustup
 
 **Last Updated**: April 2026
 **Framework Version**: 0.1.0
+
+---
+
+## 🔗 Related Documentation
+
+| Document | Description |
+|----------|-------------|
+| [../README.md](../README.md) | Documentation index |
+| [developer-guide.md](./developer-guide.md) | Development setup and workflow |
+| [environment-variables.md](./environment-variables.md) | Configuration reference |
+| [testing-guide.md](./testing-guide.md) | Testing strategies |
+| [contributing.md](./contributing.md) | Contribution guidelines |
+| [../schema/unified-workflow-schema.yml](../schema/unified-workflow-schema.yml) | Schema reference |

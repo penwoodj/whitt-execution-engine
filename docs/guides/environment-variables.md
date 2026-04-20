@@ -1,8 +1,8 @@
-# Environment Variables
+# ⚙️ Environment Variables
 
-This document describes all environment variables supported by the Whitt Execution Engine framework.
+This document describes all environment variables supported by Whitt Execution Engine framework.
 
-## Overview
+## 📋 Overview
 
 Environment variables can be configured through:
 1. **.env file** in the project root (recommended for development)
@@ -355,7 +355,7 @@ whitt-execution-engine run workflow.yml
 
 ---
 
-## Configuration File (workflow.yml)
+## 🔧 Configuration File (workflow.yml)
 
 Environment variables are referenced in workflow YAML using `${VARIABLE_NAME}` syntax:
 
@@ -386,7 +386,7 @@ agentic_workflow:
 
 ---
 
-## Troubleshooting
+## 🐛 Troubleshooting
 
 ### Common Issues
 
@@ -427,9 +427,12 @@ cat ./workspace/logs/workflow.log | jq .
 
 ---
 
-## Additional Resources
+## 🔗 Related Documentation
 
-- **Main Documentation**: See [README.md](README.md)
-- **Example Workflows**: `opencode/docs/reports/requirements/example-workflows/`
-- **Schema Documentation**: `opencode/docs/reports/requirements/schema-consolidated-report.md`
-- **Installation Guide**: [INSTALL.md](INSTALL.md)
+| Document | Description |
+|----------|-------------|
+| [../README.md](../README.md) | Documentation index |
+| [developer-guide.md](./developer-guide.md) | Development setup and workflow |
+| [testing-guide.md](./testing-guide.md) | Testing strategies |
+| [install.md](./install.md) | Installation guide |
+| [../schema/unified-workflow-schema.yml](../schema/unified-workflow-schema.yml) | Schema reference |

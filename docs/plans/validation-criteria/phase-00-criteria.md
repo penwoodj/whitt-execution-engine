@@ -144,7 +144,7 @@ cargo test --lib ir::tests::round_trip
 
 ## Parser Robustness
 
-**Requirement:** Parser handles all 53 example workflows without crash
+**Requirement:** Parser handles all 50 example workflows without crash
 
 ### Example Workflow Categories
 
@@ -180,7 +180,7 @@ cargo test --lib ir::tests::round_trip
 ### Verification Commands
 
 ```bash
-# Parse all 53 example workflows
+# Parse all 50 example workflows
 find examples/workflows -name "*.yaml" -o -name "*.yml" | while read file; do
   echo "Parsing $file..."
   cargo run --bin parser -- "$file" || exit 1
@@ -193,7 +193,7 @@ find examples/workflows -name "*.yaml" -o -name "*.yml" | wc -l
 
 ### Pass Criteria
 
-- [ ] All 53 example workflows parse without crash
+- [ ] All 50 example workflows parse without crash
 - [ ] Parser returns appropriate error for invalid workflows
 - [ ] No memory leaks during parsing (valgrind clean)
 - [ ] Parsing time < 1 second per workflow on average
@@ -624,7 +624,7 @@ done
 ```
 
 **Evidence:**
-- All 53 example workflows parse
+- All 50 example workflows parse
 - No crashes during parsing
 - Parsing time < 1 second per workflow
 
@@ -754,7 +754,7 @@ cargo run --bin adr_compliance -- --phase 0
 - `unit_test_results.json`
 - `integration_test_output.log`
 - `property_test_results.json`
-- `e2e_execution_logs/` (parse logs for 53 workflows)
+- `e2e_execution_logs/` (parse logs for 50 workflows)
 - `system_log_samples.json`
 - `cli_verification/` (terminal screenshots)
 - `benchmarks/` (criterion reports)
@@ -771,7 +771,7 @@ cargo run --bin adr_compliance -- --phase 0
 - Schema coverage < 100%
 - ADR compliance violations exist
 - Performance regression > 10%
-- 53 workflows don't all parse
+- 50 workflows don't all parse
 
 ---
 

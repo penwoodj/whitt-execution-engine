@@ -1,6 +1,6 @@
-# Critical Evaluation
+# 🔍 Critical Evaluation
 
-## Overview
+## 📊 Overview
 
 This document summarizes the critical technology choices for the AutoAgents SDK workflow execution engine. All decisions are based on 2025-2026 ecosystem research, performance benchmarks, and production readiness.
 
@@ -17,7 +17,7 @@ Each evaluation considers:
 
 **Evaluation sources:**
 - `RESEARCH_UPSTREAM_SUCCESS_FACTORS.md` (April 2026, 683 lines)
-- ADRs (`adr-0000` through `adr-0008`)
+- ADRs (`adr-0000` through `adr-0007`)
 - Performance benchmarks from upstream crates
 - RustSec advisories for security issues
 
@@ -344,6 +344,6 @@ Ollama outputs NDJSON (newline-delimited JSON), not SSE. Using native crate avoi
 ## References
 
 - **Upstream Research**: `RESEARCH_UPSTREAM_SUCCESS_FACTORS.md` (April 2026)
-- **ADRs**: `adr-0000` through `adr-0008`
+- **ADRs**: `adr-0000` through `adr-0007`
 - **Transpiler Architecture**: `transpiler_architecture.md`
 - **Unified Schema**: `unified-workflow-schema.yml` v2.0

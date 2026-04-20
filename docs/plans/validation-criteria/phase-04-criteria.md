@@ -1,21 +1,25 @@
-# Phase 04: Quality Loops - Validation Criteria
+# Phase 04: Memory & Search - Validation Criteria
 
-**Phase Focus:** Generate-verify-repair loops, benchmarks, file-type matrix, quality reports
-**Entry Criteria:** Phases 00, 01, and 02 complete (Phase 03 optional)
+**Phase Focus:** Local memory, search (full-text, semantic, hybrid), external search, scraping, provenance, GC
+**Entry Criteria:** Phases 00, 01, 02, 03, and 04 complete
 **Estimated Duration:** 3-4 weeks
-**Blocking for:** Phases 05, 06, 07, 08
+**Blocking for:** Phases 05, 06, 07
 
 ---
 
 ## Phase Overview
 
-Phase 04 implements quality assurance loops. This phase provides generate-verify-repair workflows for iterative improvement, benchmarks with metadata, file-type quality tracking, and actionable quality reports. Quality loops automatically detect issues and suggest or apply repairs.
+Phase 04 implements memory and search capabilities. This phase provides local memory storage, full-text search, semantic search, hybrid search, external search with policy gates, web scraping with robots.txt respect, provenance tracking, and garbage collection.
 
 **Critical Success Factors:**
-1. Generate-verify-repair loops converge (no infinite loops)
-2. Benchmarks store with complete metadata
-3. File-type matrix tracks quality accurately
-4. Reports provide actionable insights
+1. Local memory stores and retrieves reliably
+2. Full-text search works correctly
+3. Semantic search works correctly
+4. Hybrid search combines both
+5. External search behind policy gates
+6. Scraping respects robots.txt
+7. Provenance captures timestamps
+8. GC prevents unbounded growth
 
 ---
 
@@ -25,296 +29,409 @@ Phase 04 implements quality assurance loops. This phase provides generate-verify
 
 **Verification Commands:**
 ```bash
-# Verify Phases 00-02 exit
+# Verify Phases 00-04 exit
 cargo test --test phase_00_integration -- --test-threads=1
 cargo test --test phase_01_integration -- --test-threads=1
 cargo test --test phase_02_integration -- --test-threads=1
-
-# Verify schema coverage
-cargo run --bin schema_audit -- --phase 0 --output phase_00_coverage.md
-cargo run --bin schema_audit -- --phase 1 --output phase_01_coverage.md
-cargo run --bin schema_audit -- --phase 2 --output phase_02_coverage.md
+cargo test --test phase_04_integration -- --test-threads=1
 ```
 
 **Prerequisites:**
-- [ ] Phases 00, 01, 02 exit criteria verified (all 7 layers)
-- [ ] Schema coverage 100% for phases 00, 01, 02
-- [ ] ADR compliance verified for phases 00, 01, 02
-- [ ] Cross-phase regression clean (Phases 00+01+02)
-- [ ] Benchmark infrastructure ready
+- [ ] Phases 00-04 exit criteria verified (all 7 layers)
+- [ ] Schema coverage 100% for phases 00-04
+- [ ] ADR compliance verified for phases 00-04
+- [ ] Cross-phase regression clean (Phases 00-04)
+- [ ] Vector database ready for semantic search
+- [ ] Full-text index ready for search
 
 **Blocking Violations:**
-- Unresolved Phase 00, 01, or 02 failures
+- Unresolved Phase 00-04 failures
 - Schema coverage < 100% for any phase
 - Cross-phase regression detected
 
 ---
 
-## Generate-Verify-Repair Loops
+## Local Memory
 
-**Requirement:** Generate-verify-repair loops converge (no infinite loops)
+**Requirement:** Local memory stores and retrieves reliably
 
-### Loop Structure
+### Memory Operations
+
+1. **Store:** Store data with key
+2. **Retrieve:** Retrieve data by key
+3. **Update:** Update existing data
+4. **Delete:** Delete data by key
+5. **List:** List all keys
+6. **Exists:** Check if key exists
+
+### Memory Structure
 
 ```
-Generate → Verify → Pass?
-               ↓
-           Repair → Generate
+.memory/
+├── data/
+│   ├── workflow_1.json
+│   ├── workflow_2.json
+│   └── ...
+├── index/
+│   ├── full_text.idx
+│   ├── semantic.idx
+│   └── ...
+├── metadata/
+│   ├── provenance.json
+│   └── timestamps.json
+└── gc/
+    └── deleted.json
 ```
-
-1. **Generate:** Produce artifact (code, config, document)
-2. **Verify:** Validate artifact against criteria
-3. **Pass?** If verification passes, exit loop
-4. **Repair:** If verification fails, generate repair
-5. **Repeat:** Go back to Generate
-
-### Convergence Criteria
-
-1. **Max Iterations:** Loop terminates after N iterations
-2. **Convergence Threshold:** Verification score >= threshold
-3. **Stability:** No improvement for K iterations
-4. **Timeout:** Maximum time limit exceeded
 
 ### Verification Commands
 
 ```bash
-# Test generate-verify-repair loops
-cargo test --lib quality::tests::basic_gvr_loop
-cargo test --lib quality::tests::gvr_convergence
-cargo test --lib quality::tests::gvr_max_iterations
-cargo test --lib quality::tests::gvr_convergence_threshold
-cargo test --lib quality::tests::gvr_stability_check
-cargo test --lib quality::tests::gvr_timeout
+# Test local memory operations
+cargo test --lib memory::tests::store_operation
+cargo test --lib memory::tests::retrieve_operation
+cargo test --lib memory::tests::update_operation
+cargo test --lib memory::tests::delete_operation
+cargo test --lib memory::tests::list_operation
+cargo test --lib memory::tests::exists_operation
 
-# Test infinite loop prevention
-cargo test --lib quality::tests::infinite_loop_prevention
+# Test reliability
+cargo test --lib memory::tests::concurrent_operations
+cargo test --lib memory::tests::persistence_after_restart
 ```
 
 ### Pass Criteria
 
-- [ ] Generate-verify-repair loops execute correctly
-- [ ] Loops converge (terminate) in all test cases
-- [ ] Max iterations respected
-- [ ] Convergence thresholds work
-- [ ] Stability checks work
-- [ ] Timeout enforced
-- [ ] No infinite loops
+- [ ] All memory operations work correctly
+- [ ] Data persists after restart
+- [ ] Concurrent operations work safely
+- [ ] No data corruption
+- [ ] No memory leaks
 
 ### Evidence Required
 
-- Generate-verify-repair loop test results
-- Convergence metrics
-- Timeout test logs
-- Infinite loop prevention test logs
+- Memory operation test results
+- Persistence test logs
+- Concurrent operation test logs
 
 ---
 
-## Benchmark Storage
+## Full-Text Search
 
-**Requirement:** Benchmarks store with complete metadata
+**Requirement:** Full-text search works correctly
 
-### Benchmark Metadata
+### Search Features
 
-1. **Workflow Metadata:**
-   - Workflow ID
-   - Workflow name
-   - Workflow version
-   - Workflow type (generation, verification, repair)
+1. **Keyword Search:** Search by keywords
+2. **Phrase Search:** Search by exact phrases
+3. **Boolean Search:** AND, OR, NOT operators
+4. **Wildcard Search:** Wildcard patterns
+5. **Proximity Search:** Words within distance
+6. **Fuzzy Search:** Approximate matches
 
-2. **Execution Metadata:**
-   - Timestamp
-   - Execution time
-   - Success/failure
-   - Error message (if failed)
+### Verification Commands
 
-3. **Resource Metadata:**
-   - CPU usage
-   - Memory usage
-   - Network usage
-   - Disk I/O
+```bash
+# Test full-text search
+cargo test --lib search::tests::keyword_search
+cargo test --lib search::tests::phrase_search
+cargo test --lib search::tests::boolean_search
+cargo test --lib search::tests::wildcard_search
+cargo test --lib search::tests::proximity_search
+cargo test --lib search::tests::fuzzy_search
 
-4. **Quality Metadata:**
-   - Verification score
-   - Repair count
-   - Iteration count
-   - Convergence metric
+# Test relevance ranking
+cargo test --lib search::tests::relevance_ranking
+```
 
-### Storage Format
+### Pass Criteria
+
+- [ ] All search types work correctly
+- [ ] Results ranked by relevance
+- [ ] Search performance acceptable
+- [ ] No false negatives (missing results)
+- [ ] Minimal false positives (irrelevant results)
+
+### Evidence Required
+
+- Full-text search test results
+- Relevance ranking test logs
+- Search performance metrics
+
+---
+
+## Semantic Search
+
+**Requirement:** Semantic search works correctly
+
+### Search Features
+
+1. **Embedding Generation:** Generate embeddings for queries
+2. **Vector Search:** Search by vector similarity
+3. **Top-K Retrieval:** Return top K most similar results
+4. **Similarity Threshold:** Filter by similarity threshold
+
+### Verification Commands
+
+```bash
+# Test semantic search
+cargo test --lib search::tests::embedding_generation
+cargo test --lib search::tests::vector_search
+cargo test --lib search::tests::top_k_retrieval
+cargo test --lib search::tests::similarity_threshold
+
+# Test accuracy
+cargo test --lib search::tests::semantic_search_accuracy
+```
+
+### Pass Criteria
+
+- [ ] Embeddings generated correctly
+- [ ] Vector search works
+- [ ] Top-K retrieval returns K results
+- [ ] Similarity threshold filters correctly
+- [ ] Search accuracy > 90%
+
+### Evidence Required
+
+- Semantic search test results
+- Accuracy metrics
+- Vector search logs
+
+---
+
+## Hybrid Search
+
+**Requirement:** Hybrid search combines full-text and semantic search
+
+### Search Strategy
+
+1. **Execute full-text search**
+2. **Execute semantic search**
+3. **Combine results (merge, deduplicate)**
+4. **Rank by combined score**
+5. **Return top results
+
+### Scoring
+
+```
+combined_score = 0.6 * full_text_score + 0.4 * semantic_score
+```
+
+### Verification Commands
+
+```bash
+# Test hybrid search
+cargo test --lib search::tests::hybrid_search_merge
+cargo test --lib search::tests::hybrid_search_deduplication
+cargo test --lib search::tests::hybrid_search_ranking
+cargo test --lib search::tests::hybrid_search_accuracy
+```
+
+### Pass Criteria
+
+- [ ] Full-text and semantic search execute
+- [ ] Results merged correctly
+- [ ] Duplicates removed
+- [ ] Combined ranking works
+- [ ] Hybrid accuracy > individual search accuracy
+
+### Evidence Required
+
+- Hybrid search test results
+- Merge and deduplication logs
+- Combined ranking metrics
+
+---
+
+## External Search
+
+**Requirement:** External search behind policy gates
+
+### External Search Sources
+
+1. **Google Search:** Web search
+2. **Bing Search:** Web search
+3. **Wikipedia:** Encyclopedia search
+4. **GitHub:** Code search
+
+### Policy Gates
+
+1. **Allowed Domains:** Whitelist of allowed domains
+2. **Blocked Domains:** Blacklist of blocked domains
+3. **Rate Limits:** Maximum requests per minute
+4. **Content Filters:** Block inappropriate content
+
+### Verification Commands
+
+```bash
+# Test external search
+cargo test --lib search::tests::google_search
+cargo test --lib search::tests::bing_search
+cargo test --lib search::tests::wikipedia_search
+cargo test --lib search::tests::github_search
+
+# Test policy gates
+cargo test --lib search::tests::allowed_domains
+cargo test --lib search::tests::blocked_domains
+cargo test --lib search::tests::rate_limits
+cargo test --lib search::tests::content_filters
+```
+
+### Pass Criteria
+
+- [ ] All external search sources work
+- [ ] Allowed domains enforced
+- [ ] Blocked domains enforced
+- [ ] Rate limits enforced
+- [ ] Content filters work
+
+### Evidence Required
+
+- External search test results
+- Policy gate test logs
+- Rate limit logs
+
+---
+
+## Web Scraping
+
+**Requirement:** Scraping respects robots.txt
+
+### Scraping Features
+
+1. **Robots.txt Parser:** Parse robots.txt
+2. **Disallow Rules:** Respect disallow rules
+3. **Crawl Delay:** Respect crawl-delay
+4. **User-Agent:** Identify user-agent
+5. **Rate Limiting:** Respect server rate limits
+
+### Verification Commands
+
+```bash
+# Test web scraping
+cargo test --lib scraping::tests::robots_txt_parser
+cargo test --lib scraping::tests::disallow_rules
+cargo test --lib scraping::tests::crawl_delay
+cargo test --lib scraping::tests::user_agent
+cargo test --lib scraping::tests::rate_limiting
+```
+
+### Pass Criteria
+
+- [ ] Robots.txt parsed correctly
+- [ ] Disallow rules respected
+- [ ] Crawl delay respected
+- [ ] User-agent identified
+- [ ] Rate limits respected
+
+### Evidence Required
+
+- Web scraping test results
+- Robots.txt compliance logs
+
+---
+
+## Provenance
+
+**Requirement:** Provenance captures timestamps
+
+### Provenance Data
+
+1. **Creation Timestamp:** When data was created
+2. **Modification Timestamp:** When data was last modified
+3. **Access Timestamp:** When data was last accessed
+4. **Source:** Where data came from
+5. **Author:** Who created/modified data
+
+### Provenance Format
 
 ```json
 {
-  "benchmark_id": "uuid",
-  "workflow_id": "workflow_uuid",
-  "workflow_name": "test_workflow",
-  "workflow_version": "1.0.0",
-  "workflow_type": "generation",
-  "timestamp": "2026-04-06T10:00:00Z",
-  "execution_time_ms": 1234,
-  "success": true,
-  "error": null,
-  "cpu_usage_percent": 75.5,
-  "memory_usage_mb": 512,
-  "network_usage_bytes": 1024,
-  "disk_io_bytes": 2048,
-  "verification_score": 0.95,
-  "repair_count": 2,
-  "iteration_count": 5,
-  "convergence_metric": 0.98
+  "data_id": "uuid",
+  "created_at": "2026-04-06T10:00:00Z",
+  "modified_at": "2026-04-06T11:00:00Z",
+  "accessed_at": "2026-04-06T12:00:00Z",
+  "source": "external_search",
+  "author": "system"
 }
 ```
 
 ### Verification Commands
 
 ```bash
-# Test benchmark storage
-cargo test --lib quality::tests::benchmark_storage
-cargo test --lib quality::tests::benchmark_retrieval
-cargo test --lib quality::tests::benchmark_metadata_completeness
-
-# Test benchmark querying
-cargo test --lib quality::tests::benchmark_query_by_workflow
-cargo test --lib quality::tests::benchmark_query_by_type
-cargo test --lib quality::tests::benchmark_query_by_score
+# Test provenance
+cargo test --lib provenance::tests::creation_timestamp
+cargo test --lib provenance::tests::modification_timestamp
+cargo test --lib provenance::tests::access_timestamp
+cargo test --lib provenance::tests::source_tracking
+cargo test --lib provenance::tests::author_tracking
 ```
 
 ### Pass Criteria
 
-- [ ] Benchmarks stored with complete metadata
-- [ ] Metadata retrieval works correctly
-- [ ] All required fields present
-- [ ] Benchmark queries work correctly
-- [ ] No missing or null metadata fields
+- [ ] All timestamps captured correctly
+- [ ] Source tracked accurately
+- [ ] Author tracked accurately
+- [ ] Timestamps update correctly
+- [ ] No missing provenance data
 
 ### Evidence Required
 
-- Benchmark storage test results
-- Metadata completeness verification
-- Benchmark query test logs
+- Provenance test results
+- Timestamp verification logs
 
 ---
 
-## File-Type Matrix
+## Garbage Collection
 
-**Requirement:** File-type matrix tracks quality
+**Requirement:** GC prevents unbounded growth
 
-### File Types
+### GC Features
 
-1. **YAML Files:** Workflow specifications
-2. **Rust Files:** Generated code
-3. **Markdown Files:** Documentation
-4. **JSON Files:** Configuration and metadata
-5. **Text Files:** Logs and reports
+1. **Deleted Data Cleanup:** Remove deleted data
+2. **Expired Data Cleanup:** Remove expired data
+3. **Orphan Cleanup:** Remove orphaned data
+4. **Index Cleanup:** Rebuild indexes
+5. **Compaction:** Compact storage
 
-### Quality Metrics
+### GC Triggers
 
-1. **Syntax Validity:** File parses correctly
-2. **Semantic Correctness:** Content is semantically valid
-3. **Style Compliance:** Follows style guidelines
-4. **Coverage:** Test coverage (for code)
-5. **Documentation:** Documentation completeness
-
-### Matrix Structure
-
-| File Type | Total | Valid | Invalid | Quality Score | Avg Iterations |
-|-----------|-------|-------|---------|----------------|----------------|
-| YAML      | 53    | 50    | 3       | 0.94           | 2.1            |
-| Rust      | 25    | 23    | 2       | 0.92           | 1.8            |
-| Markdown  | 12    | 12    | 0       | 1.00           | 1.0            |
-| JSON      | 8     | 8     | 0       | 1.00           | 1.0            |
-| Text      | 5     | 5     | 0       | 1.00           | 1.0            |
+1. **Manual Trigger:** Trigger GC manually
+2. **Automatic Trigger:** Trigger GC on threshold
+3. **Scheduled Trigger:** Trigger GC periodically
 
 ### Verification Commands
 
 ```bash
-# Test file-type matrix
-cargo test --lib quality::tests::file_type_matrix_tracking
-cargo test --lib quality::tests::file_type_matrix_aggregation
-cargo test --lib quality::tests::file_type_matrix_quality_scores
+# Test garbage collection
+cargo test --lib gc::tests::deleted_data_cleanup
+cargo test --lib gc::tests::expired_data_cleanup
+cargo test --lib gc::tests::orphan_cleanup
+cargo test --lib gc::tests::index_cleanup
+cargo test --lib gc::tests::compaction
 
-# Test matrix updates
-cargo test --lib quality::tests::matrix_update_on_valid_file
-cargo test --lib quality::tests::matrix_update_on_invalid_file
+# Test GC triggers
+cargo test --lib gc::tests::manual_trigger
+cargo test --lib gc::tests::automatic_trigger
+cargo test --lib gc::tests::scheduled_trigger
+
+# Test unbounded growth prevention
+cargo test --lib gc::tests::unbounded_growth_prevention
 ```
 
 ### Pass Criteria
 
-- [ ] File-type matrix tracks all file types
-- [ ] Quality scores calculated correctly
-- [ ] Matrix updates on valid/invalid files
-- [ ] Aggregation statistics accurate
-- [ ] Matrix queryable by file type
+- [ ] All cleanup types work
+- [ ] All triggers work
+- [ ] Unbounded growth prevented
+- [ ] No data loss during GC
+- [ ] GC completes in reasonable time
 
 ### Evidence Required
 
-- File-type matrix test results
-- Quality score calculations
-- Matrix aggregation logs
-
----
-
-## Quality Reports
-
-**Requirement:** Reports provide actionable insights
-
-### Report Types
-
-1. **Overall Quality Report:** Summary of all workflows
-2. **Workflow Quality Report:** Detailed report for single workflow
-3. **File-Type Quality Report:** Quality by file type
-4. **Trend Report:** Quality over time
-
-### Report Content
-
-#### Overall Quality Report
-
-```markdown
-# Overall Quality Report
-
-## Summary
-- Total Workflows: 53
-- Valid Workflows: 50 (94.3%)
-- Invalid Workflows: 3 (5.7%)
-- Average Quality Score: 0.94
-- Average Iterations: 1.8
-
-## Issues
-1. workflow_04.yaml: Invalid syntax (line 42)
-2. workflow_12.yaml: Missing required field
-3. workflow_27.yaml: Schema validation error
-
-## Recommendations
-1. Fix syntax errors in workflow_04.yaml
-2. Add missing fields to workflow_12.yaml
-3. Resolve schema validation in workflow_27.yaml
-```
-
-### Verification Commands
-
-```bash
-# Test quality reports
-cargo test --lib quality::tests::overall_quality_report
-cargo test --lib quality::tests::workflow_quality_report
-cargo test --lib quality::tests::file_type_quality_report
-cargo test --lib quality::tests::trend_report
-
-# Test report actionability
-cargo test --lib quality::tests::report_actionability
-cargo test --lib quality::tests::report_recommendations
-```
-
-### Pass Criteria
-
-- [ ] All report types generated correctly
-- [ ] Reports include actionable insights
-- [ ] Recommendations specific and actionable
-- [ ] Trend data accurate
-- [ ] Report formatting correct
-
-### Evidence Required
-
-- Quality report test results
-- Sample quality reports
-- Actionability verification
+- GC test results
+- Growth prevention logs
+- GC performance metrics
 
 ---
 
@@ -341,7 +458,7 @@ cargo test --test '*' -- --test-threads=1
 
 **Evidence:**
 - All Phase 04 integration tests pass
-- Quality loops integrate with scheduler
+- Memory and search integrate correctly
 
 ### Layer 3: Property Tests
 
@@ -351,34 +468,31 @@ PROPTEST_NUMBER_OF_TESTS=100 cargo test --lib property_based
 ```
 
 **Evidence:**
-- Loop convergence invariants hold for 100 iterations
-- Metadata completeness invariants hold
+- Search invariants hold for 100 iterations
+- Memory persistence invariants hold
 
 ### Layer 4: E2E Tests
 
 **Commands:**
 ```bash
-# Execute quality loop workflow
-cargo run --bin agentsdk -- run examples/workflows/quality_loop.yaml
-
-# Verify benchmark storage
-cargo run --bin quality -- list-benchmarks
-
-# Generate quality report
-cargo run --bin quality -- report --output quality_report.md
+# Execute search workflows
+cargo run --bin agentsdk -- run examples/workflows/full_text_search.yaml
+cargo run --bin agentsdk -- run examples/workflows/semantic_search.yaml
+cargo run --bin agentsdk -- run examples/workflows/hybrid_search.yaml
+cargo run --bin agentsdk -- run examples/workflows/scraping.yaml
 ```
 
 **Evidence:**
-- Quality loops execute and converge
-- Benchmarks stored with metadata
-- Quality reports generated
+- All search workflows execute
+- Scraping respects robots.txt
+- GC prevents unbounded growth
 
 ### Layer 5: System Log Validation
 
 **Commands:**
 ```bash
 # Verify automation scope logs
-cargo run --bin agentsdk -- run examples/workflows/quality_loop.yaml 2>&1 | \
+cargo run --bin agentsdk -- run examples/workflows/search.yaml 2>&1 | \
   jq -e 'select(.scope == "automation")'
 ```
 
@@ -390,26 +504,36 @@ cargo run --bin agentsdk -- run examples/workflows/quality_loop.yaml 2>&1 | \
 
 **Commands:**
 ```bash
-# Test quality commands
-cargo run --bin agentsdk -- quality list-benchmarks
-cargo run --bin agentsdk -- quality report
-cargo run --bin agentsdk -- quality matrix
+# Test memory commands
+cargo run --bin agentsdk -- memory store --key test --value "hello"
+cargo run --bin agentsdk -- memory retrieve --key test
+cargo run --bin agentsdk -- memory list
+
+# Test search commands
+cargo run --bin agentsdk -- search full-text --query "test"
+cargo run --bin agentsdk -- search semantic --query "test"
+cargo run --bin agentsdk -- search hybrid --query "test"
+
+# Test GC command
+cargo run --bin agentsdk -- gc run
 ```
 
 **Evidence:**
-- Quality commands work
-- Output formatted correctly
+- Memory commands work
+- Search commands work
+- GC command works
 
 ### Layer 7: Benchmark Performance
 
 **Commands:**
 ```bash
-cargo bench --bench phase_04_benchmarks
+cargo bench --bench phase_05_benchmarks
 ```
 
 **Evidence:**
-- Quality loop performance acceptable
-- Benchmark storage performant
+- Search performance acceptable
+- Memory operations performant
+- GC completes in reasonable time
 - No performance regression > 10%
 
 ---
@@ -422,12 +546,14 @@ cargo bench --bench phase_04_benchmarks
 cargo test --test phase_00_integration -- --test-threads=1
 cargo test --test phase_01_integration -- --test-threads=1
 cargo test --test phase_02_integration -- --test-threads=1
+cargo test --test phase_04_integration -- --test-threads=1
 ```
 
 **Pass Criteria:**
 - [ ] All Phase 00 tests still pass
 - [ ] All Phase 01 tests still pass
 - [ ] All Phase 02 tests still pass
+- [ ] All Phase 04 tests still pass
 
 ---
 
@@ -437,28 +563,37 @@ cargo test --test phase_02_integration -- --test-threads=1
 
 ### Phase 04-Owned Fields
 
-**QualitySchema:**
-- verification_criteria
-- repair_strategy
-- max_iterations
-- convergence_threshold
+**MemorySchema:**
+- memory_id
+- key
+- value
+- created_at
+- modified_at
+- accessed_at
 
-**BenchmarkSchema:**
-- benchmark_id
-- execution_time_ms
-- verification_score
-- repair_count
+**SearchSchema:**
+- search_type
+- query
+- similarity_threshold
+- top_k
 
-**QualityReportSchema:**
-- report_type
-- summary
-- issues
-- recommendations
+**ScrapingSchema:**
+- url
+- respect_robots_txt
+- user_agent
+- rate_limit
+
+**ProvenanceSchema:**
+- data_id
+- created_at
+- modified_at
+- source
+- author
 
 ### Verification Commands
 
 ```bash
-cargo run --bin schema_audit -- --phase 4 --output coverage_report.md
+cargo run --bin schema_audit -- --phase 5 --output coverage_report.md
 ```
 
 **Expected Output:**
@@ -470,12 +605,13 @@ cargo run --bin schema_audit -- --phase 4 --output coverage_report.md
 ## ADR Compliance
 
 **Relevant ADRs:**
-- ADR-008: Quality Loop Architecture
+- ADR-009: Memory Architecture
+- ADR-010: Search Architecture
 
 ### Verification Commands
 
 ```bash
-cargo run --bin adr_compliance -- --phase 4
+cargo run --bin adr_compliance -- --phase 5
 ```
 
 **Expected Output:**
@@ -493,35 +629,38 @@ cargo run --bin adr_compliance -- --phase 4
    - [ ] No features from later phases added
 
 2. **Architecture Drift:**
-   - [ ] Quality loops match ADR-008
+   - [ ] Memory matches ADR-009
+   - [ ] Search matches ADR-010
 
 3. **Scope Creep:**
-   - [ ] Only quality loop features implemented
-   - [ ] No memory or search features added
+   - [ ] Only memory and search features implemented
+   - [ ] No automation or autonomy features added
 
 ---
 
 ## Evidence Storage
 
-**Location:** `results/phase_04/`
+**Location:** `results/phase_05/`
 
 **Contents:**
 - `unit_test_results.json`
 - `integration_test_output.log`
 - `property_test_results.json`
-- `e2e_execution_logs/` (quality loop workflows)
+- `e2e_execution_logs/` (search workflows)
 - `system_log_samples.json` (automation scope)
-- `cli_verification/` (quality commands)
-- `benchmarks/` (quality loop performance)
-- `benchmark_metadata/` (stored benchmark metadata)
-- `quality_reports/` (generated quality reports)
-- `file_type_matrix/` (file-type quality matrix)
+- `cli_verification/` (memory and search commands)
+- `benchmarks/` (search and memory performance)
+- `search_samples/` (search results)
+- `scraping_logs/` (robots.txt compliance)
+- `provenance_data/` (provenance samples)
+- `gc_logs/` (garbage collection logs)
 - `schema_coverage_report.md`
 - `adr_compliance_report.md`
 - `anti_goal_drift_checklist.md`
 - `phase_00_regression/`
 - `phase_01_regression/`
 - `phase_02_regression/`
+- `phase_04_regression/`
 
 ---
 
@@ -529,10 +668,12 @@ cargo run --bin adr_compliance -- --phase 4
 
 **Cannot exit Phase 04 if:**
 - Any verification layer fails
-- Generate-verify-repair loops don't converge
-- Benchmark metadata incomplete
-- File-type matrix doesn't track quality
-- Reports not actionable
+- Memory operations don't work reliably
+- Search doesn't work correctly
+- External search not behind policy gates
+- Scraping doesn't respect robots.txt
+- Provenance not captured
+- GC doesn't prevent unbounded growth
 - Any prior phase regression detected
 
 ---

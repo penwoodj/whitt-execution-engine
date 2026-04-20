@@ -1,25 +1,23 @@
-# Phase 05: Memory & Search - Validation Criteria
+# Phase 05: Automation - Validation Criteria
 
-**Phase Focus:** Local memory, search (full-text, semantic, hybrid), external search, scraping, provenance, GC
-**Entry Criteria:** Phases 00, 01, 02, 03, and 04 complete
+**Phase Focus:** Cron jobs, git experiments, merge proposals, refinement artifacts, results tracking, rollback
+**Entry Criteria:** Phases 00, 01, 02, 03, 04, and 05 complete
 **Estimated Duration:** 3-4 weeks
-**Blocking for:** Phases 06, 07, 08
+**Blocking for:** Phases 06, 07
 
 ---
 
 ## Phase Overview
 
-Phase 05 implements memory and search capabilities. This phase provides local memory storage, full-text search, semantic search, hybrid search, external search with policy gates, web scraping with robots.txt respect, provenance tracking, and garbage collection.
+Phase 05 implements automation capabilities. This phase provides cron job scheduling, git experiment isolation, merge proposal generation, refinement artifact capture, results tracking and comparison, and rollback functionality. Automation enables workflows to run periodically and experiment with changes safely.
 
 **Critical Success Factors:**
-1. Local memory stores and retrieves reliably
-2. Full-text search works correctly
-3. Semantic search works correctly
-4. Hybrid search combines both
-5. External search behind policy gates
-6. Scraping respects robots.txt
-7. Provenance captures timestamps
-8. GC prevents unbounded growth
+1. Cron jobs execute on schedule
+2. Git experiments are isolated
+3. Merge proposals are generated
+4. Refinement captured as artifacts
+5. Results tracked and comparable
+6. Rollback works correctly
 
 ---
 
@@ -29,409 +27,363 @@ Phase 05 implements memory and search capabilities. This phase provides local me
 
 **Verification Commands:**
 ```bash
-# Verify Phases 00-04 exit
+# Verify Phases 00-05 exit
 cargo test --test phase_00_integration -- --test-threads=1
 cargo test --test phase_01_integration -- --test-threads=1
 cargo test --test phase_02_integration -- --test-threads=1
 cargo test --test phase_04_integration -- --test-threads=1
+cargo test --test phase_05_integration -- --test-threads=1
 ```
 
 **Prerequisites:**
-- [ ] Phases 00-04 exit criteria verified (all 7 layers)
-- [ ] Schema coverage 100% for phases 00-04
-- [ ] ADR compliance verified for phases 00-04
-- [ ] Cross-phase regression clean (Phases 00-04)
-- [ ] Vector database ready for semantic search
-- [ ] Full-text index ready for search
+- [ ] Phases 00-05 exit criteria verified (all 7 layers)
+- [ ] Schema coverage 100% for phases 00-05
+- [ ] ADR compliance verified for phases 00-05
+- [ ] Cross-phase regression clean (Phases 00-05)
+- [ ] Git repository initialized
+- [ ] Cron scheduler ready
 
 **Blocking Violations:**
-- Unresolved Phase 00-04 failures
+- Unresolved Phase 00-05 failures
 - Schema coverage < 100% for any phase
 - Cross-phase regression detected
 
 ---
 
-## Local Memory
+## Cron Jobs
 
-**Requirement:** Local memory stores and retrieves reliably
+**Requirement:** Cron jobs execute on schedule
 
-### Memory Operations
-
-1. **Store:** Store data with key
-2. **Retrieve:** Retrieve data by key
-3. **Update:** Update existing data
-4. **Delete:** Delete data by key
-5. **List:** List all keys
-6. **Exists:** Check if key exists
-
-### Memory Structure
+### Cron Schedule Syntax
 
 ```
-.memory/
-├── data/
-│   ├── workflow_1.json
-│   ├── workflow_2.json
-│   └── ...
-├── index/
-│   ├── full_text.idx
-│   ├── semantic.idx
-│   └── ...
-├── metadata/
-│   ├── provenance.json
-│   └── timestamps.json
-└── gc/
-    └── deleted.json
+* * * * * command
+│ │ │ │ │
+│ │ │ │ └─ Day of week (0-6)
+│ │ │ └─── Month (1-12)
+│ │ └───── Day of month (1-31)
+│ └─────── Hour (0-23)
+└───────── Minute (0-59)
 ```
+
+### Cron Features
+
+1. **Fixed Schedule:** Execute at specific times
+2. **Interval Schedule:** Execute every N minutes/hours/days
+3. **Complex Schedule:** Combinations of schedules
+4. **Timezone Support:** Execute in specific timezone
+5. **Job Management:** Create, list, delete cron jobs
 
 ### Verification Commands
 
 ```bash
-# Test local memory operations
-cargo test --lib memory::tests::store_operation
-cargo test --lib memory::tests::retrieve_operation
-cargo test --lib memory::tests::update_operation
-cargo test --lib memory::tests::delete_operation
-cargo test --lib memory::tests::list_operation
-cargo test --lib memory::tests::exists_operation
+# Test cron jobs
+cargo test --lib automation::tests::fixed_schedule
+cargo test --lib automation::tests::interval_schedule
+cargo test --lib automation::tests::complex_schedule
+cargo test --lib automation::tests::timezone_support
 
-# Test reliability
-cargo test --lib memory::tests::concurrent_operations
-cargo test --lib memory::tests::persistence_after_restart
+# Test job management
+cargo test --lib automation::tests::cron_job_create
+cargo test --lib automation::tests::cron_job_list
+cargo test --lib automation::tests::cron_job_delete
+
+# Test execution
+cargo test --lib automation::tests::cron_job_execution
 ```
 
 ### Pass Criteria
 
-- [ ] All memory operations work correctly
-- [ ] Data persists after restart
-- [ ] Concurrent operations work safely
-- [ ] No data corruption
-- [ ] No memory leaks
+- [ ] All schedule types work correctly
+- [ ] Jobs execute on schedule
+- [ ] Timezone support works
+- [ ] Job management works
+- [ ] No missed executions
 
 ### Evidence Required
 
-- Memory operation test results
-- Persistence test logs
-- Concurrent operation test logs
+- Cron job test results
+- Schedule execution logs
+- Timezone test logs
 
 ---
 
-## Full-Text Search
+## Git Experiments
 
-**Requirement:** Full-text search works correctly
+**Requirement:** Git experiments are isolated
 
-### Search Features
+### Experiment Isolation
 
-1. **Keyword Search:** Search by keywords
-2. **Phrase Search:** Search by exact phrases
-3. **Boolean Search:** AND, OR, NOT operators
-4. **Wildcard Search:** Wildcard patterns
-5. **Proximity Search:** Words within distance
-6. **Fuzzy Search:** Approximate matches
+1. **Branch Creation:** Create experiment branch
+2. **Workspace Isolation:** Isolate experiment workspace
+3. **Revert on Failure:** Revert experiment on failure
+4. **Merge on Success:** Merge experiment on success
+
+### Experiment Workflow
+
+```
+1. Create experiment branch from main
+2. Make changes in experiment branch
+3. Run tests in experiment branch
+4. If tests pass → merge to main
+5. If tests fail → revert experiment
+```
 
 ### Verification Commands
 
 ```bash
-# Test full-text search
-cargo test --lib search::tests::keyword_search
-cargo test --lib search::tests::phrase_search
-cargo test --lib search::tests::boolean_search
-cargo test --lib search::tests::wildcard_search
-cargo test --lib search::tests::proximity_search
-cargo test --lib search::tests::fuzzy_search
+# Test git experiments
+cargo test --lib automation::tests::experiment_branch_creation
+cargo test --lib automation::tests::workspace_isolation
+cargo test --lib automation::tests::revert_on_failure
+cargo test --lib automation::tests::merge_on_success
 
-# Test relevance ranking
-cargo test --lib search::tests::relevance_ranking
+# Test experiment safety
+cargo test --lib automation::tests::experiment_safety
+cargo test --lib automation::tests::experiment_rollback
 ```
 
 ### Pass Criteria
 
-- [ ] All search types work correctly
-- [ ] Results ranked by relevance
-- [ ] Search performance acceptable
-- [ ] No false negatives (missing results)
-- [ ] Minimal false positives (irrelevant results)
+- [ ] Experiment branches created correctly
+- [ ] Workspaces isolated
+- [ ] Revert on failure works
+- [ ] Merge on success works
+- [ ] No corruption of main branch
 
 ### Evidence Required
 
-- Full-text search test results
-- Relevance ranking test logs
-- Search performance metrics
+- Git experiment test results
+- Branch creation logs
+- Isolation test logs
 
 ---
 
-## Semantic Search
+## Merge Proposals
 
-**Requirement:** Semantic search works correctly
+**Requirement:** Merge proposals are generated
 
-### Search Features
+### Proposal Content
 
-1. **Embedding Generation:** Generate embeddings for queries
-2. **Vector Search:** Search by vector similarity
-3. **Top-K Retrieval:** Return top K most similar results
-4. **Similarity Threshold:** Filter by similarity threshold
+1. **Title:** Summary of changes
+2. **Description:** Detailed description of changes
+3. **Diff:** Diff of changes
+4. **Test Results:** Test execution results
+5. **Review Status:** Review status
+
+### Proposal Generation
+
+```markdown
+# Merge Proposal: Add Feature X
+
+## Description
+Add feature X to improve Y
+
+## Changes
+- Added feature X
+- Updated tests for feature X
+
+## Test Results
+- Unit tests: PASS
+- Integration tests: PASS
+- E2E tests: PASS
+
+## Review Status
+Pending review
+```
 
 ### Verification Commands
 
 ```bash
-# Test semantic search
-cargo test --lib search::tests::embedding_generation
-cargo test --lib search::tests::vector_search
-cargo test --lib search::tests::top_k_retrieval
-cargo test --lib search::tests::similarity_threshold
+# Test merge proposals
+cargo test --lib automation::tests::proposal_generation
+cargo test --lib automation::tests::proposal_content
+cargo test --lib automation::tests::proposal_diff
 
-# Test accuracy
-cargo test --lib search::tests::semantic_search_accuracy
+# Test proposal submission
+cargo test --lib automation::tests::proposal_submission
 ```
 
 ### Pass Criteria
 
-- [ ] Embeddings generated correctly
-- [ ] Vector search works
-- [ ] Top-K retrieval returns K results
-- [ ] Similarity threshold filters correctly
-- [ ] Search accuracy > 90%
+- [ ] Proposals generated correctly
+- [ ] Proposals include all required content
+- [ ] Diff accurately reflects changes
+- [ ] Test results included
+- [ ] Proposals submitted successfully
 
 ### Evidence Required
 
-- Semantic search test results
-- Accuracy metrics
-- Vector search logs
+- Merge proposal test results
+- Proposal content samples
+- Diff verification logs
 
 ---
 
-## Hybrid Search
+## Refinement Artifacts
 
-**Requirement:** Hybrid search combines full-text and semantic search
+**Requirement:** Refinement captured as artifacts
 
-### Search Strategy
+### Artifact Types
 
-1. **Execute full-text search**
-2. **Execute semantic search**
-3. **Combine results (merge, deduplicate)**
-4. **Rank by combined score**
-5. **Return top results
+1. **Code Artifacts:** Generated code
+2. **Config Artifacts:** Configuration files
+3. **Document Artifacts:** Documentation
+4. **Result Artifacts:** Execution results
+5. **Log Artifacts:** Execution logs
 
-### Scoring
+### Artifact Storage
 
 ```
-combined_score = 0.6 * full_text_score + 0.4 * semantic_score
+.artifacts/
+├── code/
+│   ├── generated_code_1.rs
+│   └── generated_code_2.rs
+├── config/
+│   └── config_1.yaml
+├── document/
+│   └── doc_1.md
+├── result/
+│   └── result_1.json
+└── log/
+    └── log_1.txt
 ```
 
 ### Verification Commands
 
 ```bash
-# Test hybrid search
-cargo test --lib search::tests::hybrid_search_merge
-cargo test --lib search::tests::hybrid_search_deduplication
-cargo test --lib search::tests::hybrid_search_ranking
-cargo test --lib search::tests::hybrid_search_accuracy
+# Test artifact capture
+cargo test --lib automation::tests::code_artifact_capture
+cargo test --lib automation::tests::config_artifact_capture
+cargo test --lib automation::tests::document_artifact_capture
+cargo test --lib automation::tests::result_artifact_capture
+cargo test --lib automation::tests::log_artifact_capture
+
+# Test artifact storage
+cargo test --lib automation::tests::artifact_storage
+cargo test --lib automation::tests::artifact_retrieval
 ```
 
 ### Pass Criteria
 
-- [ ] Full-text and semantic search execute
-- [ ] Results merged correctly
-- [ ] Duplicates removed
-- [ ] Combined ranking works
-- [ ] Hybrid accuracy > individual search accuracy
+- [ ] All artifact types captured
+- [ ] Artifacts stored correctly
+- [ ] Artifacts retrievable
+- [ ] No artifact loss
+- [ ] Storage organized correctly
 
 ### Evidence Required
 
-- Hybrid search test results
-- Merge and deduplication logs
-- Combined ranking metrics
+- Artifact capture test results
+- Storage test logs
+- Retrieval test logs
 
 ---
 
-## External Search
+## Results Tracking
 
-**Requirement:** External search behind policy gates
+**Requirement:** Results tracked and comparable
 
-### External Search Sources
+### Result Data
 
-1. **Google Search:** Web search
-2. **Bing Search:** Web search
-3. **Wikipedia:** Encyclopedia search
-4. **GitHub:** Code search
+1. **Execution ID:** Unique execution identifier
+2. **Timestamp:** Execution timestamp
+3. **Workflow:** Workflow executed
+4. **Success:** Success/failure
+5. **Duration:** Execution duration
+6. **Output:** Execution output
+7. **Metrics:** Execution metrics
 
-### Policy Gates
+### Result Comparison
 
-1. **Allowed Domains:** Whitelist of allowed domains
-2. **Blocked Domains:** Blacklist of blocked domains
-3. **Rate Limits:** Maximum requests per minute
-4. **Content Filters:** Block inappropriate content
+```markdown
+## Execution Comparison
+
+| Metric | Execution A | Execution B | Delta |
+|--------|-------------|-------------|-------|
+| Success | true | true | - |
+| Duration (s) | 10 | 12 | +20% |
+| Output | "result1" | "result2" | Changed |
+```
 
 ### Verification Commands
 
 ```bash
-# Test external search
-cargo test --lib search::tests::google_search
-cargo test --lib search::tests::bing_search
-cargo test --lib search::tests::wikipedia_search
-cargo test --lib search::tests::github_search
+# Test result tracking
+cargo test --lib automation::tests::result_tracking
+cargo test --lib automation::tests::result_storage
+cargo test --lib automation::tests::result_retrieval
 
-# Test policy gates
-cargo test --lib search::tests::allowed_domains
-cargo test --lib search::tests::blocked_domains
-cargo test --lib search::tests::rate_limits
-cargo test --lib search::tests::content_filters
+# Test result comparison
+cargo test --lib automation::tests::result_comparison
+cargo test --lib automation::tests::result_delta_calculation
 ```
 
 ### Pass Criteria
 
-- [ ] All external search sources work
-- [ ] Allowed domains enforced
-- [ ] Blocked domains enforced
-- [ ] Rate limits enforced
-- [ ] Content filters work
+- [ ] Results tracked correctly
+- [ ] Results stored
+- [ ] Results retrievable
+- [ ] Results comparable
+- [ ] Delta calculations correct
 
 ### Evidence Required
 
-- External search test results
-- Policy gate test logs
-- Rate limit logs
+- Result tracking test results
+- Comparison test logs
+- Delta calculation logs
 
 ---
 
-## Web Scraping
+## Rollback
 
-**Requirement:** Scraping respects robots.txt
+**Requirement:** Rollback works correctly
 
-### Scraping Features
+### Rollback Scenarios
 
-1. **Robots.txt Parser:** Parse robots.txt
-2. **Disallow Rules:** Respect disallow rules
-3. **Crawl Delay:** Respect crawl-delay
-4. **User-Agent:** Identify user-agent
-5. **Rate Limiting:** Respect server rate limits
+1. **Manual Rollback:** User triggers rollback
+2. **Automatic Rollback:** System triggers rollback on failure
+3. **Partial Rollback:** Rollback specific changes
+4. **Full Rollback:** Rollback all changes
 
-### Verification Commands
+### Rollback Process
 
-```bash
-# Test web scraping
-cargo test --lib scraping::tests::robots_txt_parser
-cargo test --lib scraping::tests::disallow_rules
-cargo test --lib scraping::tests::crawl_delay
-cargo test --lib scraping::tests::user_agent
-cargo test --lib scraping::tests::rate_limiting
 ```
-
-### Pass Criteria
-
-- [ ] Robots.txt parsed correctly
-- [ ] Disallow rules respected
-- [ ] Crawl delay respected
-- [ ] User-agent identified
-- [ ] Rate limits respected
-
-### Evidence Required
-
-- Web scraping test results
-- Robots.txt compliance logs
-
----
-
-## Provenance
-
-**Requirement:** Provenance captures timestamps
-
-### Provenance Data
-
-1. **Creation Timestamp:** When data was created
-2. **Modification Timestamp:** When data was last modified
-3. **Access Timestamp:** When data was last accessed
-4. **Source:** Where data came from
-5. **Author:** Who created/modified data
-
-### Provenance Format
-
-```json
-{
-  "data_id": "uuid",
-  "created_at": "2026-04-06T10:00:00Z",
-  "modified_at": "2026-04-06T11:00:00Z",
-  "accessed_at": "2026-04-06T12:00:00Z",
-  "source": "external_search",
-  "author": "system"
-}
+1. Identify changes to rollback
+2. Revert changes in git
+3. Restore artifacts
+4. Restore configuration
+5. Verify rollback success
 ```
 
 ### Verification Commands
 
 ```bash
-# Test provenance
-cargo test --lib provenance::tests::creation_timestamp
-cargo test --lib provenance::tests::modification_timestamp
-cargo test --lib provenance::tests::access_timestamp
-cargo test --lib provenance::tests::source_tracking
-cargo test --lib provenance::tests::author_tracking
+# Test rollback
+cargo test --lib automation::tests::manual_rollback
+cargo test --lib automation::tests::automatic_rollback
+cargo test --lib automation::tests::partial_rollback
+cargo test --lib automation::tests::full_rollback
+
+# Test rollback safety
+cargo test --lib automation::tests::rollback_safety
+cargo test --lib automation::tests::rollback_verification
 ```
 
 ### Pass Criteria
 
-- [ ] All timestamps captured correctly
-- [ ] Source tracked accurately
-- [ ] Author tracked accurately
-- [ ] Timestamps update correctly
-- [ ] No missing provenance data
+- [ ] All rollback types work
+- [ ] Rollback reverts changes correctly
+- [ ] Artifacts restored
+- [ ] Configuration restored
+- [ ] Rollback verification succeeds
+- [ ] No data loss during rollback
 
 ### Evidence Required
 
-- Provenance test results
-- Timestamp verification logs
-
----
-
-## Garbage Collection
-
-**Requirement:** GC prevents unbounded growth
-
-### GC Features
-
-1. **Deleted Data Cleanup:** Remove deleted data
-2. **Expired Data Cleanup:** Remove expired data
-3. **Orphan Cleanup:** Remove orphaned data
-4. **Index Cleanup:** Rebuild indexes
-5. **Compaction:** Compact storage
-
-### GC Triggers
-
-1. **Manual Trigger:** Trigger GC manually
-2. **Automatic Trigger:** Trigger GC on threshold
-3. **Scheduled Trigger:** Trigger GC periodically
-
-### Verification Commands
-
-```bash
-# Test garbage collection
-cargo test --lib gc::tests::deleted_data_cleanup
-cargo test --lib gc::tests::expired_data_cleanup
-cargo test --lib gc::tests::orphan_cleanup
-cargo test --lib gc::tests::index_cleanup
-cargo test --lib gc::tests::compaction
-
-# Test GC triggers
-cargo test --lib gc::tests::manual_trigger
-cargo test --lib gc::tests::automatic_trigger
-cargo test --lib gc::tests::scheduled_trigger
-
-# Test unbounded growth prevention
-cargo test --lib gc::tests::unbounded_growth_prevention
-```
-
-### Pass Criteria
-
-- [ ] All cleanup types work
-- [ ] All triggers work
-- [ ] Unbounded growth prevented
-- [ ] No data loss during GC
-- [ ] GC completes in reasonable time
-
-### Evidence Required
-
-- GC test results
-- Growth prevention logs
-- GC performance metrics
+- Rollback test results
+- Rollback verification logs
+- Safety test logs
 
 ---
 
@@ -458,7 +410,7 @@ cargo test --test '*' -- --test-threads=1
 
 **Evidence:**
 - All Phase 05 integration tests pass
-- Memory and search integrate correctly
+- Automation integrates correctly
 
 ### Layer 3: Property Tests
 
@@ -468,31 +420,30 @@ PROPTEST_NUMBER_OF_TESTS=100 cargo test --lib property_based
 ```
 
 **Evidence:**
-- Search invariants hold for 100 iterations
-- Memory persistence invariants hold
+- Experiment isolation invariants hold
+- Rollback safety invariants hold
 
 ### Layer 4: E2E Tests
 
 **Commands:**
 ```bash
-# Execute search workflows
-cargo run --bin agentsdk -- run examples/workflows/full_text_search.yaml
-cargo run --bin agentsdk -- run examples/workflows/semantic_search.yaml
-cargo run --bin agentsdk -- run examples/workflows/hybrid_search.yaml
-cargo run --bin agentsdk -- run examples/workflows/scraping.yaml
+# Execute automation workflows
+cargo run --bin agentsdk -- run examples/workflows/cron_job.yaml
+cargo run --bin agentsdk -- run examples/workflows/git_experiment.yaml
+cargo run --bin agentsdk -- run examples/workflows/rollback.yaml
 ```
 
 **Evidence:**
-- All search workflows execute
-- Scraping respects robots.txt
-- GC prevents unbounded growth
+- Cron jobs execute on schedule
+- Git experiments isolated
+- Rollback works correctly
 
 ### Layer 5: System Log Validation
 
 **Commands:**
 ```bash
 # Verify automation scope logs
-cargo run --bin agentsdk -- run examples/workflows/search.yaml 2>&1 | \
+cargo run --bin agentsdk -- run examples/workflows/automation.yaml 2>&1 | \
   jq -e 'select(.scope == "automation")'
 ```
 
@@ -504,36 +455,28 @@ cargo run --bin agentsdk -- run examples/workflows/search.yaml 2>&1 | \
 
 **Commands:**
 ```bash
-# Test memory commands
-cargo run --bin agentsdk -- memory store --key test --value "hello"
-cargo run --bin agentsdk -- memory retrieve --key test
-cargo run --bin agentsdk -- memory list
-
-# Test search commands
-cargo run --bin agentsdk -- search full-text --query "test"
-cargo run --bin agentsdk -- search semantic --query "test"
-cargo run --bin agentsdk -- search hybrid --query "test"
-
-# Test GC command
-cargo run --bin agentsdk -- gc run
+# Test automation commands
+cargo run --bin agentsdk -- automation cron create --schedule "*/5 * * * *" --workflow test.yaml
+cargo run --bin agentsdk -- automation cron list
+cargo run --bin agentsdk -- automation cron delete <job_id>
+cargo run --bin agentsdk -- automation experiment start --name test_exp
+cargo run --bin agentsdk -- automation rollback <experiment_id>
 ```
 
 **Evidence:**
-- Memory commands work
-- Search commands work
-- GC command works
+- Automation commands work
+- Error handling works
 
 ### Layer 7: Benchmark Performance
 
 **Commands:**
 ```bash
-cargo bench --bench phase_05_benchmarks
+cargo bench --bench phase_06_benchmarks
 ```
 
 **Evidence:**
-- Search performance acceptable
-- Memory operations performant
-- GC completes in reasonable time
+- Automation performance acceptable
+- Rollback completes in reasonable time
 - No performance regression > 10%
 
 ---
@@ -547,6 +490,7 @@ cargo test --test phase_00_integration -- --test-threads=1
 cargo test --test phase_01_integration -- --test-threads=1
 cargo test --test phase_02_integration -- --test-threads=1
 cargo test --test phase_04_integration -- --test-threads=1
+cargo test --test phase_05_integration -- --test-threads=1
 ```
 
 **Pass Criteria:**
@@ -554,6 +498,7 @@ cargo test --test phase_04_integration -- --test-threads=1
 - [ ] All Phase 01 tests still pass
 - [ ] All Phase 02 tests still pass
 - [ ] All Phase 04 tests still pass
+- [ ] All Phase 05 tests still pass
 
 ---
 
@@ -563,37 +508,50 @@ cargo test --test phase_04_integration -- --test-threads=1
 
 ### Phase 05-Owned Fields
 
-**MemorySchema:**
-- memory_id
-- key
-- value
+**CronSchema:**
+- schedule
+- timezone
+- workflow
+- enabled
+
+**GitExperimentSchema:**
+- experiment_id
+- branch_name
+- base_branch
+- changes
+
+**MergeProposalSchema:**
+- proposal_id
+- title
+- description
+- diff
+- test_results
+
+**RefinementSchema:**
+- artifact_id
+- artifact_type
+- content
 - created_at
-- modified_at
-- accessed_at
 
-**SearchSchema:**
-- search_type
-- query
-- similarity_threshold
-- top_k
+**ResultSchema:**
+- execution_id
+- timestamp
+- workflow
+- success
+- duration
+- output
+- metrics
 
-**ScrapingSchema:**
-- url
-- respect_robots_txt
-- user_agent
-- rate_limit
-
-**ProvenanceSchema:**
-- data_id
-- created_at
-- modified_at
-- source
-- author
+**RollbackSchema:**
+- rollback_id
+- experiment_id
+- changes_reverted
+- artifacts_restored
 
 ### Verification Commands
 
 ```bash
-cargo run --bin schema_audit -- --phase 5 --output coverage_report.md
+cargo run --bin schema_audit -- --phase 6 --output coverage_report.md
 ```
 
 **Expected Output:**
@@ -605,13 +563,13 @@ cargo run --bin schema_audit -- --phase 5 --output coverage_report.md
 ## ADR Compliance
 
 **Relevant ADRs:**
-- ADR-009: Memory Architecture
-- ADR-010: Search Architecture
+- ADR-011: Automation Architecture
+- ADR-012: Experiment Safety
 
 ### Verification Commands
 
 ```bash
-cargo run --bin adr_compliance -- --phase 5
+cargo run --bin adr_compliance -- --phase 6
 ```
 
 **Expected Output:**
@@ -629,31 +587,33 @@ cargo run --bin adr_compliance -- --phase 5
    - [ ] No features from later phases added
 
 2. **Architecture Drift:**
-   - [ ] Memory matches ADR-009
-   - [ ] Search matches ADR-010
+   - [ ] Automation matches ADR-011
+   - [ ] Experiments match ADR-012
 
 3. **Scope Creep:**
-   - [ ] Only memory and search features implemented
-   - [ ] No automation or autonomy features added
+   - [ ] Only automation features implemented
+   - [ ] No autonomy features added
 
 ---
 
 ## Evidence Storage
 
-**Location:** `results/phase_05/`
+**Location:** `results/phase_06/`
 
 **Contents:**
 - `unit_test_results.json`
 - `integration_test_output.log`
 - `property_test_results.json`
-- `e2e_execution_logs/` (search workflows)
+- `e2e_execution_logs/` (automation workflows)
 - `system_log_samples.json` (automation scope)
-- `cli_verification/` (memory and search commands)
-- `benchmarks/` (search and memory performance)
-- `search_samples/` (search results)
-- `scraping_logs/` (robots.txt compliance)
-- `provenance_data/` (provenance samples)
-- `gc_logs/` (garbage collection logs)
+- `cli_verification/` (automation commands)
+- `benchmarks/` (automation performance)
+- `cron_logs/` (cron job execution logs)
+- `git_experiments/` (experiment logs)
+- `merge_proposals/` (generated proposals)
+- `refinement_artifacts/` (captured artifacts)
+- `results_tracking/` (result comparisons)
+- `rollback_logs/` (rollback execution logs)
 - `schema_coverage_report.md`
 - `adr_compliance_report.md`
 - `anti_goal_drift_checklist.md`
@@ -661,6 +621,7 @@ cargo run --bin adr_compliance -- --phase 5
 - `phase_01_regression/`
 - `phase_02_regression/`
 - `phase_04_regression/`
+- `phase_05_regression/`
 
 ---
 
@@ -668,12 +629,12 @@ cargo run --bin adr_compliance -- --phase 5
 
 **Cannot exit Phase 05 if:**
 - Any verification layer fails
-- Memory operations don't work reliably
-- Search doesn't work correctly
-- External search not behind policy gates
-- Scraping doesn't respect robots.txt
-- Provenance not captured
-- GC doesn't prevent unbounded growth
+- Cron jobs don't execute on schedule
+- Git experiments not isolated
+- Merge proposals not generated
+- Refinement not captured as artifacts
+- Results not tracked
+- Rollback doesn't work
 - Any prior phase regression detected
 
 ---

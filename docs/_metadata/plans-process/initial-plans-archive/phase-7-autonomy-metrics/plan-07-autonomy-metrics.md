@@ -5,7 +5,7 @@
 **Status**: Not Started
 **Created**: 2026-03-27
 **Related ADR**: ADR-0008 (Autonomous loops and metrics-driven FE and BE UX expansion)
-**Related Research Plan**: research-plan-05-automation-autonomy-metrics.yml
+**Related Research Plan**: research-plan-04-automation-autonomy-metrics.yml
 **Estimated Time**: 10-12 weeks
 **Dependencies**: plan-00 (Foundation), plan-01 (MVP Queue), plan-02 (CLI & Backends), plan-03 (Glyphnova UI), plan-04 (Quality Loops), plan-05 (Memory & Search), plan-06 (Automation)
 
@@ -107,7 +107,7 @@ From `requirements.md` and `schema-consolidated-report.md`:
 
 ### Research Plan Review
 
-**research-plan-05-automation-autonomy-metrics.yml** is **COMPLETED** with 3 research domains (plan-07 uses domain 2):
+**research-plan-04-automation-autonomy-metrics.yml** is **COMPLETED** with 3 research domains (plan-07 uses domain 2):
 
 2. **Autonomy and Metrics**: What autonomy models and metrics frameworks best support bounded, safe autonomous loops?
 
@@ -928,15 +928,15 @@ whitt-execution-engine autonomy --set-boundaries --max-duration 1h --max-iterati
 
 ### Related Documents
 
-- **ADR-0008**: [Autonomous loops and metrics-driven FE and BE UX expansion](../roadmap/adr-0008-autonomy-and-metrics.yml)
-- **Research Plan 05**: [Automation, autonomy, and metrics research](../roadmap/research-plan-05-automation-autonomy-metrics.yml)
+- **ADR-0008**: [Autonomous loops and metrics-driven FE and BE UX expansion](../roadmap/adr-0007-autonomy-and-metrics.yml)
+- **Research Plan 05**: [Automation, autonomy, and metrics research](../roadmap/research-plan-04-automation-autonomy-metrics.yml)
 - **Plan 00**: [Foundation Compiler Contract](phase-0-foundation/plan-00-foundation.md)
 - **Plan 01**: [MVP Queue & Scheduler](phase-1-mvp-queue/plan-01-mvp-queue.md)
 - **Plan 02**: [CLI & Backends](phase-2-cli-backends/plan-02-cli-backends.md)
 - **Plan 03**: [Glyphnova UI](phase-3-glyphnova-ui/plan-03-glyphnova-ui.md)
-- **Plan 04**: [Quality Loops](phase-4-quality-loops/plan-04-quality-loops.md)
-- **Plan 05**: [Memory & Search](phase-5-memory-search/plan-05-memory-search.md)
-- **Plan 06**: [Automation](phase-6-automation/plan-06-automation.md)
+- **Plan 04**: [Quality Loops](phase-4-quality-loops/plan-03-quality-loops.md)
+- **Plan 05**: [Memory & Search](phase-5-memory-search/plan-04-memory-search.md)
+- **Plan 06**: [Automation](phase-6-automation/plan-05-automation.md)
 - **Requirements**: [schema-consolidated-report.md](../requirements/schema-consolidated-report.md)
 
 ### Implementation References

@@ -25,7 +25,7 @@
 **Test Coverage**:
 - `01-basic-model-selection-providers.yaml` - All identification fields populated
 - `02-model-parameters-tuning.yaml` - Version tag demonstration
-- All 53 workflows require identification fields
+- All 50 workflows require identification fields
 
 **Phase 0 Validation**:
 - WorkflowSpec struct defines all identification fields with types

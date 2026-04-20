@@ -678,6 +678,14 @@ External Services:
 3. **Join ecosystem discussions** - Participate in shaping standards
 4. **Consider contribution** - Submit bug reports, help improve documentation
 
+## 🔗 Related Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Critical Evaluation](../requirements/critical-evaluation.md) | Tech stack decisions and choices |
+| [Constraints and Assumptions](../requirements/constraints-and-assumptions.md) | Project scope and design decisions |
+| [ADRs](../roadmap/) | Architectural decision records |
+
 ---
 
 **This research document provides upstream success factors to guide the development of AgentSDK. The findings are actionable and grounded in actual Rust ecosystem reality.**

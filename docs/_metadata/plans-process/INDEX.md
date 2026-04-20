@@ -88,31 +88,31 @@ opencode/docs/plans/
 │   ├── validation/
 │   └── tests/
 │
-├── 04-quality-loops/                 # PHASE 4: QUALITY LOOPS & BENCHMARKS
+├── 03-quality-loops/                 # PHASE 4: QUALITY LOOPS & BENCHMARKS
 │   ├── plan.md
 │   ├── tasks/
 │   ├── validation/
 │   └── tests/
 │
-├── 05-memory-search/                 # PHASE 5: MEMORY & SEARCH
+├── 04-memory-search/                 # PHASE 5: MEMORY & SEARCH
 │   ├── plan.md
 │   ├── tasks/
 │   ├── validation/
 │   └── tests/
 │
-├── 06-automation/                    # PHASE 6: AUTOMATION
+├── 05-automation/                    # PHASE 6: AUTOMATION
 │   ├── plan.md
 │   ├── tasks/
 │   ├── validation/
 │   └── tests/
 │
-├── 07-autonomy-metrics/              # PHASE 7: AUTONOMY & METRICS
+├── 06-autonomy-metrics/              # PHASE 7: AUTONOMY & METRICS
 │   ├── plan.md
 │   ├── tasks/
 │   ├── validation/
 │   └── tests/
 │
-├── 08-final-validation/              # PHASE 8: FINAL VALIDATION
+├── 07-final-validation/              # PHASE 8: FINAL VALIDATION
 │   ├── plan.md                       # Comprehensive final validation plan
 │   ├── 00-system-log-verification.md # System log verification
 │   ├── 01-unit-test-verification.md  # Unit test deep verification
@@ -139,11 +139,11 @@ opencode/docs/plans/
     ├── phase-01-criteria.md          # Phase 1 measurable criteria
     ├── phase-02-criteria.md          # Phase 2 measurable criteria
     ├── phase-03-criteria.md          # Phase 3 measurable criteria
-    ├── phase-04-criteria.md          # Phase 4 measurable criteria
-    ├── phase-05-criteria.md          # Phase 5 measurable criteria
-    ├── phase-06-criteria.md          # Phase 6 measurable criteria
-    ├── phase-07-criteria.md          # Phase 7 measurable criteria
-    ├── phase-08-criteria.md          # Phase 8 measurable criteria
+    ├── phase-03-criteria.md          # Phase 4 measurable criteria
+    ├── phase-03-criteria.md          # Phase 5 measurable criteria
+    ├── phase-03-criteria.md          # Phase 6 measurable criteria
+    ├── phase-03-criteria.md          # Phase 7 measurable criteria
+    ├── phase-03-criteria.md          # Phase 8 measurable criteria
     ├── anti-goal-drift-checklist.md  # Goal drift detection checklist
     └── cumulative-progress.md        # Cumulative progress tracker
 ```
@@ -356,7 +356,7 @@ wiremock = "0.6"  # Mock HTTP for backend testing
 ## References
 
 - **Schema**: `opencode/docs/reports/requirements/unifying-schema/unified-workflow-schema.yml` (801 lines)
-- **ADRs**: `opencode/docs/reports/roadmap/adr-0000` through `adr-0008`
+- **ADRs**: `opencode/docs/reports/roadmap/adr-0000` through `adr-0007`
 - **Example Workflows**: `opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/` (53 files)
 - **v1.0 Plans**: `opencode/docs/reports/initial-plans/` (8 plans, all 0% complete)
 - **Research**: `opencode/docs/research/next-steps/` (8 research files)

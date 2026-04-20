@@ -361,7 +361,7 @@
 - Folder permissions
 - Confirmations
 
-#### 5. Convergence Loops (05-loops-convergence/04-convergence-reduction-aggregation.yaml)
+#### 5. Convergence Loops (04-loops-convergence/04-convergence-reduction-aggregation.yaml)
 **Status**: ✅ SUPPORTED
 **Features Preserved**:
 - Validation loop configuration
@@ -369,14 +369,14 @@
 - Tolerance settings
 - Stop conditions
 
-#### 6. RAG CRUD Operations (08-rag-operations/01-document-indexing-retrieval.yaml)
+#### 6. RAG CRUD Operations (07-rag-operations/01-document-indexing-retrieval.yaml)
 **Status**: ✅ SUPPORTED
 **Features Preserved**:
 - RAG configuration
 - Knowledge base operations
 - Embedding and retrieval
 
-#### 7. Nested Workflow References (10-sub-workflows/01-nested-workflow-references.yaml)
+#### 7. Nested Workflow References (09-sub-workflows/01-nested-workflow-references.yaml)
 **Status**: ✅ SUPPORTED
 **Features Preserved**:
 - Sub-workflow configuration
@@ -384,7 +384,7 @@
 - Isolation policies
 - Circular reference detection
 
-#### 8. Web Operations (07-web-operations/03-url-parameters-requests.yaml)
+#### 8. Web Operations (06-web-operations/03-url-parameters-requests.yaml)
 **Status**: ✅ SUPPORTED
 **Features Preserved**:
 - Web fetch with full parameters
@@ -392,7 +392,7 @@
 - Web search
 - URL parameters, headers, auth, timeout, SSL validation
 
-#### 9. Script/CLI Execution (09-script-cli/01-script-execution.yaml)
+#### 9. Script/CLI Execution (08-script-cli/01-script-execution.yaml)
 **Status**: ✅ SUPPORTED
 **Features Preserved**:
 - Script run with env vars
@@ -400,21 +400,21 @@
 - Output capture
 - Timeout handling
 
-#### 10. Nested Validation (11-conditional-branching/01-event-based-branching.yaml)
+#### 10. Nested Validation (10-conditional-branching/01-event-based-branching.yaml)
 **Status**: ✅ SUPPORTED
 **Features Preserved**:
 - Explicit validation steps
 - Parallel validation execution
 - Validation aggregation
 
-#### 11. Local File CRUD (06-file-operations/01-file-read-write-batch.yaml)
+#### 11. Local File CRUD (05-file-operations/01-file-read-write-batch.yaml)
 **Status**: ✅ SUPPORTED
 **Features Preserved**:
 - File read/write/delete
 - File operations
 - CRUD patterns
 
-#### 12. Loop Variations (05-loops-convergence/01-for-loops-explicit-iteration.yaml)
+#### 12. Loop Variations (04-loops-convergence/01-for-loops-explicit-iteration.yaml)
 **Status**: ✅ SUPPORTED
 **Features Preserved**:
 - All loop types (count, time, validation, retry, infinite)
@@ -422,14 +422,14 @@
 - Stop conditions
 - Safety limits
 
-#### 14. Web Scrape to RAG (08-rag-operations/02-rag-generation-context-aware.yaml)
+#### 14. Web Scrape to RAG (07-rag-operations/02-rag-generation-context-aware.yaml)
 **Status**: ✅ SUPPORTED
 **Features Preserved**:
 - Web scraping configuration
 - RAG integration
 - Knowledge base updates
 
-#### 15. Hierarchical Logging (13-logging-monitoring/01-hierarchical-logging-system.yaml)
+#### 15. Hierarchical Logging (12-logging-monitoring/01-hierarchical-logging-system.yaml)
 **Status**: ✅ SUPPORTED
 **Features Preserved**:
 - Hierarchical logging scopes
@@ -443,7 +443,7 @@
 - Prompt manipulation
 - Context injection
 
-#### 17. Comprehensive Features (17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml)
+#### 17. Comprehensive Features (16-user-inputs-ui/01-user-input-prompts-validation.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml)
 **Status**: ✅ SUPPORTED
 **Features Preserved**:
 - All manual schema features

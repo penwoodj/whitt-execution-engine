@@ -16,21 +16,21 @@
 | 02 | Step Types | 4 | `requirements-oriented-auto/02-step-types/` |
 | 03 | Data Flow | 3 | `requirements-oriented-auto/03-data-flow/` |
 | 04 | Parallel Execution | 3 | `requirements-oriented-auto/04-parallel-execution/` |
-| 05 | Loops & Convergence | 4 | `requirements-oriented-auto/05-loops-convergence/` |
-| 06 | File Operations | 2 | `requirements-oriented-auto/06-file-operations/` |
-| 07 | Web Operations | 3 | `requirements-oriented-auto/07-web-operations/` |
-| 08 | RAG Operations | 2 | `requirements-oriented-auto/08-rag-operations/` |
-| 09 | Script & CLI | 2 | `requirements-oriented-auto/09-script-cli/` |
-| 10 | Sub-Workflows | 2 | `requirements-oriented-auto/10-sub-workflows/` |
-| 11 | Conditional Branching | 2 | `requirements-oriented-auto/11-conditional-branching/` |
-| 12 | Error Handling & Retries | 3 | `requirements-oriented-auto/12-error-handling-retries/` |
-| 13 | Logging & Monitoring | 3 | `requirements-oriented-auto/13-logging-monitoring/` |
-| 14 | Checkpointing & State | 2 | `requirements-oriented-auto/14-checkpointing-state/` |
-| 15 | Resource Management | 3 | `requirements-oriented-auto/15-resource-management/` |
-| 16 | Tool Permissions | 2 | `requirements-oriented-auto/16-tool-permissions/` |
-| 17 | User Inputs & UI | 2 | `requirements-oriented-auto/17-user-inputs-ui/` |
-| 18 | Hooks & Lifecycle | 4 | `requirements-oriented-auto/18-hooks-lifecycle/` |
-| 19 | Comprehensive Integration | 2 | `requirements-oriented-auto/19-comprehensive-integration/` |
+| 05 | Loops & Convergence | 4 | `requirements-oriented-auto/04-loops-convergence/` |
+| 06 | File Operations | 2 | `requirements-oriented-auto/05-file-operations/` |
+| 07 | Web Operations | 3 | `requirements-oriented-auto/06-web-operations/` |
+| 08 | RAG Operations | 2 | `requirements-oriented-auto/07-rag-operations/` |
+| 09 | Script & CLI | 2 | `requirements-oriented-auto/08-script-cli/` |
+| 10 | Sub-Workflows | 2 | `requirements-oriented-auto/09-sub-workflows/` |
+| 11 | Conditional Branching | 2 | `requirements-oriented-auto/10-conditional-branching/` |
+| 12 | Error Handling & Retries | 3 | `requirements-oriented-auto/11-error-handling-retries/` |
+| 13 | Logging & Monitoring | 3 | `requirements-oriented-auto/12-logging-monitoring/` |
+| 14 | Checkpointing & State | 2 | `requirements-oriented-auto/13-checkpointing-state/` |
+| 15 | Resource Management | 3 | `requirements-oriented-auto/14-resource-management/` |
+| 16 | Tool Permissions | 2 | `requirements-oriented-auto/15-tool-permissions/` |
+| 17 | User Inputs & UI | 2 | `requirements-oriented-auto/16-user-inputs-ui/` |
+| 18 | Hooks & Lifecycle | 4 | `requirements-oriented-auto/17-hooks-lifecycle/` |
+| 19 | Comprehensive Integration | 2 | `requirements-oriented-auto/18-comprehensive-integration/` |
 | - | Manual Brainstorm | 1 | `manual/agentic-workflow-manual-brainstorm.yml` |
 
 ---
@@ -152,21 +152,21 @@ requirements-oriented-auto/
 ├── 02-step-types/              4 files
 ├── 03-data-flow/               3 files
 ├── 04-parallel-execution/      3 files
-├── 05-loops-convergence/       4 files
-├── 06-file-operations/         2 files
-├── 07-web-operations/          3 files
-├── 08-rag-operations/          2 files
-├── 09-script-cli/              2 files
-├── 10-sub-workflows/           2 files
-├── 11-conditional-branching/  2 files
-├── 12-error-handling-retries/ 3 files
-├── 13-logging-monitoring/      3 files
-├── 14-checkpointing-state/    2 files
-├── 15-resource-management/     3 files
-├── 16-tool-permissions/        2 files
-├── 17-user-inputs-ui/          2 files
-├── 18-hooks-lifecycle/         4 files
-└── 19-comprehensive-integration/ 2 files
+├── 04-loops-convergence/       4 files
+├── 05-file-operations/         2 files
+├── 06-web-operations/          3 files
+├── 07-rag-operations/          2 files
+├── 08-script-cli/              2 files
+├── 09-sub-workflows/           2 files
+├── 10-conditional-branching/  2 files
+├── 11-error-handling-retries/ 3 files
+├── 12-logging-monitoring/      3 files
+├── 13-checkpointing-state/    2 files
+├── 14-resource-management/     3 files
+├── 15-tool-permissions/        2 files
+├── 16-user-inputs-ui/          2 files
+├── 17-hooks-lifecycle/         4 files
+└── 18-comprehensive-integration/ 2 files
 ```
 
 ### Manual Brainstorm (1 file)

@@ -315,7 +315,7 @@ orchestration:
 - ✅ Model loading/unloading
 - ✅ Memory-based model selection
 
-**Demonstrated in**: 01-model-configuration/01-basic-model-selection-providers.yaml, 01-model-configuration/02-model-parameters-tuning.yaml, 01-model-configuration/03-model-lifecycle-management.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
+**Demonstrated in**: 01-model-configuration/01-basic-model-selection-providers.yaml, 01-model-configuration/02-model-parameters-tuning.yaml, 01-model-configuration/03-model-lifecycle-management.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
 
 ### 2. Execution Modes
 
@@ -362,7 +362,7 @@ orchestration:
 - ✅ Tolerance settings (exact/fuzzy)
 - ✅ Max iteration limits
 
-**Demonstrated in**: 05-loops-convergence/04-convergence-reduction-aggregation.yaml, 11-conditional-branching/01-event-based-branching.yaml, 05-loops-convergence/01-for-loops-explicit-iteration.yaml, 03-data-flow/01-workflow-level-variables.yaml, 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
+**Demonstrated in**: 04-loops-convergence/04-convergence-reduction-aggregation.yaml, 10-conditional-branching/01-event-based-branching.yaml, 04-loops-convergence/01-for-loops-explicit-iteration.yaml, 03-data-flow/01-workflow-level-variables.yaml, 16-user-inputs-ui/01-user-input-prompts-validation.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
 
 ### 5. Validation Strategies
 
@@ -377,7 +377,7 @@ orchestration:
 - ✅ Top-level overall validation
 - ✅ Propagation of validation results
 
-**Demonstrated in**: 01-model-configuration/01-basic-model-selection-providers.yaml, 05-loops-convergence/04-convergence-reduction-aggregation.yaml, 11-conditional-branching/01-event-based-branching.yaml, 05-loops-convergence/01-for-loops-explicit-iteration.yaml, 03-data-flow/01-workflow-level-variables.yaml, 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
+**Demonstrated in**: 01-model-configuration/01-basic-model-selection-providers.yaml, 04-loops-convergence/04-convergence-reduction-aggregation.yaml, 10-conditional-branching/01-event-based-branching.yaml, 04-loops-convergence/01-for-loops-explicit-iteration.yaml, 03-data-flow/01-workflow-level-variables.yaml, 16-user-inputs-ui/01-user-input-prompts-validation.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
 
 ### 6. Tool System
 
@@ -392,10 +392,10 @@ orchestration:
 - ✅ Human-gated operations
 
 **Tools Demonstrated**:
-- File operations: read, write, delete, backup, archive (06-file-operations/01-file-read-write-batch.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml)
-- Web operations: fetch, scrape, search (07-web-operations/03-url-parameters-requests.yaml, 08-rag-operations/02-rag-generation-context-aware.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml)
-- Shell operations: exec, safe execution (09-script-cli/01-script-execution.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml)
-- Grep: search with regex (01-model-configuration/04-cost-tracking-budgets.yaml, 06-file-operations/01-file-read-write-batch.yaml)
+- File operations: read, write, delete, backup, archive (05-file-operations/01-file-read-write-batch.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml)
+- Web operations: fetch, scrape, search (06-web-operations/03-url-parameters-requests.yaml, 07-rag-operations/02-rag-generation-context-aware.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml)
+- Shell operations: exec, safe execution (08-script-cli/01-script-execution.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml)
+- Grep: search with regex (01-model-configuration/04-cost-tracking-budgets.yaml, 05-file-operations/01-file-read-write-batch.yaml)
 
 ### 7. Web Operations
 
@@ -410,7 +410,7 @@ orchestration:
 - ✅ Robots.txt respect
 - ✅ User-agent configuration
 
-**Demonstrated in**: 07-web-operations/03-url-parameters-requests.yaml, 08-rag-operations/02-rag-generation-context-aware.yaml
+**Demonstrated in**: 06-web-operations/03-url-parameters-requests.yaml, 07-rag-operations/02-rag-generation-context-aware.yaml
 
 ### 8. Script and CLI Execution
 
@@ -423,7 +423,7 @@ orchestration:
 - ✅ Safe execution mode
 - ✅ CLI parameter parsing
 
-**Demonstrated in**: 09-script-cli/01-script-execution.yaml
+**Demonstrated in**: 08-script-cli/01-script-execution.yaml
 
 ### 9. RAG Operations
 
@@ -436,7 +436,7 @@ orchestration:
 - ✅ Knowledge base CRUD
 - ✅ Inverted index creation
 
-**Demonstrated in**: 08-rag-operations/01-document-indexing-retrieval.yaml, 08-rag-operations/02-rag-generation-context-aware.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
+**Demonstrated in**: 07-rag-operations/01-document-indexing-retrieval.yaml, 07-rag-operations/02-rag-generation-context-aware.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
 
 ### 10. Nested Workflow References
 
@@ -449,7 +449,7 @@ orchestration:
 - ✅ Isolation strategies
 - ✅ Policy inheritance and override
 
-**Demonstrated in**: 10-sub-workflows/01-nested-workflow-references.yaml, 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
+**Demonstrated in**: 09-sub-workflows/01-nested-workflow-references.yaml, 16-user-inputs-ui/01-user-input-prompts-validation.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
 
 ### 11. File Operations
 
@@ -462,7 +462,7 @@ orchestration:
 - ✅ Integrity checking (checksums)
 - ✅ Validation before write
 
-**Demonstrated in**: 06-file-operations/01-file-read-write-batch.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
+**Demonstrated in**: 05-file-operations/01-file-read-write-batch.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
 
 ### 12. State Management
 
@@ -475,7 +475,7 @@ orchestration:
 - ✅ Delta updates
 - ✅ Integrity validation
 
-**Demonstrated in**: 13-logging-monitoring/01-hierarchical-logging-system.yaml, 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
+**Demonstrated in**: 12-logging-monitoring/01-hierarchical-logging-system.yaml, 16-user-inputs-ui/01-user-input-prompts-validation.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
 
 ### 13. Metrics Collection
 
@@ -501,7 +501,7 @@ orchestration:
 - ✅ Branch enable by evaluation
 - ✅ Decision logic configuration
 
-**Demonstrated in**: 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
+**Demonstrated in**: 16-user-inputs-ui/01-user-input-prompts-validation.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
 
 ### 15. Event-Based Orchestration
 
@@ -513,7 +513,7 @@ orchestration:
 - ✅ Event aggregation
 - ✅ Event logging
 
-**Demonstrated in**: 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
+**Demonstrated in**: 16-user-inputs-ui/01-user-input-prompts-validation.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml
 
 ---
 
@@ -523,42 +523,42 @@ orchestration:
 |------------|--------|----------------|-------|
 | **Core Features** | | | |
 | YAML-based workflow definition | ✅ Complete | all 52 categorized examples |
-| Model management | ✅ Complete | 01-model-configuration/01-basic-model-selection-providers.yaml, 01-model-configuration/02-model-parameters-tuning.yaml, 01-model-configuration/03-model-lifecycle-management.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Model management | ✅ Complete | 01-model-configuration/01-basic-model-selection-providers.yaml, 01-model-configuration/02-model-parameters-tuning.yaml, 01-model-configuration/03-model-lifecycle-management.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
 | Execution modes (parallel/serial/hybrid) | ✅ Complete | all 52 categorized examples |
-| Hierarchical logging | ✅ Complete | 13-logging-monitoring/01-hierarchical-logging-system.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Hierarchical logging | ✅ Complete | 12-logging-monitoring/01-hierarchical-logging-system.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
 | Retry logic | ✅ Complete | all 52 categorized examples |
-| Validation loops | ✅ Complete | 01-model-configuration/01-basic-model-selection-providers.yaml, 05-loops-convergence/04-convergence-reduction-aggregation.yaml, 11-conditional-branching/01-event-based-branching.yaml, 05-loops-convergence/01-for-loops-explicit-iteration.yaml, 03-data-flow/01-workflow-level-variables.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Validation loops | ✅ Complete | 01-model-configuration/01-basic-model-selection-providers.yaml, 04-loops-convergence/04-convergence-reduction-aggregation.yaml, 10-conditional-branching/01-event-based-branching.yaml, 04-loops-convergence/01-for-loops-explicit-iteration.yaml, 03-data-flow/01-workflow-level-variables.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
 | Variable references | ✅ Complete | all 52 categorized examples |
 | **Advanced Features** | | | |
-| Conditional branching | ✅ Complete | 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
-| Event-based execution | ✅ Complete | 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
-| Interdependent validation | ✅ Complete | 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
-| Nested sub-workflows | ✅ Complete | 10-sub-workflows/01-nested-workflow-references.yaml, 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
-| Orchestration | ✅ Complete | 01-model-configuration/03-model-lifecycle-management.yaml, 10-sub-workflows/01-nested-workflow-references.yaml, 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
-| State management | ✅ Complete | 13-logging-monitoring/01-hierarchical-logging-system.yaml, 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Conditional branching | ✅ Complete | 16-user-inputs-ui/01-user-input-prompts-validation.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Event-based execution | ✅ Complete | 16-user-inputs-ui/01-user-input-prompts-validation.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Interdependent validation | ✅ Complete | 16-user-inputs-ui/01-user-input-prompts-validation.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Nested sub-workflows | ✅ Complete | 09-sub-workflows/01-nested-workflow-references.yaml, 16-user-inputs-ui/01-user-input-prompts-validation.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Orchestration | ✅ Complete | 01-model-configuration/03-model-lifecycle-management.yaml, 09-sub-workflows/01-nested-workflow-references.yaml, 16-user-inputs-ui/01-user-input-prompts-validation.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| State management | ✅ Complete | 12-logging-monitoring/01-hierarchical-logging-system.yaml, 16-user-inputs-ui/01-user-input-prompts-validation.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
 | **Tool System** | | | |
-| File operations (CRUD) | ✅ Complete | 06-file-operations/01-file-read-write-batch.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
-| Web operations (fetch/scrape) | ✅ Complete | 07-web-operations/03-url-parameters-requests.yaml, 08-rag-operations/02-rag-generation-context-aware.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
-| Shell execution | ✅ Complete | 09-script-cli/01-script-execution.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
-| Tool permissions | ✅ Complete | 01-model-configuration/04-cost-tracking-budgets.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| File operations (CRUD) | ✅ Complete | 05-file-operations/01-file-read-write-batch.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Web operations (fetch/scrape) | ✅ Complete | 06-web-operations/03-url-parameters-requests.yaml, 07-rag-operations/02-rag-generation-context-aware.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Shell execution | ✅ Complete | 08-script-cli/01-script-execution.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Tool permissions | ✅ Complete | 01-model-configuration/04-cost-tracking-budgets.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
 | **Data Operations** | | | |
-| RAG operations | ✅ Complete | 08-rag-operations/01-document-indexing-retrieval.yaml, 08-rag-operations/02-rag-generation-context-aware.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
-| Knowledge base CRUD | ✅ Complete | 08-rag-operations/01-document-indexing-retrieval.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
-| Embedding generation | ✅ Complete | 08-rag-operations/01-document-indexing-retrieval.yaml, 08-rag-operations/02-rag-generation-context-aware.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| RAG operations | ✅ Complete | 07-rag-operations/01-document-indexing-retrieval.yaml, 07-rag-operations/02-rag-generation-context-aware.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Knowledge base CRUD | ✅ Complete | 07-rag-operations/01-document-indexing-retrieval.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Embedding generation | ✅ Complete | 07-rag-operations/01-document-indexing-retrieval.yaml, 07-rag-operations/02-rag-generation-context-aware.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
 | **Quality & Optimization** | | | |
-| Convergence loops | ✅ Complete | 05-loops-convergence/04-convergence-reduction-aggregation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
-| Prompt refinement | ✅ Complete | 07-web-operations/01-web-fetch-scrape.yaml, 03-data-flow/01-workflow-level-variables.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
-| Auto model routing | ✅ Complete | 01-model-configuration/02-model-parameters-tuning.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
-| Weighted validation | ✅ Complete | 17-user-inputs-ui/01-user-input-prompts-validation.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Convergence loops | ✅ Complete | 04-loops-convergence/04-convergence-reduction-aggregation.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Prompt refinement | ✅ Complete | 06-web-operations/01-web-fetch-scrape.yaml, 03-data-flow/01-workflow-level-variables.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Auto model routing | ✅ Complete | 01-model-configuration/02-model-parameters-tuning.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Weighted validation | ✅ Complete | 16-user-inputs-ui/01-user-input-prompts-validation.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
 | **Execution & Output** | | | |
 | Metrics collection | ✅ Complete | all 52 categorized examples |
 | Multiple output formats | ✅ Complete | all 52 categorized examples |
-| File backup and archive | ✅ Complete | 06-file-operations/01-file-read-write-batch.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| File backup and archive | ✅ Complete | 05-file-operations/01-file-read-write-batch.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
 | **Specialized Features** | | | |
-| Loop variations (count/time/infinite) | ✅ Complete | 05-loops-convergence/01-for-loops-explicit-iteration.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
-| Abstract validation criteria | ✅ Complete | 05-loops-convergence/01-for-loops-explicit-iteration.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
-| URL parameters | ✅ Complete | 07-web-operations/03-url-parameters-requests.yaml, 08-rag-operations/02-rag-generation-context-aware.yaml |
-| Script environment variables | ✅ Complete | 09-script-cli/01-script-execution.yaml, 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Loop variations (count/time/infinite) | ✅ Complete | 04-loops-convergence/01-for-loops-explicit-iteration.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| Abstract validation criteria | ✅ Complete | 04-loops-convergence/01-for-loops-explicit-iteration.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
+| URL parameters | ✅ Complete | 06-web-operations/03-url-parameters-requests.yaml, 07-rag-operations/02-rag-generation-context-aware.yaml |
+| Script environment variables | ✅ Complete | 08-script-cli/01-script-execution.yaml, 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml |
 
 **Total Requirements**: 35+
 **Complete Requirements**: 35
@@ -627,7 +627,7 @@ orchestration:
 
 ---
 
-### Example 5: Convergence Loops (05-loops-convergence/04-convergence-reduction-aggregation.yaml)
+### Example 5: Convergence Loops (04-loops-convergence/04-convergence-reduction-aggregation.yaml)
 
 **Purpose**: Demonstrate iterative improvement
 
@@ -641,7 +641,7 @@ orchestration:
 
 ---
 
-### Example 6: RAG CRUD Operations (08-rag-operations/01-document-indexing-retrieval.yaml)
+### Example 6: RAG CRUD Operations (07-rag-operations/01-document-indexing-retrieval.yaml)
 
 **Purpose**: Demonstrate knowledge base management
 
@@ -655,7 +655,7 @@ orchestration:
 
 ---
 
-### Example 7: Prompt to Workflow Generator (07-web-operations/01-web-fetch-scrape.yaml)
+### Example 7: Prompt to Workflow Generator (06-web-operations/01-web-fetch-scrape.yaml)
 
 **Purpose**: Demonstrate meta-workflow generation
 
@@ -669,7 +669,7 @@ orchestration:
 
 ---
 
-### Example 8: Nested Workflow References (10-sub-workflows/01-nested-workflow-references.yaml)
+### Example 8: Nested Workflow References (09-sub-workflows/01-nested-workflow-references.yaml)
 
 **Purpose**: Demonstrate workflow orchestration
 
@@ -683,7 +683,7 @@ orchestration:
 
 ---
 
-### Example 9: Web Operations with URL Parameters (07-web-operations/03-url-parameters-requests.yaml)
+### Example 9: Web Operations with URL Parameters (06-web-operations/03-url-parameters-requests.yaml)
 
 **Purpose**: Demonstrate web operations
 
@@ -697,7 +697,7 @@ orchestration:
 
 ---
 
-### Example 10: Script and CLI Execution (09-script-cli/01-script-execution.yaml)
+### Example 10: Script and CLI Execution (08-script-cli/01-script-execution.yaml)
 
 **Purpose**: Demonstrate shell integration
 
@@ -711,7 +711,7 @@ orchestration:
 
 ---
 
-### Example 11: Nested Validation Parallel Explicit (11-conditional-branching/01-event-based-branching.yaml)
+### Example 11: Nested Validation Parallel Explicit (10-conditional-branching/01-event-based-branching.yaml)
 
 **Purpose**: Demonstrate parallel validation with explicit workflows
 
@@ -725,7 +725,7 @@ orchestration:
 
 ---
 
-### Example 12: Local File CRUD (06-file-operations/01-file-read-write-batch.yaml)
+### Example 12: Local File CRUD (05-file-operations/01-file-read-write-batch.yaml)
 
 **Purpose**: Demonstrate comprehensive file operations
 
@@ -739,7 +739,7 @@ orchestration:
 
 ---
 
-### Example 13: Loop Variations (05-loops-convergence/01-for-loops-explicit-iteration.yaml)
+### Example 13: Loop Variations (04-loops-convergence/01-for-loops-explicit-iteration.yaml)
 
 **Purpose**: Demonstrate different loop types
 
@@ -754,7 +754,7 @@ orchestration:
 
 ---
 
-### Example 14: Web Scrape to RAG Pipeline (08-rag-operations/02-rag-generation-context-aware.yaml)
+### Example 14: Web Scrape to RAG Pipeline (07-rag-operations/02-rag-generation-context-aware.yaml)
 
 **Purpose**: Demonstrate web scraping and RAG integration
 
@@ -768,7 +768,7 @@ orchestration:
 
 ---
 
-### Example 15: Hierarchical Logging (13-logging-monitoring/01-hierarchical-logging-system.yaml)
+### Example 15: Hierarchical Logging (12-logging-monitoring/01-hierarchical-logging-system.yaml)
 
 **Purpose**: Demonstrate advanced logging
 
@@ -796,7 +796,7 @@ orchestration:
 
 ---
 
-### Example 17: Conditional Branching Workflows (17-user-inputs-ui/01-user-input-prompts-validation.yaml)
+### Example 17: Conditional Branching Workflows (16-user-inputs-ui/01-user-input-prompts-validation.yaml)
 
 **Purpose**: Demonstrate event-based conditional logic
 
@@ -811,7 +811,7 @@ orchestration:
 
 ---
 
-### Example 18: Comprehensive Features Workflow (19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml)
+### Example 18: Comprehensive Features Workflow (18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml)
 
 **Purpose**: Demonstrate ALL features in one coherent workflow
 
@@ -1131,7 +1131,7 @@ The schema provides a solid foundation for building, deploying, and optimizing A
 
 **Example Workflows** (53 workflows across 19 categories demonstrating all features):
 - all 52 categorized examples: Core workflow demonstrations
-- 19-comprehensive-integration/01-complex-orchestration-sub-agents.yaml-comprehensive-features-workflow.yml: All features in one coherent workflow
+- 18-comprehensive-integration/01-complex-orchestration-sub-agents.yaml-comprehensive-features-workflow.yml: All features in one coherent workflow
 
 **Review Documentation** (11 review cycles):
 - review-cycle-1-schema-completeness.md

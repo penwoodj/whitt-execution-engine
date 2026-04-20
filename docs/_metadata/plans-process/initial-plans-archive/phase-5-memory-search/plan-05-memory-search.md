@@ -5,7 +5,7 @@
 **Status**: Not Started
 **Created**: 2026-03-27
 **Related ADR**: ADR-0006 (Local memory retrieval web search and web scraping)
-**Related Research Plan**: research-plan-04-quality-memory-search.yml
+**Related Research Plan**: research-plan-03-quality-memory-search.yml
 **Estimated Time**: 10-12 weeks
 **Dependencies**: plan-00 (Foundation), plan-01 (MVP Queue), plan-02 (CLI & Backends), plan-03 (Glyphnova UI), plan-04 (Quality Loops)
 
@@ -101,7 +101,7 @@ From `requirements.md` and `schema-consolidated-report.md`:
 
 ### Research Plan Review
 
-**research-plan-04-quality-memory-search.yml** is **COMPLETED** with 3 research domains (plan-05 uses domain 3):
+**research-plan-03-quality-memory-search.yml** is **COMPLETED** with 3 research domains (plan-05 uses domain 3):
 
 3. **Memory and Search Architecture**: What memory architecture and retrieval strategy best support local-first agentic workflows?
 
@@ -771,13 +771,13 @@ whitt-execution-engine provenance --operation search-123
 
 ### Related Documents
 
-- **ADR-0006**: [Local memory retrieval web search and web scraping](../roadmap/adr-0006-memory-search-scraping.yml)
-- **Research Plan 04**: [Quality loops and memory & search research](../roadmap/research-plan-04-quality-memory-search.yml)
+- **ADR-0006**: [Local memory retrieval web search and web scraping](../roadmap/adr-0004-memory-search-scraping.yml)
+- **Research Plan 04**: [Quality loops and memory & search research](../roadmap/research-plan-03-quality-memory-search.yml)
 - **Plan 00**: [Foundation Compiler Contract](phase-0-foundation/plan-00-foundation.md)
 - **Plan 01**: [MVP Queue & Scheduler](phase-1-mvp-queue/plan-01-mvp-queue.md)
 - **Plan 02**: [CLI & Backends](phase-2-cli-backends/plan-02-cli-backends.md)
 - **Plan 03**: [Glyphnova UI](phase-3-glyphnova-ui/plan-03-glyphnova-ui.md)
-- **Plan 04**: [Quality Loops](phase-4-quality-loops/plan-04-quality-loops.md)
+- **Plan 04**: [Quality Loops](phase-4-quality-loops/plan-03-quality-loops.md)
 - **Requirements**: [schema-consolidated-report.md](../requirements/schema-consolidated-report.md)
 
 ### Implementation References

@@ -1260,6 +1260,12 @@ agentic_workflow:
 
 ---
 
-## See Also
-- [Unified Workflow Schema](../schema/unified-workflow-schema.yml) - Single source of truth
-- [Schema Integration Plan](./hooks-integration-plan.md) - Integration plan for hooks
+## 🔗 Related Documentation
+
+| Document | Description |
+|----------|-------------|
+| [README.md](./README.md) | Schema documentation |
+| [unified-workflow-schema.yml](./unified-workflow-schema.yml) - Single source of truth |
+| [hooks-integration-plan.md](./hooks-integration-plan.md) - Integration plan for hooks |
+| [../workflows/examples/](../workflows/examples/) - Workflow examples |
+| [../guides/](../guides/) | Development guides |

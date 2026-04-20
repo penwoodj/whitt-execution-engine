@@ -955,7 +955,7 @@ Expected output: `type-mapping-patterns.md` document with concrete examples
 
 - [ ] **Step 4: Commit evidence artifacts**
 
-Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add yaml-to-rust type mapping evidence"`
+Run: `git add ./workspace/plans/research/evidence/ && git commit -m "feat: add whitt-execution-engine type mapping evidence"`
 Expected: Git commit successful
 
 ---

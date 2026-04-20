@@ -5,7 +5,7 @@
 **Status**: Not Started
 **Created**: 2026-03-27
 **Related ADR**: ADR-0005 (Quality loops, artifact workflows, and benchmark-driven file-type expansion)
-**Related Research Plan**: research-plan-04-quality-memory-search.yml
+**Related Research Plan**: research-plan-03-quality-memory-search.yml
 **Estimated Time**: 8-10 weeks
 **Dependencies**: plan-00 (Foundation), plan-01 (MVP Queue), plan-02 (CLI & Backends), plan-03 (Glyphnova UI)
 
@@ -79,7 +79,7 @@ From `requirements.md` and `schema-consolidated-report.md`:
 
 ### Research Plan Review
 
-**research-plan-04-quality-memory-search.yml** is **COMPLETED** with 3 research domains (plan-04 uses domains 1 and 2):
+**research-plan-03-quality-memory-search.yml** is **COMPLETED** with 3 research domains (plan-04 uses domains 1 and 2):
 
 1. **Quality Loops**: What verifier interfaces and repair loop semantics best support generate-verify-repair for different artifact types?
 2. **Benchmark Strategy**: What benchmark design and curation strategy best measures quality across file types while remaining maintainable?
@@ -750,8 +750,8 @@ whitt-execution-engine report quality --type file-type --format html
 
 ### Related Documents
 
-- **ADR-0005**: [Quality loops, artifact workflows, and benchmark-driven file-type expansion](../roadmap/adr-0005-quality-loops-benchmarks-artifact-workflows.yml)
-- **Research Plan 04**: [Quality loops and memory & search research](../roadmap/research-plan-04-quality-memory-search.yml)
+- **ADR-0005**: [Quality loops, artifact workflows, and benchmark-driven file-type expansion](../roadmap/adr-0003-quality-loops-benchmarks-artifact-workflows.yml)
+- **Research Plan 04**: [Quality loops and memory & search research](../roadmap/research-plan-03-quality-memory-search.yml)
 - **Plan 00**: [Foundation Compiler Contract](phase-0-foundation/plan-00-foundation.md)
 - **Plan 01**: [MVP Queue & Scheduler](phase-1-mvp-queue/plan-01-mvp-queue.md)
 - **Plan 02**: [CLI & Backends](phase-2-cli-backends/plan-02-cli-backends.md)

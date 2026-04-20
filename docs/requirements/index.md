@@ -1,11 +1,11 @@
-# Requirements Index
+# 📋 Requirements Index
 
 **Version**: 5.0
 **Date**: 2026-04-13
 
 ---
 
-## Overview
+## 📊 Overview
 
 Index of all requirements documentation for AutoAgents SDK. Organized by implementation phase, priority, and completion status.
 
@@ -17,15 +17,15 @@ Index of all requirements documentation for AutoAgents SDK. Organized by impleme
 
 ---
 
-## Requirements by Section
+## 🎯 Requirements by Section
 
-### Core Requirements (Phase 1)
+### 🚀 Core Requirements (Phase 1)
 
 | # | Requirement | Priority | Status | Document | Description |
 |---|-------------|----------|--------|-------------|
 | 1 | Unified Workflow Schema v2.0 | P0 | ✅ | [unified-workflow-schema.yml](../schema/unified-workflow-schema.yml) | Single source of truth for workflow structure |
 | 2 | Schema Validation | P0 | ✅ | [unified-schema-requirements.md](../schema/unified-schema-requirements.md) | Validation rules and requirements |
-| 3 | Example Workflows | P0 | ✅ | [example-workflows/README.md](./example-workflows/README.md) | 53 categorized workflows covering all features |
+| 3 | Example Workflows | P0 | ✅ | [example-workflows/README.md](./example-workflows/README.md) | 50 categorized workflows covering all features |
 | 4 | Model Router | P0 | ✅ | [model-router/README.md](./model-router/README.md) | Multi-provider model abstraction |
 | 5 | Transpiler Architecture | P0 | ✅ | [transpiler_architecture.md](../plans/transpiler/transpiler_architecture.md) | 7-layer transpiler design |
 | 6 | Transpiler Implementation | P1 | 🔄 | [transpiler_implementation_plan.yml](../plans/transpiler/transpiler_implementation_plan.yml) | Code generation and templates |
@@ -39,7 +39,7 @@ Index of all requirements documentation for AutoAgents SDK. Organized by impleme
 
 ---
 
-## Advanced Requirements (Phase 2+)
+## 🔬 Advanced Requirements (Phase 2+)
 
 | # | Requirement | Priority | Status | Document | Description |
 |---|-------------|----------|--------|----------|-------------|
@@ -49,11 +49,11 @@ Index of all requirements documentation for AutoAgents SDK. Organized by impleme
 | 17 | Llama.cpp Vulkan Integration | P1 | ✅ | [llamacpp-vulkan-integration.md](./llamacpp-vulkan-integration.md) | GPU acceleration with layer offload |
 | 18 | Transpiler Feature Matrix | P1 | ✅ | [transpiler-feature-matrix-r0054-r0075.md](./transpiler-feature-matrix-r0054-r0075.md) | Schema definition + docs generation (R0054-R0075) |
 | 19 | Critical Evaluation | P1 | ✅ | [critical-evaluation.md](./critical-evaluation.md) | Tech stack decisions (serde-saphyr, Rig, Treadle, etc.) |
-| 20 | Human-in-the-Loop | P1 | ⏳ | [treadle-integration-task.md](../plans/04-quality-loops/tasks/01-treadle-integration.md) | HITL with persistent workflows |
-| 21 | Quality Loops | P2 | ⏳ | [quality-loops-plan.md](../plans/04-quality-loops/plan.md) | Generate-verify-repair iteration loops |
-| 22 | Memory & Search | P2 | ⏳ | [memory-search-plan.md](../plans/05-memory-search/plan.md) | Vector DB with RAG operations |
-| 23 | Autonomy Metrics | P3 | ⏳ | [autonomy-metrics-plan.md](../plans/07-autonomy-metrics/plan.md) | Self-improvement metrics |
-| 24 | Automation | P4 | ⏳ | [automation-plan.md](../plans/06-automation/plan.md) | Git operations, cron workflows |
+| 20 | Human-in-the-Loop | P1 | ⏳ | [treadle-integration-task.md](../plans/03-quality-loops/tasks/01-treadle-integration.md) | HITL with persistent workflows |
+| 21 | Quality Loops | P2 | ⏳ | [quality-loops-plan.md](../plans/03-quality-loops/plan.md) | Generate-verify-repair iteration loops |
+| 22 | Memory & Search | P2 | ⏳ | [memory-search-plan.md](../plans/04-memory-search/plan.md) | Vector DB with RAG operations |
+| 23 | Autonomy Metrics | P3 | ⏳ | [autonomy-metrics-plan.md](../plans/06-autonomy-metrics/plan.md) | Self-improvement metrics |
+| 24 | Automation | P4 | ⏳ | [automation-plan.md](../plans/05-automation/plan.md) | Git operations, cron workflows |
 
 ---
 
@@ -180,7 +180,7 @@ Index of all requirements documentation for AutoAgents SDK. Organized by impleme
 - [Critical Evaluation](./critical-evaluation.md) - Tech stack comparison and choices
 
 **Example Workflows:**
-- [52 Categorized Workflows](./example-workflows/requirements-oriented-auto/) - All schema features demonstrated
+- [50 Categorized Workflows](./example-workflows/requirements-oriented-auto/) - All schema features demonstrated
 - [Manual Brainstorm](./example-workflows/manual/agentic-workflow-manual-brainstorm.yml) - Conceptual agentic patterns
 
 ---
@@ -199,7 +199,7 @@ Index of all requirements documentation for AutoAgents SDK. Organized by impleme
 
 ## AutoAgents SDK Tool Abstraction
 
-All 53 workflow examples leverage the AutoAgents SDK for:
+All 50 workflow examples leverage the AutoAgents SDK for:
 - **Multi-provider model support** - LM Studio, Ollama, llama.cpp, OpenAI
 - **Backend selection** - Vulkan, CUDA, CPU, Metal with automatic fallback
 - **Parameter tuning** - Temperature, top_p, max_tokens configuration

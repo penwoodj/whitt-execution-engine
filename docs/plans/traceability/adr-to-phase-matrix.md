@@ -67,7 +67,7 @@
 **Compliance Test**:
 - Test: Validate YAML against JSON Schema
 - Expected: All valid workflows pass schema validation
-- Command: Schema validator on all 53 workflows
+- Command: Schema validator on all 50 workflows
 - Result: 100% pass rate
 
 **Verification Method**:

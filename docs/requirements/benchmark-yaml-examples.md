@@ -1,6 +1,6 @@
-# Complete YAML Benchmark Examples
+# 📋 Complete YAML Benchmark Examples
 
-## Overview
+## 📊 Overview
 
 Three benchmark workflows demonstrating scaling from 5 to 100 models. Each workflow benchmarks all models end-to-end (discovery → loading → 8 prompts → aggregation → ranking → report), demonstrating fault tolerance and comprehensive data collection.
 
@@ -591,3 +591,12 @@ hosting:
 6. Create benchmark result aggregation and ranking logic
 7. Implement memory-aware model loading and unloading
 8. Add benchmark progress display (current model, prompts, ETA)
+
+## 🔗 Related Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Requirements Index](./index.md) | Complete requirements documentation |
+| [Schema Reference](../schema/unified-workflow-schema.yml) | Single source of truth for workflow structure |
+| [Critical Evaluation](./critical-evaluation.md) | Tech stack decisions and choices |
+| [Configuration Defaults](./configuration-defaults.md) | Default values for all components |

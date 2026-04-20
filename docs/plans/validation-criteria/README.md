@@ -13,12 +13,10 @@ Incremental validation framework preventing goal drift and ensuring systematic v
 - phase-00-criteria.md - Foundation phase measurable validation criteria
 - phase-01-criteria.md - MVP Queue & Scheduler phase measurable validation criteria
 - phase-02-criteria.md - CLI & Backends phase measurable validation criteria
-- phase-03-criteria.md - Glyphnova UI phase measurable validation criteria
-- phase-04-criteria.md - Quality Loops phase measurable validation criteria
-- phase-05-criteria.md - Memory & Search phase measurable validation criteria
-- phase-06-criteria.md - Automation phase measurable validation criteria
-- phase-07-criteria.md - Autonomy & Metrics phase measurable validation criteria
-- phase-08-criteria.md - Final Validation phase measurable validation criteria
+- phase-03-criteria.md - Quality Loops phase measurable validation criteria
+- phase-04-criteria.md - Memory & Search phase measurable validation criteria
+- phase-05-criteria.md - Automation phase measurable validation criteria
+- phase-06-criteria.md - Autonomy & Metrics phase measurable validation criteria
 
 ## 7 Verification Layers
 

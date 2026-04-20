@@ -6,7 +6,7 @@ This directory contains all workflow examples for the AgentSDK schema, organized
 graph TD
     A["example-workflows/"] --> B["requirements-oriented-auto/"]
     A --> C["manual/"]
-    B --> D["19 Categories<br/>53 YAML Examples"]
+    B --> D["18 Categories<br/>50 YAML Examples"]
     C --> E["1 Brainstorm Reference"]
 
     style A fill:#2196F3,color:#fff
@@ -17,11 +17,11 @@ graph TD
 
 ```
 example-workflows/
-├── requirements-oriented-auto/     52 categorized examples across 19 categories
+├── requirements-oriented-auto/     50 categorized examples across 18 categories
 │   ├── 01-model-configuration/     Start here
 │   ├── 02-step-types/
 │   ├── ...
-│   └── 19-comprehensive-integration/
+│   └── 18-comprehensive-integration/
 ├── manual/                         Human brainstorm reference
 │   └── agentic-workflow-manual-brainstorm.yml
 ├── requirements-coverage-analysis.md   Schema coverage report
@@ -39,7 +39,7 @@ example-workflows/
 |-------|-------|---------|
 | 1-5 | Schema completeness, coherence, models, control flow, permissions | Original 16 workflows |
 | 6-8 | Completeness, consistency, schema quality | All workflows |
-| 9 | Core schema comprehensibility for juniors | 52 individual examples |
+| 9 | Core schema comprehensibility for juniors | 50 individual examples |
 | 10 | Advanced features (orchestration, guardrails) | Comprehensive integration |
 | 11 | Edge cases and testing guidance | All examples |
 
@@ -135,14 +135,14 @@ Rule: `${...}` for static structural references, `{{...}}` for runtime dynamic v
 - **Retrieval accuracy**: Test semantic search returns relevant results for test queries
 - **Context window handling**: Verify retrieved context fits within model token limits
 - **Citation validation**: Ensure LLM responses properly cite source documents
-- **Examples**: See `08-rag-operations/` directory
+- **Examples**: See `07-rag-operations/` directory
 
 ### Web API Operations
 - **Mock API endpoints**: Create test APIs for development without hitting production services
 - **Rate limit handling**: Test retry behavior when API rate limits are hit
 - **Timeout management**: Configure appropriate timeouts for network operations
 - **Error propagation**: Ensure API errors properly bubble up through workflow steps
-- **Examples**: See `07-web-operations/` directory
+- **Examples**: See `06-web-operations/` directory
 
 ### Model Lifecycle
 - **Warmup timing**: Measure and configure model warmup duration for optimal performance
@@ -156,11 +156,11 @@ Rule: `${...}` for static structural references, `{{...}}` for runtime dynamic v
 - **Denylist blocking**: Test that denied operations properly fail with appropriate errors
 - **Scope validation**: Confirm per-step restrictions don't exceed global permissions
 - **Dynamic guardrails**: Test content-based policy triggers (PII, harmful content)
-- **Examples**: See `16-tool-permissions/` directory
+- **Examples**: See `15-tool-permissions/` directory
 
 ### Error Recovery
 - **Retry backoff**: Verify exponential/linear backoff delays increase as expected
 - **Escalation paths**: Test escalation to model/oracle after configurable retry counts
 - **Partial recovery**: Confirm workflows can continue with partial results after failure
 - **Cleanup handling**: Verify resources are properly cleaned up after failures
-- **Examples**: See `12-error-handling-retries/` directory
+- **Examples**: See `11-error-handling-retries/` directory

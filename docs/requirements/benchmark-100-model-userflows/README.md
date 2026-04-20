@@ -23,7 +23,7 @@ MVP requirements for a fault-tolerant benchmark system running an 8-prompt chain
 - uf12-model-provider-abstraction.md - Unified API for Ollama/LM Studio/llama.cpp
 - uf13-progress-tracking-and-checkpointing.md - Resume after crash, progress display
 - uf14-validation-and-quality-scoring.md - Automated per-step scoring (0.0-1.0)
-- uf15-resource-monitoring-and-adaptation.md - VRAM/RAM/CPU/temp tracking + adaptation
+- uf14-resource-monitoring-and-adaptation.md - VRAM/RAM/CPU/temp tracking + adaptation
 - uf16-configuration-management.md - Config layering, validation, defaults
 - uf17-benchmark-report-generation.md - Rankings, tables, analysis report
 - uf18-cleanup-and-teardown.md - Graceful shutdown, resource free
@@ -40,7 +40,10 @@ MVP requirements for a fault-tolerant benchmark system running an 8-prompt chain
 
 Current unified-workflow-schema.yml covers 60-90% of MVP needs. Gaps require ~28 new schema properties across 5 new root sections including `benchmark_manifest`, `benchmark_execution`, `benchmark_scoring`, and `benchmark_results`.
 
-## Related
+## 🔗 Related Documentation
 
-- [Unified Schema](../unifying-schema/unified-workflow-schema.yml) - Base schema with current coverage
-- [MVP Summary](mvp-summary-report.md) - Complete scope analysis and recommendations
+| Document | Description |
+|----------|-------------|
+| [Unified Schema](../schema/unified-workflow-schema.yml) | Base schema with current coverage |
+| [MVP Summary](mvp-summary-report.md) | Complete scope analysis and recommendations |
+| [Requirements Index](../index.md) | Complete requirements documentation |

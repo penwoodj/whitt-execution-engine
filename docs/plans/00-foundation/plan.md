@@ -59,7 +59,7 @@ Phase 0 owns these sections of the unified schema:
 - `permissions`: File system permissions
 
 ### Section 14: Features Demonstrated
-- 19 feature categories from example workflows
+- 18 feature categories from example workflows
 - Feature compatibility checks
 
 ### Section 15: Variable Interpolation Syntax
@@ -93,7 +93,7 @@ Phase 0 owns these sections of the unified schema:
 
 ---
 
-## Task Breakdown
+## 📋 Task Breakdown
 
 ### Task 0: Cargo Project Setup
 **File:** `tasks/00-cargo-project-setup.md`
@@ -357,7 +357,7 @@ cargo clippy -- -D warnings
 
 ---
 
-## Success Criteria
+## ✅ Success Criteria
 
 Phase 0 is complete when:
 

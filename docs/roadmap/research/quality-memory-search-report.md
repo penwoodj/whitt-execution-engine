@@ -1,6 +1,6 @@
 # Quality Loops, Memory, Retrieval, and Search Research Report
 
-**Plan ID**: research-plan-04-quality-memory-search
+**Plan ID**: research-plan-03-quality-memory-search
 **Status**: Complete
 **Date**: 2026-03-07
 **Supports**: ADR-0005, ADR-0006

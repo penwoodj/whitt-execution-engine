@@ -12,8 +12,8 @@
 | Schema location | `reports/requirements/unifying-schema/unified-workflow-schema.yml` |
 | Schema size | 801 lines (down from 1705) |
 | Example workflows | 52 v2-compliant YAMLs + 2 archived v1 artifacts |
-| ADRs | 9 (adr-0000 through adr-0008) |
-| Plan phases | 10 (00-foundation through 08-final-validation + deep-research) |
+| ADRs | 9 (adr-0000 through adr-0007) |
+| Plan phases | 10 (00-foundation through 07-final-validation + deep-research) |
 
 ---
 
@@ -62,7 +62,7 @@
 
 **Key tasks**: Shell setup, backend API, control plane components
 
-### Phase 4 — Quality Loops (`plans/04-quality-loops/`)
+### Phase 4 — Quality Loops (`plans/03-quality-loops/`)
 **Scope**: Generate-verify-repair loops, benchmark harness, quality scoring, regression testing.
 
 **v2 schema alignment status**: ✅ Updated
@@ -70,7 +70,7 @@
 
 **Key tasks**: Quality loop implementation, benchmark harness, scoring
 
-### Phase 5 — Memory & Search (`plans/05-memory-search/`)
+### Phase 5 — Memory & Search (`plans/04-memory-search/`)
 **Scope**: Local memory storage, fulltext search, semantic search, search query engine, external search adapters, web scraping, provenance tracking, garbage collection, integration.
 
 **v2 schema alignment status**: ✅ Updated
@@ -79,7 +79,7 @@
 
 **Key tasks**: 9 tasks + 8 validation files with mock/test specifications + legacy test archive
 
-### Phase 6 — Automation (`plans/06-automation/`)
+### Phase 6 — Automation (`plans/05-automation/`)
 **Scope**: Cron scheduler, merge proposal generation, manual refinement capture, experiment result tracking, rollback/cleanup.
 
 **v2 schema alignment status**: ✅ Updated
@@ -88,7 +88,7 @@
 
 **Key tasks**: 5 tasks covering git automation workflow
 
-### Phase 7 — Autonomy & Metrics (`plans/07-autonomy-metrics/`)
+### Phase 7 — Autonomy & Metrics (`plans/06-autonomy-metrics/`)
 **Scope**: Metrics collection, intervention tracking, autonomous decision-making, observability.
 
 **v2 schema alignment status**: ✅ Updated
@@ -98,7 +98,7 @@
 
 **Key tasks**: 3 tasks + validation with mock specs
 
-### Phase 8 — Final Validation (`plans/08-final-validation/`)
+### Phase 8 — Final Validation (`plans/07-final-validation/`)
 **Scope**: End-to-end validation, 100-model benchmarking, workflow generation tests, edge case coverage.
 
 **v2 schema alignment status**: ✅ Updated
@@ -141,7 +141,7 @@
 | Rust crate name `whitt::` | `plans/02-cli-and-llm-backend-integration/tasks/` (15+ files) | LOW | Requires actual code rename |
 | Directory `03-glyphnova-ui/` | `plans/03-glyphnova-ui/` | LOW | Historical, phase removed |
 | ADR-0004 filename | `reports/roadmap/adr-0004-glyphnova-ui-control-plane.yml` | LOW | Title + filename rename pending |
-| `schema_version: 1.0` | `plans/05-memory-search/tasks/00-local-memory-storage.md` | MEDIUM | Pending |
+| `schema_version: 1.0` | `plans/04-memory-search/tasks/00-local-memory-storage.md` | MEDIUM | Pending |
 | `input_variables` in traceability | `plans/traceability/schema-to-phase-matrix.md` | MEDIUM | Pending |
 | `input_variables` in benchmarks | `reports/requirements/benchmark-100-model-userflows/` (3 files) | MEDIUM | Pending |
 | `1705` in simplification plan | `plans/unified-schema-simplification/plan.md` | NONE | Historical record, skip |
@@ -151,11 +151,11 @@
 ## Implementation Dependencies
 
 ```
-00-foundation ──→ 01-core-execution-engine ──→ 02-cli-and-llm-backend-integration ──→ 04-quality-loops
+00-foundation ──→ 01-core-execution-engine ──→ 02-cli-and-llm-backend-integration ──→ 03-quality-loops
                                                       ↓
-                               05-memory-search ──→ 06-automation ──→ 07-autonomy-metrics
+                               04-memory-search ──→ 05-automation ──→ 06-autonomy-metrics
                                                                         ↓
-                                                               08-final-validation
+                                                               07-final-validation
 ```
 
 ---

@@ -1,8 +1,8 @@
-# Contributing to Whitt Execution Engine
+# 🤝 Contributing to Whitt Execution Engine
 
 Thank you for your interest in contributing! This guide will help you get started.
 
-## Table of Contents
+## 📋 Table of Contents
 
 1. [Code of Conduct](#code-of-conduct)
 2. [Getting Started](#getting-started)
@@ -15,13 +15,13 @@ Thank you for your interest in contributing! This guide will help you get starte
 
 ---
 
-## Code of Conduct
+## 🤝 Code of Conduct
 
-Be respectful, inclusive, and constructive. See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for details.
+Be respectful, inclusive, and constructive.
 
 ---
 
-## Getting Started
+## 🚀 Getting Started
 
 ### Prerequisites
 
@@ -60,7 +60,7 @@ cargo install cargo-edit
 
 ---
 
-## Development Workflow
+## 💻 Development Workflow
 
 ### Branch Strategy
 
@@ -98,7 +98,7 @@ git push origin feature/my-new-feature
 # Visit GitHub and create PR from feature/my-new-feature to develop
 ```
 
-### Commit Message Format
+### 📝 Commit Message Format
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/) specification:
 
@@ -140,7 +140,7 @@ Fixes #456
 
 ---
 
-## Coding Standards
+## ⚙️ Coding Standards
 
 ### Rust Conventions
 
@@ -225,7 +225,7 @@ error!("Failed to parse YAML: {:?}", err);
 
 ---
 
-## Testing
+## 🧪 Testing
 
 ### Unit Tests
 
@@ -297,7 +297,7 @@ cargo test -- --test-threads=4
 
 ---
 
-## Documentation
+## 📝 Documentation
 
 ### Code Documentation
 
@@ -363,7 +363,7 @@ cargo doc --document-private-items
 
 ---
 
-## Pull Request Process
+## 🔀 Pull Request Process
 
 ### Before Submitting
 
@@ -418,7 +418,7 @@ Brief description of changes.
 
 ---
 
-## Issue Reporting
+## 🐛 Issue Reporting
 
 ### Bug Reports
 
@@ -479,7 +479,7 @@ Look for issues labeled `good first issue` or `help wanted` to get started.
 
 ---
 
-## Project Structure
+## 🏗️ Project Structure
 
 ```
 whitt-execution-engine/
@@ -504,7 +504,7 @@ whitt-execution-engine/
 
 ---
 
-## Design Philosophy
+## 🎨 Design Philosophy
 
 - **Declarative over Imperative**: Define what, not how
 - **Type Safety**: Leverage Rust's type system
@@ -514,22 +514,24 @@ whitt-execution-engine/
 
 ---
 
-## Resources
-
-- [README](README.md) - Project overview
-- [INSTALL.md](INSTALL.md) - Installation guide
-- [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md) - Configuration reference
-- [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) - Developer onboarding
-- [Example Workflows](opencode/docs/reports/requirements/example-workflows/) - Usage examples
-
----
-
 ## Contact
 
 - **Issues**: https://github.com/penwoodj/whitt-execution-engine/issues
 - **Discussions**: https://github.com/penwoodj/whitt-execution-engine/discussions
-- **Email**: your.email@example.com
 
 ---
 
-**Thank you for contributing!**
+## 🔗 Related Documentation
+
+| Document | Description |
+|----------|-------------|
+| [../README.md](../README.md) | Documentation index |
+| [developer-guide.md](./developer-guide.md) | Development setup and workflow |
+| [environment-variables.md](./environment-variables.md) - Configuration reference |
+| [testing-guide.md](./testing-guide.md) | Testing strategies and procedures |
+| [install.md](./install.md) | Installation guide |
+| [../plans/README.md](../plans/README.md) | Implementation plans |
+
+---
+
+**Thank you for contributing!** 🚀

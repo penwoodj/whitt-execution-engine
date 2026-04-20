@@ -365,7 +365,7 @@
 4. Create validation error messages
 
 **Acceptance Test**:
-- Test: Validate all 53 workflows against schema
+- Test: Validate all 50 workflows against schema
 - Command: Run schema validator on all workflows
 - Expected: 100% valid workflows pass
 - Validation: Invalid workflows rejected with clear errors

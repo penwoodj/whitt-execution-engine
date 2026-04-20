@@ -1,6 +1,6 @@
-# Testing Guide
+# 🧪 Testing Guide
 
-This guide explains how to test the 53 example workflows included with the Whitt Execution Engine framework.
+This guide explains how to test the 50 example workflows included with the Whitt Execution Engine framework.
 
 ## Table of Contents
 
@@ -17,7 +17,7 @@ This guide explains how to test the 53 example workflows included with the Whitt
 
 ## Overview
 
-The framework includes **53 example workflows** organized into **19 categories**, demonstrating all features of the YAML workflow system:
+The framework includes **50 example workflows** organized into **18 categories**, demonstrating all features of the YAML workflow system:
 
 | Category | Examples | Key Features |
 |----------|-----------|--------------|
@@ -38,10 +38,8 @@ The framework includes **53 example workflows** organized into **19 categories**
 | Resource Management | 3 | Memory allocation, CPU/GPU scheduling, throttling |
 | Tool Permissions | 2 | Allow/deny lists, step control |
 | User Inputs & UI | 2 | Input validation, interactive feedback |
-| Hooks & Lifecycle | 4 | Pre/post hooks, step hooks, lifecycle events |
-| Comprehensive Integration | 2 | Complex orchestration, guardrails |
 
-**Location**: `opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/`
+**Location**: `../workflows/examples/requirements-oriented-auto/`
 
 ---
 
@@ -122,7 +120,7 @@ cargo test
 
 ```bash
 # Run specific workflow
-cargo run -- run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/01-model-configuration/01-basic-model-selection-providers.yaml
+cargo run -- run ../workflows/examples/requirements-oriented-auto/01-model-configuration/01-basic-model-selection-providers.yaml
 
 # View output
 cat ./workspace/output/step_1_output
@@ -135,7 +133,7 @@ cat ./workspace/logs/workflow.log
 
 ```bash
 # Test all model configuration workflows (4 workflows)
-for file in opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/01-model-configuration/*.yaml; do
+for file in ../workflows/examples/requirements-oriented-auto/01-model-configuration/*.yaml; do
     echo "Testing: $file"
     cargo run --run "$file"
 done
@@ -144,7 +142,7 @@ done
 ### Test All Workflows
 
 ```bash
-# Test all 53 workflows (when framework is fully implemented)
+# Test all 50 workflows (when framework is fully implemented)
 cargo run --test-all-workflows
 
 # This will:
@@ -161,7 +159,7 @@ cargo run --test-all-workflows
 
 ```bash
 # Validate workflow schema only
-cargo run --validate opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/01-model-configuration/01-basic-model-selection-providers.yaml
+cargo run --validate ../workflows/examples/requirements-oriented-auto/01-model-configuration/01-basic-model-selection-providers.yaml
 
 # Expected output:
 # ✓ Schema valid
@@ -173,7 +171,7 @@ cargo run --validate opencode/docs/reports/requirements/example-workflows/requir
 
 ```bash
 # Validate and plan execution without running
-cargo run --dry-run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/01-model-configuration/01-basic-model-selection-providers.yaml
+cargo run --dry-run ../workflows/examples/requirements-oriented-auto/01-model-configuration/01-basic-model-selection-providers.yaml
 
 # Expected output:
 # Execution plan:
@@ -193,16 +191,16 @@ cargo run --dry-run opencode/docs/reports/requirements/example-workflows/require
 **Test Command**:
 ```bash
 # Test 1: Basic model selection
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/01-model-configuration/01-basic-model-selection-providers.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/01-model-configuration/01-basic-model-selection-providers.yaml
 
 # Test 2: Model parameters tuning
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/01-model-configuration/02-model-parameters-tuning.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/01-model-configuration/02-model-parameters-tuning.yaml
 
 # Test 3: Model lifecycle management
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/01-model-configuration/03-model-lifecycle-management.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/01-model-configuration/03-model-lifecycle-management.yaml
 
 # Test 4: Cost tracking and budgets
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/01-model-configuration/04-cost-tracking-budgets.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/01-model-configuration/04-cost-tracking-budgets.yaml
 ```
 
 **Expected Output**:
@@ -218,16 +216,16 @@ cargo run --run opencode/docs/reports/requirements/example-workflows/requirement
 **Test Command**:
 ```bash
 # Test LLM inference steps
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/02-step-types/01-llm-inference-steps.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/02-step-types/01-llm-inference-steps.yaml
 
 # Test code execution steps
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/02-step-types/02-code-execution-steps.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/02-step-types/02-code-execution-steps.yaml
 
 # Test tool invocation steps
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/02-step-types/03-tool-invocation-steps.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/02-step-types/03-tool-invocation-steps.yaml
 
 # Test hybrid step workflows
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/02-step-types/04-hybrid-step-workflows.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/02-step-types/04-hybrid-step-workflows.yaml
 ```
 
 **Expected Output**:
@@ -238,37 +236,35 @@ cargo run --run opencode/docs/reports/requirements/example-workflows/requirement
 
 ### Category 4: Parallel Execution
 
-**Workflows**: 3 examples
+### Category 04: Loops & Convergence
+
+**Workflows**: 4 examples
 
 **Test Command**:
 ```bash
-# Test parallel group execution
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/04-parallel-execution/01-parallel-groups-execution.yaml
+# Test for loops
+cargo run --run ../workflows/examples/requirements-oriented-auto/04-loops-convergence/01-for-loop-iteration.yaml
 
-# Test resource concurrency control
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/04-parallel-execution/02-resource-concurrency-control.yaml
-
-# Test load balancing strategies
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/04-parallel-execution/03-load-balancing-strategies.yaml
+# Test foreach loops
+cargo run --run ../workflows/examples/requirements-oriented-auto/04-loops-convergence/02-foreach-iteration.yaml
 ```
 
 **Expected Output**:
-- Steps execute concurrently
-- Resources managed correctly
-- Load balancing distributes work
-- Memory usage within limits
+- Loop iterations execute correctly
+- Convergence criteria met
+- Results aggregated properly
 
-### Category 11: Conditional Branching
+### Category 10: Conditional Branching
 
 **Workflows**: 2 examples
 
 **Test Command**:
 ```bash
 # Test event-based branching
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/11-conditional-branching/01-event-based-branching.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/10-conditional-branching/01-event-based-branching.yaml
 
 # Test decision logic workflows
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/11-conditional-branching/02-decision-logic-workflows.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/10-conditional-branching/02-decision-logic-workflows.yaml
 ```
 
 **Expected Output**:
@@ -284,13 +280,13 @@ cargo run --run opencode/docs/reports/requirements/example-workflows/requirement
 **Test Command**:
 ```bash
 # Test retry strategies and backoff
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/12-error-handling-retries/01-retry-strategies-backoff.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/11-error-handling-retries/01-retry-strategies-backoff.yaml
 
 # Test error propagation and escalation
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/12-error-handling-retries/02-error-propagation-escalation.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/11-error-handling-retries/02-error-propagation-escalation.yaml
 
 # Test graceful failure and recovery
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/12-error-handling-retries/03-graceful-failure-recovery.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/11-error-handling-retries/03-graceful-failure-recovery.yaml
 ```
 
 **Expected Output**:
@@ -306,13 +302,13 @@ cargo run --run opencode/docs/reports/requirements/example-workflows/requirement
 **Test Command**:
 ```bash
 # Test hierarchical logging system
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/13-logging-monitoring/01-hierarchical-logging-system.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/12-logging-monitoring/01-hierarchical-logging-system.yaml
 
 # Test metrics collection
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/13-logging-monitoring/02-metrics-collection.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/12-logging-monitoring/02-metrics-collection.yaml
 
 # Test structured output formats
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/13-logging-monitoring/03-structured-output-formats.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/12-logging-monitoring/03-structured-output-formats.yaml
 ```
 
 **Expected Output**:
@@ -393,7 +389,7 @@ ALLOWED_FILE_PATHS=./workspace/output
 
 ```bash
 # Run workflow with validation loop
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/05-loops-convergence/04-convergence-reduction-aggregation.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/04-loops-convergence/04-convergence-reduction-aggregation.yaml
 
 # Check convergence in logs
 grep "convergence" ./workspace/logs/workflow.log
@@ -406,7 +402,7 @@ jq '.validation_score' ./workspace/metrics/run_*.json
 
 ```bash
 # Test nested workflow execution
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/10-sub-workflows/02-workflow-composition-patterns.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/09-sub-workflows/02-workflow-composition-patterns.yaml
 
 # Check sub-workflow output
 ls -la ./workspace/output/sub_workflows/
@@ -419,7 +415,7 @@ grep "interdependent" ./workspace/logs/workflow.log
 
 ```bash
 # Run workflow with checkpointing
-cargo run --run opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/14-checkpointing-state/01-checkpointing-save-restore.yaml
+cargo run --run ../workflows/examples/requirements-oriented-auto/13-checkpointing-state/01-checkpointing-save-restore.yaml
 
 # Verify checkpoints created
 ls -la ./workspace/checkpoints/
@@ -430,7 +426,7 @@ ls -la ./workspace/checkpoints/
 
 ---
 
-## Test Report Generation
+## 📊 Test Report Generation
 
 After testing all workflows, generate a comprehensive report:
 
@@ -439,7 +435,7 @@ After testing all workflows, generate a comprehensive report:
 cargo run --test-report
 
 # Report will include:
-# - Total workflows tested: 53
+# - Total workflows tested: 50
 # - Passed: X
 # - Failed: Y
 # - Performance metrics
@@ -461,7 +457,7 @@ cargo run --test-report
 
 ---
 
-## Test Coverage by Category
+## 📊 Test Coverage by Category
 
 | Category | Workflows | Status |
 |-----------|-----------|---------|
@@ -483,8 +479,7 @@ cargo run --test-report
 | 16 - Tool Permissions | 2 | ✅ Schema Complete |
 | 17 - User Inputs & UI | 2 | ✅ Schema Complete |
 | 18 - Hooks & Lifecycle | 4 | ✅ Schema Complete |
-| 19 - Comprehensive Integration | 2 | ✅ Schema Complete |
-| **TOTAL** | **53** | **100% Schema Complete** |
+| **TOTAL** | **50** | **100% Schema Complete** |
 
 ---
 
@@ -492,19 +487,22 @@ cargo run --test-report
 
 1. Start with **Category 01** (Model Configuration) workflows
 2. Progress through categories in order
-3. Test edge cases with complex workflows (Categories 18-19)
+3. Test edge cases with complex workflows (Category 18)
 4. Validate all workflows before framework implementation is complete
 5. Generate test report when testing is finished
 
 ---
 
-## Additional Resources
+## 🔗 Related Documentation
 
-- [Example Workflows README](opencode/docs/reports/requirements/example-workflows/README.md)
-- [Schema Documentation](opencode/docs/reports/requirements/schema-consolidated-report.md)
-- [Installation Guide](INSTALL.md)
-- [Environment Variables](ENVIRONMENT_VARIABLES.md)
-- [Developer Guide](DEVELOPER_GUIDE.md)
+| Document | Description |
+|----------|-------------|
+| [../README.md](../README.md) | Documentation index |
+| [developer-guide.md](./developer-guide.md) | Development setup and workflow |
+| [environment-variables.md](./environment-variables.md) | Configuration reference |
+| [install.md](./install.md) | Installation guide |
+| [contributing.md](./contributing.md) | Contribution guidelines |
+| [../schema/unified-workflow-schema.yml](../schema/unified-workflow-schema.yml) | Schema reference |
 
 ---
 

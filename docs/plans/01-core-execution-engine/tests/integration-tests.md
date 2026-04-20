@@ -316,7 +316,7 @@ This document defines integration test requirements for Phase 1 MVP Queue & Sche
 
 **Purpose:** Verify loop with examples
 
-**Setup:** Use `05-loops-convergence/*` examples
+**Setup:** Use `04-loops-convergence/*` examples
 
 **Test Steps:**
 1. Load workflow with count/foreach/while loop

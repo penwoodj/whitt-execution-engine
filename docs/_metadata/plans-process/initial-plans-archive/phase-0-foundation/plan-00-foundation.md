@@ -713,10 +713,10 @@ cargo test --test '*e2e*'
 - [plan-01: MVP Queue & Scheduler](../phase-1-mvp-queue/plan-01-mvp-queue.md) - Depends on this plan
 - [plan-02: CLI & Backends](../phase-2-cli-backends/plan-02-cli-backends.md) - Depends on this plan
 - [plan-03: Glyphnova UI](../phase-3-glyphnova-ui/plan-03-glyphnova-ui.md) - Depends on this plan
-- [plan-04: Quality Loops & Benchmarks](../phase-4-quality-loops/plan-04-quality-loops.md) - Depends on this plan
-- [plan-05: Memory & Search](../phase-5-memory-search/plan-05-memory-search.md) - Depends on this plan
-- [plan-06: Cron & Git Refinement](../phase-6-automation/plan-06-automation.md) - Depends on this plan
-- [plan-07: Autonomy & Metrics](../phase-7-autonomy-metrics/plan-07-autonomy-metrics.md) - Depends on this plan
+- [plan-04: Quality Loops & Benchmarks](../phase-4-quality-loops/plan-03-quality-loops.md) - Depends on this plan
+- [plan-05: Memory & Search](../phase-5-memory-search/plan-04-memory-search.md) - Depends on this plan
+- [plan-06: Cron & Git Refinement](../phase-6-automation/plan-05-automation.md) - Depends on this plan
+- [plan-07: Autonomy & Metrics](../phase-7-autonomy-metrics/plan-06-autonomy-metrics.md) - Depends on this plan
 
 ---
 

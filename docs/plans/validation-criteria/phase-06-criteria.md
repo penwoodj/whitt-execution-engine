@@ -1,389 +1,340 @@
-# Phase 06: Automation - Validation Criteria
+# Phase 06: Autonomy & Metrics - Validation Criteria
 
-**Phase Focus:** Cron jobs, git experiments, merge proposals, refinement artifacts, results tracking, rollback
-**Entry Criteria:** Phases 00, 01, 02, 03, 04, and 05 complete
-**Estimated Duration:** 3-4 weeks
-**Blocking for:** Phases 07, 08
+**Phase Focus:** Autonomous loops, metrics, human override, dashboards, confidence thresholds
+**Entry Criteria:** ALL prior phases complete (00-06)
+**Estimated Duration:** 4-5 weeks
+**Blocking for:** None (final phase)
 
 ---
 
 ## Phase Overview
 
-Phase 06 implements automation capabilities. This phase provides cron job scheduling, git experiment isolation, merge proposal generation, refinement artifact capture, results tracking and comparison, and rollback functionality. Automation enables workflows to run periodically and experiment with changes safely.
+Phase 07 implements autonomy capabilities. This phase provides autonomous workflow execution, comprehensive metrics, human override mechanisms, real-time dashboards, and confidence threshold enforcement. Autonomy enables workflows to run with minimal human intervention while maintaining safety.
 
 **Critical Success Factors:**
-1. Cron jobs execute on schedule
-2. Git experiments are isolated
-3. Merge proposals are generated
-4. Refinement captured as artifacts
-5. Results tracked and comparable
-6. Rollback works correctly
+1. Autonomous loops bounded (no infinite loops)
+2. Metrics comprehensive (all execution components)
+3. Human override available
+4. Dashboards real-time
+5. Confidence thresholds enforced
 
 ---
 
 ## Phase Entry Criteria
 
-**Status:** Must be verified before starting Phase 06
+**Status:** Must be verified before starting Phase 07
 
 **Verification Commands:**
 ```bash
-# Verify Phases 00-05 exit
+# Verify ALL prior phases exit
 cargo test --test phase_00_integration -- --test-threads=1
 cargo test --test phase_01_integration -- --test-threads=1
 cargo test --test phase_02_integration -- --test-threads=1
 cargo test --test phase_04_integration -- --test-threads=1
 cargo test --test phase_05_integration -- --test-threads=1
+cargo test --test phase_06_integration -- --test-threads=1
+
+# Verify schema coverage for ALL prior phases
+for phase in 0 1 2 4 5 6; do
+  cargo run --bin schema_audit -- --phase $phase --output phase_${phase}_coverage.md
+done
 ```
 
 **Prerequisites:**
-- [ ] Phases 00-05 exit criteria verified (all 7 layers)
-- [ ] Schema coverage 100% for phases 00-05
-- [ ] ADR compliance verified for phases 00-05
-- [ ] Cross-phase regression clean (Phases 00-05)
-- [ ] Git repository initialized
-- [ ] Cron scheduler ready
+- [ ] Phases 00-06 exit criteria verified (all 7 layers)
+- [ ] Schema coverage 100% for phases 00-06
+- [ ] ADR compliance verified for phases 00-06
+- [ ] Cross-phase regression clean (Phases 00-06)
+- [ ] Dashboard infrastructure ready
+- [ ] Override mechanism ready
 
 **Blocking Violations:**
-- Unresolved Phase 00-05 failures
+- Unresolved Phase 00-06 failures
 - Schema coverage < 100% for any phase
 - Cross-phase regression detected
+- Dashboard infrastructure not ready
 
 ---
 
-## Cron Jobs
+## Autonomous Loops
 
-**Requirement:** Cron jobs execute on schedule
+**Requirement:** Autonomous loops bounded (no infinite loops)
 
-### Cron Schedule Syntax
+### Loop Types
 
-```
-* * * * * command
-│ │ │ │ │
-│ │ │ │ └─ Day of week (0-6)
-│ │ │ └─── Month (1-12)
-│ │ └───── Day of month (1-31)
-│ └─────── Hour (0-23)
-└───────── Minute (0-59)
-```
+1. **Continuous Loop:** Run indefinitely (with bounds)
+2. **Periodic Loop:** Run at intervals
+3. **Conditional Loop:** Run while condition true
+4. **Event-Driven Loop:** Run on events
 
-### Cron Features
+### Loop Bounds
 
-1. **Fixed Schedule:** Execute at specific times
-2. **Interval Schedule:** Execute every N minutes/hours/days
-3. **Complex Schedule:** Combinations of schedules
-4. **Timezone Support:** Execute in specific timezone
-5. **Job Management:** Create, list, delete cron jobs
+1. **Max Iterations:** Terminate after N iterations
+2. **Max Duration:** Terminate after T seconds
+3. **Max Resources:** Terminate after R resources used
+4. **Manual Stop:** Terminate on manual stop
 
 ### Verification Commands
 
 ```bash
-# Test cron jobs
-cargo test --lib automation::tests::fixed_schedule
-cargo test --lib automation::tests::interval_schedule
-cargo test --lib automation::tests::complex_schedule
-cargo test --lib automation::tests::timezone_support
+# Test autonomous loops
+cargo test --lib autonomy::tests::continuous_loop
+cargo test --lib autonomy::tests::periodic_loop
+cargo test --lib autonomy::tests::conditional_loop
+cargo test --lib autonomy::tests::event_driven_loop
 
-# Test job management
-cargo test --lib automation::tests::cron_job_create
-cargo test --lib automation::tests::cron_job_list
-cargo test --lib automation::tests::cron_job_delete
+# Test loop bounds
+cargo test --lib autonomy::tests::max_iterations_bound
+cargo test --lib autonomy::tests::max_duration_bound
+cargo test --lib autonomy::tests::max_resources_bound
+cargo test --lib autonomy::tests::manual_stop
 
-# Test execution
-cargo test --lib automation::tests::cron_job_execution
+# Test infinite loop prevention
+cargo test --lib autonomy::tests::infinite_loop_prevention
 ```
 
 ### Pass Criteria
 
-- [ ] All schedule types work correctly
-- [ ] Jobs execute on schedule
-- [ ] Timezone support works
-- [ ] Job management works
-- [ ] No missed executions
+- [ ] All loop types work correctly
+- [ ] All bounds enforced
+- [ ] Loops terminate on bounds
+- [ ] Manual stop works
+- [ ] No infinite loops
 
 ### Evidence Required
 
-- Cron job test results
-- Schedule execution logs
-- Timezone test logs
+- Autonomous loop test results
+- Bound enforcement logs
+- Infinite loop prevention logs
 
 ---
 
-## Git Experiments
+## Comprehensive Metrics
 
-**Requirement:** Git experiments are isolated
+**Requirement:** Metrics comprehensive (all execution components)
 
-### Experiment Isolation
+### Metric Categories
 
-1. **Branch Creation:** Create experiment branch
-2. **Workspace Isolation:** Isolate experiment workspace
-3. **Revert on Failure:** Revert experiment on failure
-4. **Merge on Success:** Merge experiment on success
+1. **Workflow Metrics:**
+   - workflow_duration_seconds
+   - workflow_success_count
+   - workflow_failure_count
+   - workflow_retry_count
 
-### Experiment Workflow
+2. **Pipeline Metrics:**
+   - pipeline_duration_seconds
+   - pipeline_step_count
+   - pipeline_success_count
 
+3. **Step Metrics:**
+   - step_duration_seconds
+   - step_success_count
+   - step_failure_count
+
+4. **Model Metrics:**
+   - model_request_count
+   - model_response_tokens
+   - model_latency_seconds
+
+5. **Tool Metrics:**
+   - tool_invocation_count
+   - tool_success_count
+   - tool_failure_count
+
+6. **Autonomy Metrics:**
+   - autonomous_loop_count
+   - autonomous_iteration_count
+   - autonomous_override_count
+
+### Metrics Export
+
+**Prometheus Format:**
 ```
-1. Create experiment branch from main
-2. Make changes in experiment branch
-3. Run tests in experiment branch
-4. If tests pass → merge to main
-5. If tests fail → revert experiment
-```
-
-### Verification Commands
-
-```bash
-# Test git experiments
-cargo test --lib automation::tests::experiment_branch_creation
-cargo test --lib automation::tests::workspace_isolation
-cargo test --lib automation::tests::revert_on_failure
-cargo test --lib automation::tests::merge_on_success
-
-# Test experiment safety
-cargo test --lib automation::tests::experiment_safety
-cargo test --lib automation::tests::experiment_rollback
-```
-
-### Pass Criteria
-
-- [ ] Experiment branches created correctly
-- [ ] Workspaces isolated
-- [ ] Revert on failure works
-- [ ] Merge on success works
-- [ ] No corruption of main branch
-
-### Evidence Required
-
-- Git experiment test results
-- Branch creation logs
-- Isolation test logs
-
----
-
-## Merge Proposals
-
-**Requirement:** Merge proposals are generated
-
-### Proposal Content
-
-1. **Title:** Summary of changes
-2. **Description:** Detailed description of changes
-3. **Diff:** Diff of changes
-4. **Test Results:** Test execution results
-5. **Review Status:** Review status
-
-### Proposal Generation
-
-```markdown
-# Merge Proposal: Add Feature X
-
-## Description
-Add feature X to improve Y
-
-## Changes
-- Added feature X
-- Updated tests for feature X
-
-## Test Results
-- Unit tests: PASS
-- Integration tests: PASS
-- E2E tests: PASS
-
-## Review Status
-Pending review
+agentsdk_workflow_duration_seconds{workflow_id="uuid"} 10.5
+agentsdk_pipeline_duration_seconds{pipeline_id="uuid"} 5.2
+agentsdk_step_duration_seconds{step_id="uuid"} 2.1
+agentsdk_model_response_tokens{model_id="gpt-4"} 1500
+agentsdk_tool_invocation_count{tool_id="search"} 3
+agentsdk_autonomous_loop_count{loop_id="uuid"} 100
 ```
 
 ### Verification Commands
 
 ```bash
-# Test merge proposals
-cargo test --lib automation::tests::proposal_generation
-cargo test --lib automation::tests::proposal_content
-cargo test --lib automation::tests::proposal_diff
+# Test comprehensive metrics
+cargo test --lib autonomy::tests::workflow_metrics
+cargo test --lib autonomy::tests::pipeline_metrics
+cargo test --lib autonomy::tests::step_metrics
+cargo test --lib autonomy::tests::model_metrics
+cargo test --lib autonomy::tests::tool_metrics
+cargo test --lib autonomy::tests::autonomy_metrics
 
-# Test proposal submission
-cargo test --lib automation::tests::proposal_submission
+# Test metrics export
+cargo test --lib autonomy::tests::metrics_prometheus_export
 ```
 
 ### Pass Criteria
 
-- [ ] Proposals generated correctly
-- [ ] Proposals include all required content
-- [ ] Diff accurately reflects changes
-- [ ] Test results included
-- [ ] Proposals submitted successfully
+- [ ] All metric categories collected
+- [ ] All metrics accurate
+- [ ] Metrics export correctly
+- [ ] No missing metrics
 
 ### Evidence Required
 
-- Merge proposal test results
-- Proposal content samples
-- Diff verification logs
+- Metrics collection test results
+- Metrics export samples
+- Metrics completeness checklist
 
 ---
 
-## Refinement Artifacts
+## Human Override
 
-**Requirement:** Refinement captured as artifacts
+**Requirement:** Human override available
 
-### Artifact Types
+### Override Types
 
-1. **Code Artifacts:** Generated code
-2. **Config Artifacts:** Configuration files
-3. **Document Artifacts:** Documentation
-4. **Result Artifacts:** Execution results
-5. **Log Artifacts:** Execution logs
+1. **Manual Stop:** Manually stop autonomous loop
+2. **Pause:** Pause autonomous loop (resumeable)
+3. **Modify:** Modify loop parameters
+4. **Rollback:** Rollback loop execution
 
-### Artifact Storage
+### Override Workflow
 
 ```
-.artifacts/
-├── code/
-│   ├── generated_code_1.rs
-│   └── generated_code_2.rs
-├── config/
-│   └── config_1.yaml
-├── document/
-│   └── doc_1.md
-├── result/
-│   └── result_1.json
-└── log/
-    └── log_1.txt
+1. Human requests override
+2. System validates override
+3. Override applied
+4. Execution stops/pauses/modifies
+5. Override logged
 ```
 
 ### Verification Commands
 
 ```bash
-# Test artifact capture
-cargo test --lib automation::tests::code_artifact_capture
-cargo test --lib automation::tests::config_artifact_capture
-cargo test --lib automation::tests::document_artifact_capture
-cargo test --lib automation::tests::result_artifact_capture
-cargo test --lib automation::tests::log_artifact_capture
+# Test human override
+cargo test --lib autonomy::tests::manual_stop
+cargo test --lib autonomy::tests::pause
+cargo test --lib autonomy::tests::modify
+cargo test --lib autonomy::tests::rollback
 
-# Test artifact storage
-cargo test --lib automation::tests::artifact_storage
-cargo test --lib automation::tests::artifact_retrieval
+# Test override validation
+cargo test --lib autonomy::tests::override_validation
+cargo test --lib autonomy::tests::override_logging
 ```
 
 ### Pass Criteria
 
-- [ ] All artifact types captured
-- [ ] Artifacts stored correctly
-- [ ] Artifacts retrievable
-- [ ] No artifact loss
-- [ ] Storage organized correctly
+- [ ] All override types work
+- [ ] Override validated before application
+- [ ] Override applied correctly
+- [ ] Override logged
+- [ ] No data loss on override
 
 ### Evidence Required
 
-- Artifact capture test results
-- Storage test logs
-- Retrieval test logs
+- Override test results
+- Validation logs
+- Override logs
 
 ---
 
-## Results Tracking
+## Real-Time Dashboards
 
-**Requirement:** Results tracked and comparable
+**Requirement:** Dashboards real-time
 
-### Result Data
+### Dashboard Components
 
-1. **Execution ID:** Unique execution identifier
-2. **Timestamp:** Execution timestamp
-3. **Workflow:** Workflow executed
-4. **Success:** Success/failure
-5. **Duration:** Execution duration
-6. **Output:** Execution output
-7. **Metrics:** Execution metrics
+1. **Workflow Status:** Real-time workflow status
+2. **Queue Status:** Real-time queue status
+3. **Metrics Dashboard:** Real-time metrics
+4. **Logs Dashboard:** Real-time logs
+5. **Alerts Dashboard:** Real-time alerts
 
-### Result Comparison
+### Dashboard Updates
 
-```markdown
-## Execution Comparison
+1. **WebSocket:** Real-time updates via WebSocket
+2. **Polling:** Fallback to polling if WebSocket unavailable
+3. **Caching:** Cache dashboard data for performance
 
-| Metric | Execution A | Execution B | Delta |
-|--------|-------------|-------------|-------|
-| Success | true | true | - |
-| Duration (s) | 10 | 12 | +20% |
-| Output | "result1" | "result2" | Changed |
+### Verification Commands
+
+```bash
+# Test dashboard components
+cargo test --lib autonomy::tests::workflow_status_dashboard
+cargo test --lib autonomy::tests::queue_status_dashboard
+cargo test --lib autonomy::tests::metrics_dashboard
+cargo test --lib autonomy::tests::logs_dashboard
+cargo test --lib autonomy::tests::alerts_dashboard
+
+# Test real-time updates
+cargo test --lib autonomy::tests::websocket_updates
+cargo test --lib autonomy::tests::polling_updates
+cargo test --lib autonomy::tests::caching
+```
+
+### Pass Criteria
+
+- [ ] All dashboard components work
+- [ ] Real-time updates work
+- [ ] WebSocket preferred over polling
+- [ ] Caching improves performance
+- [ ] Dashboard updates within 1 second
+
+### Evidence Required
+
+- Dashboard test results
+- Real-time update logs
+- Performance metrics
+
+---
+
+## Confidence Thresholds
+
+**Requirement:** Confidence thresholds enforced
+
+### Threshold Types
+
+1. **Action Threshold:** Minimum confidence to take action
+2. **Override Threshold:** Minimum confidence to override human
+3. **Stop Threshold:** Minimum confidence to continue autonomous loop
+
+### Threshold Enforcement
+
+```yaml
+autonomy:
+  confidence_thresholds:
+    action_threshold: 0.8
+    override_threshold: 0.9
+    stop_threshold: 0.7
 ```
 
 ### Verification Commands
 
 ```bash
-# Test result tracking
-cargo test --lib automation::tests::result_tracking
-cargo test --lib automation::tests::result_storage
-cargo test --lib automation::tests::result_retrieval
+# Test confidence thresholds
+cargo test --lib autonomy::tests::action_threshold
+cargo test --lib autonomy::tests::override_threshold
+cargo test --lib autonomy::tests::stop_threshold
 
-# Test result comparison
-cargo test --lib automation::tests::result_comparison
-cargo test --lib automation::tests::result_delta_calculation
+# Test threshold enforcement
+cargo test --lib autonomy::tests::threshold_enforcement
+cargo test --lib autonomy::tests::threshold_logging
 ```
 
 ### Pass Criteria
 
-- [ ] Results tracked correctly
-- [ ] Results stored
-- [ ] Results retrievable
-- [ ] Results comparable
-- [ ] Delta calculations correct
+- [ ] All thresholds enforced
+- [ ] Actions below threshold blocked
+- [ ] Overrides below threshold blocked
+- [ ] Loops stop below threshold
+- [ ] Threshold violations logged
 
 ### Evidence Required
 
-- Result tracking test results
-- Comparison test logs
-- Delta calculation logs
-
----
-
-## Rollback
-
-**Requirement:** Rollback works correctly
-
-### Rollback Scenarios
-
-1. **Manual Rollback:** User triggers rollback
-2. **Automatic Rollback:** System triggers rollback on failure
-3. **Partial Rollback:** Rollback specific changes
-4. **Full Rollback:** Rollback all changes
-
-### Rollback Process
-
-```
-1. Identify changes to rollback
-2. Revert changes in git
-3. Restore artifacts
-4. Restore configuration
-5. Verify rollback success
-```
-
-### Verification Commands
-
-```bash
-# Test rollback
-cargo test --lib automation::tests::manual_rollback
-cargo test --lib automation::tests::automatic_rollback
-cargo test --lib automation::tests::partial_rollback
-cargo test --lib automation::tests::full_rollback
-
-# Test rollback safety
-cargo test --lib automation::tests::rollback_safety
-cargo test --lib automation::tests::rollback_verification
-```
-
-### Pass Criteria
-
-- [ ] All rollback types work
-- [ ] Rollback reverts changes correctly
-- [ ] Artifacts restored
-- [ ] Configuration restored
-- [ ] Rollback verification succeeds
-- [ ] No data loss during rollback
-
-### Evidence Required
-
-- Rollback test results
-- Rollback verification logs
-- Safety test logs
+- Threshold test results
+- Enforcement logs
+- Threshold violation logs
 
 ---
 
@@ -397,7 +348,7 @@ cargo test --lib -- --test-threads=1
 ```
 
 **Evidence:**
-- All Phase 06 unit tests pass
+- All Phase 07 unit tests pass
 - Test coverage >= 90%
 - No clippy warnings
 
@@ -409,8 +360,8 @@ cargo test --test '*' -- --test-threads=1
 ```
 
 **Evidence:**
-- All Phase 06 integration tests pass
-- Automation integrates correctly
+- All Phase 07 integration tests pass
+- Autonomy integrates correctly
 
 ### Layer 3: Property Tests
 
@@ -420,63 +371,62 @@ PROPTEST_NUMBER_OF_TESTS=100 cargo test --lib property_based
 ```
 
 **Evidence:**
-- Experiment isolation invariants hold
-- Rollback safety invariants hold
+- Loop bound invariants hold for 100 iterations
+- Override safety invariants hold
 
 ### Layer 4: E2E Tests
 
 **Commands:**
 ```bash
-# Execute automation workflows
-cargo run --bin agentsdk -- run examples/workflows/cron_job.yaml
-cargo run --bin agentsdk -- run examples/workflows/git_experiment.yaml
-cargo run --bin agentsdk -- run examples/workflows/rollback.yaml
+# Execute autonomy workflows
+cargo run --bin agentsdk -- run examples/workflows/autonomous_loop.yaml
+cargo run --bin agentsdk -- run examples/workflows/human_override.yaml
+cargo run --bin agentsdk -- run examples/workflows/confidence_threshold.yaml
 ```
 
 **Evidence:**
-- Cron jobs execute on schedule
-- Git experiments isolated
-- Rollback works correctly
+- Autonomous loops bounded
+- Human override works
+- Confidence thresholds enforced
 
 ### Layer 5: System Log Validation
 
 **Commands:**
 ```bash
-# Verify automation scope logs
-cargo run --bin agentsdk -- run examples/workflows/automation.yaml 2>&1 | \
-  jq -e 'select(.scope == "automation")'
+# Verify autonomy scope logs
+cargo run --bin agentsdk -- run examples/workflows/autonomy.yaml 2>&1 | \
+  jq -e 'select(.scope == "autonomy")'
 ```
 
 **Evidence:**
-- Automation scope logs emitted
+- Autonomy scope logs emitted
 - Logs include timestamp, scope, event, message
 
 ### Layer 6: Live CLI Verification
 
 **Commands:**
 ```bash
-# Test automation commands
-cargo run --bin agentsdk -- automation cron create --schedule "*/5 * * * *" --workflow test.yaml
-cargo run --bin agentsdk -- automation cron list
-cargo run --bin agentsdk -- automation cron delete <job_id>
-cargo run --bin agentsdk -- automation experiment start --name test_exp
-cargo run --bin agentsdk -- automation rollback <experiment_id>
+# Test autonomy commands
+cargo run --bin agentsdk -- autonomy start --workflow test.yaml --mode autonomous
+cargo run --bin agentsdk -- autonomy stop --loop_id <loop_id>
+cargo run --bin agentsdk -- autonomy pause --loop_id <loop_id>
+cargo run --bin agentsdk -- autonomy resume --loop_id <loop_id>
 ```
 
 **Evidence:**
-- Automation commands work
+- Autonomy commands work
 - Error handling works
 
 ### Layer 7: Benchmark Performance
 
 **Commands:**
 ```bash
-cargo bench --bench phase_06_benchmarks
+cargo bench --bench phase_07_benchmarks
 ```
 
 **Evidence:**
-- Automation performance acceptable
-- Rollback completes in reasonable time
+- Autonomy performance acceptable
+- Dashboard updates fast
 - No performance regression > 10%
 
 ---
@@ -485,77 +435,64 @@ cargo bench --bench phase_06_benchmarks
 
 **Commands:**
 ```bash
-# Run all prior phase tests
+# Run ALL prior phase tests
 cargo test --test phase_00_integration -- --test-threads=1
 cargo test --test phase_01_integration -- --test-threads=1
 cargo test --test phase_02_integration -- --test-threads=1
 cargo test --test phase_04_integration -- --test-threads=1
 cargo test --test phase_05_integration -- --test-threads=1
+cargo test --test phase_06_integration -- --test-threads=1
 ```
 
 **Pass Criteria:**
-- [ ] All Phase 00 tests still pass
-- [ ] All Phase 01 tests still pass
-- [ ] All Phase 02 tests still pass
-- [ ] All Phase 04 tests still pass
-- [ ] All Phase 05 tests still pass
+- [ ] ALL Phase 00 tests still pass
+- [ ] ALL Phase 01 tests still pass
+- [ ] ALL Phase 02 tests still pass
+- [ ] ALL Phase 04 tests still pass
+- [ ] ALL Phase 05 tests still pass
+- [ ] ALL Phase 06 tests still pass
 
 ---
 
 ## Schema Coverage Audit
 
-**Requirement:** 100% of Phase 06-owned fields implemented
+**Requirement:** 100% of Phase 07-owned fields implemented
 
-### Phase 06-Owned Fields
+### Phase 07-Owned Fields
 
-**CronSchema:**
-- schedule
-- timezone
-- workflow
-- enabled
+**AutonomySchema:**
+- mode
+- loop_type
+- max_iterations
+- max_duration_seconds
+- max_resources_mb
 
-**GitExperimentSchema:**
-- experiment_id
-- branch_name
-- base_branch
-- changes
+**ConfidenceThresholdSchema:**
+- action_threshold
+- override_threshold
+- stop_threshold
 
-**MergeProposalSchema:**
-- proposal_id
-- title
-- description
-- diff
-- test_results
-
-**RefinementSchema:**
-- artifact_id
-- artifact_type
-- content
-- created_at
-
-**ResultSchema:**
-- execution_id
+**OverrideSchema:**
+- override_id
+- type
+- user_id
 - timestamp
-- workflow
-- success
-- duration
-- output
-- metrics
+- reason
 
-**RollbackSchema:**
-- rollback_id
-- experiment_id
-- changes_reverted
-- artifacts_restored
+**DashboardSchema:**
+- dashboard_id
+- components
+- update_interval_ms
+- cache_ttl_ms
 
 ### Verification Commands
 
 ```bash
-cargo run --bin schema_audit -- --phase 6 --output coverage_report.md
+cargo run --bin schema_audit -- --phase 7 --output coverage_report.md
 ```
 
 **Expected Output:**
-- 100% coverage for Phase 06-owned fields
+- 100% coverage for Phase 07-owned fields
 - No unimplemented fields
 
 ---
@@ -563,17 +500,17 @@ cargo run --bin schema_audit -- --phase 6 --output coverage_report.md
 ## ADR Compliance
 
 **Relevant ADRs:**
-- ADR-011: Automation Architecture
-- ADR-012: Experiment Safety
+- ADR-013: Autonomy Architecture
+- ADR-014: Human Override Safety
 
 ### Verification Commands
 
 ```bash
-cargo run --bin adr_compliance -- --phase 6
+cargo run --bin adr_compliance -- --phase 7
 ```
 
 **Expected Output:**
-- All Phase 06-relevant ADR constraints satisfied
+- All Phase 07-relevant ADR constraints satisfied
 - No outstanding ADR TODOs
 
 ---
@@ -583,37 +520,36 @@ cargo run --bin adr_compliance -- --phase 6
 **Run after phase completion:**
 
 1. **Requirements Drift:**
-   - [ ] Implementation matches Phase 06 requirements
+   - [ ] Implementation matches Phase 07 requirements
    - [ ] No features from later phases added
 
 2. **Architecture Drift:**
-   - [ ] Automation matches ADR-011
-   - [ ] Experiments match ADR-012
+   - [ ] Autonomy matches ADR-013
+   - [ ] Override matches ADR-014
 
 3. **Scope Creep:**
-   - [ ] Only automation features implemented
-   - [ ] No autonomy features added
+   - [ ] Only autonomy features implemented
+   - [ ] No final validation features added
 
 ---
 
 ## Evidence Storage
 
-**Location:** `results/phase_06/`
+**Location:** `results/phase_07/`
 
 **Contents:**
 - `unit_test_results.json`
 - `integration_test_output.log`
 - `property_test_results.json`
-- `e2e_execution_logs/` (automation workflows)
-- `system_log_samples.json` (automation scope)
-- `cli_verification/` (automation commands)
-- `benchmarks/` (automation performance)
-- `cron_logs/` (cron job execution logs)
-- `git_experiments/` (experiment logs)
-- `merge_proposals/` (generated proposals)
-- `refinement_artifacts/` (captured artifacts)
-- `results_tracking/` (result comparisons)
-- `rollback_logs/` (rollback execution logs)
+- `e2e_execution_logs/` (autonomy workflows)
+- `system_log_samples.json` (autonomy scope)
+- `cli_verification/` (autonomy commands)
+- `benchmarks/` (autonomy performance)
+- `autonomous_loops/` (loop execution logs)
+- `metrics_export/` (comprehensive metrics)
+- `override_logs/` (human override logs)
+- `dashboard_snapshots/` (dashboard screenshots)
+- `confidence_logs/` (threshold enforcement logs)
 - `schema_coverage_report.md`
 - `adr_compliance_report.md`
 - `anti_goal_drift_checklist.md`
@@ -622,6 +558,7 @@ cargo run --bin adr_compliance -- --phase 6
 - `phase_02_regression/`
 - `phase_04_regression/`
 - `phase_05_regression/`
+- `phase_06_regression/`
 
 ---
 
@@ -629,13 +566,12 @@ cargo run --bin adr_compliance -- --phase 6
 
 **Cannot exit Phase 06 if:**
 - Any verification layer fails
-- Cron jobs don't execute on schedule
-- Git experiments not isolated
-- Merge proposals not generated
-- Refinement not captured as artifacts
-- Results not tracked
-- Rollback doesn't work
-- Any prior phase regression detected
+- Autonomous loops not bounded
+- Metrics not comprehensive
+- Human override not available
+- Dashboards not real-time
+- Confidence thresholds not enforced
+- ANY prior phase regression detected
 
 ---
 
