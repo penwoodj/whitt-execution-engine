@@ -293,6 +293,84 @@ networks:
     name: whitt-network
 ```
 
+### BuildKit Cache Configuration (Development)
+
+**Purpose:** Use BuildKit cache mounts to persist HuggingFace downloads during development.
+
+**Add to docker-compose.yml:**
+```yaml
+services:
+  llama-server:
+    # Add BuildKit cache mount for model downloads
+    # This cache persists HuggingFace downloads across builds
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      cache_from:
+        - whitt-execution-engine/llama-server:latest
+      cache_to:
+        - whitt-execution-engine/llama-server:cache
+
+    # Mount cache volume for runtime downloads
+    volumes:
+      - ./models:/models:ro
+      - huggingface_cache:/root/.cache/huggingface
+
+volumes:
+  huggingface_cache:
+    driver: local
+```
+
+**Build with BuildKit:**
+```bash
+# Build with BuildKit enabled (default in Docker 23.0+)
+DOCKER_BUILDKIT=1 docker compose build
+
+# Build with explicit cache
+docker buildx build --cache-from=type=local,src=cache --cache-to=type=local,dest=cache -f docker/Dockerfile .
+```
+
+**Benefits:**
+- Faster rebuilds during development
+- Reduced bandwidth usage
+- Cache persists locally
+
+**Note:** BuildKit cache is for development only. Production should use volume mounts for models.
+
+### Volume Mounts vs Image Layers (Large Models)
+
+**Docker Hub Layer Limit:** 5GB
+
+**When to use volume mounts:**
+- Models > 5GB (7B, 8B, 13B, 70B models)
+- Large models that change frequently
+- Production deployments with model switching
+
+**Example: Volume mount for large models:**
+```yaml
+services:
+  llama-server:
+    volumes:
+      # Mount models from host (not COPY into image)
+      - ./models:/models:ro
+```
+
+**When to COPY small models:**
+- Models < 5GB (1B Q4_K_M at ~600MB)
+- Use COPY only for frequently-used small models
+- Example: `COPY models/Llama-3.2-1B.Q4_K_M.gguf /models/`
+
+**Dockerfile example for small models:**
+```dockerfile
+# Only COPY models < 5GB
+COPY models/Llama-3.2-1B.Q4_K_M.gguf /models/
+```
+
+**Performance impact:**
+- Volume mounts: Slightly slower I/O than image layers
+- COPY: Faster I/O, but increases image size
+- Trade-off: Image size vs. runtime I/O performance
+
 ### Docker Compose Override Files
 
 Create: `docker-compose.amd.yml` (AMD GPU configuration)
@@ -601,6 +679,61 @@ features:
   color: true
 vulkan:
   visible_devices: "0"
+  disable_debug: true
+  enable_validation: false
+```
+
+Create: `configs/models/rx-580-polaris.yml`
+```yaml
+# AMD RX 580 (Polaris10) GPU-optimized configuration
+# Driver: RADV (NOT AMDVLK - 2GB allocation limit, llama.cpp issue #15054)
+# Performance: ~39 tok/s (7B Q4_K_M), ~226 tok/s (1B)
+model:
+  path: /models/Llama-3.2-1B-Instruct.Q4_K_M.gguf
+  huggingface:
+    repo: meta-llama/Llama-3.2-1B-Instruct
+    filename: Llama-3.2-1B-Instruct.Q4_K_M.gguf
+    branch: main
+  quantization: Q4_K_M
+  parameter_count: 1000000000
+context:
+  size: 4096
+  batch_size: 512
+  ubatch_size: 512
+hardware:
+  threads: 8
+  gpu_layers: 99  # Near-max offload for Polaris
+  mmap_size: 4
+  use_mmap: true
+sampling:
+  temperature: 0.7
+  top_p: 0.95
+  top_k: 40
+  repeat_penalty: 1.1
+  repeat_last_n: 64
+  max_tokens: 512
+server:
+  host: 127.0.0.1
+  port: 8080
+  parallel: true
+  timeout: 600
+  max_slots: 8
+  metrics: true
+  slots_endpoint: true
+cache:
+  cache_type_k: f16
+  cache_type_v: f16
+  kv_cache_size: 2
+features:
+  log_level: info
+  verbose: false
+  print_system_info: true
+  profiling: false
+  color: true
+vulkan:
+  visible_devices: "0"
+  # CRITICAL: Disable flash attention for Polaris (llama.cpp issue #20465)
+  flash_attention: false
   disable_debug: true
   enable_validation: false
 ```

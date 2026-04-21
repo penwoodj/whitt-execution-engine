@@ -4,7 +4,7 @@
 
 **Goal:** Design unified YAML configuration system for llama.cpp with Rust validation, CLI parsing, and environment variable translation.
 
-**Tech Stack:** Rust, serde, serde-saphyr, clap, garde, anyhow
+**Tech Stack:** Rust, serde, serde-saphyr v0.0.24, clap, garde, anyhow
 
 **llama-cpp-2 Configuration:**
 - **Version:** Use `llama-cpp-2 = { version = "0.1.138", features = ["vulkan", "sampler"] }` in Cargo.toml
@@ -196,6 +196,36 @@ docker service create \
 - Qwen 2.5 1.5B: 180 TPS, ~1.5GB VRAM
 - Gemma 3 1B: 200 TPS, <1GB VRAM
 - Gemma 3 4B: 80 TPS, ~3GB VRAM
+
+### AMD RX 580 (Polaris) GPU Profile
+
+**Confirmed Working:** llama.cpp Vulkan with RADV driver
+**Performance:** ~39 tok/s (7B Q4_K_M), ~226 tok/s (1B)
+
+**Required Settings:**
+```yaml
+vulkan:
+  visible_devices: "0"
+  flash_attention: false  # CRITICAL: Disable for Polaris (llama.cpp issue #20465)
+  disable_debug: true
+```
+
+**Critical Requirements:**
+- **Driver:** MUST use RADV (NOT AMDVLK — 2GB allocation limit, llama.cpp issue #15054)
+- **Flash Attention:** Disable (`-fa 0`) due to bug on Polaris
+- **Memory Allocation:** `GGML_VK_FORCE_MAX_ALLOCATION_SIZE=2147483646` (set in Dockerfile)
+- **Vulkan Version:** 1.4.335 on RX 580 Polaris10
+
+**Recommended Config:**
+```yaml
+hardware:
+  gpu_layers: 99  # Near-max offload for Polaris
+vulkan:
+  visible_devices: "0"
+  flash_attention: false
+  disable_debug: true
+```
+
 
 ---
 
@@ -745,6 +775,12 @@ pub struct VulkanConfig {
     /// Enable validation layers (debug)
     #[serde(default)]
     pub enable_validation: bool,
+
+    /// Enable flash attention. Default: false.
+    /// NOTE: Disable (false) for AMD Polaris GPUs due to llama.cpp issue #20465.
+    #[serde(default)]
+    #[garde(range(min = 0, max = 1))]
+    pub flash_attention: Option<bool>,
 }
 
 // Enums

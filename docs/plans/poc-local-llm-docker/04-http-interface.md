@@ -159,21 +159,33 @@ server:
 - Higher utilization of GPU
 - Better throughput for chat applications
 
----
+**AMD Polaris GPU Tuning:**
+- **Flash Attention:** MUST be disabled (`-fa 0`) due to bug (llama.cpp issue #20465)
+  - Enabling causes garbled output on Polaris GPUs
+- **Conservative Batch Sizes:** Use smaller batch sizes on Polaris
+  - Recommended: `batch_size: 512`, `ubatch_size: 512`
+  - Larger batches may cause instability
+- **GPU Layers:** Use `n_gpu_layers=99` (near-max) for Polaris
+- **Driver Requirement:** MUST use RADV (NOT AMDVLK)
+  - AMDVLK has 2GB allocation limit (llama.cpp issue #15054)
 
-## Task 2: HTTP API Endpoints
+**Polaris-Specific Config:**
+```yaml
+server:
+  parallel: true
+  max_slots: 8          # Moderate concurrency
 
-### API Key Authentication
+context:
+  batch_size: 512       # Conservative for Polaris
+  ubatch_size: 512
 
-**Security:** llama-server supports API key authentication for production deployments.
+cache:
+  cache_type_k: f16
+  cache_type_v: f16
 
-**Enable API Key:**
-```bash
-# Set via environment variable
-LLAMA_ARG_API_KEY="your-secret-api-key"
-
-# Or via command line flag
-llama-server --api-key "your-secret-api-key"
+vulkan:
+  flash_attention: false  # CRITICAL: Disable for Polaris
+```
 ```
 
 **Authentication Request:**
@@ -937,34 +949,50 @@ echo "=== Benchmark Complete ==="
 - Concurrent requests: 20+ without degradation
 - Total throughput: >1000 tokens/s (10 concurrent)
 
----
+### AMD RX 580 Performance Expectations
 
-## Task 8: Metrics and Monitoring
+**GPU:** AMD RX 580 (Polaris10) with RADV driver
+**Vulkan Version:** 1.4.335
 
-### Prometheus Metrics Collection
+**Performance Metrics:**
+- **7B Q4_K_M:** ~39 tokens/second
+- **1B Q4_K_M:** ~226 tokens/second
+- **First token latency:** 50-100ms (after model load)
+- **Subsequent tokens:** 5-20ms per token
 
-**Setup:**
+**Critical Configuration for Polaris:**
+- **Flash Attention:** MUST be disabled (`-fa 0`) due to bug (llama.cpp issue #20465)
+  - Enabling causes garbled output on Polaris
+- **Driver:** MUST use RADV (NOT AMDVLK)
+  - AMDVLK has 2GB allocation limit (llama.cpp issue #15054)
+- **Memory Allocation:** Set `GGML_VK_FORCE_MAX_ALLOCATION_SIZE=2147483646`
+- **GPU Layers:** Use `n_gpu_layers=99` for near-max offload
+
+**Recommended Server Config for RX 580:**
 ```yaml
-# docker-compose.yml - Add Prometheus service
-services:
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: whitt-prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
-    depends_on:
-      - llama-server
+server:
+  parallel: true        # Enable continuous batching
+  max_slots: 8          # Moderate concurrency for Polaris
 
-volumes:
-  prometheus_data:
+sampling:
+  temperature: 0.7
+  top_p: 0.95
+
+cache:
+  cache_type_k: f16
+  cache_type_v: f16
+
+vulkan:
+  visible_devices: "0"
+  flash_attention: false  # CRITICAL: Disable for Polaris
+  disable_debug: true
+```
+
+**Performance Notes:**
+- Throughput varies with quantization (Q4_K_M recommended)
+- Continuous batching improves throughput by 10-50%
+- F16 KV cache provides 2x speedup vs F32
+- Polaris performance is stable across context sizes
 ```
 
 **Prometheus Config:**

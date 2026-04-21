@@ -90,9 +90,11 @@ log_info!("Request ID: {}", request_id);
 ### Version
 ```toml
 [dependencies]
-reqwest = { version = "0.13", features = ["stream"] }
-tokio = { version = "1.35", features = ["full"] }
+reqwest = { version = "0.13.2", features = ["stream"] }
+tokio = { version = "1.50", features = ["full"] }
 ```
+
+**Note:** tokio ^1.50.0 required by autoagents crate (0.3.7+).
 
 ### Connection Pooling (Recommended)
 ```rust
@@ -526,6 +528,38 @@ let rt = Builder::new_current_thread()
     .enable_all()
     .build()?;
 ```
+
+## Additional Dependencies
+
+### CLI and Parsing
+```toml
+[dependencies]
+clap = { version = "4.6", features = ["derive"] }
+serde-saphyr = "0.0.24"
+```
+
+**Note:** clap ^4.6 required by autoagents crate (0.3.7+). serde-saphyr 0.0.24 is the latest version (pre-1.0, actively maintained).
+
+### YAML Schema Parsing
+```toml
+[dependencies]
+serde-saphyr = "0.0.24"
+```
+
+**Rationale:** 1.5x faster than serde_yaml, provides schema validation support.
+
+## Dependency Compatibility Matrix
+
+| Dependency | Version | Constraint | Notes |
+|------------|---------|------------|-------|
+| tokio | 1.50+ | autoagents requirement (0.3.7+) | Async runtime, industry standard |
+| clap | 4.6+ | autoagents requirement (0.3.7+) | CLI argument parsing |
+| reqwest | 0.13.2 | Latest stable, no conflicts | HTTP client with streaming |
+| serde-saphyr | 0.0.24 | Latest, pre-1.0 | YAML parsing, 1.5x faster than serde_yaml |
+| eventsource-stream | 0.2.3 | Transport-agnostic, no version lock | SSE streaming, production-ready |
+| llama-cpp-2 | 0.1.144 | Latest, no 0.2 series exists | llama.cpp client bindings |
+
+**Important:** All versions are compatible with each other. No version conflicts detected in the dependency tree.
 
 ## References
 

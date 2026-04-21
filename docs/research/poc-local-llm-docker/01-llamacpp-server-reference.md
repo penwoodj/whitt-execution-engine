@@ -257,6 +257,13 @@ curl http://localhost:8080/health
 **PR #9519:** Tested and verified SSE events may split JSON across events.
 **Handling required:** Buffer incomplete JSON until parseable.
 
+### AMD Polaris (RX 580) Compatibility
+
+- **Driver**: Use RADV (Mesa). Do NOT use AMDVLK — it has a 2GB memory allocation limit (llama.cpp issue #15054).
+- **Flash Attention**: Broken on Polaris (llama.cpp issue #20465). Always launch with `-fa 0`.
+- **Memory Workaround**: Set `GGML_VK_FORCE_MAX_ALLOCATION_SIZE=2147483646` environment variable.
+- **Performance**: ~39 tok/s (7B Q4_K_M), ~226 tok/s (1B models) on RX 580 8GB.
+
 ## Performance Characteristics
 
 ### OpenAI vs Native Endpoints

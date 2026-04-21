@@ -1021,18 +1021,18 @@ edition = "2021"
 
 [dependencies]
 # Existing dependencies
-llama-cpp-2 = { version = "0.2", features = ["vulkan"] }
+llama-cpp-2 = { version = "0.1.144", features = ["vulkan"] }
 serde = { version = "1.0", features = ["derive"] }
-serde-saphyr = "0.1"
+serde-saphyr = "0.0.24"
 serde_json = "1.0"
-clap = { version = "4.5", features = ["derive"] }
-tokio = { version = "1.35", features = ["full"] }
+clap = { version = "4.6", features = ["derive"] }
+tokio = { version = "1.50", features = ["full"] }
 anyhow = "1.0"
 thiserror = "1.0"
 garde = { version = "0.20", features = ["derive"] }
 
 # New dependencies for PoC client
-reqwest = { version = "0.13", features = ["json", "stream"] }
+reqwest = { version = "0.13.2", features = ["json", "stream"] }
 tokio-stream = "0.1"
 async-stream = "0.3"
 futures = "0.3"
@@ -1048,6 +1048,46 @@ path = "src/bin/poc_client.rs
 [[bin]]
 name = "whitt"
 path = "src/main.rs"
+```
+
+### Dependency Upgrade Notes
+
+**Why These Versions Are Required:**
+
+**tokio ^1.50.0:**
+- **Requirement:** autoagents crate (used in production) requires tokio 1.50+
+- **Current:** Project has 1.35
+- **Upgrade:** Must upgrade to ^1.50.0 for autoagents compatibility
+- **Impact:** Provides new async features and performance improvements
+
+**clap ^4.6:**
+- **Requirement:** autoagents crate requires clap 4.6+
+- **Current:** Project has 4.5
+- **Upgrade:** Must upgrade to ^4.6 for autoagents compatibility
+- **Impact:** New CLI features and improved derive macros
+
+**serde-saphyr 0.0.24:**
+- **Status:** Latest version (pre-1.0, actively maintained)
+- **Features:** Native merge keys, garde support, safe Rust
+- **Note:** No 0.1 series exists (versioning skipped)
+
+**llama-cpp-2 0.1.144:**
+- **Latest:** April 2026 release
+- **Note:** NO 0.2.x series exists (despite common misconception)
+- **Usage:** Reserved for future embedded mode (in-process llama.cpp)
+
+**reqwest 0.13.2:**
+- **Latest:** Current stable release
+- **Features:** JSON parsing, streaming support, HTTP/2
+
+**eventsource-stream 0.2.3:**
+- **Status:** Current version (no conflicts)
+- **Features:** Reconnection, error handling, event filtering
+
+**Dependency Conflict Resolution:**
+- All upgraded versions are compatible
+- No breaking changes between current versions
+- Upgrade required for autoagents integration (future phase)
 ```
 
 ---

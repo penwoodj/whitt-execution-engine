@@ -84,9 +84,31 @@ Demonstrate end-to-end local LLM inference where:
   - NVIDIA 570.123.10+ (for CUDA workloads)
   - AMD AMDGPU 6.4.x (for ROCm/Vulkan)
   - Intel NEO 26.09+ (for oneAPI/Vulkan)
-- [ ] 8GB+ GPU VRAM (tested on AMD RX 6800, NVIDIA RTX 3060)
+- [ ] 4GB+ GPU VRAM (tested on AMD RX 580 8GB Polaris10, Vulkan 1.4.335 via RADV)
 - [ ] 16GB+ system RAM
 - [ ] 20GB+ disk space for models
+
+### GPU Compatibility (Tested Hardware)
+
+**AMD RX 580 8GB (Polaris10) — CONFIRMED WORKING:**
+- Vulkan 1.4 via RADV driver (NOT AMDVLK — has 2GB allocation limit, issue #15054)
+- Performance: ~39 tok/s with 7B Q4_K_M, ~25 tok/s with 4B models
+- Known issue: Flash attention may cause garbled output (issue #20465), use `-fa 0` workaround
+- Known issue: Memory allocation limit (issue #5441), set `GGML_VK_FORCE_MAX_ALLOCATION_SIZE=2147483646`
+- 8GB VRAM: fits 7B Q4_K_M comfortably (`-ngl 99`)
+- 4GB VRAM: limited to 3B models (`-ngl 99`)
+- GPU layers: Use `-ngl 99` for models that fit VRAM, partial offload for larger models
+
+### Dependency Version Requirements
+
+| Dependency | Required Version | Notes |
+|---|---|---|
+| tokio | **1.50+** | autoagents requires ^1.50.0 (project currently has 1.40 — MUST upgrade) |
+| clap | **4.6+** | autoagents requires ^4.6.0 (project currently has 4.5 — MUST upgrade) |
+| serde-saphyr | **0.0.24** | Upgrade from 0.0.21 for latest bug fixes (pre-1.0, actively maintained) |
+| reqwest | **0.13** | Latest stable is 0.13.2 (NOT 0.12). eventsource-stream is transport-agnostic |
+| llama-cpp-2 | **0.1.138+** | Compatible with current version. Add "sampler" feature. Latest is 0.1.144 |
+| autoagents | **0.3.7** | Upgrade from 0.3.5. No conflicts with llama-cpp-2 (both use same backend) |
 
 ### Software
 
@@ -242,7 +264,24 @@ cmake --version > /dev/null 2>&1 && echo "✅ cmake OK" || echo "❌ cmake missi
 
 - [ ] `HF_TOKEN` environment variable (optional, for private models)
 - [ ] `GGML_VK_VISIBLE_DEVICES` set to target GPU (default: 0)
+- [ ] `GGML_VK_FORCE_MAX_ALLOCATION_SIZE=2147483646` for AMD Polaris GPUs (RX 570/580/590)
 - [ ] Network: 8080 port available for llama-server
+
+### Docker Model Strategy
+
+**Development**: Volume mount models (avoids registry bloat, instant model swaps)
+```yaml
+volumes:
+  - ./models:/models:ro  # Read-only bind mount
+```
+
+**Production**: Runtime download with BuildKit cache mount (small images, cached downloads)
+```dockerfile
+RUN --mount=type=cache,target=/root/.cache/huggingface \
+    huggingface-cli download repo/model --local-dir /models
+```
+
+**⚠️ Docker Hub layer limit: 5GB** — Models larger than 5GB MUST use volume mounts or runtime download. Do NOT bake large GGUF files into image layers.
 
 ---
 

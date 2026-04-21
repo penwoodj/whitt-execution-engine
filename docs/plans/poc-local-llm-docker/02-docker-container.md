@@ -100,6 +100,13 @@ ENV TZ=UTC
 ENV PYTHONUNBUFFERED=1
 ENV HF_HUB_DISABLE_TELEMETRY=1
 
+# AMD Polaris GPU workarounds (RX 570/580/590)
+# IMPORTANT: Use RADV driver, NOT AMDVLK (2GB allocation limit, llama.cpp issue #15054)
+# Issue #5441: Memory allocation limit on Polaris GPUs
+ENV GGML_VK_FORCE_MAX_ALLOCATION_SIZE=2147483646
+# Issue #20465: Flash attention may cause garbled output on Polaris
+# Set in entrypoint: --flash-attn 0
+
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Vulkan runtime (required for llama.cpp Vulkan support)
@@ -971,11 +978,82 @@ if [[ "$SIZE_BYTES" =~ .*GB ]]; then
     SIZE_MB=$(echo "$SIZE_BYTES" | sed 's/GB//')
     SIZE_MB_INT=$(echo "$SIZE_MB * 1024" | bc | cut -d'.' -f1)
     if [ "$SIZE_MB_INT" -gt 500 ]; then
-        log_warn "Image size exceeds 500MB target: $SIZE_BYTES"
-    fi
+log_warn "Image size exceeds 500MB target: $SIZE_BYTES"
 fi
 
 # Push if requested
+```
+
+### BuildKit Cache for Model Downloads
+
+**Purpose:** Use Docker BuildKit cache mounts to persist HuggingFace downloads across builds.
+
+**Dockerfile Update:**
+```dockerfile
+# In the build stage (not runtime stage)
+FROM ghcr.io/ggml-org/llama.cpp:server-vulkan AS base
+
+# Add BuildKit cache mount for HuggingFace downloads
+# Cache directory: /root/.cache/huggingface
+RUN --mount=type=cache,target=/root/.cache/huggingface \
+    if [ ! -d /root/.cache/huggingface ]; then \
+        mkdir -p /root/.cache/huggingface; \
+    fi && \
+    echo "BuildKit cache configured for HuggingFace downloads"
+```
+
+**Usage in docker build:**
+```bash
+# Build with cache (cache persists on host)
+docker build --cache-type=local -f docker/Dockerfile -t llama-server:v1 .
+```
+
+**Benefits:**
+- Faster rebuilds: Downloads cached locally
+- Reduced bandwidth: Models not re-downloaded
+- Developer-friendly: Cache persists across build sessions
+
+**Limitations:**
+- Cache is local to build machine (not portable)
+- Requires BuildKit (Docker 23.0+)
+- Cache must be managed manually (clean periodically)
+
+### Docker Hub Layer Limit Warning
+
+**CRITICAL:** Docker Hub has a **5GB layer limit**.
+
+**Implications:**
+- Large GGUF models (>5GB) CANNOT be baked into image with `COPY` or `ADD`
+- Models must be downloaded at runtime or mounted as volumes
+
+**Recommendation:**
+```yaml
+# docker-compose.yml
+volumes:
+  # Mount models from host (not COPY into image)
+  - ./models:/models:ro
+```
+
+**When to COPY small models:**
+- Models < 5GB (e.g., 1B Q4_K_M at ~600MB)
+- Use COPY only for frequently-used small models
+- Example: `COPY models/Llama-3.2-1B.Q4_K_M.gguf /models/`
+
+**When to use volume mounts:**
+- Models > 5GB (7B, 8B, 13B, 70B)
+- Large models that change frequently
+- Production deployments with model switching
+
+**Example: Volume mount in docker-compose:**
+```yaml
+services:
+  llama-server:
+    volumes:
+      # Mount models directory (read-only for security)
+      - ./models:/models:ro
+      # Mount config file
+      - ./config.yml:/config/config.yml:ro
+```
 if [ "$PUSH" = "true" ]; then
     log_info "Pushing image to registry..."
     docker push "${FULL_IMAGE_NAME}"

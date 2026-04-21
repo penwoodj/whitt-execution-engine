@@ -99,6 +99,16 @@ amdgpu-container-cli --version
 
 **Alternative (legacy):** `--device=/dev/kfd` + `--device=/dev/dri` + `--group-add video` (if toolkit not available)
 
+#### AMD RX 580 (Polaris) Specific Configuration
+
+**Driver Requirement:** Use RADV (Mesa) driver. Do NOT use AMDVLK — it has a 2GB memory allocation limit (llama.cpp issue #15054).
+
+**Flash Attention Bug:** Flash attention is broken on Polaris (llama.cpp issue #20465). Always launch with `-fa 0` flag to disable.
+
+**Memory Workaround:** Set environment variable `GGML_VK_FORCE_MAX_ALLOCATION_SIZE=2147483646` to work around allocation limits.
+
+**Performance:** ~39 tok/s (7B Q4_K_M), ~226 tok/s (1B models) on RX 580 8GB with Vulkan backend.
+
 ### Intel GPUs
 ```bash
 docker run \
@@ -295,6 +305,31 @@ docker run \
 RUN wget -O /models/model.gguf \
     https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct/resolve/main/llama-3-8b-instruct.Q4_K_M.gguf
 ```
+
+### 4. BuildKit Cache for Model Downloads
+
+**Docker BuildKit cache mount pattern for HuggingFace downloads:**
+
+```dockerfile
+#syntax=docker/dockerfile:1.4
+FROM ghcr.io/ggml-org/llama.cpp:server-vulkan
+
+RUN apt-get update && apt-get install -y python3-pip
+RUN pip3 install huggingface_hub
+
+RUN --mount=type=cache,target=/root/.cache/huggingface \
+    huggingface-cli download meta-llama/Meta-Llama-3-8B-Instruct \
+    llama-3-8b-instruct.Q4_K_M.gguf \
+    --local-dir /models
+```
+
+**Benefits:**
+- Cache persists across builds (no re-download on rebuild)
+- Reduces build time significantly for development workflows
+- Compatible with Docker BuildKit (default in modern Docker)
+
+**Important: Docker Hub Layer Limit**
+Docker Hub has a 5GB layer limit. Models exceeding this size (many 7B+ GGUF files) MUST use volume mounts at runtime instead of embedding in the image. Use BuildKit cache during development, then switch to runtime downloads or volume mounts for production.
 
 ## Hugging Face Token Handling
 
