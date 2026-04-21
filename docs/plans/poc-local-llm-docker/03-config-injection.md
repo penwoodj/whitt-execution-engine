@@ -961,21 +961,13 @@ GPU_TYPE=$(detect_gpu)
 log_info "Recommended compose file:"
 case "$GPU_TYPE" in
     nvidia)
-        echo "  docker-compose.yml -f docker-compose.nvidia.yml"
-        echo "  or"
         echo "  docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d"
         ;;
     amd)
-        echo "  docker-compose.yml -f docker-compose.amd.yml"
-        echo "  or"
-        echo "  docker compose -f docker-compose.yml -f docker-compose.amd.yml up -d"
-        ;;
+        echo "  docker compose -f docker-compose.yml -f docker-compose.amd.yml up -d";;
+    ;;
     cpu)
-        echo "  docker-compose.yml (no GPU passthrough)"
-        echo "  or"
         echo "  docker compose up -d"
-        ;;
-esac
 ```
 
 ---
@@ -1380,4 +1372,4 @@ Create:
 After completing Phase 03:
 1. Proceed to Phase 05: Rust Client
 2. Phase 04 can be completed in parallel (documentation)
-3. Use docker-compose files in Phase 05 for container management
+3. Use docker compose files in Phase 05 for container management

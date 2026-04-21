@@ -4,11 +4,11 @@
 
 **Goal:** Build optimized Docker container for llama.cpp with automatic model download, configuration loading, and health monitoring.
 
-**Tech Stack:** Docker, Bash, llama.cpp (official image), huggingface-cli
+**Tech Stack:** Docker, Bash, llama.cpp (official image), huggingface-hub CLI (hf)
 
 **Dependencies:**
 - Phase 02 is independent (no dependencies on other phases)
-- Output used by Phase 03 (docker-compose) and Phase 04 (HTTP interface)
+- Output used by Phase 03 (docker compose) and Phase 04 (HTTP interface)
 
 ---
 
@@ -118,7 +118,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglx0 \
     libegl1 \
     libgles2 \
-    # Python and pip for huggingface-cli
+    # Python and pip for huggingface-hub CLI
     python3 \
     python3-pip \
     # HTTP client for healthcheck
@@ -129,7 +129,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install huggingface-cli
+# Install huggingface-hub CLI
 RUN pip3 install --no-cache-dir --break-system-packages huggingface-hub
 
 # Copy llama-server and llama-cli from base image
@@ -189,7 +189,7 @@ CMD ["/entrypoint.sh"]
 
 - **Target:** <500MB final image
 - **Base image:** ~200MB (Ubuntu + llama.cpp)
-- **Runtime deps:** ~150MB (Vulkan, Python, huggingface-cli, curl, tini)
+- **Runtime deps:** ~150MB (Vulkan, Python, huggingface-hub CLI, curl, tini)
 - **Models:** NOT included (downloaded at runtime)
 
 ---
@@ -274,8 +274,8 @@ download_model() {
     while [ $attempt -le $max_retries ]; do
         log_info "Download attempt $attempt of $max_retries..."
 
-        # Use huggingface-cli for download (supports resume)
-        if command -v huggingface-cli &> /dev/null; then
+        # Use hf for download (supports resume)
+        if command -v hf &> /dev/null; then
             # Check for HF_TOKEN in environment
             if [ -n "$HUGGING_FACE_HUB_TOKEN" ]; then
                 export HUGGING_FACE_HUB_TOKEN
@@ -285,7 +285,7 @@ download_model() {
             fi
 
             # Download with timeout (300 seconds)
-            if timeout 300 huggingface-cli download \
+            if timeout 300 hf download \
                 --repo-type model \
                 --local-dir "$(dirname "$model_path")" \
                 --local-dir-use-symlinks False \
@@ -328,7 +328,7 @@ download_model() {
                 fi
             fi
         else
-            log_error "huggingface-cli not found. Cannot download model."
+            log_error "hf not found. Cannot download model."
             exit 1
         fi
     done
@@ -1044,7 +1044,7 @@ volumes:
 - Large models that change frequently
 - Production deployments with model switching
 
-**Example: Volume mount in docker-compose:**
+**Example: Volume mount in Docker Compose:**
 ```yaml
 services:
   llama-server:
@@ -1351,7 +1351,7 @@ docker run --rm \
 ### Phase 05: Rust Client
 
 **Output:** Docker image
-**Input:** Phase 05 starts container via docker-compose
+**Input:** Phase 05 starts container via docker compose
 
 ---
 
@@ -1385,6 +1385,6 @@ Create:
 ## Next Steps
 
 After completing Phase 02:
-1. Proceed to Phase 03: Config Injection (docker-compose)
+1. Proceed to Phase 03: Config Injection (docker compose)
 2. Use image in Phase 05: Rust Client
 3. Reference HTTP interface in Phase 04 for API details

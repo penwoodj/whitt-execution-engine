@@ -115,7 +115,7 @@ Demonstrate end-to-end local LLM inference where:
 - [ ] Rust 1.75+ with Cargo
 - [ ] Vulkan SDK (for local dev, not needed in container)
 - [ ] curl for manual API testing
-- [ ] huggingface-cli for model downloads
+- [ ] hf CLI (huggingface-hub) for model downloads
 - [ ] dumb-init for container graceful shutdown
 - [ ] jq for JSON parsing in scripts
 - [ ] cmake 3.20+ (for llama.cpp builds)
@@ -126,19 +126,25 @@ Demonstrate end-to-end local LLM inference where:
 
 ```bash
 # System packages (most already installed on CachyOS)
-sudo pacman -S --needed --noconfirm docker docker-compose curl cmake jq dumb-init
+sudo pacman -S --needed --noconfirm docker docker-compose-plugin curl cmake jq python-pipx
 
 # Enable and start Docker
 sudo systemctl enable --now docker
-sudo usermod -aG docker $USER  # then log out and back in
+sudo usermod -aG docker $USER
 
-# Python tools for model management
-pip install -U huggingface_hub
+# After usermod, log out/in or run: newgrp docker
+# Until then, prefix docker commands with sudo
+
+# Python tools (Arch requires pipx due to PEP 668 externally-managed-environment)
+pipx install huggingface_hub
+pipx install dumb-init
 
 # Verify Docker GPU passthrough (AMD)
 docker run --rm --device /dev/dri:/dev/dri --group-add video \
   ghcr.io/ggml-org/llama.cpp:server-vulkan --list-devices
-# Expected: "ggml_vulkan: Found 1 Vulkan devices" with AMD RX 580
+# Expected output:
+#   Available devices:
+#     Vulkan0: AMD Radeon RX 580 Series (RADV POLARIS10) (8192 MiB, 7199 MiB free)
 
 # Verify all tools
 docker --version          # Docker version 29.x+
@@ -147,8 +153,8 @@ cargo --version           # cargo 1.94+
 cmake --version           # cmake 4.x+
 curl --version            # curl 8.x+
 jq --version              # jq-1.8+
-huggingface-cli version   # huggingface_hub x.x.x
-which dumb-init           # /usr/bin/dumb-init
+hf --version              # huggingface-hub x.x.x
+which dumb-init           # installed via pipx
 ```
 
 #### Ubuntu 24.04/26.04 LTS (NVIDIA GPU)
@@ -159,7 +165,8 @@ sudo apt update && sudo apt install -y curl cmake jq git build-essential
 
 # Install Docker Engine (official method)
 curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER  # then log out and back in
+sudo usermod -aG docker $USER
+# After usermod, log out/in or run: newgrp docker
 
 # Install NVIDIA Container Toolkit
 curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | \
@@ -188,14 +195,14 @@ docker run --rm --gpus all nvidia/cuda:12.5.0-base-ubuntu24.04 nvidia-smi
 docker --version           # 29.3.0+
 nvidia-ctk --version       # 1.17.4+
 cargo --version            # 1.75+
-huggingface-cli version
+hf --version
 ```
 
 #### Fedora / RHEL (AMD GPU)
 
 ```bash
 # System packages
-sudo dnf install -y docker docker-compose curl cmake jq git gcc
+sudo dnf install -y docker docker-compose-plugin curl cmake jq git gcc
 
 # Enable Docker
 sudo systemctl enable --now docker
@@ -228,14 +235,14 @@ cargo --version > /dev/null 2>&1 && echo "✅ Rust OK" || echo "❌ Rust missing
 
 # 4. GPU visible to Docker (AMD)
 docker run --rm --device /dev/dri:/dev/dri --group-add video \
-  ghcr.io/ggml-org/llama.cpp:server-vulkan --list-devices 2>&1 | grep -q "Found" && \
+  ghcr.io/ggml-org/llama.cpp:server-vulkan --list-devices 2>&1 | grep -q "Vulkan" && \
   echo "✅ GPU passthrough OK" || echo "❌ GPU not visible in Docker"
 
 # 5. Port 8080 available
 ss -tlnp | grep -q ':8080' && echo "❌ Port 8080 in use" || echo "✅ Port 8080 available"
 
-# 6. huggingface-cli available
-huggingface-cli version > /dev/null 2>&1 && echo "✅ HF CLI OK" || echo "❌ HF CLI missing"
+# 6. hf CLI available
+hf --version > /dev/null 2>&1 && echo "✅ HF CLI OK" || echo "❌ HF CLI missing"
 
 # 7. curl available
 curl --version > /dev/null 2>&1 && echo "✅ curl OK" || echo "❌ curl missing"
@@ -278,7 +285,7 @@ volumes:
 **Production**: Runtime download with BuildKit cache mount (small images, cached downloads)
 ```dockerfile
 RUN --mount=type=cache,target=/root/.cache/huggingface \
-    huggingface-cli download repo/model --local-dir /models
+    hf download repo/model --local-dir /models
 ```
 
 **⚠️ Docker Hub layer limit: 5GB** — Models larger than 5GB MUST use volume mounts or runtime download. Do NOT bake large GGUF files into image layers.
@@ -330,7 +337,7 @@ RUN --mount=type=cache,target=/root/.cache/huggingface \
 | Risk | Impact | Probability | Mitigation |
 |------|--------|--------------|------------|
 | **GPU passthrough fails** | High | Medium | Support both AMD (--device /dev/dri) and NVIDIA (--gpus all); add GPU detection in entrypoint |
-| **Model download fails** | Medium | Medium | Use huggingface-cli with resume; cache models in volume; support local model mount fallback |
+| **Model download fails** | Medium | Medium | Use hf CLI with resume; cache models in volume; support local model mount fallback |
 | **Vulkan not initialized** | High | Low | Include full Vulkan runtime deps in Dockerfile; add Vulkan initialization test in entrypoint |
 | **Container port conflicts** | Low | Medium | Use random port in docker-compose (--publish "8080"); document port mapping |
 | **SSE streaming parse errors** | Medium | Low | Use robust SSE parser; implement reconnection logic; add debug logging |
@@ -381,7 +388,7 @@ RUN --mount=type=cache,target=/root/.cache/huggingface \
 │                    src/bin/poc_client.rs                         │
 │  • Parse CLI args (--config, --prompt, --stream)                 │
 │  • Validate YAML config using garde                            │
-│  • Start Docker container via docker-compose                     │
+│  • Start Docker container via docker compose                     │
 │  • Wait for /health endpoint                                    │
 │  • Send POST /v1/chat/completions                               │
 │  • Parse SSE stream, print tokens in real-time                  │
@@ -442,7 +449,7 @@ Data Flow:
 Key Integration Points:
 - **Phase 01 → 03:** YAML schema passed as Docker volume
 - **Phase 02 → 04:** Container image with llama-server binary
-- **Phase 03 → 05:** docker-compose manages container lifecycle
+- **Phase 03 → 05:** docker compose manages container lifecycle
 - **Phase 04 → 05:** HTTP API specification matches Rust client
 - **Phase 01 → 05:** Config structs reused for CLI validation
 
@@ -760,6 +767,11 @@ while let Some(event) = stream.next().await {
 - `llamacpp:predicted_tokens_seconds`: Token generation time
 - `llamacpp:kv_cache_usage_ratio`: KV cache utilization
 
+**Metric Field Rename (llama.cpp PR #16818):**
+- Old field: `llamacpp:n_past_max` (deprecated)
+- New field: `llamacpp:n_tokens_max` (use this)
+- **Action:** Update monitoring dashboards to use `n_tokens_max`
+
 **Endpoint:**
 - `GET /metrics`: Prometheus scraping endpoint
 
@@ -781,11 +793,45 @@ while let Some(event) = stream.next().await {
 - Q4_0, Q4_K, Q5_0, Q5_K, Q6_K, Q8_0, F16, F32
 - Q4_K_M recommended for best balance of size/speed/quality
 
+### VRAM Budget Table (8GB RX 580)
+
+| Model Size | Quantization | Model Size | Context Size | Total VRAM | Fits 8GB? | Notes |
+|------------|--------------|-------------|--------------|-------------|-------------|-------|
+| 8B | Q4_K_M | ~5.8GB | 1.9GB (8K ctx) | ~7.7GB | ✅ Yes | Recommended configuration |
+| 9B | Q4_K_M | ~6.8GB | 1.9GB (8K ctx) | ~8.7GB | ⚠️ Tight | Reduce context to 8K |
+| 13B | Q4_K_M | ~10.5GB | 1.9GB (8K ctx) | ~12.4GB | ❌ No | Requires `-ngl` partial offload |
+
+**Key Notes:**
+- VRAM calculation includes: model weights + KV cache + GPU overhead
+- Context size impacts VRAM usage significantly (KV cache = 2 × n_ctx × n_embd × sizeof(f16))
+- For 13B models on 8GB VRAM: must reduce GPU layers (`-ngl 32`) and/or use CPU offload
+- Qwen3.5 models: **BROKEN on RX 580 Vulkan** - see Qwen3.5 Regression Warning below
+
+### Qwen3.5 Models: Vulkan Regression Warning (CRITICAL)
+
+**Issue:** Qwen3.5/Qwen3 models fail on AMD gfx803 (RX 580) with Vulkan after llama.cpp build b8175.
+
+**Source:** https://github.com/ggml-org/llama.cpp/issues/20699
+
+**Symptoms:**
+- Model loading fails or produces garbled output
+- Vulkan initialization errors on Polaris GPUs
+- Works correctly on build b8089 or earlier
+
+**Workarounds:**
+1. **Pin llama.cpp version:** Use build b8089 or earlier for Qwen3.5 models
+2. **Avoid Qwen3.5 on RX 580:** Use alternative models (Llama 3.2, Gemma 3, etc.)
+3. **Use different backend:** CUDA or Metal (if available on your hardware)
+
+**Recommended Action for RX 580:**
+- If using Qwen3.5 models: pin llama.cpp to b8089
+- Otherwise: use latest llama.cpp with Llama/Gemma models (fully supported on RX 580)
+
 ### HuggingFace Download
 
 **CLI tool:**
 ```bash
-huggingface-cli download \
+hf download \
   --repo-type model \
   --local-dir /models \
   --local-dir-use-symlinks False \
@@ -805,7 +851,7 @@ model_path = hf_hub_download(
 )
 ```
 
-**Resume support:** Built-in to huggingface-cli
+**Resume support:** Built-in to hf CLI
 
 **Authentication:** `HUGGING_FACE_HUB_TOKEN` env var for private/gated models
 

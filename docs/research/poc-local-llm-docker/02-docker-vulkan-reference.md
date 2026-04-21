@@ -3,7 +3,23 @@
 ## Docker Version Requirements
 
 **Docker Engine:** 29.3.0+ recommended (fixes MIG bug, AMD CDI support)
-**Docker Compose:** 2.0+ required
+**docker compose:** 2.0+ required
+
+### Docker 29.x Deprecations
+
+**cgroup v1 Deprecation:** Docker 29.x deprecates cgroup v1 support.
+
+**Impact:**
+- GPU workloads may require cgroup v2 for optimal resource isolation
+- Legacy systems using cgroup v1 should upgrade kernel (5.2+)
+- Some container runtimes may have compatibility issues
+
+**Migration:**
+- Verify cgroup version: `docker info | grep "Cgroup Version"`
+- Enable cgroup v2: Boot kernel with `systemd.unified_cgroup_hierarchy=1`
+- Check AMD GPU toolkit compatibility with cgroup v2
+
+**Note:** cgroup v2 is default in modern Linux distributions (Ubuntu 21.04+, RHEL 9+, etc.)
 
 **NVIDIA Container Toolkit:**
 - **Version:** 1.17.4+ REQUIRED (CVE-2025-23266/23359 fixes)
@@ -69,6 +85,30 @@ nvidia-container-cli --version
 ```
 
 ### AMD GPUs
+
+#### CDI-Based GPU Injection (Docker 29.3.0+)
+
+**New in Docker 29.3.0:** Container Device Interface (CDI) for AMD GPU injection.
+
+```bash
+# CDI-based injection (recommended for Docker 29.3.0+)
+docker run \
+    --device nvidia.com/gpu=all \
+    ghcr.io/ggml-org/llama.cpp:server-vulkan
+
+# Or specific GPU by index
+docker run \
+    --device nvidia.com/gpu=0 \
+    ghcr.io/ggml-org/llama.cpp:server-vulkan
+```
+
+**Benefits:**
+- Declarative device specification
+- Better integration with container runtimes
+- Future-proof (replacing legacy device mounting)
+
+#### Legacy Device Mounting (Still Supported)
+
 ```bash
 docker run \
     --gpus all \
@@ -78,10 +118,13 @@ docker run \
     ghcr.io/ggml-org/llama.cpp:server-vulkan
 ```
 
+**Note:** `--device /dev/dri` still works but CDI is the future. Legacy method remains compatible.
+
 **Prerequisites:**
 - `amdgpu-container-toolkit` 1.2.0+ installed on host (REQUIRED for --gpus support, requires Docker 25.0+)
 - ROCm drivers installed on host
 - Docker 25.0+ required for --gpus support
+- Docker 29.3.0+ recommended for CDI-based injection
 
 **Toolkit Installation:**
 ```bash
@@ -156,7 +199,7 @@ docker run --rm \
     ghcr.io/ggml-org/llama.cpp:server-vulkan
 ```
 
-**Docker Compose:**
+**docker compose:**
 ```yaml
 services:
   llama-server:
@@ -242,6 +285,27 @@ VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation
 
 **Issue #1392:** NVIDIA ICD files mounted at `/etc/vulkan/icd.d/` but applications expect `/usr/share/vulkan/icd.d/`.
 
+## libglvnd Fix (PR #18664)
+
+**PR #18664:** Fixed libglvnd library linking issues in llama.cpp Docker image.
+
+**Problem:** Missing or incorrect libglvnd library references causing Vulkan initialization failures on some GPU vendors.
+
+**Solution:** Updated Dockerfile to properly install and link libglvnd libraries:
+```dockerfile
+RUN apt-get install -y libglvnd0 libgl1 libglx0 libegl1 libgles2
+```
+
+**Impact:** Resolves GPU detection issues on AMD, NVIDIA, and Intel GPUs in containerized environments.
+
+**Verification:**
+```bash
+docker run --rm ghcr.io/ggml-org/llama.cpp:server-vulkan \
+    vulkaninfo | grep "GPU id"
+```
+
+**Note:** If using older images without this fix, manually install libglvnd packages in your Dockerfile.
+
 **Symptoms:**
 - `vkCreateInstance` failures
 - "No compatible GPU found" errors
@@ -318,7 +382,7 @@ RUN apt-get update && apt-get install -y python3-pip
 RUN pip3 install huggingface_hub
 
 RUN --mount=type=cache,target=/root/.cache/huggingface \
-    huggingface-cli download meta-llama/Meta-Llama-3-8B-Instruct \
+    hf download meta-llama/Meta-Llama-3-8B-Instruct \
     llama-3-8b-instruct.Q4_K_M.gguf \
     --local-dir /models
 ```
@@ -455,7 +519,7 @@ wait $!
 ### kth8/llama-server-vulkan
 **Repository:** https://github.com/kth8/llama-server-vulkan
 
-**Docker Compose:**
+**docker compose:**
 ```yaml
 services:
   llama-server:

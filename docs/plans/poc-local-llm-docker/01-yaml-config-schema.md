@@ -197,6 +197,61 @@ docker service create \
 - Gemma 3 1B: 200 TPS, <1GB VRAM
 - Gemma 3 4B: 80 TPS, ~3GB VRAM
 
+### VRAM Budget Constraints (8GB RX 580)
+
+**For RX 580 8GB Polaris GPUs:**
+
+| Model Size | Quantization | Model Size | Context Size | Total VRAM | Fits 8GB? | Configuration |
+|------------|--------------|-------------|--------------|-------------|-------------|---------------|
+| 8B | Q4_K_M | ~5.8GB | 1.9GB (8K ctx) | ~7.7GB | ✅ Yes | `hardware.gpu_layers: 99` |
+| 9B | Q4_K_M | ~6.8GB | 1.9GB (8K ctx) | ~8.7GB | ⚠️ Tight | Reduce context to 8K, or `gpu_layers: 80` |
+| 13B | Q4_K_M | ~10.5GB | 1.9GB (8K ctx) | ~12.4GB | ❌ No | `hardware.gpu_layers: 32-40` (partial offload) |
+
+**VRAM Budget Rules:**
+- VRAM = Model weights + KV cache + GPU overhead
+- KV cache size = 2 × n_ctx × n_embd × sizeof(f16)
+- For 8GB VRAM: Use 8B Q4_K_M with full GPU offload
+- For 13B models: Must reduce GPU layers (partial offload to CPU)
+
+### Qwen3.5 Models: Vulkan Regression (CRITICAL)
+
+**Issue:** Qwen3.5/Qwen3 models fail on AMD RX 580 (gfx803) with Vulkan after llama.cpp build b8175.
+
+**Source:** https://github.com/ggml-org/llama.cpp/issues/20699
+
+**Workarounds:**
+1. Pin llama.cpp to build b8089 or earlier
+2. Avoid Qwen3.5 on RX 580 Vulkan
+3. Use alternative models (Llama 3.2, Gemma 3, etc.)
+
+**Config Impact:**
+- If using Qwen3.5: Add version constraint to Dockerfile
+- Example: `ARG LLAMA_CPP_COMMIT=b8089` (for b8089)
+
+### serde-saphyr 0.0.24: #[non_exhaustive] Enums
+
+**Breaking Change:** All public enums in serde-saphyr 0.0.24 are now marked `#[non_exhaustive]`.
+
+**Impact on Error Handling:**
+```rust
+// Before (serde-saphyr 0.0.21):
+match error {
+    ParseError::InvalidYaml => { /* handle */ }
+    ParseError::IoError(_) => { /* handle */ }
+}
+
+// After (serde-saphyr 0.0.24):
+match error {
+    ParseError::InvalidYaml => { /* handle */ }
+    ParseError::IoError(_) => { /* handle */ }
+    _ => { /* Required: wildcard for #[non_exhaustive] */ }
+}
+```
+
+**Feature Split:**
+- Can use `features = ["deserialize"]` for config parsing only (reduces compile time)
+- Full serde support still available with default features
+
 ### AMD RX 580 (Polaris) GPU Profile
 
 **Confirmed Working:** llama.cpp Vulkan with RADV driver

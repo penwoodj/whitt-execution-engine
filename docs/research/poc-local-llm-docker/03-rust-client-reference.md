@@ -96,6 +96,26 @@ tokio = { version = "1.50", features = ["full"] }
 
 **Note:** tokio ^1.50.0 required by autoagents crate (0.3.7+).
 
+### reqwest 0.13 Rustls Default
+
+**Breaking Change:** reqwest 0.13 defaults to rustls instead of native-tls.
+
+**Impact:**
+- Default TLS backend changed from native-tls (OpenSSL) to rustls
+- May cause compatibility issues with certain certificate chains
+- Performance difference: rustls is faster but may not support all platforms
+
+**Solution:** Explicitly specify TLS backend if needed:
+```toml
+# Use native-tls (OpenSSL-based)
+reqwest = { version = "0.13.2", features = ["stream", "native-tls"] }
+
+# Or use rustls explicitly
+reqwest = { version = "0.13.2", features = ["stream", "rustls-tls"] }
+```
+
+**Recommendation:** Test both TLS backends with your target deployment environment.
+
 ### Connection Pooling (Recommended)
 ```rust
 use reqwest::Client;
@@ -149,7 +169,7 @@ while let Some(event) = stream.next().await {
 }
 ```
 
-### 2. reqwest-eventsource
+### 2. reqwest-eventsource (Not Recommended)
 **Version:** 0.5.x
 **Features:** Built on reqwest, automatic retry
 
@@ -158,23 +178,18 @@ while let Some(event) = stream.next().await {
 reqwest-eventsource = "0.5"
 ```
 
-```rust
-use reqwest_eventsource::{Event, RequestBuilderExt};
+**CRITICAL INCOMPATIBILITY:** reqwest-eventsource is LOCKED to reqwest 0.12 and does NOT support reqwest 0.13.
 
-let stream = client
-    .post("http://localhost:8080/v1/chat/completions")
-    .json(&request)
-    .eventsource()
-    .await?;
+**Issue:**
+- reqwest-eventsource 0.5.x depends on reqwest ^0.12
+- Cannot upgrade to reqwest 0.13 with reqwest-eventsource
+- Causes dependency version conflicts in modern projects
 
-while let Some(event) = stream.next().await {
-    match event {
-        Ok(Event::Open) => println!("Connection opened"),
-        Ok(Event::Message(message)) => println!("Message: {}", message.data),
-        Err(error) => eprintln!("Error: {}", error),
-    }
-}
-```
+**Solution:** Use eventsource-stream instead (see option 1) - it's transport-agnostic and has no version lock on reqwest.
+
+**Connection Pool Corruption Bug:** There is a known connection pool corruption bug after network errors (seanmonstar/reqwest#2956). This affects reqwest-eventsource when network errors occur.
+
+**Recommendation:** DO NOT use reqwest-eventsource. Use eventsource-stream (0.2.3) instead.
 
 ### 3. eventsrc (Newer)
 **Version:** 0.2.x
@@ -548,18 +563,61 @@ serde-saphyr = "0.0.24"
 
 **Rationale:** 1.5x faster than serde_yaml, provides schema validation support.
 
+### serde-saphyr 0.0.24 Migration Notes
+
+**#[non_exhaustive] Enums:** As of serde-saphyr 0.0.24, some enums are marked with `#[non_exhaustive]`, requiring wildcard matches in pattern matching.
+
+**Impact:**
+- Cannot exhaustively match all enum variants directly
+- Must use `_` wildcard in match statements
+- Future-proof: new variants added without breaking code
+
+**Example:**
+```rust
+// BAD: Exhaustive match without wildcard
+match value {
+    Value::String(s) => /* ... */,
+    Value::Number(n) => /* ... */,
+    // Missing variants cause compile error
+}
+
+// GOOD: Include wildcard
+match value {
+    Value::String(s) => /* ... */,
+    Value::Number(n) => /* ... */,
+    _ => /* handle other variants */,
+}
+```
+
+**Feature Split:** Can use minimal features to reduce compile time:
+```toml
+# Deserialize only (if you don't need serialization)
+serde-saphyr = { version = "0.0.24", features = ["deserialize"] }
+
+# Or use default features (both serialize + deserialize)
+serde-saphyr = "0.0.24"
+```
+
+**Best Practice:** Always include `_` wildcard when matching serde-saphyr enums to ensure forward compatibility.
+
 ## Dependency Compatibility Matrix
 
 | Dependency | Version | Constraint | Notes |
 |------------|---------|------------|-------|
 | tokio | 1.50+ | autoagents requirement (0.3.7+) | Async runtime, industry standard |
 | clap | 4.6+ | autoagents requirement (0.3.7+) | CLI argument parsing |
-| reqwest | 0.13.2 | Latest stable, no conflicts | HTTP client with streaming |
-| serde-saphyr | 0.0.24 | Latest, pre-1.0 | YAML parsing, 1.5x faster than serde_yaml |
-| eventsource-stream | 0.2.3 | Transport-agnostic, no version lock | SSE streaming, production-ready |
+| reqwest | 0.13.2 | Latest stable, rustls default | HTTP client with streaming. Use features = ["native-tls"] or ["rustls-tls"] explicitly |
+| reqwest-eventsource | 0.5.x | LOCKED to reqwest 0.12 | NOT RECOMMENDED. Use eventsource-stream instead (transport-agnostic, no version lock) |
+| eventsource-stream | 0.2.3 | Transport-agnostic, no version lock | SSE streaming, production-ready. **Recommended** over reqwest-eventsource |
+| serde-saphyr | 0.0.24 | Latest, pre-1.0 | YAML parsing, 1.5x faster than serde_yaml. Use wildcard match for #[non_exhaustive] enums |
 | llama-cpp-2 | 0.1.144 | Latest, no 0.2 series exists | llama.cpp client bindings |
 
-**Important:** All versions are compatible with each other. No version conflicts detected in the dependency tree.
+**Critical Notes:**
+- **reqwest-eventsource incompatibility:** Locked to reqwest 0.12. Cannot use with reqwest 0.13. Use eventsource-stream instead.
+- **Connection pool bug:** reqwest has a known connection pool corruption bug after network errors (seanmonstar/reqwest#2956). Monitor for issues.
+- **Serde-saphyr enums:** Use `_` wildcard in match statements due to `#[non_exhaustive]` attribute.
+
+**Important:** All versions listed above are compatible with each other except reqwest-eventsource (which should be avoided).
 
 ## References
 

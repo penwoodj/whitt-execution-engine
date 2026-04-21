@@ -65,6 +65,19 @@
 
 Example: `LLAMA_ARG_CTX_SIZE=4096` equals `--ctx-size 4096`.
 
+### LLAMA_ARG_* Environment Variables
+**Availability:** 100+ LLAMA_ARG_* environment variables available for full system configuration.
+**Functionality:** Complete system configuration via environment variables - all CLI flags can be set via LLAMA_ARG_* prefix.
+**Example:**
+```bash
+export LLAMA_ARG_CTX_SIZE=4096
+export LLAMA_ARG_THREADS=8
+export LLAMA_ARG_PARALLEL=4
+export LLAMA_ARG_API_KEY="your-secret-key"
+export LLAMA_ARG_N_GPU_LAYERS=99
+```
+**Best Practice:** Use environment variables for production deployments, CLI flags for development/debugging.
+
 ## Key CLI Flags
 
 ### Model and Context
@@ -186,6 +199,12 @@ Example: `LLAMA_ARG_CTX_SIZE=4096` equals `--ctx-size 4096`.
 - `/models` - Model listing
 - `/models/unload` - Model unload endpoint
 
+### Endpoint Flags Requirement
+**Note:** The `/props` and `/slots` endpoints require specific build flags to be enabled:
+- `--enable-props` flag required for `/props` endpoint availability
+- `--enable-slots` flag required for `/slots` endpoint availability
+**Check Availability:** Verify endpoints are available by calling them - return 404 if not enabled in build.
+
 ### Health Check Alternative (Recommended for Production)
 
 **Issue #20684:** `/health` endpoint gets queued with other requests under high load.
@@ -247,6 +266,11 @@ curl http://localhost:8080/health
 ### Endpoint
 - `/metrics` - Prometheus scraping endpoint
 
+### Field Rename (Breaking Change)
+**PR #16818:** Metrics field `n_past_max` renamed to `n_tokens_max`.
+**Action Required:** Update any metrics scraping/parsing code to use `n_tokens_max` instead of `n_past_max`.
+**Affected Versions:** Builds after PR #16818 merge.
+
 ## Known Issues
 
 ### Health Check Under Load
@@ -256,6 +280,12 @@ curl http://localhost:8080/health
 ### Streaming Chunk Splitting
 **PR #9519:** Tested and verified SSE events may split JSON across events.
 **Handling required:** Buffer incomplete JSON until parseable.
+
+### Qwen3.5/Qwen3 Regression on AMD Polaris (RX 580)
+**Issue #20699:** After llama.cpp build b8175+, Qwen3.5 and Qwen3 models fail to run on AMD gfx803 (RX 580) with Vulkan backend.
+**Symptoms:** Model load failures or runtime crashes when using Qwen3.5 models.
+**Workaround:** Pin to build b8089 or earlier for Qwen3.5 support on AMD Polaris GPUs.
+**Affected:** AMD gfx803 GPUs (RX 580, RX 570, RX 480) with Qwen3.5 models only.
 
 ### AMD Polaris (RX 580) Compatibility
 

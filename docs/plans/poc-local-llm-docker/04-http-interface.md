@@ -373,7 +373,16 @@ llama_prompt_processing_seconds_total 123.456
 # HELP llama_token_generation_seconds_total Total token generation time
 # TYPE llama_token_generation_seconds_total counter
 llama_token_generation_seconds_total 456.789
+
+# HELP llama_n_tokens_max Maximum tokens processed (renamed from n_past_max)
+# TYPE llama_n_tokens_max gauge
+llama_n_tokens_max 8192
 ```
+
+**Metric Field Rename (llama.cpp PR #16818):**
+- Old: `llama_n_past_max` (deprecated)
+- New: `llama_n_tokens_max` (use this in dashboards)
+- **Action:** Update Prometheus queries and Grafana panels
 
 **Use Cases:**
 - Prometheus monitoring

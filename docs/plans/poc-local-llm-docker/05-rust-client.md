@@ -39,7 +39,15 @@
 
 ### Reqwest Client Configuration
 
-**Version:** reqwest 0.13 with `stream` feature
+**Version:** reqwest 0.13.2 with TLS features
+
+**CRITICAL:** reqwest 0.13 switched default TLS from native-tls to rustls.
+
+**Compatible Dependency:**
+```toml
+[dependencies]
+reqwest = { version = "0.13.2", features = ["rustls", "stream"] }
+```
 
 **Connection Pooling (Recommended):**
 ```rust
@@ -56,26 +64,87 @@ let client = ClientBuilder::new()
     .expect("Failed to build client");
 ```
 
+### Connection Pool Error Handling (Issue #2956)
+
+**Known Issue:** Connection pool corruption after network errors.
+
+**Workaround:** Recreate client on persistent errors.
+
+```rust
+async fn send_with_retry(client: &Client, request: &Request) -> Result<Response> {
+    let mut retries = 0;
+    let max_retries = 3;
+
+    loop {
+        match send_request(client, request).await {
+            Ok(response) => return Ok(response),
+            Err(e) if retries < max_retries => {
+                // Check if error indicates pool corruption
+                if is_pool_corruption(&e) {
+                    // Recreate client to reset connection pool
+                    let new_client = ClientBuilder::new()
+                        .connect_timeout(Duration::from_secs(10))
+                        .timeout(Duration::from_secs(300))
+                        .pool_idle_timeout(Duration::from_secs(60))
+                        .pool_max_idle_per_host(10)
+                        .build()?;
+                    *client = new_client;
+                }
+                retries += 1;
+                tokio::time::sleep(Duration::from_millis(100 * retries as u64)).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+```
+
 ### SSE Streaming Options
 
-**1. eventsource-stream (Recommended)**
+**1. eventsource-stream (Recommended - Transport-Agnostic)**
 - **Version:** 0.2.3
 - **Maturity:** Production-ready
 - **Features:** Reconnection, error handling, event filtering
+- **Compatibility:** Works with reqwest 0.13 (transport-agnostic)
 
 ```toml
 [dependencies]
 eventsource-stream = "0.2.3"
 ```
 
-**2. reqwest-eventsource**
+**2. reqwest-eventsource (INCOMPATIBLE - DO NOT USE)**
 - **Version:** 0.5.x
-- **Features:** Built on reqwest, automatic retry
+- **Issue:** Locked to reqwest 0.12 - **INCOMPATIBLE with reqwest 0.13**
+- **Workaround:** Use `eventsource-stream` instead
 
 **3. eventsrc (Newer)**
 - **Version:** 0.2.x
 - **Features:** Minimal, async-native
 - **Note:** Less mature than eventsource-stream
+
+### serde-saphyr 0.0.24: #[non_exhaustive] Enums
+
+**Breaking Change:** All public enums are now `#[non_exhaustive]`.
+
+**Impact on Error Matching:**
+```rust
+// Before (serde-saphyr 0.0.21):
+match error {
+    ParseError::InvalidYaml => { /* handle */ }
+    ParseError::IoError(_) => { /* handle */ }
+}
+
+// After (serde-saphyr 0.0.24) - Wildcard required:
+match error {
+    ParseError::InvalidYaml => { /* handle */ }
+    ParseError::IoError(_) => { /* handle */ }
+    _ => { /* Required: wildcard for #[non_exhaustive] */ }
+}
+```
+
+**Feature Split:**
+- Use `features = ["deserialize"]` for config parsing only (reduces compile time)
+- Full serde support available with default features
 
 ### Streaming Chunk Splitting (Critical Gotcha)
 
@@ -1032,7 +1101,11 @@ thiserror = "1.0"
 garde = { version = "0.20", features = ["derive"] }
 
 # New dependencies for PoC client
-reqwest = { version = "0.13.2", features = ["json", "stream"] }
+# CRITICAL: reqwest 0.13 defaults to rustls TLS
+# CRITICAL: eventsource-stream is transport-agnostic (works with reqwest 0.13)
+# CRITICAL: DO NOT use reqwest-eventsource (locked to reqwest 0.12)
+reqwest = { version = "0.13.2", features = ["rustls", "json", "stream"] }
+eventsource-stream = "0.2.3"
 tokio-stream = "0.1"
 async-stream = "0.3"
 futures = "0.3"
@@ -1070,6 +1143,10 @@ path = "src/main.rs"
 - **Status:** Latest version (pre-1.0, actively maintained)
 - **Features:** Native merge keys, garde support, safe Rust
 - **Note:** No 0.1 series exists (versioning skipped)
+- **CRITICAL BREAKING:** All public enums are now `#[non_exhaustive]`
+  - Requires wildcard `_ => {}` in all match expressions
+  - Feature split: can use `features = ["deserialize"]` only for config parsing
+  - See "serde-saphyr 0.0.24: #[non_exhaustive] Enums" section above for examples
 
 **llama-cpp-2 0.1.144:**
 - **Latest:** April 2026 release
@@ -1079,10 +1156,18 @@ path = "src/main.rs"
 **reqwest 0.13.2:**
 - **Latest:** Current stable release
 - **Features:** JSON parsing, streaming support, HTTP/2
+- **CRITICAL:** Defaults to rustls TLS (not native-tls)
+- **CRITICAL:** INCOMPATIBLE with reqwest-eventsource (which requires reqwest 0.12)
 
 **eventsource-stream 0.2.3:**
 - **Status:** Current version (no conflicts)
 - **Features:** Reconnection, error handling, event filtering
+- **Compatibility:** Transport-agnostic, works with reqwest 0.13 rustls
+
+**Connection Pool Bug (reqwest issue #2956):**
+- **Issue:** Connection pool corruption after network errors
+- **Workaround:** Recreate HTTP client on persistent errors
+- **Implementation:** See "Connection Pool Error Handling" section above
 
 **Dependency Conflict Resolution:**
 - All upgraded versions are compatible
@@ -1295,7 +1380,7 @@ cargo build --bin poc_client --release
 
 ### Step 2: Start Server
 
-**Test:** Start LLM server with docker-compose
+**Test:** Start LLM server with docker compose
 
 ```bash
 # Start server
