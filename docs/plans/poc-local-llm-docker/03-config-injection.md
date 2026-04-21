@@ -35,9 +35,9 @@
 --runtime=nvidia
 ```
 - **Prerequisites:**
-  - `nvidia-container-toolkit` installed on host
+  - `nvidia-container-toolkit` 1.17.4+ installed on host (REQUIRED for CVE-2025-23266/23359 fixes)
   - `nvidia-docker` version 2.0+
-  - NVIDIA driver >= 470.x
+  - NVIDIA driver >= 570.123.10+
 - **Toolkit Installation:**
   ```bash
   distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
@@ -47,6 +47,31 @@
 
   sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
   sudo systemctl restart docker
+
+  # Verify version (must be 1.17.4+)
+  nvidia-container-cli --version
+  ```
+
+**AMD GPUs:**
+```bash
+--gpus all  # Requires AMD Container Toolkit 1.2.0+ (Docker 25.0+)
+```
+- **Prerequisites:**
+  - `amdgpu-container-toolkit` 1.2.0+ installed on host
+  - Docker 25.0+ required for --gpus support
+  - ROCm drivers installed on host
+- **Toolkit Installation:**
+  ```bash
+  # Install AMD Container Toolkit (requires Docker 25.0+)
+  curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/rocm-archive-keyring.gpg
+  echo "deb [arch=amd64 signed-by=/usr/share/keyrings/rocm-archive-keyring.gpg] https://repo.radeon.com/rocm/apt/$(. /etc/os-release; echo $VERSION_CODENAME) main" | \
+    sudo tee /etc/apt/sources.list.d/rocm.list
+
+  sudo apt-get update && sudo apt-get install -y amdgpu-container-toolkit
+  sudo systemctl restart docker
+
+  # Verify version (must be 1.2.0+)
+  amdgpu-container-cli --version
   ```
 
 **Intel GPUs:**
@@ -141,12 +166,23 @@ services:
     # Config volume mount
     volumes:
       - ./config.yml:/config/config.yml:ro
-      - ./models:/models
+      - ./models:/models:ro  # Read-only for security
       - ./logs:/var/log/llama-server
 
     # Port mapping (default from llama.cpp: 8080)
+    # SECURITY: Bind to 127.0.0.1 for production, 0.0.0.0 only for development
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
+
+    # Network mode
+    # host mode for lowest latency (5-10μs vs 50-100μs bridge)
+    network_mode: host
+
+    # Shared memory for GPU workloads (8GB recommended)
+    shm_size: 8g
+
+    # Run as non-root user (uid 1000 from Dockerfile)
+    user: "1000:1000"
 
     # Environment variable overrides (optional)
     # These override config file settings if set
@@ -264,21 +300,23 @@ Create: `docker-compose.amd.yml` (AMD GPU configuration)
 ```yaml
 version: '3.9'
 
-services:
-  llama-server:
-    # AMD GPU passthrough
-    devices:
-      - /dev/dri:/dev/dri
-      - /dev/kfd:/dev/kfd
-    group_add:
-      - video
-    environment:
-      # Vulkan GPU selection
-      GGML_VK_VISIBLE_DEVICES: "0"
-      # Allow graphics queue (AMD-specific)
-      GGML_VK_ALLOW_GRAPHICS_QUEUE: "1"
-      # Force max GPU allocation (optional)
-      GGML_VK_FORCE_MAX_ALLOCATION_SIZE: "0"
+  services:
+    llama-server:
+      # AMD GPU passthrough (requires AMD Container Toolkit 1.2.0+ and Docker 25.0+)
+      deploy:
+        resources:
+          reservations:
+            devices:
+              - driver: amdgpu
+                count: all
+                capabilities: [gpu]
+      environment:
+        # Vulkan GPU selection
+        GGML_VK_VISIBLE_DEVICES: "0"
+        # Allow graphics queue (AMD-specific)
+        GGML_VK_ALLOW_GRAPHICS_QUEUE: "1"
+        # Force max GPU allocation (optional)
+        GGML_VK_FORCE_MAX_ALLOCATION_SIZE: "0"
 ```
 
 Create: `docker-compose.nvidia.yml` (NVIDIA GPU configuration)
@@ -286,19 +324,20 @@ Create: `docker-compose.nvidia.yml` (NVIDIA GPU configuration)
 ```yaml
 version: '3.9'
 
-services:
-  llama-server:
-    # NVIDIA GPU passthrough
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    environment:
-      # CUDA GPU selection
-      CUDA_VISIBLE_DEVICES: "0"
+  services:
+    llama-server:
+      # NVIDIA GPU passthrough (requires NVIDIA Container Toolkit 1.17.4+)
+      # CRITICAL: Version 1.17.4+ REQUIRED for CVE-2025-23266/23359 fixes (CVSS 9.0)
+      deploy:
+        resources:
+          reservations:
+            devices:
+              - driver: nvidia
+                count: all
+                capabilities: [gpu]
+      environment:
+        # CUDA GPU selection
+        CUDA_VISIBLE_DEVICES: "0"
 ```
 
 ---
@@ -484,21 +523,21 @@ hardware:
   gpu_layers: 999
   mmap_size: 4
   use_mmap: true
-sampling:
-  temperature: 0.7
-  top_p: 0.95
-  top_k: 40
-  repeat_penalty: 1.1
-  repeat_last_n: 64
-  max_tokens: 512
-server:
-  host: 0.0.0.0
-  port: 8080
-  parallel: true
-  timeout: 600
-  max_slots: 8
-  metrics: true
-  slots_endpoint: true
+  sampling:
+    temperature: 0.7
+    top_p: 0.95
+    top_k: 40
+    repeat_penalty: 1.1
+    repeat_last_n: 64
+    max_tokens: 512
+  server:
+    host: 127.0.0.1  # Secure default
+    port: 8080
+    parallel: true
+    timeout: 600
+    max_slots: 8
+    metrics: true
+    slots_endpoint: true
 cache:
   cache_type_k: f16
   cache_type_v: f16
@@ -535,21 +574,21 @@ hardware:
   gpu_layers: 999
   mmap_size: 8
   use_mmap: true
-sampling:
-  temperature: 0.7
-  top_p: 0.95
-  top_k: 40
-  repeat_penalty: 1.1
-  repeat_last_n: 64
-  max_tokens: 1024
-server:
-  host: 0.0.0.0
-  port: 8080
-  parallel: true
-  timeout: 600
-  max_slots: 8
-  metrics: true
-  slots_endpoint: true
+  sampling:
+    temperature: 0.7
+    top_p: 0.95
+    top_k: 40
+    repeat_penalty: 1.1
+    repeat_last_n: 64
+    max_tokens: 1024
+  server:
+    host: 127.0.0.1  # Secure default
+    port: 8080
+    parallel: true
+    timeout: 600
+    max_slots: 8
+    metrics: true
+    slots_endpoint: true
 cache:
   cache_type_k: f16
   cache_type_v: f16
@@ -617,6 +656,26 @@ fi
 # Copy new config
 log_info "Copying new config to config.yml"
 cp "$MODEL_CONFIG" config.yml
+
+# Verify checksum if specified in new config
+if command -v yq &> /dev/null; then
+    model_path=$(yq eval '.model.path' config.yml 2>/dev/null)
+    expected_sha256=$(yq eval '.model.huggingface.sha256 // ""' "$MODEL_CONFIG" 2>/dev/null || echo "")
+
+    if [ -n "$expected_sha256" ] && [ -f "$model_path" ]; then
+        log_info "Verifying model checksum..."
+        actual_sha256=$(sha256sum "$model_path" | awk '{print $1}')
+        if [ "$actual_sha256" != "$expected_sha256" ]; then
+            log_error "Checksum verification failed!"
+            log_error "Expected: $expected_sha256"
+            log_error "Actual: $actual_sha256"
+            log_error "Model file may be corrupted. Re-download required."
+            exit 1
+        else
+            log_info "Checksum verified successfully"
+        fi
+    fi
+fi
 
 # Restart container
 log_info "Restarting container..."
@@ -695,6 +754,24 @@ detect_gpu() {
     if command -v nvidia-smi &> /dev/null; then
         log_info "NVIDIA GPU detected"
         nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
+
+        # Check NVIDIA Container Toolkit version (CRITICAL for security)
+        if command -v nvidia-container-cli &> /dev/null; then
+            local nvidia_ctk_version=$(nvidia-container-cli --version 2>/dev/null | head -n1 || echo "unknown")
+            log_info "NVIDIA Container Toolkit: $nvidia_ctk_version"
+
+            # Check if version is 1.17.4+ (CVE-2025-23266/23359 fix)
+            local major_minor=$(echo "$nvidia_ctk_version" | grep -oP '^\d+\.\d+' || echo "0.0")
+            if [ "$(echo "$major_minor" | cut -d. -f1)" -lt 1 ] || [ "$(echo "$major_minor" | cut -d. -f1)" -eq 1 ] && [ "$(echo "$major_minor" | cut -d. -f2)" -lt 17 ]; then
+                log_error "NVIDIA Container Toolkit version is too old: $nvidia_ctk_version"
+                log_error "Version 1.17.4+ REQUIRED for CVE-2025-23266/23359 fixes (CVSS 9.0)"
+                log_error "Update: sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit"
+                exit 1
+            fi
+        else
+            log_warn "nvidia-container-cli not found. Cannot verify toolkit version."
+        fi
+
         echo "nvidia"
         return 0
     fi
@@ -702,6 +779,24 @@ detect_gpu() {
     # Check for AMD (via /dev/kfd)
     if [ -e /dev/kfd ]; then
         log_info "AMD GPU detected"
+
+        # Check AMD Container Toolkit version (required for --gpus support)
+        if command -v amdgpu-container-cli &> /dev/null; then
+            local amdgpu_ctk_version=$(amdgpu-container-cli --version 2>/dev/null | head -n1 || echo "unknown")
+            log_info "AMD Container Toolkit: $amdgpu_ctk_version"
+
+            # Check if version is 1.2.0+ (required for --gpus support)
+            local major_minor=$(echo "$amdgpu_ctk_version" | grep -oP '^\d+\.\d+' || echo "0.0")
+            if [ "$(echo "$major_minor" | cut -d. -f1)" -lt 1 ] || [ "$(echo "$major_minor" | cut -d. -f1)" -eq 1 ] && [ "$(echo "$major_minor" | cut -d. -f2)" -lt 2 ]; then
+                log_warn "AMD Container Toolkit version is too old: $amdgpu_ctk_version"
+                log_warn "Version 1.2.0+ required for --gpus support"
+                log_warn "Update: sudo apt-get update && sudo apt-get install -y amdgpu-container-toolkit"
+                log_warn "Will use legacy device passthrough (--device=/dev/dri, --device=/dev/kfd)"
+            fi
+        else
+            log_warn "amdgpu-container-cli not found. Using legacy device passthrough."
+        fi
+
         # Try to get GPU info (if available)
         if command -v rocminfo &> /dev/null; then
             rocminfo | grep "Name:" | head -n1

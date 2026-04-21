@@ -163,6 +163,64 @@ server:
 
 ## Task 2: HTTP API Endpoints
 
+### API Key Authentication
+
+**Security:** llama-server supports API key authentication for production deployments.
+
+**Enable API Key:**
+```bash
+# Set via environment variable
+LLAMA_ARG_API_KEY="your-secret-api-key"
+
+# Or via command line flag
+llama-server --api-key "your-secret-api-key"
+```
+
+**Authentication Request:**
+```bash
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-secret-api-key" \
+  -d '{
+    "model": "model",
+    "messages": [{"role": "user", "content": "Hello"}],
+    "max_tokens": 100
+  }'
+```
+
+**Security Best Practices:**
+- Use strong, randomly generated API keys (minimum 32 characters)
+- Pass API key via environment variable (not build arguments)
+- Rotate API keys regularly
+- Never log API keys
+- Use HTTPS in production (adds TLS handshake overhead of 1-3ms)
+
+### CORS Configuration
+
+**Production Warning:** `cors_origins: "*"` is insecure for production deployments.
+
+**Secure CORS Configuration:**
+```yaml
+# config.yml
+server:
+  cors_origins: "http://localhost:8080,https://yourdomain.com"  # Specify allowed origins
+```
+
+**Environment Variable:**
+```bash
+LLAMA_ARG_CORS_ORIGINS="http://localhost:8080,https://yourdomain.com"
+```
+
+**Command Line:**
+```bash
+llama-server --cors-origins "http://localhost:8080,https://yourdomain.com"
+```
+
+**Why NOT use "*" in production:**
+- Allows any origin to make requests
+- Vulnerable to CSRF attacks
+- Bypasses same-origin policy protections
+
 ### Health Endpoint
 
 **Endpoint:** `GET /health`
@@ -667,7 +725,117 @@ async fn send_with_retry(
 
 ---
 
-## Task 7: Performance Benchmarks
+## Task 7: Request/Response Logging
+
+### Logging Strategy
+
+**Security Considerations:**
+- NEVER log API keys or sensitive tokens
+- Mask or truncate sensitive content
+- Use request IDs for correlation
+- Separate access logs from error logs
+
+### Access Log Configuration
+
+**Enable Access Logging:**
+```yaml
+# config.yml
+server:
+  access_log: /var/log/llama-server/access.log
+```
+
+**Docker Volume for Logs:**
+```yaml
+# docker-compose.yml
+volumes:
+  - ./logs:/var/log/llama-server:rw  # Write access for logs
+```
+
+### Structured Access Log Format
+
+```json
+{
+  "timestamp": "2026-04-20T12:34:56.789Z",
+  "request_id": "req_abc123",
+  "remote_addr": "127.0.0.1",
+  "method": "POST",
+  "path": "/v1/chat/completions",
+  "protocol": "HTTP/1.1",
+  "status_code": 200,
+  "request_time_ms": 1234,
+  "user_agent": "curl/7.68.0",
+  "model": "llama-3.2-1b-instruct",
+  "prompt_tokens": 10,
+  "completion_tokens": 50,
+  "total_tokens": 60,
+  "stream": true,
+  "api_key_valid": true
+}
+```
+
+### Log Rotation
+
+**Configure Log Rotation:**
+```yaml
+# docker-compose.yml
+services:
+  llama-server:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"  # Keep 3 files max (30MB total)
+        compress: "true"  # Compress rotated logs
+```
+
+### Security: Sensitive Data Masking
+
+**What to Mask:**
+- API keys: `Authorization: Bearer ********`
+- Sensitive prompts: Truncate or hash
+- Personal data: Mask PII
+
+**Masking Example:**
+```bash
+# Example log
+{
+  "timestamp": "2026-04-20T12:34:56.789Z",
+  "request_id": "req_abc123",
+  "authorization": "Bearer ***************************",  # Masked
+  "prompt": "My name is *** and I'm *** years old",  # Masked PII
+  "status_code": 200
+}
+```
+
+### Request ID Correlation
+
+**Generate Request ID:**
+```rust
+use uuid::Uuid;
+
+let request_id = Uuid::new_v4().to_string();
+
+// Include in headers
+let response = client
+    .post("http://localhost:8080/v1/chat/completions")
+    .header("X-Request-ID", &request_id)
+    .json(&request)
+    .send()
+    .await?;
+
+// Log request ID for correlation
+log_info!("Request ID: {}", request_id);
+```
+
+**Benefits of Request IDs:**
+- Trace requests across services
+- Debug distributed issues
+- Correlate client and server logs
+- Identify performance bottlenecks
+
+---
+
+## Task 8: Performance Benchmarks
 
 ### Benchmark Script
 
@@ -826,6 +994,87 @@ scrape_configs:
 **Derived Metrics:**
 - Tokens per second: `rate(llama_n_tokens_processed_total[1m])`
 - Average latency: `llama_prompt_processing_seconds_total / llama_n_tokens_processed_total`
+
+### Structured Logging
+
+**Recommendation:** Use structured JSON logging for production deployments.
+
+**Enable Structured Logging:**
+```yaml
+# config.yml
+features:
+  log_level: info
+  verbose: false  # Structured logs override verbose mode
+```
+
+**Structured Log Format:**
+```json
+{
+  "timestamp": "2026-04-20T12:34:56.789Z",
+  "level": "info",
+  "request_id": "req_abc123",
+  "endpoint": "/v1/chat/completions",
+  "method": "POST",
+  "status_code": 200,
+  "duration_ms": 1234,
+  "prompt_tokens": 10,
+  "completion_tokens": 50,
+  "total_tokens": 60,
+  "model": "llama-3.2-1b-instruct",
+  "ip_address": "127.0.0.1"
+}
+```
+
+**Request Logging Configuration:**
+```yaml
+# docker-compose.yml
+services:
+  llama-server:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "request_id,endpoint,method"
+```
+
+**Benefits of Structured Logging:**
+- Easy to parse with log aggregation tools
+- Support for querying and filtering
+- Better for debugging production issues
+- Enables log-based metrics extraction
+
+### Docker Resource Limits Interaction
+
+**Resource Limits Impact on llama-server:**
+
+| Resource | llama-server Impact | Recommended Value |
+|----------|---------------------|-------------------|
+| `memory_limit` | Limits KV cache size | 8-16GB for 7B models |
+| `shm_size` | Required for Vulkan GPU | 8GB for GPU workloads |
+| `cpu_count` | Limits thread count | 4-8 for optimal throughput |
+| `pids_limit` | Limits concurrent processes | 1000 for slots + overhead |
+
+**Docker Compose Configuration:**
+```yaml
+services:
+  llama-server:
+    # Memory limits (prevents OOM kills)
+    mem_limit: 16g
+    mem_reservation: 8g
+    # Shared memory (required for Vulkan)
+    shm_size: 8g
+    # CPU limits
+    cpus: '4.0'
+    cpuset: '0-3'  # Pin to specific cores
+    # Process limits
+    pids_limit: 1000
+```
+
+**Trade-offs:**
+- Lower memory limit = Smaller KV cache = Lower context capacity
+- Higher CPU count = More throughput but diminishing returns
+- Insufficient shm_size = Vulkan errors, crashes
 
 ---
 

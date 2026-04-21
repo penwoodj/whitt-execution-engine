@@ -1,5 +1,24 @@
 # Docker + Vulkan + GPU Research Reference
 
+## Docker Version Requirements
+
+**Docker Engine:** 29.3.0+ recommended (fixes MIG bug, AMD CDI support)
+**Docker Compose:** 2.0+ required
+
+**NVIDIA Container Toolkit:**
+- **Version:** 1.17.4+ REQUIRED (CVE-2025-23266/23359 fixes)
+- **CVE Severity:** CVSS 9.0 (container escape vulnerability)
+- **Installation:** See NVIDIA GPUs section below
+
+**AMD Container Toolkit:**
+- **Version:** 1.2.0+ for --gpus support (requires Docker 25.0+)
+- **Installation:** See AMD GPUs section below
+
+**GPU Driver Requirements:**
+- NVIDIA 570.123.10+ (for CUDA workloads)
+- AMD AMDGPU 6.4.x (for ROCm/Vulkan)
+- Intel NEO 26.09+ (for oneAPI/Vulkan)
+
 ## Official Vulkan Dockerfile
 
 **Base Configuration:**
@@ -31,9 +50,9 @@ docker run \
 ```
 
 **Prerequisites:**
-- `nvidia-container-toolkit` installed on host
+- `nvidia-container-toolkit` 1.17.4+ installed on host (REQUIRED for CVE-2025-23266/23359 fixes, CVSS 9.0)
 - `nvidia-docker` version 2.0+
-- NVIDIA driver >= 470.x
+- NVIDIA driver >= 570.123.10+
 
 **Toolkit Installation:**
 ```bash
@@ -44,23 +63,41 @@ curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.li
 
 sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
 sudo systemctl restart docker
+
+# Verify version (must be 1.17.4+)
+nvidia-container-cli --version
 ```
 
 ### AMD GPUs
 ```bash
 docker run \
+    --gpus all \
     --device=/dev/kfd \
-    --device=/dev/dri \
+    --device=/dev/dri:/dev/dri \
     --group-add video \
     ghcr.io/ggml-org/llama.cpp:server-vulkan
 ```
 
 **Prerequisites:**
+- `amdgpu-container-toolkit` 1.2.0+ installed on host (REQUIRED for --gpus support, requires Docker 25.0+)
 - ROCm drivers installed on host
-- No NVIDIA toolkit required
-- `--device=/dev/kfd` for KFD (AMD GPU device)
-- `--device=/dev/dri` for Direct Rendering Infrastructure
-- `--group-add video` for video device group permissions
+- Docker 25.0+ required for --gpus support
+
+**Toolkit Installation:**
+```bash
+# Install AMD Container Toolkit (requires Docker 25.0+)
+curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/rocm-archive-keyring.gpg
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/rocm-archive-keyring.gpg] https://repo.radeon.com/rocm/apt/$(. /etc/os-release; echo $VERSION_CODENAME) main" | \
+    sudo tee /etc/apt/sources.list.d/rocm.list
+
+sudo apt-get update && sudo apt-get install -y amdgpu-container-toolkit
+sudo systemctl restart docker
+
+# Verify version (must be 1.2.0+)
+amdgpu-container-cli --version
+```
+
+**Alternative (legacy):** `--device=/dev/kfd` + `--device=/dev/dri` + `--group-add video` (if toolkit not available)
 
 ### Intel GPUs
 ```bash
@@ -72,12 +109,85 @@ docker run \
 ```
 
 **Recommendation:** SYCL preferred over Vulkan for Intel GPUs (better performance).
-
 **Prerequisites:**
 - Intel oneAPI Base Toolkit
 - Intel GPU drivers (latest)
 
-## Multi-GPU Configuration
+## Network Optimization
+
+**Network Mode Comparison:**
+| Mode | Latency | Use Case |
+|------|---------|----------|
+| `--network bridge` | 50-100μs | Default, isolated |
+| `--network host` | 5-10μs | Lowest latency, development |
+
+**Recommendation:** Use `--network host` for lowest HTTP latency (5-10μs vs 50-100μs bridge).
+
+**Docker Compose Configuration:**
+```yaml
+services:
+  llama-server:
+      network_mode: host  # For lowest latency
+```
+
+**Trade-offs:**
+- `host` mode: Lowest latency, but no port isolation
+- `bridge` mode: Better isolation, but higher latency
+
+## Shared Memory for GPU Workloads
+
+**Recommendation:** `--shm-size=8g` for Vulkan GPU workloads (8GB shared memory).
+
+**Docker Run:**
+```bash
+docker run --rm \
+    --gpus all \
+    --shm-size=8g \
+    ghcr.io/ggml-org/llama.cpp:server-vulkan
+```
+
+**Docker Compose:**
+```yaml
+services:
+  llama-server:
+      shm_size: 8g
+```
+
+## Non-Root Container Security Patterns
+
+**Run as Non-Root User:**
+```dockerfile
+RUN useradd -m -u 1000 -s /bin/bash llama
+USER llama
+```
+
+**Drop Capabilities:**
+```dockerfile
+RUN setcap cap_drop=all, cap_sys_admin=eip RUN llama
+```
+
+**Read-Only Filesystem:**
+```bash
+# Mount model volumes as read-only
+docker run -v /models:/models:ro \
+    --gpus all \
+    ghcr.io/ggml-org/llama.cpp:server-vulkan
+```
+
+**Localhost Binding:**
+```bash
+# Bind to localhost only (not 0.0.0.0 for production)
+docker run -p 127.0.0.1:8080:8080 \
+    --gpus all \
+    ghcr.io/ggml-org/llama.cpp:server-vulkan
+```
+
+**API Key Authentication:**
+```bash
+docker run -e LLAMA_ARG_API_KEY="your-secret-api-key" \
+    --gpus all \
+    ghcr.io/ggml-org/llama.cpp:server-vulkan
+```
 
 **Environment Variable:**
 ```bash

@@ -18,13 +18,35 @@
 
 **Image:** `ghcr.io/ggml-org/llama.cpp:server-vulkan`
 
-**Base OS:** Ubuntu 26.04
+**Base OS:** Ubuntu 26.04 (VALID: released April 23, 2026)
+
+**Note:** Ubuntu 24.04 LTS is also supported as a fallback if 26.04 has issues.
 
 **Build Configuration:**
 ```dockerfile
 FROM ubuntu:26.04
 RUN cmake -DGGML_VULKAN=ON ...
 ```
+
+### Prerequisites
+
+**Docker Version Requirements:**
+- **Docker Engine:** 29.3.0+ recommended (fixes MIG bug, AMD CDI support)
+- **Docker Compose:** 2.0+
+- **NVIDIA Container Toolkit:** 1.17.4+ REQUIRED (CVE-2025-23266/23359 fixes, CVSS 9.0 container escape vulnerability)
+- **AMD Container Toolkit:** 1.2.0+ for --gpus support (requires Docker 25.0+)
+
+**GPU Driver Requirements:**
+- NVIDIA 570.123.10+ (for CUDA workloads)
+- AMD AMDGPU 6.4.x (for ROCm/Vulkan)
+- Intel NEO 26.09+ (for oneAPI/Vulkan)
+
+**Security Notes:**
+- **NVIDIA Container Toolkit CVE:** Version 1.17.4+ is REQUIRED to fix CVE-2025-23266 (CVSS 9.0 container escape vulnerability)
+- **Network binding:** Use `127.0.0.1:8080:8080` for production, `0.0.0.0:8080:8080` only for development
+- **Non-root containers:** Run as non-root user for security
+- **Read-only model mounts:** Mount model volumes as read-only (`:ro`)
+- **API keys:** Pass via environment variable, not build arguments
 
 **Architecture:**
 - Single-threaded context management
@@ -136,6 +158,11 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 # Set up volumes
 VOLUME ["/models", "/config", "/var/log/llama-server"]
 
+# Run as non-root user for security
+RUN useradd -m -u 1000 -s /bin/bash llama && \
+    chown -R llama:llama /models /config /var/log/llama-server /app
+USER llama
+
 # Entry point with tini for signal handling
 ENTRYPOINT ["tini", "--"]
 CMD ["/entrypoint.sh"]
@@ -203,11 +230,27 @@ download_model() {
     local repo="$2"
     local filename="$3"
     local branch="${4:-main}"
+    local expected_sha256="${5:-}"
 
-    # If model already exists, skip download
+    # If model already exists, verify checksum if provided
     if [ -f "$model_path" ]; then
-        log_info "Model already exists: $model_path"
-        return 0
+        if [ -n "$expected_sha256" ]; then
+            log_info "Verifying existing model checksum..."
+            local actual_sha256=$(sha256sum "$model_path" | awk '{print $1}')
+            if [ "$actual_sha256" != "$expected_sha256" ]; then
+                log_error "Checksum mismatch for existing model: $model_path"
+                log_error "Expected: $expected_sha256"
+                log_error "Actual: $actual_sha256"
+                log_error "Re-downloading model..."
+                rm -f "$model_path"
+            else
+                log_info "Model exists and checksum verified: $model_path"
+                return 0
+            fi
+        else
+            log_info "Model already exists: $model_path"
+            return 0
+        fi
     fi
 
     log_info "Downloading model: $repo/$filename"
@@ -216,30 +259,74 @@ download_model() {
     # Create directory for model
     mkdir -p "$(dirname "$model_path")"
 
-    # Use huggingface-cli for download (supports resume)
-    if command -v huggingface-cli &> /dev/null; then
-        # Check for HF_TOKEN in environment
-        if [ -n "$HUGGING_FACE_HUB_TOKEN" ]; then
-            export HUGGING_FACE_HUB_TOKEN
-        elif [ -n "$HF_TOKEN" ]; then
-            # Support legacy HF_TOKEN env var
-            export HUGGING_FACE_HUB_TOKEN="$HF_TOKEN"
+    # Download with timeout and retry logic
+    local max_retries=3
+    local retry_delay=5
+    local attempt=1
+
+    while [ $attempt -le $max_retries ]; do
+        log_info "Download attempt $attempt of $max_retries..."
+
+        # Use huggingface-cli for download (supports resume)
+        if command -v huggingface-cli &> /dev/null; then
+            # Check for HF_TOKEN in environment
+            if [ -n "$HUGGING_FACE_HUB_TOKEN" ]; then
+                export HUGGING_FACE_HUB_TOKEN
+            elif [ -n "$HF_TOKEN" ]; then
+                # Support legacy HF_TOKEN env var
+                export HUGGING_FACE_HUB_TOKEN="$HF_TOKEN"
+            fi
+
+            # Download with timeout (300 seconds)
+            if timeout 300 huggingface-cli download \
+                --repo-type model \
+                --local-dir "$(dirname "$model_path")" \
+                --local-dir-use-symlinks False \
+                --resume-download \
+                "$repo" \
+                "$filename" \
+                --revision "$branch"; then
+                # Download successful, verify checksum if provided
+                if [ -n "$expected_sha256" ]; then
+                    log_info "Verifying checksum..."
+                    local actual_sha256=$(sha256sum "$model_path" | awk '{print $1}')
+                    if [ "$actual_sha256" != "$expected_sha256" ]; then
+                        log_error "Checksum verification failed!"
+                        log_error "Expected: $expected_sha256"
+                        log_error "Actual: $actual_sha256"
+                        rm -f "$model_path"
+                        return 1
+                    else
+                        log_info "Checksum verified successfully"
+                    fi
+                fi
+
+                log_info "Model downloaded successfully: $model_path"
+                return 0
+            else
+                local exit_code=$?
+                if [ $exit_code -eq 124 ]; then
+                    log_error "Download timeout after 300 seconds"
+                else
+                    log_error "Download failed with exit code: $exit_code"
+                fi
+
+                if [ $attempt -lt $max_retries ]; then
+                    log_info "Retrying in $retry_delay seconds..."
+                    sleep $retry_delay
+                    attempt=$((attempt + 1))
+                else
+                    log_error "Max retries ($max_retries) exceeded"
+                    return 1
+                fi
+            fi
+        else
+            log_error "huggingface-cli not found. Cannot download model."
+            exit 1
         fi
+    done
 
-        huggingface-cli download \
-            --repo-type model \
-            --local-dir "$(dirname "$model_path")" \
-            --local-dir-use-symlinks False \
-            --resume-download \
-            "$repo" \
-            "$filename" \
-            --revision "$branch"
-
-        log_info "Model downloaded successfully: $model_path"
-    else
-        log_error "huggingface-cli not found. Cannot download model."
-        exit 1
-    fi
+    return 1
 }
 
 # Function to validate YAML config
@@ -391,7 +478,8 @@ translate_config() {
     export LLAMA_ARG_N_PREDICT="$n_predict"
 
     # Server host (default from llama.cpp: 127.0.0.1)
-    host=$(get_yaml_value ".server.host" "0.0.0.0")
+    # SECURITY: Default to 127.0.0.1 for production. Use 0.0.0.0 only for development.
+    host=$(get_yaml_value ".server.host" "127.0.0.1")
     export LLAMA_ARG_HOST="$host"
 
     # Server port (default from llama.cpp: 8080)
@@ -687,9 +775,10 @@ main() {
         repo=$(yq eval '.model.huggingface.repo // ""' "$config_path" 2>/dev/null || echo "")
         filename=$(yq eval '.model.huggingface.filename // ""' "$config_path" 2>/dev/null || echo "")
         branch=$(yq eval '.model.huggingface.branch // "main"' "$config_path" 2>/dev/null || echo "main")
+        sha256=$(yq eval '.model.huggingface.sha256 // ""' "$config_path" 2>/dev/null || echo "")
 
         if [ -n "$repo" ] && [ -n "$filename" ]; then
-            download_model "$LLAMA_ARG_MODEL_PATH" "$repo" "$filename" "$branch"
+            download_model "$LLAMA_ARG_MODEL_PATH" "$repo" "$filename" "$branch" "$sha256"
         fi
     fi
 
@@ -928,11 +1017,16 @@ docker images whitt-execution-engine/llama-server --format "{{.Size}}"
 **Test:** Start container without config (default behavior)
 
 ```bash
-# Start container
+# Start container with security best practices
+# Note: --network host for lowest latency (5-10μs vs 50-100μs bridge)
+#       --shm-size=8g for GPU workloads
+#       --user to run as non-root (if needed for development)
 docker run --rm \
     --name llama-server-test \
-    -v $(pwd)/models:/models \
-    -p 8080:8080 \
+    -v $(pwd)/models:/models:ro \
+    -p 127.0.0.1:8080:8080 \
+    --network host \
+    --shm-size=8g \
     whitt-execution-engine/llama-server:v0.1.0
 
 # Expected output:
@@ -943,6 +1037,13 @@ docker run --rm \
 # [INFO] Vulkan support detected. GPU: 0
 # [INFO] Server arguments: -m /models/model.gguf -c 2048 ...
 # [INFO] Starting llama-server...
+
+# Security Notes:
+# - Binding to 127.0.0.1:8080 (localhost only, not 0.0.0.0:8080)
+# - Model volume mounted read-only (:ro)
+# - Running as non-root user (uid 1000)
+# - Shared memory size set to 8GB for GPU workloads
+# - Network mode: host (lowest latency)
 ```
 
 ### Step 3: Start Container with Config File
@@ -958,6 +1059,7 @@ model:
     repo: meta-llama/Llama-3.2-1B-Instruct
     filename: Llama-3.2-1B-Instruct.Q4_K_M.gguf
     branch: main
+    sha256: ""  # Set to actual SHA256 for verification
   quantization: Q4_K_M
   parameter_count: 1000000000
 context:
@@ -975,7 +1077,7 @@ sampling:
   repeat_penalty: 1.1
   max_tokens: 512
 server:
-  host: 0.0.0.0
+  host: 127.0.0.1  # Secure default
   port: 8080
   parallel: true
   timeout: 600
@@ -991,15 +1093,18 @@ vulkan:
   disable_debug: true
 EOF
 
-# Start container with config
+# Start container with config (security best practices)
 docker run --rm \
     --name llama-server-test \
-    -v $(pwd)/test_config.yml:/config/config.yml \
-    -v $(pwd)/models:/models \
-    -p 8080:8080 \
+    -v $(pwd)/test_config.yml:/config/config.yml:ro \
+    -v $(pwd)/models:/models:ro \
+    -p 127.0.0.1:8080:8080 \
+    --network host \
+    --shm-size=8g \
     whitt-execution-engine/llama-server:v0.1.0
 
 # Expected: Model downloads (if not present), server starts with config values
+# Security: Binding to 127.0.0.1 (not 0.0.0.0), volumes read-only, network host mode
 ```
 
 ### Step 4: Verify Healthcheck
@@ -1085,14 +1190,18 @@ docker ps -a --filter name=llama-server-test --format "{{.Status}}"
 
 ```bash
 # Start container with AMD GPU
+# Note: --network host for lowest latency (5-10μs vs 50-100μs bridge)
+#       --shm-size=8g for GPU workloads
 docker run --rm \
     --name llama-server-test \
     --device /dev/dri:/dev/dri \
     --group-add video \
     --device /dev/kfd \
-    -v $(pwd)/test_config.yml:/config/config.yml \
-    -v $(pwd)/models:/models \
-    -p 8080:8080 \
+    -v $(pwd)/test_config.yml:/config/config.yml:ro \
+    -v $(pwd)/models:/models:ro \
+    -p 127.0.0.1:8080:8080 \
+    --network host \
+    --shm-size=8g \
     whitt-execution-engine/llama-server:v0.1.0
 
 # Check logs for GPU detection
@@ -1106,14 +1215,18 @@ docker logs llama-server-test | grep -i "vulkan\|gpu"
 **Test:** NVIDIA GPU access
 
 ```bash
-# Start container with NVIDIA GPU (requires nvidia-container-toolkit)
+# Start container with NVIDIA GPU (requires nvidia-container-toolkit 1.17.4+)
+# CRITICAL: NVIDIA Container Toolkit 1.17.4+ REQUIRED for CVE-2025-23266 fix (CVSS 9.0)
+# Note: --network host for lowest latency, --shm-size=8g for GPU workloads
 docker run --rm \
     --name llama-server-test \
     --gpus all \
     --runtime=nvidia \
-    -v $(pwd)/test_config.yml:/config/config.yml \
-    -v $(pwd)/models:/models \
-    -p 8080:8080 \
+    -v $(pwd)/test_config.yml:/config/config.yml:ro \
+    -v $(pwd)/models:/models:ro \
+    -p 127.0.0.1:8080:8080 \
+    --network host \
+    --shm-size=8g \
     whitt-execution-engine/llama-server:v0.1.0
 
 # Check logs for GPU detection

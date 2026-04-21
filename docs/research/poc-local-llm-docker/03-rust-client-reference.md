@@ -7,23 +7,85 @@
 
 **Rationale:** llama.cpp server exposes HTTP endpoints only. No native Rust IPC support planned.
 
-## HTTP Overhead Analysis
+**Timeout Configuration for Streaming Requests**
 
-### Breakdown
-- TCP connection: 1-2ms
-- TLS handshake (if HTTPS): 1-3ms
-- HTTP framing: <1ms
-- **Total overhead per request:** ~2-6ms
-
-### Optimization Impact
+**Recommended Settings:**
 ```rust
-// Baseline (HTTPS, new connection): ~6ms
-// Optimized (HTTP, connection pool): ~2-3ms
+let mut stream_request = ChatCompletionRequest { /* ... */ };
+stream_request.stream = true;
+
+// Read timeout (streaming requests take longer)
+let client = Client::builder()
+    .connect_timeout(Duration::from_secs(10))
+    .timeout(Duration::from_secs(600))  // 5 minutes for streaming
+
+// Benefits:**
+// - Allows for long completions without timing out
+// - Accounts for generation time, not request timeout
 ```
 
-**Recommendation:** Use HTTP with connection pooling for lowest latency.
+**Best Practices:**
+- Always use streaming timeout > non-streaming timeout
+- Implement client-side abort mechanism for user-initiated stops
 
-## Reqwest Client Configuration
+### Structured Error Types for Common Failure Modes
+
+**Usage:**
+```rust
+use thiserror::anyhow::{Context, Result};
+
+#[derive(Debug, thiserror::Error)]
+pub enum LlmClientError {
+    #[error("Server not ready: {0}")]
+    ServerNotReady(String),
+
+    #[error("Model load failed: {0}")]
+    ModelLoadFailed(String),
+
+    #[error("Container not started: {0}")]
+    ContainerNotStarted(String),
+
+    #[error("Health check failed: {0}")]
+    HealthCheckFailed(String),
+
+    #[error("Request timeout after {0}s")]
+    RequestTimeout(u64),
+
+    #[error("HTTP error: {0}")]
+    HttpError(#[from] reqwest::Error),
+
+    #[error("Failed to parse response: {0}")]
+    ParseError(String),
+}
+```
+
+**Error Handling Best Practices:**
+- Always include context in error responses
+- Distinguish transient failures (timeout, network) from permanent errors (bad request)
+- Map HTTP errors to appropriate LlmClientError variants
+- Include request/response correlation data in errors
+
+### Request ID Correlation
+
+**Generate Request ID for Distributed Systems:**
+```rust
+use uuid::Uuid;
+
+let request_id = Uuid::new_v4().to_string();
+
+// Include in headers
+let response = client
+    .post("http://localhost:8080/v1/chat/completions")
+    .header("X-Request-ID", &request_id)
+    .json(&request)
+    .send()
+    .await?;
+
+// Log request ID for correlation
+log_info!("Request ID: {}", request_id);
+```
+
+## References
 
 ### Version
 ```toml

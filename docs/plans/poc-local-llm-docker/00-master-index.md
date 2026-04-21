@@ -6,6 +6,8 @@
 
 **Architecture:** Rust CLI → HTTP API → Docker Container → llama-server (Vulkan GPU) → GGUF Model
 
+**Architecture Note:** `llama-cpp-2` (embedded FFI bindings) and `llama-server` (HTTP API in Docker) are complementary approaches. This PoC uses `llama-server` in Docker for simplicity and HTTP-based integration. `llama-cpp-2` is reserved for future embedded mode where llama.cpp runs in-process.
+
 ---
 
 ## PoC Objective
@@ -74,8 +76,14 @@ Demonstrate end-to-end local LLM inference where:
 
 ### System Requirements
 
-- [ ] Docker 20.10+ with GPU support (NVIDIA or AMD)
+- [ ] Docker Engine 29.3.0+ (recommended, fixes MIG bug, AMD CDI support)
 - [ ] Docker Compose 2.0+
+- [ ] NVIDIA Container Toolkit 1.17.4+ REQUIRED (CVE-2025-23266/23359 fixes, CVSS 9.0)
+- [ ] AMD Container Toolkit 1.2.0+ for --gpus support (requires Docker 25.0+)
+- [ ] GPU Drivers:
+  - NVIDIA 570.123.10+ (for CUDA workloads)
+  - AMD AMDGPU 6.4.x (for ROCm/Vulkan)
+  - Intel NEO 26.09+ (for oneAPI/Vulkan)
 - [ ] 8GB+ GPU VRAM (tested on AMD RX 6800, NVIDIA RTX 3060)
 - [ ] 16GB+ system RAM
 - [ ] 20GB+ disk space for models
@@ -91,12 +99,14 @@ Demonstrate end-to-end local LLM inference where:
 
 - [ ] Clone github.com/penwoodj/whitt-execution-engine
 - [ ] Existing Cargo.toml dependencies verified:
-  - `llama-cpp-2` with vulkan feature
+  - `llama-cpp-2 = { version = "0.1.138", features = ["vulkan", "sampler"] }` (latest is 0.1.144, no 0.2.x series exists)
   - `serde-saphyr` for YAML
   - `clap` for CLI
   - `tokio` for async
   - `anyhow` for errors
   - `garde` for validation
+
+**Note:** The `sampler` feature should be added to llama-cpp-2 in Cargo.toml for cleaner Rust sampling API. Version 0.1.138 is compatible; latest is 0.1.144 (April 19, 2026).
 
 ### Environment
 
@@ -158,6 +168,34 @@ Demonstrate end-to-end local LLM inference where:
 | **Config validation edge cases** | Medium | Low | Extensive garde rules; unit tests for all sections; example configs |
 | **Memory OOM on large models** | Medium | Low | Add GGML_VK_FORCE_MAX_ALLOCATION_SIZE defaults; document model size requirements |
 | **HTTP timeout mismatches** | Low | Low | Align container timeouts with client timeouts; exponential backoff retry |
+
+---
+
+## Security Considerations
+
+### Container Security
+
+- **Non-root containers:** Run containers as non-root user (add `USER 1000:1000` in Dockerfile)
+- **Read-only model mounts:** Mount model volumes as read-only to prevent tampering: `ro` flag
+- **Localhost binding:** Bind to `127.0.0.1:8080:8080` by default, not `0.0.0.0:8080:8080`
+- **API keys:** Use `--api-key` flag and pass via environment variable (not build args)
+- **NVIDIA Container Toolkit CVE:** Version 1.17.4+ is REQUIRED (CVE-2025-23266 CVSS 9.0 container escape vulnerability)
+- **Disable telemetry:** Set `HF_HUB_DISABLE_TELEMETRY=1` in container environment
+
+### Network Configuration
+
+- **`--network host`:** Recommended for lowest latency (5-10μs vs 50-100μs bridge mode)
+- **Port binding:** Use `"127.0.0.1:8080:8080"` for localhost-only access (not `"0.0.0.0:8080:8080"` for development)
+- **`--shm-size=8g`:** Recommended for GPU workloads (shared memory for Vulkan operations)
+
+### Docker Version Requirements
+
+- **Docker Engine 29.3.0+:** Recommended (fixes MIG bug, AMD CDI support)
+- **Docker Compose 2.0+:** Required for docker-compose.yml support
+- **NVIDIA Container Toolkit 1.17.4+:** REQUIRED for security fixes
+- **AMD Container Toolkit 1.2.0+:** Required for --gpus support (needs Docker 25.0+)
+
+---
 
 ---
 

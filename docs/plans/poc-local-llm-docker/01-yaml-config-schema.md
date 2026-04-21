@@ -6,6 +6,13 @@
 
 **Tech Stack:** Rust, serde, serde-saphyr, clap, garde, anyhow
 
+**llama-cpp-2 Configuration:**
+- **Version:** Use `llama-cpp-2 = { version = "0.1.138", features = ["vulkan", "sampler"] }` in Cargo.toml
+- **Latest version:** 0.1.144 (April 19, 2026)
+- **Note:** No 0.2.x series exists; 0.1.138 is compatible
+- **Sampler feature:** The "sampler" feature provides cleaner Rust sampling API
+- **Usage in this PoC:** llama-cpp-2 is NOT used in Phase 05 (HTTP client approach). It's reserved for future embedded mode.
+
 **Dependencies:**
 - Phase 01 is independent (no dependencies on other phases)
 - Output used by Phase 03 (config injection) and Phase 05 (Rust client)
@@ -210,6 +217,8 @@ model:
     repo: meta-llama/Llama-3.2-1B-Instruct
     filename: Llama-3.2-1B-Instruct.Q4_K_M.gguf
     branch: main
+    # SHA256 checksum for validation (optional, recommended for security)
+    sha256: abc123def456...
   # Quantization format (for validation only)
   # Options: Q4_0, Q4_K, Q5_0, Q5_K, Q6_K, Q8_0, F16, F32
   quantization: Q4_K_M
@@ -271,8 +280,9 @@ sampling:
 
 server:
   # HTTP server host (default from llama.cpp: 127.0.0.1)
-  # Use 0.0.0.0 to bind to all interfaces
-  host: 0.0.0.0  # 0.0.0.0, 127.0.0.1
+  # Use 0.0.0.0 to bind to all interfaces (development only)
+  # SECURITY: Use 127.0.0.1 for production
+  host: 127.0.0.1  # 0.0.0.0, 127.0.0.1
   # HTTP server port (default from llama.cpp: 8080)
   port: 8080  # 1-65535
   # Enable parallel processing / continuous batching
@@ -288,9 +298,22 @@ server:
   # Enable slots endpoint (/slots)
   slots_endpoint: true
   # CORS origins (comma-separated or "*")
-  cors_origins: "*"
+  # SECURITY: Do NOT use "*" in production. Specify allowed origins.
+  cors_origins: "http://localhost:8080"
+  # API key for authentication (optional, recommended for production)
+  # Pass via environment variable: --api-key
+  api_key: null  # Set to string to enable
   # Access log file (optional)
   access_log: /var/log/llama-server/access.log
+
+retry_config:
+  # Retry configuration for model downloads and API requests
+  # Request timeout (seconds)
+  timeout_seconds: 300  # 1-3600
+  # Maximum retry attempts
+  max_retries: 3  # 0-10
+  # Delay between retries (seconds)
+  retry_delay_seconds: 5  # 1-60
 
 cache:
   # KV cache type (key)
@@ -302,6 +325,16 @@ cache:
   # KV cache size (GB, 0 = auto)
   # Default from llama.cpp: 8192 MiB
   kv_cache_size: 4  # 0-64
+
+docker:
+  # Docker resource limits
+  # Memory limit (GB, 0 = unlimited)
+  memory_limit: 8  # 0-64
+  # Shared memory size (GB, recommended for GPU workloads)
+  # Default: 8GB for Vulkan operations
+  shm_size: 8  # 0-32
+  # CPU count (0 = unlimited, use host CPUs)
+  cpu_count: 4  # 0-64
 
 features:
   # Log verbosity
@@ -393,6 +426,14 @@ pub struct LlamaConfig {
     #[garde(skip)]
     pub cache: CacheConfig,
 
+    /// Retry configuration
+    #[garde(skip)]
+    pub retry_config: RetryConfig,
+
+    /// Docker resource limits
+    #[garde(skip)]
+    pub docker: DockerConfig,
+
     /// Feature flags
     #[garde(skip)]
     pub features: FeaturesConfig,
@@ -436,6 +477,10 @@ pub struct HuggingFaceConfig {
     /// Git branch (default: main)
     #[serde(default = "default_branch")]
     pub branch: String,
+
+    /// SHA256 checksum for validation (optional, recommended for security)
+    #[serde(default)]
+    pub sha256: Option<String>,
 }
 
 /// Context window configuration
@@ -554,6 +599,7 @@ pub struct SamplingConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct ServerConfig {
     /// HTTP server host (default from llama.cpp: 127.0.0.1)
+    /// SECURITY: Use 127.0.0.1 for production, 0.0.0.0 only for development
     #[serde(default = "default_host")]
     pub host: String,
 
@@ -585,8 +631,13 @@ pub struct ServerConfig {
     pub slots_endpoint: bool,
 
     /// CORS origins
+    /// SECURITY: Do NOT use "*" in production. Specify allowed origins.
     #[serde(default = "default_cors_origins")]
     pub cors_origins: String,
+
+    /// API key for authentication (optional, recommended for production)
+    #[serde(default)]
+    pub api_key: Option<String>,
 
     /// Access log file
     #[serde(default)]
@@ -610,6 +661,45 @@ pub struct CacheConfig {
     #[serde(default)]
     #[garde(range(min = 0, max = 64))]
     pub kv_cache_size: Option<usize>,
+}
+
+/// Retry configuration for model downloads and API requests
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+pub struct RetryConfig {
+    /// Request timeout (seconds)
+    #[serde(default = "default_timeout_seconds")]
+    #[garde(range(min = 1, max = 3600))]
+    pub timeout_seconds: u64,
+
+    /// Maximum retry attempts
+    #[serde(default = "default_max_retries")]
+    #[garde(range(min = 0, max = 10))]
+    pub max_retries: u32,
+
+    /// Delay between retries (seconds)
+    #[serde(default = "default_retry_delay_seconds")]
+    #[garde(range(min = 1, max = 60))]
+    pub retry_delay_seconds: u64,
+}
+
+/// Docker resource limits
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+pub struct DockerConfig {
+    /// Memory limit (GB, 0 = unlimited)
+    #[serde(default)]
+    #[garde(range(min = 0, max = 64))]
+    pub memory_limit: Option<usize>,
+
+    /// Shared memory size (GB, recommended for GPU workloads)
+    /// Default: 8GB for Vulkan operations
+    #[serde(default = "default_shm_size")]
+    #[garde(range(min = 0, max = 32))]
+    pub shm_size: usize,
+
+    /// CPU count (0 = unlimited, use host CPUs)
+    #[serde(default)]
+    #[garde(range(min = 0, max = 64))]
+    pub cpu_count: Option<usize>,
 }
 
 /// Feature flags
@@ -776,10 +866,6 @@ fn default_slots_endpoint() -> bool {
     true
 }
 
-fn default_cors_origins() -> String {
-    "*".to_string()
-}
-
 fn default_cache_type() -> CacheType {
     CacheType::F16  // Recommended (2x faster than f32)
 }
@@ -802,6 +888,26 @@ fn default_visible_devices() -> String {
 
 fn default_disable_debug() -> bool {
     true  // llama.cpp default
+}
+
+fn default_cors_origins() -> String {
+    "http://localhost:8080".to_string()  // Secure default (not "*")
+}
+
+fn default_timeout_seconds() -> u64 {
+    300  // 5 minutes
+}
+
+fn default_max_retries() -> u32 {
+    3
+}
+
+fn default_retry_delay_seconds() -> u64 {
+    5
+}
+
+fn default_shm_size() -> usize {
+    8  // 8GB for GPU workloads
 }
 ```
 
@@ -1113,6 +1219,7 @@ impl LlamaConfig {
                     repo: "meta-llama/Llama-3.2-1B-Instruct".to_string(),
                     filename: "Llama-3.2-1B-Instruct.Q4_K_M.gguf".to_string(),
                     branch: "main".to_string(),
+                    sha256: None,  // Set to string for checksum validation
                 }),
                 quantization: "Q4_K_M".to_string(),
                 parameter_count: Some(1_000_000_000),
@@ -1144,20 +1251,31 @@ impl LlamaConfig {
                 max_tokens: 512,
             },
             server: ServerConfig {
-                host: "0.0.0.0".to_string(),
+                host: "127.0.0.1".to_string(),  // Secure default
                 port: 8080,
                 parallel: true,
                 timeout: 600,
                 max_slots: 8,
                 metrics: true,
                 slots_endpoint: true,
-                cors_origins: "*".to_string(),
+                cors_origins: "http://localhost:8080".to_string(),  // Secure default
+                api_key: None,  // Set to string to enable authentication
                 access_log: None,
             },
             cache: CacheConfig {
                 cache_type_k: CacheType::F16,
                 cache_type_v: CacheType::F16,
                 kv_cache_size: Some(2),
+            },
+            retry_config: RetryConfig {
+                timeout_seconds: 300,
+                max_retries: 3,
+                retry_delay_seconds: 5,
+            },
+            docker: DockerConfig {
+                memory_limit: Some(8),
+                shm_size: 8,
+                cpu_count: Some(4),
             },
             features: FeaturesConfig {
                 log_level: LogLevel::Info,
@@ -1182,6 +1300,7 @@ impl LlamaConfig {
             repo: "meta-llama/Meta-Llama-3.1-8B-Instruct".to_string(),
             filename: "Meta-Llama-3.1-8B-Instruct.Q4_K_M.gguf".to_string(),
             branch: "main".to_string(),
+            sha256: None,
         });
         config.model.quantization = "Q4_K_M".to_string();
         config.model.parameter_count = Some(8_000_000_000);
@@ -1199,6 +1318,7 @@ impl LlamaConfig {
             repo: "meta-llama/Meta-Llama-3.1-70B-Instruct".to_string(),
             filename: "Meta-Llama-3.1-70B-Instruct.Q4_K_M.gguf".to_string(),
             branch: "main".to_string(),
+            sha256: None,
         });
         config.model.quantization = "Q4_K_M".to_string();
         config.model.parameter_count = Some(70_000_000_000);

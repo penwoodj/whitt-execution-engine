@@ -1,5 +1,48 @@
 # llama.cpp Server Research Reference
 
+## Docker Version Requirements
+
+**Docker Engine:** 29.3.0+ recommended (fixes MIG bug, AMD CDI support)
+**Docker Compose:** 2.0+ required
+
+**NVIDIA Container Toolkit:**
+- **Version:** 1.17.4+ REQUIRED (CVE-2025-23266/23359 fixes)
+- **CVE Severity:** CVSS 9.0 (container escape vulnerability)
+- **Installation:**
+  ```bash
+  distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+  curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+  curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | \
+    sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+
+  sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
+  sudo systemctl restart docker
+
+  # Verify version (must be 1.17.4+)
+  nvidia-container-cli --version
+  ```
+
+**AMD Container Toolkit:**
+- **Version:** 1.2.0+ for --gpus support (requires Docker 25.0+)
+- **Installation:**
+  ```bash
+  # Install AMD Container Toolkit (requires Docker 25.0+)
+  curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/rocm-archive-keyring.gpg
+  echo "deb [arch=amd64 signed-by=/usr/share/keyrings/rocm-archive-keyring.gpg] https://repo.radeon.com/rocm/apt/$(. /etc/os-release; echo $VERSION_CODENAME) main" | \
+    sudo tee /etc/apt/sources.list.d/rocm.list
+
+  sudo apt-get update && sudo apt-get install -y amdgpu-container-toolkit
+  sudo systemctl restart docker
+
+  # Verify version (must be 1.2.0+)
+  amdgpu-container-cli --version
+  ```
+
+**GPU Driver Requirements:**
+- NVIDIA 570.123.10+ (for CUDA workloads)
+- AMD AMDGPU 6.4.x (for ROCm/Vulkan)
+- Intel NEO 26.09+ (for oneAPI/Vulkan)
+
 ## Official Docker Images
 
 **Primary Image:**
@@ -53,9 +96,32 @@ Example: `LLAMA_ARG_CTX_SIZE=4096` equals `--ctx-size 4096`.
 ### Network
 ```bash
 --host <addr>                   # Bind address, default 127.0.0.1
---port <port>                   # Port, default 8080
---timeout <sec>                 # Request timeout, default 600
+--port <port>                   # HTTP port, default 8080
+--timeout <sec>                  # Request timeout, default 600
+--api-key <key>                # API key for authentication (production)
 ```
+
+### API Key Authentication
+```bash
+--api-key "your-secret-api-key"
+```
+**Usage:**
+- Set via command line flag
+- Pass via environment variable: `LLAMA_ARG_API_KEY=your-secret-api-key`
+- Requires `Authorization: Bearer <key>` header in requests
+**Best Practices:**
+- Use strong, randomly generated keys (minimum 32 characters)
+- Rotate keys regularly
+- Never log API keys
+
+### Concurrency
+```bash
+--parallel <n>                  # Parallel requests, default -1 (auto=4)
+--cont-batching                # Continuous batching (implicit with --parallel)
+--slot-save-path <path>         # Slot persistence path (experimental)
+```
+
+**Note:** `--cont-batching` is implicit when `--parallel` is enabled. No separate flag needed.
 
 ### Concurrency
 ```bash
@@ -114,11 +180,24 @@ Example: `LLAMA_ARG_CTX_SIZE=4096` equals `--ctx-size 4096`.
 
 ### Native (Lower Latency)
 - `/completion` - Raw completion endpoint (no chat template overhead)
-- `/health` - Health check
-- `/props` - Server properties
+- `/health` - Health check (gets queued under load - see Issue #20684)
+- `/props` - Server properties (recommended for health checks under load)
 - `/slots` - Active slots status
 - `/models` - Model listing
 - `/models/unload` - Model unload endpoint
+
+### Health Check Alternative (Recommended for Production)
+
+**Issue #20684:** `/health` endpoint gets queued with other requests under high load.
+**Workaround:** Use `/props` endpoint for health checks under load.
+
+```bash
+# Recommended health check (bypasses queue)
+curl http://localhost:8080/props
+
+# Legacy health check (may queue under load)
+curl http://localhost:8080/health
+```
 
 ### Streaming Format
 

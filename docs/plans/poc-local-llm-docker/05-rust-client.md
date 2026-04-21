@@ -11,6 +11,8 @@
 - Phase 05 depends on Phase 03 (docker-compose)
 - Phase 05 depends on Phase 04 (HTTP API)
 
+**Important Note:** llama-cpp-2 (Rust FFI bindings) is NOT used in Phase 05. This phase implements an HTTP client that communicates with llama-server running in Docker. llama-cpp-2 is reserved for future embedded mode where llama.cpp runs in-process. Current version (April 2026) is 0.1.144 (no 0.2.x series exists).
+
 ---
 
 ## Research Foundation: Rust HTTP Client Architecture
@@ -41,12 +43,15 @@
 
 **Connection Pooling (Recommended):**
 ```rust
-use reqwest::Client;
+use reqwest::{Client, ClientBuilder};
+use std::time::Duration;
 
-let client = Client::builder()
+let client = ClientBuilder::new()
+    .connect_timeout(Duration::from_secs(10))
+    .timeout(Duration::from_secs(300))
+    .pool_idle_timeout(Duration::from_secs(60))
     .pool_max_idle_per_host(10)
-    .pool_idle_timeout(Duration::from_secs(90))
-    .http2_prior_knowledge() // Disable HTTP/2 if not needed
+    .http2_prior_knowledge()
     .build()
     .expect("Failed to build client");
 ```
@@ -341,6 +346,7 @@ impl LlamaHttpClient {
             .timeout(Duration::from_secs(300))
             .pool_idle_timeout(Duration::from_secs(60))
             .pool_max_idle_per_host(10)
+            .http2_prior_knowledge()
             .build()
             .context("Failed to create HTTP client")?;
 
@@ -399,11 +405,14 @@ impl LlamaHttpClient {
 
     /// Wait for server to be healthy
     pub async fn wait_for_healthy(&self, max_wait: Duration) -> Result<()> {
+        println!("Waiting for server to be healthy...");
+
         let start = std::time::Instant::now();
 
         while start.elapsed() < max_wait {
             match self.health().await {
                 Ok(response) if response.status == "ok" => {
+                    println!("Server is healthy");
                     return Ok(());
                 }
                 Ok(_) | Err(_) => {
@@ -413,6 +422,31 @@ impl LlamaHttpClient {
         }
 
         anyhow::bail!("Server did not become healthy within {:?}", max_wait);
+    }
+
+    /// Error types for common failure modes
+    #[derive(Debug, thiserror::Error)]
+    pub enum LlmClientError {
+        #[error("Server not ready: {0}")]
+        ServerNotReady(String),
+
+        #[error("Model load failed: {0}")]
+        ModelLoadFailed(String),
+
+        #[error("Container not started: {0}")]
+        ContainerNotStarted(String),
+
+        #[error("Health check failed: {0}")]
+        HealthCheckFailed(String),
+
+        #[error("Request timeout after {0}s")]
+        RequestTimeout(u64),
+
+        #[error("HTTP error: {0}")]
+        HttpError(reqwest::Error),
+
+        #[error("Failed to parse response: {0}")]
+        ParseError(String),
     }
 
     /// Non-streaming chat completion
