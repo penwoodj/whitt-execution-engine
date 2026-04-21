@@ -94,6 +94,136 @@ Demonstrate end-to-end local LLM inference where:
 - [ ] Vulkan SDK (for local dev, not needed in container)
 - [ ] curl for manual API testing
 - [ ] huggingface-cli for model downloads
+- [ ] dumb-init for container graceful shutdown
+- [ ] jq for JSON parsing in scripts
+- [ ] cmake 3.20+ (for llama.cpp builds)
+
+### Install Commands by OS
+
+#### Arch Linux / CachyOS (AMD GPU, tested platform)
+
+```bash
+# System packages (most already installed on CachyOS)
+sudo pacman -S --needed --noconfirm docker docker-compose curl cmake jq dumb-init
+
+# Enable and start Docker
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER  # then log out and back in
+
+# Python tools for model management
+pip install -U huggingface_hub
+
+# Verify Docker GPU passthrough (AMD)
+docker run --rm --device /dev/dri:/dev/dri --group-add video \
+  ghcr.io/ggml-org/llama.cpp:server-vulkan --list-devices
+# Expected: "ggml_vulkan: Found 1 Vulkan devices" with AMD RX 580
+
+# Verify all tools
+docker --version          # Docker version 29.x+
+docker compose version    # Docker Compose version 5.x+
+cargo --version           # cargo 1.94+
+cmake --version           # cmake 4.x+
+curl --version            # curl 8.x+
+jq --version              # jq-1.8+
+huggingface-cli version   # huggingface_hub x.x.x
+which dumb-init           # /usr/bin/dumb-init
+```
+
+#### Ubuntu 24.04/26.04 LTS (NVIDIA GPU)
+
+```bash
+# System packages
+sudo apt update && sudo apt install -y curl cmake jq git build-essential
+
+# Install Docker Engine (official method)
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER  # then log out and back in
+
+# Install NVIDIA Container Toolkit
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | \
+  sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+  sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+  sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+sudo apt update && sudo apt install -y nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Python tools
+pip install -U huggingface_hub
+
+# Install dumb-init
+sudo apt install -y dumb-init
+
+# Verify NVIDIA GPU passthrough
+nvidia-smi  # Should show driver version 570.123.10+
+docker run --rm --gpus all nvidia/cuda:12.5.0-base-ubuntu24.04 nvidia-smi
+
+# Verify all tools
+docker --version           # 29.3.0+
+nvidia-ctk --version       # 1.17.4+
+cargo --version            # 1.75+
+huggingface-cli version
+```
+
+#### Fedora / RHEL (AMD GPU)
+
+```bash
+# System packages
+sudo dnf install -y docker docker-compose curl cmake jq git gcc
+
+# Enable Docker
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+
+# Install dumb-init (from EPEL or cargo install)
+sudo dnf install -y dumb-init || cargo install dumb-init
+
+# Python tools
+pip install -U huggingface_hub
+
+# Verify AMD GPU passthrough
+docker run --rm --device /dev/dri:/dev/dri --group-add video \
+  ghcr.io/ggml-org/llama.cpp:server-vulkan --list-devices
+```
+
+### Verification Checklist
+
+Run these commands to confirm everything is ready before starting implementation:
+
+```bash
+# 1. Docker is running
+docker info > /dev/null 2>&1 && echo "✅ Docker OK" || echo "❌ Docker not running"
+
+# 2. Docker Compose available
+docker compose version > /dev/null 2>&1 && echo "✅ Compose OK" || echo "❌ Compose missing"
+
+# 3. Rust toolchain
+cargo --version > /dev/null 2>&1 && echo "✅ Rust OK" || echo "❌ Rust missing"
+
+# 4. GPU visible to Docker (AMD)
+docker run --rm --device /dev/dri:/dev/dri --group-add video \
+  ghcr.io/ggml-org/llama.cpp:server-vulkan --list-devices 2>&1 | grep -q "Found" && \
+  echo "✅ GPU passthrough OK" || echo "❌ GPU not visible in Docker"
+
+# 5. Port 8080 available
+ss -tlnp | grep -q ':8080' && echo "❌ Port 8080 in use" || echo "✅ Port 8080 available"
+
+# 6. huggingface-cli available
+huggingface-cli version > /dev/null 2>&1 && echo "✅ HF CLI OK" || echo "❌ HF CLI missing"
+
+# 7. curl available
+curl --version > /dev/null 2>&1 && echo "✅ curl OK" || echo "❌ curl missing"
+
+# 8. jq available
+jq --version > /dev/null 2>&1 && echo "✅ jq OK" || echo "❌ jq missing"
+
+# 9. cmake available
+cmake --version > /dev/null 2>&1 && echo "✅ cmake OK" || echo "❌ cmake missing"
+```
 
 ### Project Setup
 
