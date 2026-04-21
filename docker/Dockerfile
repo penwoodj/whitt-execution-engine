@@ -49,9 +49,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install huggingface-hub CLI
 RUN pip3 install --no-cache-dir --break-system-packages huggingface-hub
 
-# Copy llama-server and llama-cli from base image
-COPY --from=base /llama-server /usr/local/bin/llama-server
-COPY --from=base /llama-cli /usr/local/bin/llama-cli
+COPY --from=base /app/llama-server /usr/local/bin/llama-server
 
 # Create directories
 RUN mkdir -p /models \
