@@ -7,4 +7,5 @@
 
 pub mod docker_manager;
 pub mod http_client;
+pub mod prompt_chain;
 pub mod types;
