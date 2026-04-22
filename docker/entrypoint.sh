@@ -524,6 +524,10 @@ start_server() {
         server_args="$server_args --slots"
     fi
 
+    # Disable prompt caching to prevent Vulkan backend crash
+    # (GGML_ASSERT tensor->data != NULL during prompt cache save)
+    server_args="$server_args --no-cache-prompt --slot-prompt-similarity 0.0"
+
     log_info "Server arguments: $server_args"
     log_debug "Full command: /usr/local/bin/llama-server $server_args"
 

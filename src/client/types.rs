@@ -129,7 +129,9 @@ pub struct Delta {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthResponse {
     pub status: String,
+    #[serde(default)]
     pub slots_idle: usize,
+    #[serde(default)]
     pub slots_processing: usize,
 }
 

@@ -13,6 +13,27 @@ use super::types::{
     ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, HealthResponse,
 };
 
+const MAX_RETRIES: usize = 5;
+const RETRY_DELAY: Duration = Duration::from_secs(1);
+
+fn is_retryable(err: &anyhow::Error) -> bool {
+    let targets = [
+        "connection closed before message completed",
+        "ConnectionRefused",
+        "connect error",
+        "503",
+        "IncompleteMessage",
+    ];
+    let mut chain = err.chain();
+    while let Some(source) = chain.next() {
+        let msg = source.to_string();
+        if targets.iter().any(|t| msg.contains(t)) {
+            return true;
+        }
+    }
+    false
+}
+
 /// HTTP client for llama-server.
 pub struct LlamaHttpClient {
     client: Client,
@@ -74,6 +95,24 @@ impl LlamaHttpClient {
 
     /// Non-streaming chat completion.
     pub async fn chat_completion(
+        &self,
+        request: ChatCompletionRequest,
+    ) -> Result<ChatCompletionResponse> {
+        let mut attempt = 0;
+        loop {
+            match self.chat_completion_inner(request.clone()).await {
+                Ok(resp) => return Ok(resp),
+                Err(e) if is_retryable(&e) && attempt < MAX_RETRIES => {
+                    attempt += 1;
+                    eprintln!("[RETRY {}/{}] chat_completion: {}", attempt, MAX_RETRIES, e);
+                    sleep(RETRY_DELAY).await;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    async fn chat_completion_inner(
         &self,
         request: ChatCompletionRequest,
     ) -> Result<ChatCompletionResponse> {
