@@ -8,15 +8,15 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+    echo -e "${GREEN}[INFO]${NC} $1" >&2
 }
 
 log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
+    echo -e "${YELLOW}[WARN]${NC} $1" >&2
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
 # Detect GPU type
@@ -26,7 +26,7 @@ detect_gpu() {
     # Check for NVIDIA
     if command -v nvidia-smi &> /dev/null; then
         log_info "NVIDIA GPU detected"
-        nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
+        nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader >&2
 
         # Check NVIDIA Container Toolkit version (CRITICAL for security)
         if command -v nvidia-container-cli &> /dev/null; then
@@ -72,9 +72,9 @@ detect_gpu() {
 
         # Try to get GPU info (if available)
         if command -v rocminfo &> /dev/null; then
-            rocminfo | grep "Name:" | head -n1
+            rocminfo | grep "Name:" | head -n1 >&2
         else
-            echo "AMD GPU (details unavailable)"
+            echo "AMD GPU (details unavailable)" >&2
         fi
         echo "amd"
         return 0
@@ -84,7 +84,7 @@ detect_gpu() {
     if command -v lspci &> /dev/null; then
         if lspci | grep -i "AMD" | grep -i "VGA" > /dev/null; then
             log_info "AMD GPU detected (via lspci)"
-            lspci | grep -i "AMD" | grep -i "VGA"
+            lspci | grep -i "AMD" | grep -i "VGA" >&2
             echo "amd"
             return 0
         fi

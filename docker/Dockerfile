@@ -44,12 +44,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     tini \
     ca-certificates \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install huggingface-hub CLI
 RUN pip3 install --no-cache-dir --break-system-packages huggingface-hub
 
-COPY --from=base /app/llama-server /usr/local/bin/llama-server
+# Install Go yq (mikefarah/yq) for YAML parsing
+# Python yq has different syntax — entrypoint expects yq eval file.yml
+RUN curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq && \
+    chmod +x /usr/local/bin/yq
+
+COPY --from=base /app/ /app/llama-cpp/
+ENV LD_LIBRARY_PATH=/app/llama-cpp:${LD_LIBRARY_PATH}
+RUN ln -sf /app/llama-cpp/llama-server /usr/local/bin/llama-server
 
 # Create directories
 RUN mkdir -p /models \
@@ -57,8 +65,9 @@ RUN mkdir -p /models \
     /var/log/llama-server \
     /var/run/llama-server
 
-# CRITICAL: Vulkan ICD loader symlink (fix for Issue #1392)
-RUN ln -s /etc/vulkan/icd.d /usr/share/vulkan/icd.d
+# CRITICAL: Ensure Vulkan ICD directory exists for host mount
+RUN mkdir -p /usr/share/vulkan/icd.d && \
+    ln -sf /usr/lib/x86_64-linux-gnu/libvulkan_radeon.so /usr/lib/libvulkan_radeon.so
 
 # Set working directory
 WORKDIR /app
@@ -78,7 +87,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 VOLUME ["/models", "/config", "/var/log/llama-server"]
 
 # Run as non-root user for security
-RUN useradd -m -u 1000 -s /bin/bash llama && \
+RUN useradd -m -u 1001 -s /bin/bash llama && \
     chown -R llama:llama /models /config /var/log/llama-server /app
 USER llama
 

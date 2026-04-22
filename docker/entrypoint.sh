@@ -54,7 +54,9 @@ download_model() {
     # Create directory for model
     mkdir -p "$(dirname "$model_path")"
 
-    # Download with timeout and retry logic
+    local tmp_dir="/tmp/hf_download_$$"
+    mkdir -p "$tmp_dir"
+
     local max_retries=3
     local retry_delay=5
     local attempt=1
@@ -62,40 +64,40 @@ download_model() {
     while [ $attempt -le $max_retries ]; do
         log_info "Download attempt $attempt of $max_retries..."
 
-        # Use hf for download (supports resume)
         if command -v hf &> /dev/null; then
-            # Check for HF_TOKEN in environment
             if [ -n "$HUGGING_FACE_HUB_TOKEN" ]; then
                 export HUGGING_FACE_HUB_TOKEN
             elif [ -n "$HF_TOKEN" ]; then
-                # Support legacy HF_TOKEN env var
                 export HUGGING_FACE_HUB_TOKEN="$HF_TOKEN"
             fi
 
-            # Download with timeout (300 seconds)
+            local hf_opts="--repo-type model --local-dir $tmp_dir"
+            if [ -n "$branch" ]; then
+                hf_opts="$hf_opts --revision $branch"
+            fi
+            if [ -n "$HUGGING_FACE_HUB_TOKEN" ]; then
+                hf_opts="$hf_opts --token $HUGGING_FACE_HUB_TOKEN"
+            fi
             if timeout 300 hf download \
-                --repo-type model \
-                --local-dir "$(dirname "$model_path")" \
-                --local-dir-use-symlinks False \
-                --resume-download \
+                $hf_opts \
                 "$repo" \
-                "$filename" \
-                --revision "$branch"; then
-                # Download successful, verify checksum if provided
+                "$filename"; then
                 if [ -n "$expected_sha256" ]; then
                     log_info "Verifying checksum..."
-                    local actual_sha256=$(sha256sum "$model_path" | awk '{print $1}')
+                    local actual_sha256=$(sha256sum "$tmp_dir/$filename" | awk '{print $1}')
                     if [ "$actual_sha256" != "$expected_sha256" ]; then
                         log_error "Checksum verification failed!"
                         log_error "Expected: $expected_sha256"
                         log_error "Actual: $actual_sha256"
-                        rm -f "$model_path"
+                        rm -rf "$tmp_dir"
                         return 1
                     else
                         log_info "Checksum verified successfully"
                     fi
                 fi
 
+                mv "$tmp_dir/$filename" "$model_path"
+                rm -rf "$tmp_dir"
                 log_info "Model downloaded successfully: $model_path"
                 return 0
             else
@@ -112,15 +114,18 @@ download_model() {
                     attempt=$((attempt + 1))
                 else
                     log_error "Max retries ($max_retries) exceeded"
+                    rm -rf "$tmp_dir"
                     return 1
                 fi
             fi
         else
             log_error "hf not found. Cannot download model."
+            rm -rf "$tmp_dir"
             exit 1
         fi
     done
 
+    rm -rf "$tmp_dir"
     return 1
 }
 
@@ -234,7 +239,7 @@ translate_config() {
 
     # Typical-P
     typical_p=$(get_yaml_value ".sampling.typical_p" "1.0")
-    if [ "$typical_p" != "1.0" ]; then
+    if [ "$typical_p" != "null" ] && [ "$typical_p" != "1.0" ]; then
         export LLAMA_ARG_TYPICAL_P="$typical_p"
     fi
 
@@ -264,7 +269,8 @@ translate_config() {
 
     # Seed
     seed=$(get_yaml_value ".sampling.seed" "0")
-    if [ "$seed" -gt 0 ]; then
+    # Handle null value (yq returns "null" string)
+    if [ "$seed" != "null" ] && [ "$seed" -gt 0 ]; then
         export LLAMA_ARG_SEED="$seed"
     fi
 
@@ -475,16 +481,14 @@ start_server() {
         server_args="$server_args --port $LLAMA_ARG_PORT"
     fi
 
-    if [ -n "$LLAMA_ARG_PARALLEL" ]; then
-        server_args="$server_args --parallel"
+    if [ -n "$LLAMA_ARG_N_SLOT" ]; then
+        server_args="$server_args --parallel $LLAMA_ARG_N_SLOT"
+    elif [ -n "$LLAMA_ARG_PARALLEL" ]; then
+        server_args="$server_args --parallel -1"
     fi
 
     if [ -n "$LLAMA_ARG_TIMEOUT" ]; then
         server_args="$server_args --timeout $LLAMA_ARG_TIMEOUT"
-    fi
-
-    if [ -n "$LLAMA_ARG_N_SLOT" ]; then
-        server_args="$server_args -n-slot $LLAMA_ARG_N_SLOT"
     fi
 
     # Cache parameters
@@ -496,11 +500,6 @@ start_server() {
         server_args="$server_args --cache-type-v $LLAMA_ARG_CACHE_TYPE_V"
     fi
 
-    # Log level
-    if [ -n "$LLAMA_ARG_LOG_LEVEL" ]; then
-        server_args="$server_args --log-level $LLAMA_ARG_LOG_LEVEL"
-    fi
-
     # Metrics
     if [ -n "$LLAMA_ARG_METRICS" ]; then
         server_args="$server_args --metrics"
@@ -509,16 +508,6 @@ start_server() {
     # Slots endpoint
     if [ -n "$LLAMA_ARG_SLOTS_ENDPOINT" ]; then
         server_args="$server_args --slots"
-    fi
-
-    # Profiling
-    if [ -n "$LLAMA_ARG_PROFILING" ]; then
-        server_args="$server_args --profiling"
-    fi
-
-    # Verbose
-    if [ -n "$LLAMA_ARG_VERBOSE" ]; then
-        server_args="$server_args --verbose"
     fi
 
     log_info "Server arguments: $server_args"
