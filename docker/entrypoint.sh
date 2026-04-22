@@ -365,14 +365,95 @@ translate_config() {
     fi
 
     log_info "Config translation complete"
-}
-
-# Function to validate Vulkan GPU
-validate_vulkan() {
-    log_info "Validating Vulkan GPU..."
-
-    if [ -z "$GGML_VK_VISIBLE_DEVICES" ]; then
-        export GGML_VK_VISIBLE_DEVICES="0"
+        
+        # Debug: Log all environment variables with their values
+        log_debug "=== Environment Variables ==="
+        log_debug "LLAMA_ARG_MODEL_PATH=$LLAMA_ARG_MODEL_PATH"
+        log_debug "LLAMA_ARG_CTX_SIZE=$LLAMA_ARG_CTX_SIZE"
+        log_debug "LLAMA_ARG_UBATCH_SIZE=$LLAMA_ARG_UBATCH_SIZE"
+        log_debug "LLAMA_ARG_N_THREADS=$LLAMA_ARG_N_THREADS"
+        log_debug "LLAMA_ARG_N_GPU_LAYERS=$LLAMA_ARG_N_GPU_LAYERS"
+        log_debug "LLAMA_ARG_N_PARALLEL=$LLAMA_ARG_PARALLEL"
+        log_debug "LLAMA_ARG_N_SLOT=$LLAMA_ARG_N_SLOT"
+        log_debug "LLAMA_ARG_FREQ_PENALTY=$LLAMA_ARG_FREQ_PENALTY"
+        log_debug "LLAMA_ARG_REPEAT_PENALTY=$LLAMA_ARG_REPEAT_PENALTY"
+        log_debug "LLAMA_ARG_REPEAT_LAST_N=$LLAMA_ARG_REPEAT_LAST_N"
+        log_debug "LLAMA_ARG_SEED=$LLAMA_ARG_SEED"
+        log_debug "LLAMA_ARG_TEMP=$LLAMA_ARG_TEMP"
+        log_debug "LLAMA_ARG_TOP_P=$LLAMA_ARG_TOP_P"
+        log_debug "LLAMA_ARG_TOP_K=$LLAMA_ARG_TOP_K"
+        log_debug "LLAMA_ARG_MIN_P=$LLAMA_ARG_MIN_P"
+        log_debug "LLAMA_ARG_TFS_Z=$LLAMA_ARG_TFS_Z"
+        log_debug "LLAMA_ARG_HOST=$LLAMA_ARG_HOST"
+        log_debug "LLAMA_ARG_PORT=$LLAMA_ARG_PORT"
+        log_debug "LLAMA_ARG_PARALLEL=$LLAMA_ARG_PARALLEL"
+        log_DEBUG=LLAMA_ARG_TIMEOUT
+        log_DEBUG=LLAMA_ARG_MAX_SLOTS
+        log_DEBUG=LLAMA_ARG_SLOTS_ENDPOINT
+        log_DEBUG=LLAMA_ARG_LOG_LEVEL
+        log_DEBUG=LLAMA_ARG_VERBOSE
+        log_DEBUG=LLAMA_ARG_PROFILING
+        log_DEBUG=LLAMA_ARG_PRINT_SYSTEM_INFO
+        
+        log_info "Environment variables exported"
+        
+        # Cache parameters
+        if [ -n "$LLAMA_ARG_CACHE_TYPE_K" ]; then
+            log_info "Cache type K: $LLAMA_ARG_CACHE_TYPE_K"
+        fi
+        if [ -n "$LLAMA_ARG_CACHE_TYPE_V" ]; then
+            log_info "Cache type V: $LLAMA_ARG_CACHE_TYPE_V"
+        fi
+        
+        # Sampling parameters
+        if [ -n "$LLAMA_ARG_TEMP" ]; then
+            log_info "Temperature: $LLAMA_ARG_TEMP"
+        fi
+        if [ -n "$LLAMA_ARG_TOP_P" ]; then
+            log_info "Top P: $LLAMA_ARG_TOP_P"
+        fi
+        if [ -n "$LLAMA_ARG_TOP_K" ] && [ -n "$LLAMA_ARG_REPEAT_LAST_N" ]; then
+            log_info "Repeat last N: $LLAMA_ARG_REPEAT_LAST_N"
+        fi
+        
+        # Server parameters
+        if [ -n "$LLAMA_ARG_HOST" ]; then
+            log_info "Host: $LLAMA_ARG_HOST"
+        fi
+        if [ -n "$LLAMA_ARG_PORT" ]; then
+            log_info "Port: $LLAMA_ARG_PORT"
+        fi
+        if [ -n "$LLAMA_ARG_PARALLEL" ]; then
+            log_info "Parallel slots: $LLAMA_ARG_PARALLEL"
+        fi
+        if [ -n "$LLAMA_ARG_TIMEOUT" ]; then
+            log llama_cpp_env "$LLAMA_ARG_TIMEOUT"
+        fi
+        
+        # Features
+        if [ -n "$LLAMA_ARG_LOG_LEVEL" ]; then
+            log_info "Log level: $LLAMA_ARG_LOG_LEVEL"
+        fi
+        if [ -n "$LLAMA_ARG_VERBOSE" ]; then
+            log_info "Verbose: $LLAMA_ARG_VERBOSE"
+        fi
+        
+        # Print system info
+        log_info "========================================"
+        log_info "Server configuration:"
+        log_info "  Model: $LLAMA_ARG_MODEL_PATH"
+        log_info "  Context: $LLAMA_ARG_CTX_SIZE"
+        log_info "  Batch: $LLAMA_ARG_UBATCH_SIZE"
+        log info "  Threads: $LLAMA_ARG_N_THREADS"
+        log info "  GPU layers: $LLAMA_ARG_N_GPU_LAYERS"
+        log info "  Use mmap: $LLAMA_ARG_USE_MMAP"
+        log info "  Sampling: temp=$LLAMA_ARG_TEMP, top_p=$LLAMA_ARG_TOP_P, top_k=$LLAMA_ARG_TOP_K, repeat_p=$LLAMA_ARG_REPEAT_PENALTY, repeat_last_n=$LLAMA_ARG_REPEAT_LAST_N"
+        log info "  Server: host=$LLAMA_ARG_HOST, port=$LLAMA_ARG_PORT, parallel=$LLAMA_ARG_PARALLEL, timeout=$LLAMA_ARG_TIMEOUT"
+        log info "  Features: log_level=$LLAMA_ARG_LOG_LEVEL, verbose=$LLAMA_ARG_VERBOSE, print_system_info=$LLAMA_ARG_PRINT_SYSTEM_INFO, profiling=$LLAMA_ARG_PROFILING"
+        log info "========================================"
+        
+        log_debug "Starting llama-server with environment:"
+        log_debug "$server_args"
     fi
 
     # Try to run llama-cli to check Vulkan
@@ -549,36 +630,70 @@ main() {
     fi
 
     # Validate config
-    validate_config "$config_path"
-
-    # Translate config to env vars
-    translate_config "$config_path"
-
-    # Download model if specified in config
-    if command -v yq &> /dev/null; then
-        repo=$(yq eval '.model.huggingface.repo // ""' "$config_path" 2>/dev/null || echo "")
-        filename=$(yq eval '.model.huggingface.filename // ""' "$config_path" 2>/dev/null || echo "")
-        branch=$(yq eval '.model.huggingface.branch // "main"' "$config_path" 2>/dev/null || echo "main")
-        sha256=$(yq eval '.model.huggingface.sha256 // ""' "$config_path" 2>/dev/null || echo "")
-
-        if [ -n "$repo" ] && [ -n "$filename" ]; then
-            download_model "$LLAMA_ARG_MODEL_PATH" "$repo" "$filename" "$branch" "$sha256"
+    validate_config() {
+        local config_path="$1"
+        log_info "========================================"
+        log_info "Validating config: $config_path"
+        log_info "========================================"
+        
+        if [ ! -f "$config_path" ] && [ ! -f "/config/config.yaml" ]; then
+            log_warn "No config file found in /config. Using defaults."
+        elif [ ! -f "$config_path" ] && [ -f "/config/config.yaml" ]; then
+            config_path="/config/config.yaml"
         fi
-    fi
-
-    # Check if model exists
-    if [ ! -f "$LLAMA_ARG_MODEL_PATH" ]; then
-        log_error "Model not found: $LLAMA_ARG_MODEL_PATH"
-        log_error "Please provide a valid model path or configure HuggingFace download."
-        exit 1
-    fi
-
-    # Validate Vulkan GPU
-    validate_vulkan
-
-    # Start server
-    start_server
-}
+        
+        # Debug: Print raw config content
+        log_debug "Config file content:"
+        log_debug "$(cat "$config_path" 2>&1)"
+        log_debug "========================================"
+        
+        # Check if config is valid YAML
+        if command -v yq &> /dev/null; then
+            log_debug "YAML validation: Running yq eval '.' \"$config_path\""
+            
+            # Basic structure validation
+            if ! yq eval '.model' "$config_path" > /dev/null; then
+                log_error "Missing 'model' section in config"
+                return 1
+            fi
+            
+            if ! yq eval '.context' "$config_path" > /dev/null; then
+                log_error "Missing 'context' section in config"
+                return 1
+            fi
+            
+            if ! yq eval '.sampling' "$config_path" > /dev/null; then
+                log_error "Missing 'sampling' section in config"
+                return 1
+            fi
+            
+            if ! yq eval '.hardware' "$config_path" > /dev level then
+                log_error "Missing 'hardware' section in config"
+                return 1
+            fi
+            
+            if ! yq eval '.server' "$config_path" > /dev/null; then
+                log_error "Missing 'server' section in config"
+                return 1
+            fi
+            
+            # Validate model path exists
+            local model_path
+            model_path=$(yq eval '.model.path' "$config_path" 2>/dev/null)
+            if [ -z "$model_path" ]; then
+                log_error "No model.path specified in config"
+                return 1
+            fi
+            
+            log_info "Model path: $model_path"
+            log_info "Config structure: valid YAML"
+            log_info "Config is valid"
+            
+        else
+            log_error "yq not found. Cannot validate config."
+            return 1
+        fi
+    }
 
 # Run main function
 main "$@"
