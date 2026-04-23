@@ -151,3 +151,48 @@ pub struct SlotStatus {
     #[serde(default)]
     pub n_tokens: usize,
 }
+
+// ---------------------------------------------------------------------------
+// Model management (router mode API)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelLoadRequest {
+    pub model: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelLoadResponse {
+    #[serde(default)]
+    pub success: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelUnloadRequest {
+    pub model: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelInfo {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub filename: String,
+    #[serde(default)]
+    pub status: ModelStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ModelStatus {
+    #[serde(default)]
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelListResponse {
+    #[serde(default)]
+    pub data: Vec<ModelInfo>,
+}

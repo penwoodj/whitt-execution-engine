@@ -1,18 +1,26 @@
 use whitt_execution_engine::client::http_client::LlamaHttpClient;
 use whitt_execution_engine::client::prompt_chain::PromptChain;
 
+const BASE_URL: &str = "http://localhost:8080";
+const TEST_MODEL: &str = "Qwen2.5-0.5B-Instruct-Q4_K_M";
+
+async fn ensure_model_loaded(client: &LlamaHttpClient) {
+    let _ = client.load_model(TEST_MODEL).await;
+}
+
 #[tokio::test]
 #[ignore]
 async fn test_prompt_chain_all() {
-    let client = LlamaHttpClient::new("http://localhost:8080")
+    let client = LlamaHttpClient::new(BASE_URL)
         .expect("Failed to create client");
 
     client.wait_for_healthy(std::time::Duration::from_secs(60)).await
         .expect("Server not healthy");
+    ensure_model_loaded(&client).await;
 
     // Multi-step chain
     eprintln!("[TEST 1/2] Multi-step chain");
-    let mut chain = PromptChain::new(client, "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf");
+    let mut chain = PromptChain::new(client, TEST_MODEL);
 
     let result1 = chain
         .step("What is 2+2? Answer with just the number.")
@@ -47,12 +55,13 @@ async fn test_prompt_chain_all() {
 
     // Chain with system prompt
     eprintln!("[TEST 2/2] Chain with system prompt");
-    let client2 = LlamaHttpClient::new("http://localhost:8080")
+    let client2 = LlamaHttpClient::new(BASE_URL)
         .expect("Failed to create client 2");
     client2.wait_for_healthy(std::time::Duration::from_secs(30)).await
         .expect("Server not healthy for test 2");
+    ensure_model_loaded(&client2).await;
 
-    let mut chain2 = PromptChain::new(client2, "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf")
+    let mut chain2 = PromptChain::new(client2, TEST_MODEL)
         .with_system_prompt("You are a helpful assistant. Always be concise.");
 
     assert_eq!(chain2.history().len(), 1);

@@ -189,6 +189,13 @@ translate_config() {
     model_path=$(get_yaml_value ".model.path" "/models/model.gguf")
     export LLAMA_ARG_MODEL_PATH="$model_path"
 
+    # Models directory for router mode (optional)
+    models_dir=$(get_yaml_value ".model.models_dir" "")
+    if [ -n "$models_dir" ]; then
+        export LLAMA_ARG_MODELS_DIR="$models_dir"
+        log_info "Router mode enabled: --models-dir $models_dir"
+    fi
+
     # Context size (default from llama.cpp: 2048)
     ctx_size=$(get_yaml_value ".context.size" "2048")
     export LLAMA_ARG_CTX_SIZE="$ctx_size"
@@ -409,12 +416,16 @@ start_server() {
     # Construct command arguments
     local server_args=""
 
-    # Model path (required)
-    if [ -z "$LLAMA_ARG_MODEL_PATH" ]; then
-        log_error "Model path not set. Set LLAMA_ARG_MODEL_PATH or provide config."
+    # Model path (required for single-model mode)
+    if [ -n "$LLAMA_ARG_MODELS_DIR" ]; then
+        log_info "Router mode: using --models-dir, skipping -m flag"
+        server_args="$server_args --models-dir $LLAMA_ARG_MODELS_DIR"
+    elif [ -z "$LLAMA_ARG_MODEL_PATH" ]; then
+        log_error "Model path not set. Set LLAMA_ARG_MODEL_PATH or model.models_dir."
         exit 1
+    else
+        server_args="$server_args -m $LLAMA_ARG_MODEL_PATH"
     fi
-    server_args="$server_args -m $LLAMA_ARG_MODEL_PATH"
 
     # Context size
     if [ -n "$LLAMA_ARG_CTX_SIZE" ]; then

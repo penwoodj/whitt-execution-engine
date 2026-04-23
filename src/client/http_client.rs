@@ -11,6 +11,7 @@ use tokio::time::sleep;
 
 use super::types::{
     ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, HealthResponse,
+    ModelInfo, ModelListResponse, ModelLoadRequest, ModelLoadResponse, ModelUnloadRequest,
 };
 
 const MAX_RETRIES: usize = 5;
@@ -87,6 +88,104 @@ impl LlamaHttpClient {
             }
         }
         anyhow::bail!("Server not healthy within {:?}", max_wait);
+    }
+
+    // -----------------------------------------------------------------------
+    // Model management (router mode)
+    // -----------------------------------------------------------------------
+
+    pub async fn list_models(&self) -> Result<Vec<ModelInfo>> {
+        let resp = self
+            .client
+            .get(self.url("v1/models"))
+            .send()
+            .await
+            .context("Failed to list models")?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("List models failed: {} – {}", status, body);
+        }
+        let models: ModelListResponse = resp.json().await.context("Failed to parse model list")?;
+        Ok(models.data)
+    }
+
+    pub async fn load_model(&self, model_id: impl Into<String>) -> Result<()> {
+        let model_id = model_id.into();
+        eprintln!("[MODEL] loading model: {}", model_id);
+        let resp = self
+            .client
+            .post(self.url("models/load"))
+            .json(&ModelLoadRequest { model: model_id.clone() })
+            .send()
+            .await
+            .context("Failed to send load request")?;
+
+        if resp.status().as_u16() == 400 {
+            let body = resp.text().await.unwrap_or_default();
+            if body.contains("already running") {
+                eprintln!("[MODEL] already loaded, skipping");
+                return Ok(());
+            }
+            anyhow::bail!("Load model failed: 400 – {}", body);
+        }
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Load model failed: {} – {}", status, body);
+        }
+        let result: ModelLoadResponse = resp.json().await.unwrap_or(ModelLoadResponse { success: true, error: None });
+        if !result.success {
+            anyhow::bail!("Load model rejected: {:?}", result.error);
+        }
+        eprintln!("[MODEL] load accepted, waiting for ready...");
+        self.wait_for_model_status(&model_id, "loaded", Duration::from_secs(120)).await
+    }
+
+    pub async fn unload_model(&self, model_id: impl Into<String>) -> Result<()> {
+        let model_id = model_id.into();
+        eprintln!("[MODEL] unloading model: {}", model_id);
+        let resp = self
+            .client
+            .post(self.url("models/unload"))
+            .json(&ModelUnloadRequest { model: model_id.clone() })
+            .send()
+            .await
+            .context("Failed to send unload request")?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Unload model failed: {} – {}", status, body);
+        }
+        self.wait_for_model_status(&model_id, "unloaded", Duration::from_secs(60)).await
+    }
+
+    pub async fn wait_for_model_status(
+        &self,
+        model_id: &str,
+        expected_status: &str,
+        timeout: Duration,
+    ) -> Result<()> {
+        let start = std::time::Instant::now();
+        let poll_interval = Duration::from_millis(500);
+        while start.elapsed() < timeout {
+            match self.list_models().await {
+                Ok(models) => {
+                    if let Some(model) = models.iter().find(|m| m.id == model_id) {
+                        if model.status.value == expected_status {
+                            eprintln!("[MODEL] {} is now {} (took {:?})", model_id, expected_status, start.elapsed());
+                            return Ok(());
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[MODEL] poll error (ignoring): {}", e);
+                }
+            }
+            sleep(poll_interval).await;
+        }
+        anyhow::bail!("Model {} did not reach status '{}' within {:?}", model_id, expected_status, timeout);
     }
 
     // -----------------------------------------------------------------------

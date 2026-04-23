@@ -16,6 +16,7 @@ static CLIENT: LazyLock<Client> = LazyLock::new(|| {
 });
 
 const BASE_URL: &str = "http://localhost:8080";
+const TEST_MODEL: &str = "Qwen2.5-0.5B-Instruct-Q4_K_M";
 
 async fn wait_for_server(max_wait: Duration) {
     let start = std::time::Instant::now();
@@ -94,10 +95,37 @@ async fn test_integration_all() {
     assert_eq!(health.status, "ok");
     eprintln!("[PASS 1/4] Health check");
 
+    eprintln!("\n[SETUP] Loading model {}", TEST_MODEL);
+    let _ = CLIENT
+        .post(format!("{}/models/load", BASE_URL))
+        .json(&serde_json::json!({"model": TEST_MODEL}))
+        .send()
+        .await;
+    let load_start = std::time::Instant::now();
+    loop {
+        let models: serde_json::Value = CLIENT
+            .get(format!("{}/v1/models", BASE_URL))
+            .send()
+            .await
+            .expect("list failed")
+            .json()
+            .await
+            .expect("parse failed");
+        let loaded = models["data"].as_array()
+            .and_then(|arr| arr.iter().find(|m| m["id"] == TEST_MODEL))
+            .and_then(|m| m["status"]["value"].as_str());
+        if loaded == Some("loaded") { break; }
+        if load_start.elapsed() > Duration::from_secs(120) {
+            panic!("Model did not load within 120s");
+        }
+        sleep(Duration::from_millis(500)).await;
+    }
+    eprintln!("[SETUP] model loaded in {:?}", load_start.elapsed());
+
     // --- Sub-test 2: Chat completion ---
     eprintln!("\n[TEST 2/4] Chat completion (non-streaming)");
     let body = serde_json::json!({
-        "model": "model",
+        "model": TEST_MODEL,
         "messages": [{"role": "user", "content": "Say hello"}],
         "max_tokens": 50,
         "temperature": 0.7,
@@ -114,7 +142,7 @@ async fn test_integration_all() {
     // --- Sub-test 3: Streaming completion ---
     eprintln!("\n[TEST 3/4] Streaming completion");
     let body = serde_json::json!({
-        "model": "model",
+        "model": TEST_MODEL,
         "messages": [{"role": "user", "content": "Count from 1 to 5"}],
         "max_tokens": 50,
         "temperature": 0.7,
@@ -152,7 +180,7 @@ async fn test_integration_all() {
     // --- Sub-test 4: End-to-end with content verification ---
     eprintln!("\n[TEST 4/4] End-to-end (math question)");
     let body = serde_json::json!({
-        "model": "model",
+        "model": TEST_MODEL,
         "messages": [{"role": "user", "content": "What is 2 + 2? Answer with just the number."}],
         "max_tokens": 20,
         "temperature": 0.7,
@@ -169,4 +197,10 @@ async fn test_integration_all() {
     eprintln!("[PASS 4/4] End-to-end response: {:?}", content);
 
     eprintln!("\n[ALL PASS] 4/4 integration tests succeeded");
+
+    let _ = CLIENT
+        .post(format!("{}/models/unload", BASE_URL))
+        .json(&serde_json::json!({"model": TEST_MODEL}))
+        .send()
+        .await;
 }
