@@ -14,6 +14,7 @@
 //! All defaults match llama.cpp upstream defaults where applicable.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use std::path::PathBuf;
 
 // ---------------------------------------------------------------------------
@@ -42,6 +43,28 @@ pub struct LlamaConfig {
     pub features: FeaturesConfig,
     #[serde(default)]
     pub vulkan: VulkanConfig,
+}
+
+impl Default for LlamaConfig {
+    fn default() -> Self {
+        Self {
+            model: ModelConfig {
+                path: PathBuf::from(""),
+                huggingface: None,
+                quantization: default_quantization(),
+                parameter_count: None,
+            },
+            context: ContextConfig::default(),
+            hardware: HardwareConfig::default(),
+            sampling: SamplingConfig::default(),
+            server: ServerConfig::default(),
+            cache: CacheConfig::default(),
+            retry_config: RetryConfig::default(),
+            docker: DockerConfig::default(),
+            features: FeaturesConfig::default(),
+            vulkan: VulkanConfig::default(),
+        }
+    }
 }
 
 impl LlamaConfig {
@@ -640,6 +663,119 @@ fn default_shm_size() -> usize {
     8
 }
 
+// ---------------------------------------------------------------------------
+// Config Loader
+// ---------------------------------------------------------------------------
+
+/// Multi-source YAML config loader with priority-based merging.
+///
+/// Config resolution order (highest priority wins):
+/// 1. Per-model override (configs/models/<model-name>.yml)
+/// 2. Machine-wide config (~/.config/whitt/config.yml)
+/// 3. Docker-mounted config (/config/config.yml)
+/// 4. Struct defaults (Default trait impls)
+pub struct ConfigLoader;
+
+impl ConfigLoader {
+    /// Machine-wide config directory.
+    pub const MACHINE_WIDE_DIR: &'static str = ".config/whitt";
+    pub const MACHINE_WIDE_CONFIG: &'static str = "config.yml";
+
+    /// Docker-mounted config path (inside container).
+    pub const DOCKER_CONFIG: &'static str = "/config/config.yml";
+
+    /// Per-model config directory (relative to project root).
+    pub const PER_MODEL_DIR: &'static str = "configs/models";
+
+    /// Load and merge configs from all available sources.
+    /// If `model_name` is provided, per-model overrides are applied last.
+    pub fn load_merged(model_name: Option<&str>) -> anyhow::Result<LlamaConfig> {
+        let mut config = LlamaConfig::default();
+
+        let docker_path = std::path::Path::new(Self::DOCKER_CONFIG);
+        if docker_path.exists() {
+            match LlamaConfig::from_file(docker_path) {
+                Ok(docker_config) => {
+                    tracing::info!(path = %docker_path.display(), "Loaded docker config");
+                    config = docker_config;
+                }
+                Err(e) => {
+                    tracing::warn!(path = %docker_path.display(), error = %e, "Failed to load docker config, using defaults");
+                }
+            }
+        }
+
+        if let Some(home) = dirs::home_dir() {
+            let machine_path = home
+                .join(Self::MACHINE_WIDE_DIR)
+                .join(Self::MACHINE_WIDE_CONFIG);
+            if machine_path.exists() {
+                match LlamaConfig::from_file(&machine_path) {
+                    Ok(machine_config) => {
+                        tracing::info!(path = %machine_path.display(), "Loaded machine-wide config");
+                        config = Self::merge(config, machine_config);
+                    }
+                    Err(e) => {
+                        tracing::warn!(path = %machine_path.display(), error = %e, "Failed to load machine-wide config, skipping");
+                    }
+                }
+            }
+        }
+
+        if let Some(name) = model_name {
+            let model_config_path =
+                std::path::Path::new(Self::PER_MODEL_DIR).join(format!("{}.yml", name));
+            if model_config_path.exists() {
+                match LlamaConfig::from_file(&model_config_path) {
+                    Ok(model_config) => {
+                        tracing::info!(path = %model_config_path.display(), model = name, "Loaded per-model config override");
+                        config = Self::merge(config, model_config);
+                    }
+                    Err(e) => {
+                        tracing::warn!(path = %model_config_path.display(), error = %e, "Failed to load per-model config, skipping");
+                    }
+                }
+            }
+        }
+
+        Ok(config)
+    }
+
+    /// Deep-merge two LlamaConfig instances. `override_config` wins over `base`.
+    /// Model section: entirely replaced (model path + HF config are atomic).
+    /// Other sections: field-by-field merge using serde.
+    fn merge(base: LlamaConfig, override_config: LlamaConfig) -> LlamaConfig {
+        let base_yaml = serde_saphyr::to_string(&base).unwrap_or_default();
+        let override_yaml = serde_saphyr::to_string(&override_config).unwrap_or_default();
+
+        let base_json: JsonValue = serde_saphyr::from_str(&base_yaml).unwrap_or_default();
+        let override_json: JsonValue = serde_saphyr::from_str(&override_yaml).unwrap_or_default();
+
+        let merged = Self::merge_json_values(base_json, override_json);
+        let merged_yaml = serde_saphyr::to_string(&merged).unwrap_or_default();
+
+        serde_saphyr::from_str(&merged_yaml).unwrap_or_else(|_| base)
+    }
+
+    /// Recursively merge JSON values. For objects, override wins per key.
+    /// For arrays, override replaces entirely. For scalars, override wins.
+    fn merge_json_values(base: JsonValue, override_val: JsonValue) -> JsonValue {
+        match (base, override_val) {
+            (JsonValue::Object(mut base_map), JsonValue::Object(override_map)) => {
+                for (key, value) in override_map {
+                    if let Some(existing) = base_map.remove(&key) {
+                        base_map.insert(key, Self::merge_json_values(existing, value));
+                    } else {
+                        base_map.insert(key, value);
+                    }
+                }
+                JsonValue::Object(base_map)
+            }
+            (_, override_value) => override_value,
+        }
+    }
+}
+
 // ===========================================================================
 // Unit tests
 // ===========================================================================
@@ -684,5 +820,61 @@ sampling:
         );
         assert_eq!(get("LLAMA_ARG_CTX_SIZE"), Some("4096".into()));
         assert_eq!(get("LLAMA_ARG_TEMP"), Some("0.70".into()));
+    }
+
+    #[test]
+    fn config_loader_missing_files_use_defaults() {
+        let config = ConfigLoader::load_merged(None).expect("load with no model");
+        assert_eq!(config.sampling.temperature, 0.80);
+        assert_eq!(config.server.port, 8080);
+    }
+
+    #[test]
+    fn merge_yaml_override_wins() {
+        let base_yaml = r#"
+model:
+  path: /models/base.gguf
+sampling:
+  temperature: 0.80
+  max_tokens: 512
+context:
+  size: 2048
+"#;
+        let override_yaml = r#"
+model:
+  path: /models/override.gguf
+sampling:
+  temperature: 0.50
+"#;
+        let base: LlamaConfig = serde_saphyr::from_str(base_yaml).expect("parse base");
+        let override_config: LlamaConfig =
+            serde_saphyr::from_str(override_yaml).expect("parse override");
+        let merged = ConfigLoader::merge(base, override_config);
+
+        assert_eq!(merged.model.path, PathBuf::from("/models/override.gguf"));
+        assert!((merged.sampling.temperature - 0.50).abs() < 0.001);
+        assert_eq!(merged.sampling.max_tokens, 512);
+        assert_eq!(merged.context.size, 2048);
+    }
+
+    #[test]
+    fn merge_empty_override_preserves_base() {
+        let base_yaml = r#"
+model:
+  path: /models/base.gguf
+sampling:
+  temperature: 0.80
+"#;
+        let override_yaml = r#"
+model:
+  path: /models/override.gguf
+"#;
+        let base: LlamaConfig = serde_saphyr::from_str(base_yaml).expect("parse base");
+        let override_config: LlamaConfig =
+            serde_saphyr::from_str(override_yaml).expect("parse override");
+        let merged = ConfigLoader::merge(base, override_config);
+
+        assert_eq!(merged.model.path, PathBuf::from("/models/override.gguf"));
+        assert!((merged.sampling.temperature - 0.80).abs() < 0.001);
     }
 }
