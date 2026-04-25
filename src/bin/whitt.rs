@@ -243,6 +243,14 @@ async fn one_shot_chat(
         ..Default::default()
     };
 
+    tracing::debug!(
+        max_tokens = request.max_tokens,
+        temperature = request.temperature,
+        stream = request.stream,
+        model = %request.model,
+        "[chat_request] sending request"
+    );
+
     if !no_stream {
         let mut stream = client.chat_completion_stream(request).await?;
         let mut full_response = String::new();

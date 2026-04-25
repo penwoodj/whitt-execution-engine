@@ -16,8 +16,8 @@ cargo build --bin whitt --bin model_chain --bin poc_client --features client
 Run unit tests:
 ```bash
 cargo test --features client
-# Expected: test result: ok. 5 passed; 0 failed; 14 ignored
-# (14 integration tests need live server; ignored when no server detected by test harness)
+# Expected: test result: ok. 5 passed; 0 failed; 15 ignored
+# (15 integration tests need live server; ignored when no server detected by test harness)
 ```
 
 ---
@@ -293,7 +293,7 @@ docker compose down && docker compose up -d
 - **Per-Model Configs**: `configs/models/*.yml` files exist as reference examples but are not yet wired into the Docker container's entrypoint. Only the `whitt` CLI uses `ConfigLoader` directly.
 - **Config Validation**: No JSON Schema validation yet. Invalid YAML keys are silently ignored by serde defaults.
 - **Agent ReAct**: 0.5B models can't reliably follow ReAct JSON format. Needs 7B+ for reliable agent output.
-- **SmolLM3**: THINKING model consumes all max_tokens on reasoning. Increase `--max-tokens` for content output.
+- **SmolLM3**: THINKING model consumes most token budget on reasoning. Increase `--max-tokens` and ensure slot context is large enough (see Slots below).
 - **amdgpu-container-cli**: Not installed, needs root. Legacy `/dev/dri` passthrough works fine.
 - **MODEL_HOST_PATH**: Set `MODEL_HOST_PATH=/data/models` in `.env` to mount models from external drive.
-- **Slots**: Config `ctx_size=2048, max_slots=4` (512 tokens/slot). Small for production, fine for POC.
+- **Slots**: Context is divided equally among slots. `ctx_size` / `max_slots` = tokens per slot. If generation gets cut off mid-sentence with `finish_reason=length`, the slot context is too small. Fix: increase `context.size` or reduce `max_slots` in config.yml, then restart the container.
