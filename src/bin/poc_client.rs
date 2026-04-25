@@ -31,7 +31,7 @@ struct Cli {
     config: Option<PathBuf>,
 
     /// Prompt text.
-    #[arg(short, long)]
+    #[arg(long)]
     prompt: String,
 
     /// Stream output.
@@ -103,9 +103,17 @@ async fn main() -> Result<()> {
         }
     }
 
+    let models = client.list_models().await.context("Failed to list models")?;
+    let loaded = models
+        .iter()
+        .find(|m| m.status.value == "loaded")
+        .context("No model loaded. Load one first via whitt model load or scripts/switch-model.sh")?;
+    let model_id = &loaded.id;
+    println!("Model: {}", model_id);
+
     // Build request
     let request = ChatCompletionRequest {
-        model: "model".into(),
+        model: model_id.clone(),
         messages: vec![ChatMessage::user(&cli.prompt)],
         max_tokens: Some(cli.max_tokens),
         temperature: Some(cli.temperature),

@@ -34,10 +34,13 @@ pub struct ChatCompletionRequest {
 }
 
 /// Chat message.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChatMessage {
     pub role: String,
+    #[serde(default)]
     pub content: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reasoning_content: String,
 }
 
 impl ChatMessage {
@@ -45,6 +48,7 @@ impl ChatMessage {
         Self {
             role: "user".into(),
             content: content.into(),
+            ..Default::default()
         }
     }
 
@@ -52,6 +56,7 @@ impl ChatMessage {
         Self {
             role: "assistant".into(),
             content: content.into(),
+            ..Default::default()
         }
     }
 
@@ -59,6 +64,7 @@ impl ChatMessage {
         Self {
             role: "system".into(),
             content: content.into(),
+            ..Default::default()
         }
     }
 }
@@ -119,6 +125,8 @@ pub struct Delta {
     pub role: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

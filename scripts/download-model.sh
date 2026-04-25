@@ -1,4 +1,7 @@
 #!/bin/bash
+# DEPRECATED: Use `whitt download <repo> --file <filename> --output <dir>` instead.
+# This script is retained for backward compatibility but all functionality
+# has been migrated to the Rust CLI binary.
 set -euo pipefail
 
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ] || [ $# -eq 0 ]; then

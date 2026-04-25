@@ -1,4 +1,7 @@
 #!/bin/bash
+# DEPRECATED: Use `whitt benchmark` and `whitt model swap` instead.
+# This script is retained for backward compatibility but all functionality
+# has been migrated to the Rust CLI binary.
 set -uo pipefail
 
 SERVER_URL="${LLAMA_SERVER_URL:-http://localhost:8080}"
@@ -43,16 +46,11 @@ poll_status() {
 }
 
 api_load() {
-    local resp
-    resp=$(curl -s -X POST "${SERVER_URL}/models/load" \
-        -H "Content-Type: application/json" \
-        -d "{\"model\":\"$MODEL_ID\"}" 2>&1)
-    echo "$resp" | grep -q "already running" && return 0
     local code
     code=$(curl -sf -o /dev/null -w "%{http_code}" -X POST "${SERVER_URL}/models/load" \
         -H "Content-Type: application/json" \
         -d "{\"model\":\"$MODEL_ID\"}" 2>/dev/null || echo "000")
-    [ "$code" = "200" ] || [ "$code" = "202" ]
+    [ "$code" = "200" ]
 }
 
 api_unload() {

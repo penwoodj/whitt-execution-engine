@@ -1,4 +1,7 @@
 #!/bin/bash
+# DEPRECATED: Use `whitt benchmark` instead.
+# This script is retained for backward compatibility but all functionality
+# has been migrated to the Rust CLI binary.
 set -euo pipefail
 
 SERVER_URL="${SERVER_URL:-http://localhost:8080}"
@@ -14,7 +17,7 @@ fi
 MODEL_ID=$(curl -sf "$SERVER_URL/v1/models" | jq -r '.data[] | select(.status.value == "loaded") | .id' | head -n 1)
 if [ -z "$MODEL_ID" ]; then
     echo "Error: No model is currently loaded on the server."
-    echo "Please load a model first: ./scripts/switch-model-v2.sh load <model-name>"
+    echo "Please load a model first: ./scripts/switch-model.sh load <model-name>"
     exit 1
 fi
 

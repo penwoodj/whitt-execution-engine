@@ -9,6 +9,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use whitt_execution_engine::client::http_client::LlamaHttpClient;
+use whitt_execution_engine::client::model_download::download_model_from_hf;
 use whitt_execution_engine::client::types::{
     ChatCompletionRequest, ChatMessage,
 };
@@ -18,15 +19,15 @@ use whitt_execution_engine::client::types::{
 #[command(about = "Whitt CLI — chat with local LLMs, manage models, and run agents", long_about = None)]
 struct Cli {
     /// Server URL
-    #[arg(short, long, default_value = "http://localhost:8080")]
+    #[arg(short, long, default_value = "http://localhost:8080", global = true)]
     url: String,
 
     /// Model ID (default: first loaded model)
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     model: Option<String>,
 
     /// Verbose output
-    #[arg(short, long)]
+    #[arg(short = 'v', long, global = true)]
     verbose: bool,
 
     #[command(subcommand)]
@@ -75,17 +76,38 @@ enum Commands {
         /// Task description
         task: String,
 
-        /// Model ID (default: first loaded model)
-        #[arg(long)]
-        model: Option<String>,
-
         /// Max steps before giving up
         #[arg(long, default_value = "10")]
         max_steps: usize,
+    },
 
-        /// Verbose agent output
+    /// Benchmark model performance
+    Benchmark {
+        /// Prompt text
+        #[arg(long, default_value = "The quick brown fox jumps over the lazy dog.")]
+        prompt: Option<String>,
+
+        /// Max tokens to generate
+        #[arg(long, default_value = "100")]
+        max_tokens: usize,
+
+        /// Number of concurrent requests
+        #[arg(short = 'c', long, default_value = "1")]
+        concurrent: usize,
+    },
+
+    /// Download model from HuggingFace
+    Download {
+        /// HuggingFace repo (e.g. "Qwen/Qwen2.5-0.5B-Instruct-GGUF")
+        repo: String,
+
+        /// Filename to download (e.g. "qwen2.5-0.5b-instruct-q4_k_m.gguf")
         #[arg(long)]
-        verbose: bool,
+        file: Option<String>,
+
+        /// Output directory
+        #[arg(short = 'o', long, default_value = "models")]
+        output: PathBuf,
     },
 }
 
@@ -136,8 +158,16 @@ async fn main() -> Result<()> {
             server_command(&cli.url).await
         }
 
-        Commands::Agent { task, model, max_steps, verbose } => {
-            agent_command(&cli.url, model, task, max_steps, verbose).await
+        Commands::Agent { task, max_steps } => {
+            agent_command(&cli.url, cli.model, task, max_steps, cli.verbose).await
+        }
+
+        Commands::Benchmark { prompt, max_tokens, concurrent } => {
+            benchmark_command(&cli.url, prompt, max_tokens, concurrent).await
+        }
+
+        Commands::Download { repo, file, output } => {
+            download_command(&repo, file, &output).await
         }
     }
 }
@@ -220,6 +250,9 @@ async fn one_shot_chat(
         while let Some(item) = stream.next().await {
             let chunk = item?;
             for choice in &chunk.choices {
+                if let Some(ref content) = choice.delta.reasoning_content {
+                    eprint!("[think] {}", content);
+                }
                 if let Some(ref content) = choice.delta.content {
                     print!("{}", content);
                     std::io::stdout().flush().ok();
@@ -238,8 +271,14 @@ async fn one_shot_chat(
         }
     } else {
         let response = client.chat_completion(request).await?;
-        let content = response.choices.first().map(|c| c.message.content.clone()).unwrap_or_default();
-        println!("{}", content);
+        let choice = response.choices.first();
+        let content = choice.map(|c| c.message.content.clone()).unwrap_or_default();
+        let reasoning = choice.map(|c| c.message.reasoning_content.clone()).unwrap_or_default();
+        if !reasoning.is_empty() && content.is_empty() {
+            println!("[reasoning] {}", reasoning);
+        } else {
+            println!("{}", content);
+        }
         eprintln!("Usage: {} tokens", response.usage.total_tokens);
 
         messages.push(ChatMessage::assistant(content));
@@ -345,6 +384,9 @@ async fn repl_chat(
         while let Some(item) = stream.next().await {
             let chunk = item?;
             for choice in &chunk.choices {
+                if let Some(ref reasoning) = choice.delta.reasoning_content {
+                    eprint!("[think] {}", reasoning);
+                }
                 if let Some(ref content) = choice.delta.content {
                     print!("{}", content);
                     std::io::stdout().flush().ok();
@@ -611,3 +653,83 @@ async fn parse_and_execute_tool(
 
     Ok(None)
 }
+
+async fn benchmark_command(url: &str, prompt: Option<String>, max_tokens: usize, concurrent: usize) -> Result<()> {
+    let client = LlamaHttpClient::new(url)?;
+
+    let models = client.list_models().await?;
+    let loaded = models.iter().find(|m| m.status.value == "loaded")
+        .context("No model loaded. Load one first.")?;
+    let model_id = &loaded.id;
+
+    let prompt_text = prompt.unwrap_or_else(|| "The quick brown fox jumps over the lazy dog.".to_string());
+    println!("Model: {}", model_id);
+    println!("Server: {}", url);
+    println!("Prompt: {}", prompt_text);
+    println!("Max tokens: {}", max_tokens);
+    println!("Concurrent: {}", concurrent);
+    println!();
+
+    let request = ChatCompletionRequest {
+        model: model_id.clone(),
+        messages: vec![ChatMessage::user(&prompt_text)],
+        max_tokens: Some(max_tokens),
+        stream: false,
+        ..Default::default()
+    };
+
+    println!("--- Single Request ---");
+    let start = std::time::Instant::now();
+    let resp = client.chat_completion(request).await.context("Benchmark request failed")?;
+    let elapsed = start.elapsed();
+
+    let total_tokens = resp.usage.total_tokens;
+    let tps = if elapsed.as_secs_f64() > 0.0 {
+        total_tokens as f64 / elapsed.as_secs_f64()
+    } else {
+        0.0
+    };
+
+    println!("Elapsed time: {}ms", elapsed.as_millis());
+    println!("Total tokens: {}", total_tokens);
+    println!("Tokens per second: {:.2}", tps);
+
+    for choice in resp.choices {
+        if !choice.message.content.is_empty() {
+            println!("Response: {}...", &choice.message.content[..choice.message.content.len().min(80)]);
+        }
+    }
+
+    println!();
+    println!("--- Benchmark Complete ---");
+    Ok(())
+}
+
+async fn download_command(repo: &str, file: Option<String>, output: &PathBuf) -> Result<()> {
+    println!("Repo: {}", repo);
+
+    let filename = match file {
+        Some(f) => f,
+        None => {
+            anyhow::bail!("No filename specified. Use --file to select which GGUF to download.");
+        }
+    };
+
+    let dest = output.join(&filename);
+    if dest.exists() {
+        anyhow::bail!("File already exists: {}", dest.display());
+    }
+
+    println!("File: {}", filename);
+    println!("Output: {}", dest.display());
+    println!("Downloading...");
+
+    let bytes = download_model_from_hf(repo, &filename, dest.to_str()
+        .context("Invalid output path")?)
+        .await
+        .context("Download failed")?;
+
+    println!("Downloaded {} bytes ({:.1} MB)", bytes, bytes as f64 / 1_048_576.0);
+    Ok(())
+}
+
