@@ -53,6 +53,34 @@ enum Commands {
         #[arg(long, default_value = "512")]
         max_tokens: usize,
 
+        /// Top-p (nucleus) sampling (0.0-1.0)
+        #[arg(long)]
+        top_p: Option<f32>,
+
+        /// Top-k sampling
+        #[arg(long)]
+        top_k: Option<usize>,
+
+        /// Repeat penalty (1.0 = disabled)
+        #[arg(long)]
+        repeat_penalty: Option<f32>,
+
+        /// Presence penalty
+        #[arg(long)]
+        presence_penalty: Option<f32>,
+
+        /// Frequency penalty
+        #[arg(long)]
+        frequency_penalty: Option<f32>,
+
+        /// Stop sequences
+        #[arg(long)]
+        stop: Option<Vec<String>>,
+
+        /// Random seed (0 = random)
+        #[arg(long)]
+        seed: Option<u32>,
+
         /// Disable streaming (non-interactive)
         #[arg(long)]
         no_stream: bool,
@@ -68,8 +96,11 @@ enum Commands {
         action: ModelAction,
     },
 
-    /// Server health and status
-    Server,
+    /// Server management
+    Server {
+        #[command(subcommand)]
+        action: ServerAction,
+    },
 
     /// Run ReAct agent loop
     Agent {
@@ -123,6 +154,20 @@ enum ModelAction {
     Swap { model: String },
 }
 
+#[derive(Subcommand, Debug)]
+enum ServerAction {
+    /// Show server health and loaded models
+    Status,
+    /// Start the llama.cpp server via docker compose
+    Start,
+    /// Stop the llama.cpp server via docker compose
+    Stop,
+    /// Detect GPU type (nvidia/amd/cpu)
+    Gpu,
+    /// Show server logs (follow mode)
+    Logs,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -144,18 +189,31 @@ async fn main() -> Result<()> {
             system,
             temperature,
             max_tokens,
+            top_p,
+            top_k,
+            repeat_penalty,
+            presence_penalty,
+            frequency_penalty,
+            stop,
+            seed,
             no_stream,
             save,
         } => {
-            chat_command(&cli.url, cli.model, prompt, system, temperature, max_tokens, no_stream, save).await
+            chat_command(&cli.url, cli.model, prompt, system, temperature, max_tokens, top_p, top_k, repeat_penalty, presence_penalty, frequency_penalty, stop, seed, no_stream, save).await
         }
 
         Commands::Model { action } => {
             model_command(&cli.url, action).await
         }
 
-        Commands::Server => {
-            server_command(&cli.url).await
+        Commands::Server { action } => {
+            match action {
+                ServerAction::Status => server_status_command(&cli.url).await,
+                ServerAction::Start => server_start_command().await,
+                ServerAction::Stop => server_stop_command().await,
+                ServerAction::Gpu => server_gpu_command().await,
+                ServerAction::Logs => server_logs_command().await,
+            }
         }
 
         Commands::Agent { task, max_steps } => {
@@ -179,6 +237,13 @@ async fn chat_command(
     system: Option<String>,
     temperature: f32,
     max_tokens: usize,
+    top_p: Option<f32>,
+    top_k: Option<usize>,
+    repeat_penalty: Option<f32>,
+    presence_penalty: Option<f32>,
+    frequency_penalty: Option<f32>,
+    stop: Option<Vec<String>>,
+    seed: Option<u32>,
     no_stream: bool,
     save: Option<PathBuf>,
 ) -> Result<()> {
@@ -200,10 +265,27 @@ async fn chat_command(
 
     ensure_model_loaded(&client, &model_id).await?;
 
+    use whitt_execution_engine::config::ConfigLoader;
+
+    let model_config = ConfigLoader::load_merged(Some(&model_id))
+        .unwrap_or_else(|e| {
+            tracing::debug!("Config load failed, using defaults: {}", e);
+            whitt_execution_engine::config::LlamaConfig::default()
+        });
+
+    let temperature = temperature;
+    let max_tokens = max_tokens;
+    let top_p = top_p.or(Some(model_config.sampling.top_p));
+    let top_k = top_k.or(Some(model_config.sampling.top_k));
+    let repeat_penalty = repeat_penalty.or(Some(model_config.sampling.repeat_penalty));
+    let presence_penalty = presence_penalty.or(model_config.sampling.presence_penalty);
+    let frequency_penalty = frequency_penalty.or(model_config.sampling.frequency_penalty);
+    let seed = seed.or(Some(model_config.sampling.seed));
+
     if let Some(p) = prompt {
-        one_shot_chat(&client, &model_id, p, system, temperature, max_tokens, no_stream, save).await
+        one_shot_chat(&client, &model_id, p, system, temperature, max_tokens, top_p, top_k, repeat_penalty, presence_penalty, frequency_penalty, stop, seed, no_stream, save).await
     } else {
-        repl_chat(&client, &model_id, system, temperature, max_tokens).await
+        repl_chat(&client, &model_id, system, temperature, max_tokens, top_p, top_k, repeat_penalty, presence_penalty, frequency_penalty, stop, seed).await
     }
 }
 
@@ -225,6 +307,13 @@ async fn one_shot_chat(
     system: Option<String>,
     temperature: f32,
     max_tokens: usize,
+    top_p: Option<f32>,
+    top_k: Option<usize>,
+    repeat_penalty: Option<f32>,
+    presence_penalty: Option<f32>,
+    frequency_penalty: Option<f32>,
+    stop: Option<Vec<String>>,
+    seed: Option<u32>,
     no_stream: bool,
     save: Option<PathBuf>,
 ) -> Result<()> {
@@ -239,6 +328,13 @@ async fn one_shot_chat(
         messages: messages.clone(),
         max_tokens: Some(max_tokens),
         temperature: Some(temperature),
+        top_p: top_p,
+        top_k: top_k,
+        repeat_penalty: repeat_penalty,
+        presence_penalty: presence_penalty,
+        frequency_penalty: frequency_penalty,
+        stop: stop.clone(),
+        seed: seed,
         stream: !no_stream,
         ..Default::default()
     };
@@ -317,6 +413,13 @@ async fn repl_chat(
     initial_system: Option<String>,
     temperature: f32,
     max_tokens: usize,
+    top_p: Option<f32>,
+    top_k: Option<usize>,
+    repeat_penalty: Option<f32>,
+    presence_penalty: Option<f32>,
+    frequency_penalty: Option<f32>,
+    stop: Option<Vec<String>>,
+    seed: Option<u32>,
 ) -> Result<()> {
     let mut rl = DefaultEditor::new()?;
     let mut model_id = default_model.to_string();
@@ -389,6 +492,13 @@ async fn repl_chat(
             messages: messages.clone(),
             max_tokens: Some(max_tokens),
             temperature: Some(temperature),
+            top_p: top_p,
+            top_k: top_k,
+            repeat_penalty: repeat_penalty,
+            presence_penalty: presence_penalty,
+            frequency_penalty: frequency_penalty,
+            stop: stop.clone(),
+            seed: seed,
             stream: true,
             ..Default::default()
         };
@@ -485,7 +595,7 @@ async fn model_command(url: &str, action: ModelAction) -> Result<()> {
     Ok(())
 }
 
-async fn server_command(url: &str) -> Result<()> {
+async fn server_status_command(url: &str) -> Result<()> {
     let client = LlamaHttpClient::new(url)?;
 
     let health = client.health().await?;
@@ -499,6 +609,100 @@ async fn server_command(url: &str) -> Result<()> {
         println!("  - {}", model.id);
     }
 
+    Ok(())
+}
+
+fn detect_gpu_type() -> String {
+    if std::path::Path::new("/usr/bin/nvidia-smi").exists() {
+        let output = std::process::Command::new("nvidia-smi")
+            .args(["--query-gpu=name,driver_version,memory.total", "--format=csv,noheader"])
+            .output();
+        if let Ok(out) = output {
+            if out.status.success() {
+                let info = String::from_utf8_lossy(&out.stdout);
+                println!("NVIDIA GPU detected:");
+                println!("  {}", info.trim());
+                return "nvidia".to_string();
+            }
+        }
+    }
+
+    if std::path::Path::new("/dev/kfd").exists() {
+        println!("AMD GPU detected (via /dev/kfd)");
+        return "amd".to_string();
+    }
+
+    let lspci = std::process::Command::new("lspci").output();
+    if let Ok(out) = lspci {
+        let output_str = String::from_utf8_lossy(&out.stdout);
+        if output_str.contains("AMD") && output_str.contains("VGA") {
+            println!("AMD GPU detected (via lspci)");
+            return "amd".to_string();
+        }
+    }
+
+    println!("No GPU detected. Running in CPU-only mode.");
+    "cpu".to_string()
+}
+
+async fn server_start_command() -> Result<()> {
+    let gpu_type = detect_gpu_type();
+    eprintln!("[SERVER] Starting LLM server with {} GPU...", gpu_type);
+
+    let status = match gpu_type.as_str() {
+        "nvidia" => {
+            tokio::process::Command::new("docker")
+                .args(["compose", "-f", "docker-compose.yml", "-f", "docker-compose.nvidia.yml", "up", "-d"])
+                .status().await?
+        }
+        "amd" => {
+            tokio::process::Command::new("docker")
+                .args(["compose", "-f", "docker-compose.yml", "-f", "docker-compose.amd.yml", "up", "-d"])
+                .status().await?
+        }
+        _ => {
+            tokio::process::Command::new("docker")
+                .args(["compose", "up", "-d"])
+                .status().await?
+        }
+    };
+
+    if !status.success() {
+        anyhow::bail!("docker compose up failed");
+    }
+    eprintln!("[SERVER] Server starting. Check health with: whitt server status");
+    Ok(())
+}
+
+async fn server_stop_command() -> Result<()> {
+    eprintln!("[SERVER] Stopping LLM server...");
+    let status = tokio::process::Command::new("docker")
+        .args(["compose", "down"])
+        .status()
+        .await?;
+    if !status.success() {
+        anyhow::bail!("docker compose down failed");
+    }
+    eprintln!("[SERVER] Server stopped");
+    Ok(())
+}
+
+async fn server_gpu_command() -> Result<()> {
+    let gpu_type = detect_gpu_type();
+    println!("\nGPU type: {}", gpu_type);
+    match gpu_type.as_str() {
+        "nvidia" => println!("Recommended: docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d"),
+        "amd" => println!("Recommended: docker compose -f docker-compose.yml -f docker-compose.amd.yml up -d"),
+        _ => println!("Recommended: docker compose up -d"),
+    }
+    Ok(())
+}
+
+async fn server_logs_command() -> Result<()> {
+    tokio::process::Command::new("docker")
+        .args(["compose", "logs", "-f"])
+        .status()
+        .await?;
     Ok(())
 }
 
