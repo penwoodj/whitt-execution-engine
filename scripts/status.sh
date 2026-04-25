@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -18,6 +18,10 @@ echo ""
 
 # Container status
 log_info "Container Status:"
+if ! docker compose ps &> /dev/null; then
+    log_warn "Docker compose not running"
+    exit 1
+fi
 docker compose ps
 
 echo ""
@@ -34,7 +38,13 @@ echo ""
 
 # Port binding
 log_info "Port Binding:"
-docker compose ps --format "  Port: {{.Ports}}"
+NETWORK_MODE=$(docker inspect whitt-llama-server --format='{{.HostConfig.NetworkMode}}' 2>/dev/null || echo "unknown")
+if [ "$NETWORK_MODE" = "host" ]; then
+    echo "  Network: host (server directly on http://localhost:8080)"
+else
+    PORT=$(docker port whitt-llama-server 2>/dev/null | head -n1)
+    echo "  Port: ${PORT:-not mapped}"
+fi
 
 echo ""
 
@@ -51,12 +61,9 @@ fi
 
 # Model
 log_info "Current Model:"
-if [ -f "config.yml" ]; then
-    if command -v yq &> /dev/null; then
-        yq eval '.model.path' config.yml
-    else
-        grep -A 2 "^model:" config.yml | grep "path:" | awk '{print $2}'
-    fi
+MODEL_INFO=$(curl -sf http://localhost:8080/v1/models 2>/dev/null | jq -r '.data[] | select(.status.value == "loaded") | "\(.id) (\(.status.args[.status.args | index("--model") + 1] | split("/") | last))"' 2>/dev/null)
+if [ -n "$MODEL_INFO" ]; then
+    echo "  $MODEL_INFO"
 else
-    echo "  No config.yml found"
+    echo "  No model loaded"
 fi

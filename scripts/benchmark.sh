@@ -1,12 +1,25 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 SERVER_URL="${SERVER_URL:-http://localhost:8080}"
 PROMPT="The quick brown fox jumps over the lazy dog."
 MAX_TOKENS=100
 CONCURRENT=1
 
+if ! command -v jq &> /dev/null; then
+    echo "Error: jq is required but not installed. Please install jq."
+    exit 1
+fi
+
+MODEL_ID=$(curl -sf "$SERVER_URL/v1/models" | jq -r '.data[] | select(.status.value == "loaded") | .id' | head -n 1)
+if [ -z "$MODEL_ID" ]; then
+    echo "Error: No model is currently loaded on the server."
+    echo "Please load a model first: ./scripts/switch-model-v2.sh load <model-name>"
+    exit 1
+fi
+
 echo "=== LLM Server Benchmark ==="
+echo "Model: $MODEL_ID"
 echo "Server URL: $SERVER_URL"
 echo "Prompt: $PROMPT"
 echo "Max tokens: $MAX_TOKENS"
@@ -19,7 +32,7 @@ START_TIME=$(date +%s%N)
 RESPONSE=$(curl -s -X POST "$SERVER_URL/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -d "{
-    \"model\": \"model\",
+    \"model\": \"$MODEL_ID\",
     \"messages\": [{\"role\": \"user\", \"content\": \"$PROMPT\"}],
     \"max_tokens\": $MAX_TOKENS,
     \"temperature\": 0.7,
@@ -27,9 +40,14 @@ RESPONSE=$(curl -s -X POST "$SERVER_URL/v1/chat/completions" \
   }")
 END_TIME=$(date +%s%N)
 
+if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+    echo "Error from server: $(echo "$RESPONSE" | jq -r '.error.message // .error')"
+    exit 1
+fi
+
 ELAPSED_MS=$(( (END_TIME - START_TIME) / 1000000 ))
 TOTAL_TOKENS=$(echo "$RESPONSE" | jq -r '.usage.total_tokens')
-TPS=$(echo "scale=2; $TOTAL_TOKENS / ($ELAPSED_MS / 1000)" | bc)
+TPS=$(awk "BEGIN {printf \"%.2f\", $TOTAL_TOKENS / ($ELAPSED_MS / 1000)}")
 
 echo "Elapsed time: ${ELAPSED_MS}ms"
 echo "Total tokens: $TOTAL_TOKENS"
@@ -43,11 +61,16 @@ TIMING=$(curl -s -X POST "$SERVER_URL/completion" \
     \"prompt\": \"$PROMPT\",
     \"n_predict\": $MAX_TOKENS,
     \"temperature\": 0.7,
-    \"stream\": false
+    \"stream\": false,
+    \"model\": \"$MODEL_ID\"
   }" | jq '.timings')
 
-echo "Timings:"
-echo "$TIMING" | jq
+if [ "$TIMING" = "null" ] || [ -z "$TIMING" ]; then
+    echo "Timings: not available (router mode)"
+else
+    echo "Timings:"
+    echo "$TIMING" | jq
+fi
 
 # Concurrent requests (if specified)
 if [ "$CONCURRENT" -gt 1 ]; then
@@ -58,7 +81,7 @@ if [ "$CONCURRENT" -gt 1 ]; then
         curl -s -X POST "$SERVER_URL/v1/chat/completions" \
           -H "Content-Type: application/json" \
           -d "{
-            \"model\": \"model\",
+            \"model\": \"$MODEL_ID\",
             \"messages\": [{\"role\": \"user\", \"content\": \"$PROMPT $i\"}],
             \"max_tokens\": $MAX_TOKENS,
             \"temperature\": 0.7,

@@ -2,22 +2,10 @@
 set -euo pipefail
 
 SERVER_URL="${LLAMA_SERVER_URL:-http://localhost:8080}"
-ACTION="${2:-swap}"
-if [ "${1:-}" = "list" ] || [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
-    ACTION="$1"
-    MODEL_ID="${2:-}"
-else
-    MODEL_ID="$1"
-fi
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
-
-log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+ARG1="${1:-}"
+ARG2="${2:-}"
+KNOWN_ACTIONS="list load unload swap status"
 
 usage() {
     echo "Usage: $0 <model-id> [action]"
@@ -40,6 +28,32 @@ usage() {
     echo "  LLAMA_SERVER_URL  Server URL (default: http://localhost:8080)"
     exit 1
 }
+
+if [ -z "$ARG1" ] || [ "$ARG1" = "--help" ] || [ "$ARG1" = "-h" ]; then
+    usage
+fi
+
+if echo "$KNOWN_ACTIONS" | grep -qw -- "$ARG1"; then
+    if [ -n "$ARG2" ]; then
+        MODEL_ID="$ARG2"
+        ACTION="$ARG1"
+    else
+        MODEL_ID=""
+        ACTION="$ARG1"
+    fi
+else
+    MODEL_ID="$ARG1"
+    ACTION="${ARG2:-swap}"
+fi
+
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 check_server() {
     if ! curl -sf "${SERVER_URL}/health" > /dev/null 2>&1; then
@@ -187,20 +201,36 @@ case "$ACTION" in
         ;;
     status)
         if [ -z "$MODEL_ID" ]; then usage; fi
+        if echo "$KNOWN_ACTIONS" | grep -qw "$MODEL_ID"; then
+            log_error "'$MODEL_ID' is an action, not a model name. Did you mean \`$0 $MODEL_ID\`?"
+            exit 1
+        fi
         do_status "$MODEL_ID"
         ;;
     load)
         if [ -z "$MODEL_ID" ]; then usage; fi
+        if echo "$KNOWN_ACTIONS" | grep -qw "$MODEL_ID"; then
+            log_error "'$MODEL_ID' is an action, not a model name. Did you mean \`$0 $MODEL_ID\`?"
+            exit 1
+        fi
         check_server
         do_load "$MODEL_ID"
         ;;
     unload)
         if [ -z "$MODEL_ID" ]; then usage; fi
+        if echo "$KNOWN_ACTIONS" | grep -qw "$MODEL_ID"; then
+            log_error "'$MODEL_ID' is an action, not a model name. Did you mean \`$0 $MODEL_ID\`?"
+            exit 1
+        fi
         check_server
         do_unload "$MODEL_ID"
         ;;
     swap)
         if [ -z "$MODEL_ID" ]; then usage; fi
+        if echo "$KNOWN_ACTIONS" | grep -qw "$MODEL_ID"; then
+            log_error "'$MODEL_ID' is an action, not a model name. Did you mean \`$0 $MODEL_ID\`?"
+            exit 1
+        fi
         do_swap "$MODEL_ID"
         ;;
     *)
