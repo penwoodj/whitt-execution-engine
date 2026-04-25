@@ -246,19 +246,29 @@ async fn one_shot_chat(
     if !no_stream {
         let mut stream = client.chat_completion_stream(request).await?;
         let mut full_response = String::new();
+        let mut reasoning_buffer = String::new();
 
         while let Some(item) = stream.next().await {
             let chunk = item?;
             for choice in &chunk.choices {
-                if let Some(ref content) = choice.delta.reasoning_content {
-                    eprint!("[think] {}", content);
+                if let Some(ref reasoning) = choice.delta.reasoning_content {
+                    reasoning_buffer.push_str(reasoning);
                 }
                 if let Some(ref content) = choice.delta.content {
+                    if !reasoning_buffer.is_empty() {
+                        eprintln!("\x1b[2m[thinking]\x1b[0m");
+                        eprintln!("\x1b[2m{}\x1b[0m", reasoning_buffer.trim());
+                        reasoning_buffer.clear();
+                    }
                     print!("{}", content);
                     std::io::stdout().flush().ok();
                     full_response.push_str(content);
                 }
             }
+        }
+        if !reasoning_buffer.is_empty() {
+            eprintln!("\x1b[2m[thinking]\x1b[0m");
+            eprintln!("\x1b[2m{}\x1b[0m", reasoning_buffer.trim());
         }
         println!();
 
@@ -328,7 +338,7 @@ async fn repl_chat(
 
         if trimmed.starts_with('/') {
             match parse_command(trimmed) {
-                Some(Cmd::Exit | Cmd::Quit) => {
+                Some(Cmd::Exit) => {
                     println!("Exiting...");
                     break;
                 }
@@ -381,18 +391,28 @@ async fn repl_chat(
         print!("Assistant: ");
         std::io::stdout().flush().ok();
 
+        let mut reasoning_buffer = String::new();
         while let Some(item) = stream.next().await {
             let chunk = item?;
             for choice in &chunk.choices {
                 if let Some(ref reasoning) = choice.delta.reasoning_content {
-                    eprint!("[think] {}", reasoning);
+                    reasoning_buffer.push_str(reasoning);
                 }
                 if let Some(ref content) = choice.delta.content {
+                    if !reasoning_buffer.is_empty() {
+                        eprintln!("\n\x1b[2m[thinking]\x1b[0m");
+                        eprintln!("\x1b[2m{}\x1b[0m", reasoning_buffer.trim());
+                        reasoning_buffer.clear();
+                    }
                     print!("{}", content);
                     std::io::stdout().flush().ok();
                     full_response.push_str(content);
                 }
             }
+        }
+        if !reasoning_buffer.is_empty() {
+            eprintln!("\n\x1b[2m[thinking]\x1b[0m");
+            eprintln!("\x1b[2m{}\x1b[0m", reasoning_buffer.trim());
         }
         println!();
 
@@ -404,7 +424,6 @@ async fn repl_chat(
 
 enum Cmd {
     Exit,
-    Quit,
     Model(String),
     System(String),
     Clear,

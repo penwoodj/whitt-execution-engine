@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
 use whitt_execution_engine::client::http_client::LlamaHttpClient;
 use whitt_execution_engine::client::model_download::download_model_from_hf;
@@ -198,7 +198,7 @@ async fn execute_step(
 
     let effective_input = if user_input.len() > config.max_input_chars {
         let truncated = &user_input[..config.max_input_chars];
-        warn!(
+        debug!(
             "Input truncated from {} to {} chars for {}",
             user_input.len(),
             config.max_input_chars,
@@ -347,7 +347,7 @@ async fn main() -> Result<()> {
         hf_filename: Some("tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf".to_string()),
         local_filename: Some("tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf".to_string()),
         max_tokens: 200,
-        max_input_chars: 500,
+        max_input_chars: 4096,
     };
 
     let summarizer_result =
