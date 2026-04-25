@@ -16,7 +16,7 @@ cargo build --bin whitt --bin model_chain --bin poc_client --features client
 Run unit tests:
 ```bash
 cargo test --features client
-# Expected: test result: ok. 2 passed; 0 failed; 14 ignored
+# Expected: test result: ok. 5 passed; 0 failed; 14 ignored
 # (14 integration tests need live server; ignored when no server detected by test harness)
 ```
 
@@ -153,7 +153,8 @@ If file exists at destination: Error message "File already exists: <path>".
 ```
 
 Expected: Step-by-step output showing thinking, tool calls (model_list), and final answer.
-Note: 0.5B models struggle with ReAct format. Works mechanically but may produce malformed tool calls.
+
+⚠️ DEPRECATED for POC. 0.5B models cannot reliably follow ReAct JSON format. This is a known limitation, not a bug. Needs 7B+ model for reliable agent output. Tracked for future scope.
 
 Agent available tools: model_list, model_load, model_unload, chat, file_read, final_answer.
 
@@ -181,7 +182,7 @@ Each step: load model → chat → unload model. Full logs printed.
 ./target/debug/whitt chat "Say hello in one word" --no-stream
 ```
 
-Expected: May show `[reasoning]` prefix if model uses reasoning tokens, or direct answer.
+Expected: Reasoning tokens are buffered and displayed as a single `[thinking]` block (dim text) before the response. No more per-word `[think]` prefix.
 SmolLM3 is a THINKING model — output goes to `reasoning_content` field. With low max_tokens (default 512), most tokens consumed by reasoning. Not a bug.
 
 ---
@@ -204,8 +205,93 @@ These still work but are superseded by `whitt` CLI:
 
 ---
 
+## 10. YAML Configuration System
+
+### 10.1 Config File Locations (Priority: highest → lowest)
+
+| Priority | Path | Scope |
+|----------|------|-------|
+| 1 (highest) | CLI flags | Per-invocation |
+| 2 | `configs/models/<model-name>.yml` | Per-model override |
+| 3 | `~/.config/whitt/config.yml` | Machine-wide |
+| 4 | `/config/config.yml` | Docker-mounted |
+| 5 (lowest) | Rust struct defaults | Built-in |
+
+### 10.2 Available YAML Properties
+
+All map to llama.cpp CLI flags via `LLAMA_ARG_*` env vars. Key sections:
+
+- **model**: path, huggingface.repo, huggingface.filename, quantization
+- **context**: size (default 2048), batch_size (2048), ubatch_size (512)
+- **hardware**: threads (4), gpu_layers (999), use_mmap (true)
+- **sampling**: temperature (0.80), top_p (0.95), top_k (40), repeat_penalty (1.00), max_tokens (512)
+- **server**: host (127.0.0.1), port (8080), parallel (false), max_slots (8)
+- **cache**: cache_type_k (f16), cache_type_v (f16)
+- **vulkan**: visible_devices ("0"), flash_attention (None)
+- **features**: log_level (info), verbose (false)
+
+Full schema: see `src/config/mod.rs` struct definitions.
+
+### 10.3 Config Merge Behavior
+
+When multiple config sources exist, they merge field-by-field. The model section is entirely replaced by the highest-priority source. All other sections merge: fields present in higher-priority source override the same field from lower-priority source; fields NOT present are preserved from lower-priority source.
+
+### 10.4 QA Steps
+
+**QA-C1: Default config load**
+```bash
+RUST_LOG=info ./target/debug/whitt server
+# Expected: shows loaded config or falls back to defaults
+```
+
+**QA-C2: Machine-wide config**
+```bash
+mkdir -p ~/.config/whitt
+cat > ~/.config/whitt/config.yml << 'EOF'
+model:
+  path: /models/qwen2.5-0.5b-instruct-q4_k_m.gguf
+sampling:
+  temperature: 0.42
+EOF
+RUST_LOG=info ./target/debug/whitt server
+# Expected: logs "Loaded machine-wide config", temperature=0.42
+```
+
+**QA-C3: Per-model override**
+```bash
+cat > configs/models/SmolLM3-Q4_K_M.yml << 'EOF'
+model:
+  path: /models/SmolLM3-Q4_K_M.gguf
+sampling:
+  temperature: 0.60
+  max_tokens: 2048
+EOF
+./target/debug/whitt model swap SmolLM3-Q4_K_M
+# Expected: loads with temperature=0.60, max_tokens=2048
+```
+
+**QA-C4: Graceful degradation**
+```bash
+rm -rf ~/.config/whitt/config.yml
+rm -f configs/models/SmolLM3-Q4_K_M.yml
+./target/debug/whitt server
+# Expected: works fine with defaults
+```
+
+**QA-C5: Docker config reload**
+```bash
+# Edit config.yml, then restart container:
+docker compose down && docker compose up -d
+# Note: llama.cpp does NOT support hot-reload. Restart required.
+```
+
+---
+
 ## Known Limitations
 
+- **Config Hot Reload**: llama.cpp upstream does not support live config changes. Container restart required.
+- **Per-Model Configs**: `configs/models/*.yml` files exist as reference examples but are not yet wired into the Docker container's entrypoint. Only the `whitt` CLI uses `ConfigLoader` directly.
+- **Config Validation**: No JSON Schema validation yet. Invalid YAML keys are silently ignored by serde defaults.
 - **Agent ReAct**: 0.5B models can't reliably follow ReAct JSON format. Needs 7B+ for reliable agent output.
 - **SmolLM3**: THINKING model consumes all max_tokens on reasoning. Increase `--max-tokens` for content output.
 - **amdgpu-container-cli**: Not installed, needs root. Legacy `/dev/dri` passthrough works fine.
