@@ -10,22 +10,22 @@
 
 | # | QA Area | Schema Ref | Status | Priority |
 |---|---------|------------|--------|----------|
-| 1 | Provider Config Parsing (serde-saphyr) | Lines 27-57 (providers) | 🔴 Pending | P0 |
-| 2 | Provider Config Validation (garde) | Lines 27-57 (providers) | 🔴 Pending | P0 |
+| 1 | Provider Config Parsing (serde-saphyr) | Lines 27-57 (providers) | ✅ PASS | P0 |
+| 2 | Provider Config Validation (garde) | Lines 27-57 (providers) | ✅ PASS | P0 |
 | 3 | LlmBackend Trait | Lines 27-57 (providers) | 🔴 Pending | P0 |
-| 4 | LlamaCppVulkanBackend Implementation | Lines 56-57 (llama_cpp_with_vulkan) | 🔴 Pending | P0 |
-| 5 | Config Resolution Hierarchy | Lines 503-598 (workflow_execution_strategy) | 🔴 Pending | P0 |
-| 6 | Model Schema Parsing | Lines 64-158 (models) | 🔴 Pending | P0 |
+| 4 | LlamaCppVulkanBackend Implementation | Lines 56-57 (llama_cpp_with_vulkan) | ✅ PASS | P0 |
+| 5 | Config Resolution Hierarchy | Lines 503-598 (workflow_execution_strategy) | ⚠️ PARTIAL | P0 |
+| 6 | Model Schema Parsing | Lines 64-158 (models) | ✅ PASS | P0 |
 | 7 | Model Registry Lifecycle | Lines 64-158 (models) | 🔴 Pending | P0 |
-| 8 | Resource Management | Lines 74-88 (ram_allocation, max_allowed, min_allowed) | 🔴 Pending | P1 |
-| 9 | Template Interpolation (Minijinja) | Lines 726-740 (variable_interpolation) | 🔴 Pending | P0 |
+| 8 | Resource Management | Lines 74-88 (ram_allocation, max_allowed, min_allowed) | ✅ PASS | P1 |
+| 9 | Template Interpolation (Minijinja) | Lines 726-740 (variable_interpolation) | ✅ PASS | P0 |
 | 10 | ReAct Agent Tool Loop | Lines 196-497 (agentic_workflow steps) | 🔴 Pending | P0 |
-| 11 | Tool Definitions (6 tools) | Lines 606-676 (tool_permissions) | 🔴 Pending | P0 |
+| 11 | Tool Definitions (6 tools) | Lines 606-676 (tool_permissions) | ✅ PASS | P0 |
 | 12 | Step Executor with Retry | Lines 245-268 (retry configuration) | 🔴 Pending | P0 |
 | 13 | SSE Streaming | Lines 196-497 (agentic_workflow execution) | 🔴 Pending | P1 |
-| 14 | Workflow Persistence (Treadle) | Lines 568-583 (checkpointing) | 🔴 Pending | P1 |
+| 14 | Workflow Persistence (Treadle) | Lines 568-583 (checkpointing) | ⚠️ PARTIAL | P1 |
 | 15 | Tool Sandboxing (Landlock/namespace) | Lines 606-676 (tool_permissions restrictions) | 🔴 Pending | P2 |
-| 16 | Mock Testing (HTTP mock server) | N/A (implementation detail) | 🔴 Pending | P1 |
+| 16 | Mock Testing (HTTP mock server) | N/A (implementation detail) | 🔵 DEFERRED | P1 |
 | 17 | Schema Version Validation | Lines 14-20, 803-805 (schema_version, min_schema_version) | 🔴 Pending | P0 |
 | 18 | End-to-End Integration | Lines 14-805 (full schema) | 🔴 Pending | P0 |
 | 19 | CLI Integration | Lines 196-497 (agentic_workflow) | 🔴 Pending | P0 |
