@@ -403,16 +403,19 @@ a:
 
 ## Test Execution Checklist
 
-- [ ] YAML-001: Load Project Config
-- [ ] YAML-002: Per-Model Config Auto-Load
-- [ ] YAML-003: CLI Flag Override
-- [ ] YAML-004: Config Validation
-- [ ] YAML-005: Missing Config Graceful Degradation
-- [ ] YAML-006: Config Merge Preserves Fields
-- [ ] YAML-007: All Sampling Flags from CLI
-- [ ] YAML-008: Per-Model Cache Type Override
-- [ ] YAML-009: Vulkan Env Vars from Config
-- [ ] YAML-010: Default Values on Omitted Fields
+- [x] YAML-001: Load Project Config — ✅ PASS
+- [x] YAML-002: Per-Model Config Auto-Load — ✅ PASS (bug fixed: clap defaults)
+- [x] YAML-003: CLI Flag Override — ✅ PASS (bug fixed: clap defaults)
+- [x] YAML-004: Config Validation — ✅ PASS (bug fixed: warn→bail, post-merge check)
+- [x] YAML-005: Missing Config Graceful Degradation — ✅ PASS
+- [x] YAML-006: Config Merge Preserves Fields — ✅ PASS
+- [x] YAML-007: All Sampling Flags from CLI — ✅ PASS
+- [x] YAML-008: Per-Model Cache Type Override — ✅ PASS
+- [x] YAML-009: Vulkan Env Vars from Config — ✅ PASS
+- [x] YAML-010: Default Values on Omitted Fields — ✅ PASS
+
+**QA Pass Date**: 2026-04-25
+**All 10/10 tests passing.**
 
 ---
 

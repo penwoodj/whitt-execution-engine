@@ -121,15 +121,22 @@ Comprehensive QA coverage for all POC functionality.
 - Config validation (range checks via garde)
 - Env var translation (YAML → LLAMA_ARG_*)
 
-**Status**: CONFIRMED WORKING
+**Status**: CONFIRMED WORKING (bugs fixed in QA pass 2026-04-25)
 
-**Tested and confirmed**:
+**Bugs found and fixed** (see docs/qa/findings/ for details):
+1. Config validation used warn! instead of bail! — invalid values accepted silently (YAML-004)
+2. CLI args had clap default_value — per-model config never applied (YAML-002/003)
+3. No post-merge validation — CLI args bypassed config validation (YAML-004)
+
+**Tested and confirmed** (post-fix):
 - Config loads correctly from project root `config.yml`
-- Per-model overrides apply when model swapped
+- Per-model overrides apply when model swapped (temp, max_tokens, ctx verified)
 - Merge behavior verified: CLI overrides per-model overrides machine-wide overrides project overrides defaults
 - Non-overridden fields preserved from lower-priority sources
-- Validation catches out-of-range values (temperature, context size, etc.)
+- Validation catches out-of-range values (temperature, context size, etc.) — hard reject with bail!
+- Post-merge validation catches invalid CLI overrides
 - Env var translation produces correct LLAMA_ARG_* values
+- All 25 clippy warnings resolved (see docs/qa/findings/CLIPPY-001)
 
 **Known issues/limitations**:
 - Invalid YAML keys are silently ignored by serde defaults (no JSON Schema validation yet)
@@ -266,11 +273,11 @@ Comprehensive QA coverage for all POC functionality.
 | 2. Model Management | CONFIRMED WORKING | ✅ All models tested |
 | 3. Chat | CONFIRMED WORKING | ✅ All flags tested |
 | 4. Agent ReAct | CONFIRMED WORKING (CPU) | ✅ 7B model verified |
-| 5. YAML Configuration | CONFIRMED WORKING | ✅ Merge behavior verified |
+| 5. YAML Configuration | CONFIRMED WORKING | ✅ 10/10 tests pass, 3 bugs fixed |
 | 6. Model Chain | CONFIRMED WORKING | ✅ 3-step chain verified |
 | 7. Benchmark | CONFIRMED WORKING | ✅ TPS measured |
 | 8. Download | CONFIRMED WORKING | ✅ Downloads verified |
 | 9. SmolLM3 Thinking | CONFIRMED WORKING | ✅ Reasoning blocks verified |
 | 10. Docker Infrastructure | CONFIRMED WORKING | ✅ AMD GPU tested |
 
-**Overall POC Status**: CONFIRMED WORKING
+**Overall POC Status**: CONFIRMED WORKING (QA pass 2026-04-25: 3 bugs found and fixed, 25 clippy warnings resolved)
