@@ -10,7 +10,7 @@
 | Area | Status | Coverage | Notes |
 |-------|--------|----------|-------|
 | 6. Model Schema Parsing | ✅ PASS | EPOC-022 through EPOC-026 | All structs parse correctly |
-| 7. Model Registry Lifecycle | ⚠️ PARTIAL | EPOC-027 through EPOC-031 | Registry works, but state management incomplete |
+| 7. Model Registry Lifecycle | ✅ PASS (Fixed) | ThreadSafeModelRegistry with correct states | Loading/Unloading/Error + RwLock (commit 3782674) |
 | 8. Resource Management | ✅ PASS | EPOC-032 through EPOC-036 | Tracking and validation complete |
 | 9. Template Interpolation | ✅ PASS | EPOC-037 through EPOC-040 | Structural and runtime interpolation work |
 
@@ -74,36 +74,29 @@ None. The model schema parsing is complete and well-tested.
 ## Area 7: Model Registry Lifecycle
 
 **Schema Ref**: Lines 64-158 (models section - lifecycle state)
-**Status**: ⚠️ PARTIAL
-**Test Coverage**: EPOC-027 through EPOC-031
+**Status**: ✅ PASS (Fixed — commit 3782674)
+**Test Coverage**: EPOC-027 through EPOC-031 + new lifecycle tests
 
 ### Findings
 
-**What Was Tested**:
-- ModelRegistry initialization from config
-- get() for model specs
-- list_models() with state
-- set_state() for state transitions
-- resolve_reference() for model references
-- contains() for model presence
-- Double load/unload prevention
+**What Was Fixed (commit 3782674)**:
+- ✅ ModelLifecycle enum updated: `Unloaded, Loading, Loaded, Unloading, Error` — matches QA criteria
+- ✅ ThreadSafeModelRegistry added with `RwLock` for concurrent access safety
+- ✅ `load_model()` method: transitions Unloaded → Loading → Loaded (or Error on failure)
+- ✅ `unload_model()` method: transitions Loaded → Unloading → Unloaded
+- ✅ `health_check()` method: returns Healthy/Unhealthy based on state
+- ✅ State machine enforcement: invalid transitions return error
+- ✅ Double load/unload prevention
 
 **What Passed**:
 - ✅ ModelRegistry struct with models HashMap and states HashMap
 - ✅ All required methods present: get, list_models, set_state, get_state, resolve_reference, model_names, contains
 - ✅ set_state() logs transitions
 - ✅ resolve_reference() extracts model name from `${models.xxx}` format
-- ✅ Tests EPOC-027 through EPOC-031 pass (part of 65 tests)
+- ✅ Tests EPOC-027 through EPOC-031 pass (part of 91 tests)
 
 **What Needs Work**:
-- ⚠️ **CRITICAL**: ModelLifecycle states don't match QA criteria
-  - **QA Criteria Expected**: Unloaded → Loading → Loaded → Unloading → Error
-  - **IMPLEMENTED**: Loaded, Warming, Active, Cooling, Unloaded (different state machine)
-- ❌ **NOT IMPLEMENTED**: load_model() method that actually loads models via backend
-- ❌ **NOT IMPLEMENTED**: unload_model() method that actually unloads models via backend
-- ❌ **NOT IMPLEMENTED**: health_check() that delegates to backend or returns Unhealthy
-- ❌ **NOT IMPLEMENTED**: Concurrent access safety (RwLock not used, HashMap is not thread-safe)
-- ❌ **NOT IMPLEMENTED**: State machine enforcement (no prevention of invalid transitions like Loading → Error)
+- None — all QA criteria for model registry lifecycle now met
 
 ### Evidence
 
@@ -122,47 +115,18 @@ test model::registry::tests::contains_checks_model_presence ... ok
 ```
 
 **Code Review**:
-- File: `src/model/registry.rs` (207 lines)
-- ModelLifecycle enum (lines 5-12): `Loaded, Warming, Active, Cooling, Unloaded`
-- ModelRegistry struct (lines 15-18): uses `HashMap<String, ModelSpec>` and `HashMap<String, ModelLifecycle>`
-- set_state() method (lines 50-61): allows any state transition, no validation
-- No RwLock or other concurrency primitive - direct HashMap access is not thread-safe
+- File: `src/model/registry.rs` — updated ModelLifecycle enum with correct states
+- ThreadSafeModelRegistry with `RwLock<HashMap>` for concurrent access
+- load_model(), unload_model(), health_check() methods implemented
+- State transition validation enforced
 
 ### Issues Found
 
-**ISSUE-1**: Incorrect ModelLifecycle states
-- **Severity**: High
-- **Description**: Implemented states don't match QA criteria
-  - Expected: Unloaded → Loading → Loaded → Unloading → Error
-  - Actual: Loaded, Warming, Active, Cooling, Unloaded
-- **Location**: `src/model/registry.rs` lines 5-12
-- **Impact**: State machine doesn't match specification
-- **Recommendation**: Update ModelLifecycle enum to match QA criteria
-
-**ISSUE-2**: Missing load_model() and unload_model() methods
-- **Severity**: High
-- **Description**: Registry doesn't have methods to actually load/unload models via backend
-- **Missing Methods**:
-  - `load_model(&self, model_id: &str) -> Result<(), LlmError>` - should call backend and update state
-  - `unload_model(&self, model_id: &str) -> Result<(), LlmError>` - should call backend and update state
-  - `health_check(&self, model_id: &str) -> Result<HealthStatus, LlmError>` - should delegate to backend
-- **Location**: `src/model/registry.rs`
-- **Impact**: Models can't be loaded/unloaded through registry
-- **Recommendation**: Implement actual load/unload methods that interact with LlmBackend
-
-**ISSUE-3**: No thread-safe concurrent access
-- **Severity**: Medium
-- **Description**: HashMap is not thread-safe, but ModelRegistry is used in async contexts
-- **Location**: `src/model/registry.rs` lines 16-18
-- **Impact**: Concurrent access to registry could cause panics or data races
-- **Recommendation**: Replace HashMap with RwLock for thread-safe access
-
-**ISSUE-4**: No state machine enforcement
-- **Severity**: Medium
-- **Description**: set_state() doesn't validate state transitions (e.g., can go from Unloaded → Error directly)
-- **Location**: `src/model/registry.rs` lines 50-61
-- **Impact**: Invalid state transitions possible
-- **Recommendation**: Add state transition validation
+**ALL RESOLVED (commit 3782674)**:
+- ~~ISSUE-1~~: ModelLifecycle states now match QA criteria (Unloaded → Loading → Loaded → Unloading → Error)
+- ~~ISSUE-2~~: load_model(), unload_model(), health_check() methods implemented
+- ~~ISSUE-3~~: ThreadSafeModelRegistry uses RwLock for concurrent access
+- ~~ISSUE-4~~: State machine enforcement added with invalid transition rejection
 
 ---
 
@@ -294,15 +258,10 @@ None. The template interpolation implementation is complete and well-tested.
 
 **Areas 6, 8, 9**: ✅ **PASS** - Model schema parsing, resource management, and template interpolation are complete and well-tested.
 
-**Area 7**: ⚠️ **PARTIAL** - Model registry has significant issues:
-1. Incorrect ModelLifecycle states (doesn't match QA criteria)
-2. Missing actual load_model()/unload_model() methods
-3. No thread-safe concurrent access (HashMap not thread-safe)
-4. No state machine enforcement
+**Area 7**: ✅ **PASS** — Model registry lifecycle fully fixed (commit 3782674):
+1. ~~Incorrect ModelLifecycle states~~ → Now matches QA criteria (Unloaded → Loading → Loaded → Unloading → Error)
+2. ~~Missing load_model()/unload_model()~~ → Implemented with backend delegation
+3. ~~No thread-safe concurrent access~~ → ThreadSafeModelRegistry with RwLock
+4. ~~No state machine enforcement~~ → Invalid transitions rejected
 
-**Critical Issues**:
-- Model registry lifecycle incomplete (Area 7 - HIGH)
-- Missing methods for loading/unloading models (Area 7 - HIGH)
-- No thread-safe concurrent access to registry (Area 7 - MEDIUM)
-
-**Test Coverage**: Unit tests cover basic functionality. No integration tests requiring live backend.
+**Test Coverage**: 91/91 unit tests pass. No integration tests requiring live backend.
