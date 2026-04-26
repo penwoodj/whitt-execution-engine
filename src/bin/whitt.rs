@@ -6,7 +6,7 @@ use futures::StreamExt;
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use whitt_execution_engine::client::http_client::LlamaHttpClient;
 use whitt_execution_engine::client::model_download::download_model_from_hf;
@@ -45,13 +45,13 @@ enum Commands {
         #[arg(long)]
         system: Option<String>,
 
-        /// Temperature (0.0-2.0)
-        #[arg(long, default_value = "0.7")]
-        temperature: f32,
+        /// Temperature (0.0-2.0). Overrides per-model config.
+        #[arg(long)]
+        temperature: Option<f32>,
 
-        /// Max tokens to generate
-        #[arg(long, default_value = "512")]
-        max_tokens: usize,
+        /// Max tokens to generate. Overrides per-model config.
+        #[arg(long)]
+        max_tokens: Option<usize>,
 
         /// Top-p (nucleus) sampling (0.0-1.0)
         #[arg(long)]
@@ -230,13 +230,14 @@ async fn main() -> Result<()> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn chat_command(
     url: &str,
     model: Option<String>,
     prompt: Option<String>,
     system: Option<String>,
-    temperature: f32,
-    max_tokens: usize,
+    temperature: Option<f32>,
+    max_tokens: Option<usize>,
     top_p: Option<f32>,
     top_k: Option<usize>,
     repeat_penalty: Option<f32>,
@@ -273,14 +274,23 @@ async fn chat_command(
             whitt_execution_engine::config::LlamaConfig::default()
         });
 
-    let temperature = temperature;
-    let max_tokens = max_tokens;
+    model_config.validate_config()?;
+
+    let temperature = temperature.unwrap_or(model_config.sampling.temperature);
+    let max_tokens = max_tokens.unwrap_or(model_config.sampling.max_tokens);
     let top_p = top_p.or(Some(model_config.sampling.top_p));
     let top_k = top_k.or(Some(model_config.sampling.top_k));
     let repeat_penalty = repeat_penalty.or(Some(model_config.sampling.repeat_penalty));
     let presence_penalty = presence_penalty.or(model_config.sampling.presence_penalty);
     let frequency_penalty = frequency_penalty.or(model_config.sampling.frequency_penalty);
     let seed = seed.or(Some(model_config.sampling.seed));
+
+    if !(0.0..=2.0).contains(&temperature) {
+        anyhow::bail!("temperature must be between 0.0 and 2.0, got {}", temperature);
+    }
+    if max_tokens < 1 {
+        anyhow::bail!("max_tokens must be >= 1, got {}", max_tokens);
+    }
 
     if let Some(p) = prompt {
         one_shot_chat(&client, &model_id, p, system, temperature, max_tokens, top_p, top_k, repeat_penalty, presence_penalty, frequency_penalty, stop, seed, no_stream, save).await
@@ -300,6 +310,7 @@ async fn ensure_model_loaded(client: &LlamaHttpClient, model_id: &str) -> Result
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn one_shot_chat(
     client: &LlamaHttpClient,
     model_id: &str,
@@ -328,15 +339,14 @@ async fn one_shot_chat(
         messages: messages.clone(),
         max_tokens: Some(max_tokens),
         temperature: Some(temperature),
-        top_p: top_p,
-        top_k: top_k,
-        repeat_penalty: repeat_penalty,
-        presence_penalty: presence_penalty,
-        frequency_penalty: frequency_penalty,
+        top_p,
+        top_k,
+        repeat_penalty,
+        presence_penalty,
+        frequency_penalty,
         stop: stop.clone(),
-        seed: seed,
+        seed,
         stream: !no_stream,
-        ..Default::default()
     };
 
     tracing::debug!(
@@ -407,6 +417,7 @@ async fn one_shot_chat(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn repl_chat(
     client: &LlamaHttpClient,
     default_model: &str,
@@ -492,15 +503,14 @@ async fn repl_chat(
             messages: messages.clone(),
             max_tokens: Some(max_tokens),
             temperature: Some(temperature),
-            top_p: top_p,
-            top_k: top_k,
-            repeat_penalty: repeat_penalty,
-            presence_penalty: presence_penalty,
-            frequency_penalty: frequency_penalty,
+            top_p,
+            top_k,
+            repeat_penalty,
+            presence_penalty,
+            frequency_penalty,
             stop: stop.clone(),
-            seed: seed,
+            seed,
             stream: true,
-            ..Default::default()
         };
 
         let mut stream = client.chat_completion_stream(request).await?;
@@ -550,7 +560,7 @@ enum Cmd {
 
 fn parse_command(line: &str) -> Option<Cmd> {
     let parts: Vec<&str> = line.splitn(2, ' ').collect();
-    match parts.get(0) {
+    match parts.first() {
         Some(&"/exit") | Some(&"/quit") => Some(Cmd::Exit),
         Some(&"/model") => parts.get(1).map(|m| Cmd::Model(m.to_string())),
         Some(&"/system") => parts.get(1).map(|s| Cmd::System(s.to_string())),
@@ -567,7 +577,7 @@ async fn model_command(url: &str, action: ModelAction) -> Result<()> {
         ModelAction::List => {
             let models = client.list_models().await?;
             println!("Models:");
-            println!("{:<50} {}", "ID", "STATUS");
+            println!("{:<50} STATUS", "ID");
             println!("{}", "-".repeat(60));
             for model in &models {
                 println!("{:<50} {}", model.id, model.status.value);
@@ -939,7 +949,7 @@ async fn benchmark_command(url: &str, prompt: Option<String>, max_tokens: usize,
     Ok(())
 }
 
-async fn download_command(repo: &str, file: Option<String>, output: &PathBuf) -> Result<()> {
+async fn download_command(repo: &str, file: Option<String>, output: &Path) -> Result<()> {
     println!("Repo: {}", repo);
 
     let filename = match file {

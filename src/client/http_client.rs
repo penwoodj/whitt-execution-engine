@@ -25,8 +25,8 @@ fn is_retryable(err: &anyhow::Error) -> bool {
         "503",
         "IncompleteMessage",
     ];
-    let mut chain = err.chain();
-    while let Some(source) = chain.next() {
+    let chain = err.chain();
+    for source in chain {
         let msg = source.to_string();
         if targets.iter().any(|t| msg.contains(t)) {
             return true;

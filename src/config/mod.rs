@@ -80,37 +80,36 @@ impl LlamaConfig {
         Self::from_yaml(&contents)
     }
 
-    /// Validate config values. Returns warnings for out-of-range values.
+    /// Validate config values. Returns error for out-of-range values.
     pub fn validate_config(&self) -> anyhow::Result<()> {
         if let Err(e) = Validate::validate(&self.sampling) {
-            tracing::warn!("Sampling config validation: {}", e);
+            anyhow::bail!("Sampling config validation failed: {}", e);
         }
         if let Err(e) = Validate::validate(&self.context) {
-            tracing::warn!("Context config validation: {}", e);
+            anyhow::bail!("Context config validation failed: {}", e);
         }
         Ok(())
     }
 
     /// Translate config to `LLAMA_ARG_*` environment variables.
     pub fn to_env_vars(&self) -> Vec<(String, String)> {
-        let mut vars = Vec::new();
-
-        // Model
-        vars.push((
-            "LLAMA_ARG_MODEL_PATH".into(),
-            self.model.path.display().to_string(),
-        ));
-
-        // Context
-        vars.push(("LLAMA_ARG_CTX_SIZE".into(), self.context.size.to_string()));
-        vars.push((
-            "LLAMA_ARG_BATCH_SIZE".into(),
-            self.context.batch_size.to_string(),
-        ));
-        vars.push((
-            "LLAMA_ARG_UBATCH_SIZE".into(),
-            self.context.ubatch_size.to_string(),
-        ));
+        let mut vars = vec![
+            // Model
+            (
+                "LLAMA_ARG_MODEL_PATH".into(),
+                self.model.path.display().to_string(),
+            ),
+            // Context
+            ("LLAMA_ARG_CTX_SIZE".into(), self.context.size.to_string()),
+            (
+                "LLAMA_ARG_BATCH_SIZE".into(),
+                self.context.batch_size.to_string(),
+            ),
+            (
+                "LLAMA_ARG_UBATCH_SIZE".into(),
+                self.context.ubatch_size.to_string(),
+            ),
+        ];
 
         // Hardware
         if self.hardware.threads > 0 {
@@ -446,35 +445,25 @@ impl Default for CacheConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum CacheType {
     F32,
+    #[default]
     F16,
     Q8_0,
     Q4_0,
 }
 
-impl Default for CacheType {
-    fn default() -> Self {
-        CacheType::F16
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum LogLevel {
     Trace,
     Debug,
+    #[default]
     Info,
     Warn,
     Error,
-}
-
-impl Default for LogLevel {
-    fn default() -> Self {
-        LogLevel::Info
-    }
 }
 
 /// Retry configuration.
@@ -777,7 +766,7 @@ impl ConfigLoader {
         let merged = Self::merge_json_values(base_json, override_json);
         let merged_yaml = serde_saphyr::to_string(&merged).unwrap_or_default();
 
-        serde_saphyr::from_str(&merged_yaml).unwrap_or_else(|_| base)
+        serde_saphyr::from_str(&merged_yaml).unwrap_or(base)
     }
 
     /// Recursively merge JSON values. For objects, override wins per key.
@@ -911,6 +900,6 @@ sampling:
 "#;
         let config: LlamaConfig = serde_saphyr::from_str(yaml).expect("parse");
         let result = config.validate_config();
-        assert!(result.is_ok(), "Validation warns but doesn't fail");
+        assert!(result.is_err(), "Validation must reject temperature 5.0");
     }
 }
