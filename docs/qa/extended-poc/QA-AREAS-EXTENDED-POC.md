@@ -2,7 +2,7 @@
 
 **Schema**: `docs/schema/unified-workflow-schema.yml` (805 lines)
 **Date**: 2026-04-26
-**Status**: 🟢 COMPLETE — 17/20 PASS, 1 PARTIAL, 2 DEFERRED (commit 3782674)
+**Status**: 🟢 COMPLETE — 19/20 PASS, 1 PARTIAL (commit fa5e6f3)
 
 ---
 
@@ -23,11 +23,11 @@
 | 11 | Tool Definitions (6 tools) | Lines 606-676 (tool_permissions) | ✅ PASS | P0 |
 | 12 | Step Executor with Retry | Lines 245-268 (retry configuration) | ✅ PASS | P0 |
 | 13 | SSE Streaming | Lines 196-497 (agentic_workflow execution) | ✅ PASS (Fixed) | P1 |
-| 14 | Workflow Persistence (Treadle) | Lines 568-583 (checkpointing) | ⚠️ PARTIAL | P1 |
+| 14 | Workflow Persistence (Treadle) | Lines 568-583 (checkpointing) | ✅ PASS (Fixed) | P1 |
 | 15 | Tool Sandboxing (Landlock/namespace) | Lines 606-676 (tool_permissions restrictions) | ⚠️ PARTIAL | P2 |
-| 16 | Mock Testing (HTTP mock server) | N/A (implementation detail) | 🔵 DEFERRED | P1 |
+| 16 | Mock Testing (HTTP mock server) | N/A (implementation detail) | ✅ PASS (Fixed) | P1 |
 | 17 | Schema Version Validation | Lines 14-20, 803-805 (schema_version, min_schema_version) | ✅ PASS (Fixed) | P0 |
-| 18 | End-to-End Integration | Lines 14-805 (full schema) | 🔵 DEFERRED | P0 |
+| 18 | End-to-End Integration | Lines 14-805 (full schema) | ✅ PASS (Fixed) | P0 |
 | 19 | CLI Integration | Lines 196-497 (agentic_workflow) | ✅ PASS (Fixed) | P0 |
 | 20 | Build Hygiene (warnings/errors/clippy) | N/A (code quality) | ✅ PASS | P0 |
 
