@@ -1,6 +1,6 @@
-# QA Areas — Extended POC (Provider Config + Model Schema + Agent React)
+# QA Areas — Extended POC
 
-**Plan Suite**: `docs/plans/extended-poc/`
+**Schema**: `docs/schema/unified-workflow-schema.yml` (805 lines)
 **Date**: 2026-04-26
 **Status**: 🔴 NOT STARTED — Pre-implementation QA criteria definition
 
@@ -8,28 +8,28 @@
 
 ## Summary Table
 
-| # | QA Area | Plan Ref | Status | Priority |
-|---|---------|----------|--------|----------|
-| 1 | Provider Config Parsing (serde-saphyr) | 01-provider-config | 🔴 Pending | P0 |
-| 2 | Provider Config Validation (garde) | 01-provider-config | 🔴 Pending | P0 |
-| 3 | LlmBackend Trait | 01-provider-config | 🔴 Pending | P0 |
-| 4 | LlamaCppVulkanBackend Implementation | 01-provider-config | 🔴 Pending | P0 |
-| 5 | Config Resolution Hierarchy | 01-provider-config | 🔴 Pending | P0 |
-| 6 | Model Schema Parsing | 02-model-schema | 🔴 Pending | P0 |
-| 7 | Model Registry Lifecycle | 02-model-schema | 🔴 Pending | P0 |
-| 8 | Resource Management | 02-model-schema | 🔴 Pending | P1 |
-| 9 | Template Interpolation (Minijinja) | 02-model-schema | 🔴 Pending | P0 |
-| 10 | ReAct Agent Tool Loop | 03-agent-react | 🔴 Pending | P0 |
-| 11 | Tool Definitions (6 tools) | 03-agent-react | 🔴 Pending | P0 |
-| 12 | Step Executor with Retry | 03-agent-react | 🔴 Pending | P0 |
-| 13 | SSE Streaming | 03-agent-react | 🔴 Pending | P1 |
-| 14 | Workflow Persistence (Treadle) | 03-agent-react | 🔴 Pending | P1 |
-| 15 | Tool Sandboxing (Sandlock) | 03-agent-react | 🔴 Pending | P2 |
-| 16 | Mock Testing (VidaiMock) | 03-agent-react | 🔴 Pending | P1 |
-| 17 | Schema Version Validation | 00-master-plan | 🔴 Pending | P0 |
-| 18 | End-to-End Integration | 00-master-plan | 🔴 Pending | P0 |
-| 19 | CLI Integration | 03-agent-react | 🔴 Pending | P0 |
-| 20 | Build Hygiene (warnings/errors/clippy) | All | 🔴 Pending | P0 |
+| # | QA Area | Schema Ref | Status | Priority |
+|---|---------|------------|--------|----------|
+| 1 | Provider Config Parsing (serde-saphyr) | Lines 27-57 (providers) | 🔴 Pending | P0 |
+| 2 | Provider Config Validation (garde) | Lines 27-57 (providers) | 🔴 Pending | P0 |
+| 3 | LlmBackend Trait | Lines 27-57 (providers) | 🔴 Pending | P0 |
+| 4 | LlamaCppVulkanBackend Implementation | Lines 56-57 (llama_cpp_with_vulkan) | 🔴 Pending | P0 |
+| 5 | Config Resolution Hierarchy | Lines 503-598 (workflow_execution_strategy) | 🔴 Pending | P0 |
+| 6 | Model Schema Parsing | Lines 64-158 (models) | 🔴 Pending | P0 |
+| 7 | Model Registry Lifecycle | Lines 64-158 (models) | 🔴 Pending | P0 |
+| 8 | Resource Management | Lines 74-88 (ram_allocation, max_allowed, min_allowed) | 🔴 Pending | P1 |
+| 9 | Template Interpolation (Minijinja) | Lines 726-740 (variable_interpolation) | 🔴 Pending | P0 |
+| 10 | ReAct Agent Tool Loop | Lines 196-497 (agentic_workflow steps) | 🔴 Pending | P0 |
+| 11 | Tool Definitions (6 tools) | Lines 606-676 (tool_permissions) | 🔴 Pending | P0 |
+| 12 | Step Executor with Retry | Lines 245-268 (retry configuration) | 🔴 Pending | P0 |
+| 13 | SSE Streaming | Lines 196-497 (agentic_workflow execution) | 🔴 Pending | P1 |
+| 14 | Workflow Persistence (Treadle) | Lines 568-583 (checkpointing) | 🔴 Pending | P1 |
+| 15 | Tool Sandboxing (Landlock/namespace) | Lines 606-676 (tool_permissions restrictions) | 🔴 Pending | P2 |
+| 16 | Mock Testing (HTTP mock server) | N/A (implementation detail) | 🔴 Pending | P1 |
+| 17 | Schema Version Validation | Lines 14-20, 803-805 (schema_version, min_schema_version) | 🔴 Pending | P0 |
+| 18 | End-to-End Integration | Lines 14-805 (full schema) | 🔴 Pending | P0 |
+| 19 | CLI Integration | Lines 196-497 (agentic_workflow) | 🔴 Pending | P0 |
+| 20 | Build Hygiene (warnings/errors/clippy) | N/A (code quality) | 🔴 Pending | P0 |
 
 ---
 
@@ -37,19 +37,19 @@
 
 ### Area 1: Provider Config Parsing (serde-saphyr)
 
-**Plan**: 01-provider-config.md
+**Schema Ref**: Lines 27-57 (providers section)
 **Files**: `src/config/provider.rs`
 **Criteria**:
-- Parse `providers.llama_cpp_with_vulkan` section from unified YAML
-- All structs deserialize correctly: ProviderConfig, LlamaCppVulkanProvider, LlamaCppConfig, ConnectionConfig, HostingConfig, GpuAllocation, CpuFallback, RequestsConfig, RetryConfig
-- Missing optional fields use correct defaults (e.g., host=localhost, port=8080)
+- Parse `providers` section from unified YAML
+- All structs deserialize correctly: ProviderConfig, LlmStudioProvider, OllamaProvider, LlamaCppVulkanProvider, ConnectionConfig, HostingConfig, GpuAllocation, CpuFallback, RequestsConfig, RetryConfig
+- Missing optional fields use correct defaults (e.g., host=localhost, port varies by provider)
 - serde-saphyr handles merge keys correctly
 - No hardcoded defaults in implementation — all from YAML or struct default functions
 **Test Commands**: See `QA-TEST-PROCEDURES-EXTENDED-POC.md` EPOC-001 through EPOC-005
 
 ### Area 2: Provider Config Validation (garde)
 
-**Plan**: 01-provider-config.md
+**Schema Ref**: Lines 27-57 (providers section)
 **Files**: `src/config/provider.rs`
 **Criteria**:
 - `garde::Validate` annotations enforce range constraints
@@ -64,7 +64,7 @@
 
 ### Area 3: LlmBackend Trait
 
-**Plan**: 01-provider-config.md
+**Schema Ref**: Lines 27-57 (providers section - backend interface requirements)
 **Files**: `src/backend/llm_backend.rs`
 **Criteria**:
 - Trait defined with all 8 methods: chat, chat_stream, list_models, health_check, load_model, unload_model, capabilities, base_url
@@ -77,7 +77,7 @@
 
 ### Area 4: LlamaCppVulkanBackend Implementation
 
-**Plan**: 01-provider-config.md
+**Schema Ref**: Lines 56-57 (llama_cpp_with_vulkan provider)
 **Files**: `src/backend/llama_vulkan.rs`
 **Criteria**:
 - Implements LlmBackend trait fully
@@ -94,7 +94,7 @@
 
 ### Area 5: Config Resolution Hierarchy
 
-**Plan**: 01-provider-config.md
+**Schema Ref**: Lines 503-598 (workflow_execution_strategy) + Lines 27-57 (providers) + Lines 64-158 (models) + Lines 196-497 (agentic_workflow)
 **Criteria**:
 - Resolution order: providers section → per-model overrides → step-level overrides → defaults
 - CLI args still override everything (backward compat from POC 1)
@@ -104,20 +104,20 @@
 
 ### Area 6: Model Schema Parsing
 
-**Plan**: 02-model-schema.md
+**Schema Ref**: Lines 64-158 (models section)
 **Files**: `src/model/schema.rs`
 **Criteria**:
 - Parse `models` section from unified YAML
 - ModelsConfig: global_config_path, default_router, models HashMap
 - ModelSpec: name, host, ram_allocation, max_allowed, min_allowed, model_memory, execution, thinking
 - ResourceLimit: percentage ("13%") and absolute ("3.7GB")
-- All enum variants parse correctly (CacheSize, KvQuantization, AttentionContext, RouterStrategy)
+- All enum variants parse correctly (CacheSize, KvCacheQuantization, AttentionContext, RouterStrategy)
 - ThinkingConfig optional (presence = enabled)
 **Test Commands**: See EPOC-022 through EPOC-026
 
 ### Area 7: Model Registry Lifecycle
 
-**Plan**: 02-model-schema.md
+**Schema Ref**: Lines 64-158 (models section - lifecycle state)
 **Files**: `src/model/registry.rs`
 **Criteria**:
 - ModelState: Unloaded → Loading → Loaded → Unloading → Error
@@ -131,7 +131,7 @@
 
 ### Area 8: Resource Management
 
-**Plan**: 02-model-schema.md
+**Schema Ref**: Lines 74-88 (ram_allocation, max_allowed, min_allowed) + Lines 517-526 (memory management)
 **Files**: `src/model/resource.rs`
 **Criteria**:
 - ResourceManager tracks RAM, VRAM, CPU, GPU allocations
@@ -145,7 +145,7 @@
 
 ### Area 9: Template Interpolation (Minijinja)
 
-**Plan**: 02-model-schema.md
+**Schema Ref**: Lines 726-740 (variable_interpolation syntax)
 **Files**: `src/model/interpolation.rs`
 **Criteria**:
 - `${models.model_name}` resolved at parse time (not runtime)
@@ -157,7 +157,7 @@
 
 ### Area 10: ReAct Agent Tool Loop
 
-**Plan**: 03-agent-react.md
+**Schema Ref**: Lines 196-497 (agentic_workflow steps - generative_agent step pattern)
 **Files**: `src/agent/react.rs`
 **Criteria**:
 - execute_step() runs ReAct loop: LLM call → parse tool call → execute → append → loop
@@ -170,7 +170,7 @@
 
 ### Area 11: Tool Definitions (6 tools)
 
-**Plan**: 03-agent-react.md
+**Schema Ref**: Lines 606-676 (tool_permissions - file, web, shell operations)
 **Files**: `src/agent/tools.rs`
 **Criteria**:
 - model_list: returns JSON array of model IDs
@@ -185,7 +185,7 @@
 
 ### Area 12: Step Executor with Retry
 
-**Plan**: 03-agent-react.md
+**Schema Ref**: Lines 245-268 (retry configuration in agentic_workflow) + Lines 537-556 (error_handling in workflow_execution_strategy)
 **Files**: `src/agent/executor.rs`
 **Criteria**:
 - execute_step() runs with retry logic from RetryConfig
@@ -199,7 +199,7 @@
 
 ### Area 13: SSE Streaming
 
-**Plan**: 03-agent-react.md
+**Schema Ref**: Lines 196-497 (agentic_workflow execution - streaming responses)
 **Files**: `src/agent/streaming.rs`
 **Criteria**:
 - StreamingResponse wraps backend chat_stream()
@@ -211,7 +211,7 @@
 
 ### Area 14: Workflow Persistence (Treadle)
 
-**Plan**: 03-agent-react.md
+**Schema Ref**: Lines 568-583 (checkpointing in workflow_execution_strategy)
 **Files**: `src/agent/persistence.rs`
 **Criteria**:
 - WorkflowPersistence wraps Treadle StateStore
@@ -223,35 +223,37 @@
 - Checkpoint key format: `{workflow_id}.{step_name}`
 **Test Commands**: See EPOC-062 through EPOC-066
 
-### Area 15: Tool Sandboxing (Sandlock)
+### Area 15: Tool Sandboxing (Landlock/namespace)
 
-**Plan**: 03-agent-react.md
+**Schema Ref**: Lines 606-676 (tool_permissions - allowed_paths, forbidden_paths, allowed_commands, etc.)
 **Files**: `src/agent/sandbox.rs`
 **Criteria**:
-- ToolSandbox configures Sandlock: Landlock + seccomp + memory/CPU limits
+- ToolSandbox configures sandboxing using Landlock Linux LSM or namespace-based approach
 - Default: 512MB memory, 30s CPU time, network restricted
-- with_filesystem_access() allows specific paths
-- with_network_access() allows specific domains
-- SandboxedToolExecutor wraps tool execution
+- Filesystem access controlled via allowed_paths and forbidden_paths
+- Network access controlled via allowed_domains and forbidden_domains
+- Shell command access controlled via allowed_commands and forbidden_commands
 - Per-tool sandboxing (not global)
+**Note**: sandlock crate does NOT exist. Sandbox implementation will use Landlock LSM or namespace-based approach.
 **Test Commands**: See EPOC-067 through EPOC-070
 
-### Area 16: Mock Testing (VidaiMock)
+### Area 16: Mock Testing (HTTP mock server)
 
-**Plan**: 03-agent-react.md
-**Files**: `tests/vidaimock_integration_test.rs`
+**Schema Ref**: N/A (implementation detail for testing)
+**Files**: `tests/mock_integration_test.rs`
 **Criteria**:
-- VidaiMockHarness starts mock server with configurable behavior
+- Mock server starts with configurable behavior
 - MockScenario::SlowStreaming: 5s TTFT, 1 token/sec
 - MockScenario::DroppedConnections: 10% drop rate
 - MockScenario::RateLimited: 60 RPM limit
 - MockScenario::MalformedResponses: 1% malformed
 - Agent handles all scenarios gracefully
+**Note**: vidaimock crate does NOT exist. Mock testing will use a simple HTTP mock server pattern.
 **Test Commands**: See EPOC-071 through EPOC-074
 
 ### Area 17: Schema Version Validation
 
-**Plan**: 00-master-plan.md
+**Schema Ref**: Lines 14-20 (workflow metadata) + Lines 803-805 (schema_version, min_schema_version)
 **Criteria**:
 - All YAML files must include `schema_version: "2.0.0"`
 - schema_version validated at load time
@@ -262,7 +264,7 @@
 
 ### Area 18: End-to-End Integration
 
-**Plan**: 00-master-plan.md
+**Schema Ref**: Lines 14-805 (full unified workflow schema)
 **Criteria**:
 - Full workflow: load YAML → parse → resolve config → load model → execute step → stream response
 - Provider config → Model registry → Agent execution chain works
@@ -273,7 +275,7 @@
 
 ### Area 19: CLI Integration
 
-**Plan**: 03-agent-react.md
+**Schema Ref**: Lines 196-497 (agentic_workflow) + Lines 14-20 (workflow_id, name, description)
 **Files**: `src/bin/whitt.rs`
 **Criteria**:
 - CLI uses new ReactAgent + StepExecutor
@@ -285,7 +287,7 @@
 
 ### Area 20: Build Hygiene
 
-**Plan**: All
+**Schema Ref**: N/A (code quality, not schema-specific)
 **Criteria**:
 - `cargo build --release --all-features`: 0 warnings, 0 errors
 - `cargo clippy --all-features -- -W clippy::all`: 0 warnings
@@ -300,7 +302,7 @@
 ## Cross-Cutting Concerns
 
 ### Dependency Management
-- New crates: serde-saphyr, garde, rig-core, treadle, minijinja, sandlock, vidaimock, sseer, regex, chrono, fastrand
+- New crates: serde-saphyr, garde, rig-core, treadle, minijinja, sseer, regex, chrono, fastrand, async-trait, serde-saphyr, serde-saphyr
 - All added via `cargo add` with version pinning
 - No duplicate functionality (e.g., only one YAML parser)
 - Cargo.lock updated and committed
@@ -321,7 +323,7 @@
 ### Testing Strategy
 - Unit tests per module (cargo test --lib)
 - Integration tests per sub-plan (cargo test)
-- VidaiMock for realistic LLM behavior
+- Mock server for realistic LLM behavior
 - Manual smoke tests against live llama.cpp server
 
 ---

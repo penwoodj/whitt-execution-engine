@@ -1,11 +1,12 @@
-# QA Test Procedures — Extended POC (Provider Config + Model Schema + Agent React)
+# QA Test Procedures — Extended POC
 
-**Plan Suite**: `docs/plans/extended-poc/`
+**Schema**: `docs/schema/unified-workflow-schema.yml` (805 lines)
 **Date**: 2026-04-26
 **Status**: 🔴 NOT STARTED — Pre-implementation test procedure definition
 
 > These test procedures define how to verify each QA area from `QA-AREAS-EXTENDED-POC.md`.
 > Each test has a unique ID (EPOC-NNN), command, expected result, and acceptance criteria.
+> All tests validate against the unified workflow schema (Lines 14-805).
 
 ---
 
@@ -14,7 +15,7 @@
 ### EPOC-001: Parse Minimal Provider Config
 
 **Area**: Area 1
-**File**: `src/config/provider.rs`
+**Schema Ref**: Lines 27-57 (providers section)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -42,6 +43,7 @@ providers:
 ### EPOC-002: Parse Full Provider Config with All Fields
 
 **Area**: Area 1
+**Schema Ref**: Lines 27-57 (providers section)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -83,6 +85,7 @@ providers:
 ### EPOC-003: Parse Provider Config with Missing Optional Fields
 
 **Area**: Area 1
+**Schema Ref**: Lines 27-57 (providers section)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -108,6 +111,7 @@ providers:
 ### EPOC-004: Parse Retry Config with All Backoff Strategies
 
 **Area**: Area 1
+**Schema Ref**: Lines 45-51 (retry configuration)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -122,6 +126,7 @@ cargo test parse_retry_config_with_backoff -- --nocapture
 ### EPOC-005: serde-saphyr Handles Merge Keys
 
 **Area**: Area 1
+**Schema Ref**: Lines 27-57 (providers section - supports merge keys)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -149,6 +154,7 @@ providers:
 ### EPOC-006: Garde Rejects Invalid Port (>65535)
 
 **Area**: Area 2
+**Schema Ref**: Lines 27-57 (providers section)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -159,8 +165,7 @@ cargo test garde_validation_rejects_invalid_port -- --nocapture
 providers:
   llama_cpp_with_vulkan:
     config:
-      config:
-        port: 99999
+      port: 99999
 ```
 **Expected**: Validation error: port exceeds 65535 range.
 **Pass Criteria**: ✅ `Result::Err` returned with descriptive message.
@@ -170,6 +175,7 @@ providers:
 ### EPOC-007: Garde Rejects Negative Timeout
 
 **Area**: Area 2
+**Schema Ref**: Lines 27-57 (providers section)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -180,8 +186,7 @@ cargo test garde_validation_rejects_negative_timeout -- --nocapture
 providers:
   llama_cpp_with_vulkan:
     config:
-      config:
-        connection_timeout_secs: 0
+      connection_timeout_secs: 0
 ```
 **Expected**: Validation error: connection_timeout_secs must be >= 1.
 **Pass Criteria**: ✅ `Result::Err` returned.
@@ -191,6 +196,7 @@ providers:
 ### EPOC-008: Garde Validates All Range Constraints
 
 **Area**: Area 2
+**Schema Ref**: Lines 27-57 (providers section)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -207,6 +213,7 @@ cargo test garde_validates_all_ranges -- --nocapture
 ### EPOC-009: LlmBackend Trait Is Object-Safe
 
 **Area**: Area 3
+**Schema Ref**: Lines 27-57 (providers section - backend interface)
 **Test Type**: Unit (compile-time)
 **Command**:
 ```bash
@@ -220,6 +227,7 @@ cargo check --lib 2>&1 | grep -i "object.*safe\|dyn.*LlmBackend"
 ### EPOC-010: LlmError Enum Covers All Variants
 
 **Area**: Area 3
+**Schema Ref**: Lines 27-57 (providers section - error handling)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -233,6 +241,7 @@ cargo test llm_error_variants -- --nocapture
 ### EPOC-011: BackendCapabilities and HealthStatus
 
 **Area**: Area 3
+**Schema Ref**: Lines 27-57 (providers section)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -248,6 +257,7 @@ cargo test backend_types -- --nocapture
 ### EPOC-012: Backend Constructs from Config
 
 **Area**: Area 4
+**Schema Ref**: Lines 56-57 (llama_cpp_with_vulkan provider)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -261,6 +271,7 @@ cargo test llama_vulkan_backend_new -- --nocapture
 ### EPOC-013: Backend Chat Completion (Live)
 
 **Area**: Area 4
+**Schema Ref**: Lines 56-57 (llama_cpp_with_vulkan provider)
 **Test Type**: Integration (requires Docker)
 **Command**:
 ```bash
@@ -277,6 +288,7 @@ cargo test llama_vulkan_chat_integration -- --nocapture --ignored
 ### EPOC-014: Backend Health Check (Live)
 
 **Area**: Area 4
+**Schema Ref**: Lines 56-57 (llama_cpp_with_vulkan provider)
 **Test Type**: Integration (requires Docker)
 **Command**:
 ```bash
@@ -290,6 +302,7 @@ cargo test llama_vulkan_health_check -- --nocapture --ignored
 ### EPOC-015: Backend List Models (Live)
 
 **Area**: Area 4
+**Schema Ref**: Lines 56-57 (llama_cpp_with_vulkan provider)
 **Test Type**: Integration (requires Docker)
 **Command**:
 ```bash
@@ -303,6 +316,7 @@ cargo test llama_vulkan_list_models -- --nocapture --ignored
 ### EPOC-016: Retry Delay Calculation — Exponential
 
 **Area**: Area 4
+**Schema Ref**: Lines 45-51 (retry configuration)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -316,6 +330,7 @@ cargo test retry_delay_exponential -- --nocapture
 ### EPOC-017: Retry Delay with Jitter
 
 **Area**: Area 4
+**Schema Ref**: Lines 45-51 (retry configuration)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -329,6 +344,7 @@ cargo test retry_delay_jitter -- --nocapture
 ### EPOC-018: Duration Parsing
 
 **Area**: Area 4
+**Schema Ref**: Lines 45-51 (retry configuration - duration strings)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -344,6 +360,7 @@ cargo test parse_duration -- --nocapture
 ### EPOC-019: Provider Defaults → Per-Model Override
 
 **Area**: Area 5
+**Schema Ref**: Lines 27-57 (providers) + Lines 64-158 (models)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -357,6 +374,7 @@ cargo test config_resolution_provider_to_model -- --nocapture
 ### EPOC-020: Step-Level Override Wins Over Model Config
 
 **Area**: Area 5
+**Schema Ref**: Lines 64-158 (models) + Lines 196-497 (agentic_workflow steps)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -370,6 +388,7 @@ cargo test config_resolution_step_override -- --nocapture
 ### EPOC-021: Full Resolution Chain
 
 **Area**: Area 5
+**Schema Ref**: Lines 27-57 (providers) + Lines 64-158 (models) + Lines 196-497 (agentic_workflow)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -385,6 +404,7 @@ cargo test config_resolution_full_chain -- --nocapture
 ### EPOC-022: Parse ModelSpec with All Fields
 
 **Area**: Area 6
+**Schema Ref**: Lines 68-158 (model specification)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -398,6 +418,7 @@ cargo test parse_model_spec -- --nocapture
 ### EPOC-023: Parse ResourceLimit Variants
 
 **Area**: Area 6
+**Schema Ref**: Lines 74-88 (ram_allocation, max_allowed, min_allowed)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -411,6 +432,7 @@ cargo test parse_resource_limit -- --nocapture
 ### EPOC-024: Parse ExecutionConfig with Timeouts
 
 **Area**: Area 6
+**Schema Ref**: Lines 95-102 (execution configuration)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -424,6 +446,7 @@ cargo test parse_execution_config -- --nocapture
 ### EPOC-025: ThinkingConfig Optional
 
 **Area**: Area 6
+**Schema Ref**: Lines 104-107 (thinking configuration)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -437,6 +460,7 @@ cargo test thinking_config_optional -- --nocapture
 ### EPOC-026: RouterStrategy Variants
 
 **Area**: Area 6
+**Schema Ref**: Line 66 (default_router)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -452,6 +476,7 @@ cargo test router_strategy_variants -- --nocapture
 ### EPOC-027: Register Models from Config
 
 **Area**: Area 7
+**Schema Ref**: Lines 64-158 (models section)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -465,6 +490,7 @@ cargo test model_registry_new -- --nocapture
 ### EPOC-028: Load Model State Transition
 
 **Area**: Area 7
+**Schema Ref**: Lines 64-158 (models section)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -478,6 +504,7 @@ cargo test model_registry_load -- --nocapture
 ### EPOC-029: Unload Model State Transition
 
 **Area**: Area 7
+**Schema Ref**: Lines 64-158 (models section)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -491,6 +518,7 @@ cargo test model_registry_unload -- --nocapture
 ### EPOC-030: Load Unknown Model
 
 **Area**: Area 7
+**Schema Ref**: Lines 64-158 (models section)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -504,6 +532,7 @@ cargo test model_registry_load_unknown -- --nocapture
 ### EPOC-031: Concurrent Access (RwLock)
 
 **Area**: Area 7
+**Schema Ref**: Lines 64-158 (models section)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -519,6 +548,7 @@ cargo test model_registry_concurrent -- --nocapture
 ### EPOC-032: Parse Percentage ResourceLimit
 
 **Area**: Area 8
+**Schema Ref**: Lines 74-88 (ram_allocation, max_allowed, min_allowed)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -532,6 +562,7 @@ cargo test resource_parse_percentage -- --nocapture
 ### EPOC-033: Parse Absolute ResourceLimit (GB/MB)
 
 **Area**: Area 8
+**Schema Ref**: Lines 74-88 (ram_allocation, max_allowed, min_allowed)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -545,6 +576,7 @@ cargo test resource_parse_absolute -- --nocapture
 ### EPOC-034: Reject Insufficient RAM
 
 **Area**: Area 8
+**Schema Ref**: Lines 74-88 (ram_allocation, max_allowed) + Lines 517-526 (memory management)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -558,6 +590,7 @@ cargo test resource_check_insufficient_ram -- --nocapture
 ### EPOC-035: Reject Insufficient VRAM
 
 **Area**: Area 8
+**Schema Ref**: Lines 74-88 (ram_allocation, max_allowed) + Lines 517-526 (memory management)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -571,6 +604,7 @@ cargo test resource_check_insufficient_vram -- --nocapture
 ### EPOC-036: Release Resources After Unload
 
 **Area**: Area 8
+**Schema Ref**: Lines 517-526 (memory management)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -586,6 +620,7 @@ cargo test resource_release -- --nocapture
 ### EPOC-037: Interpolate Model Reference
 
 **Area**: Area 9
+**Schema Ref**: Lines 726-740 (variable_interpolation syntax)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -599,6 +634,7 @@ cargo test interpolate_model_ref -- --nocapture
 ### EPOC-038: Parse Variable Reference
 
 **Area**: Area 9
+**Schema Ref**: Lines 726-740 (variable_interpolation syntax)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -612,6 +648,7 @@ cargo test parse_var_ref -- --nocapture
 ### EPOC-039: Unknown Variable Produces Error
 
 **Area**: Area 9
+**Schema Ref**: Lines 726-740 (variable_interpolation syntax)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -625,6 +662,7 @@ cargo test interpolate_unknown_var -- --nocapture
 ### EPOC-040: Runtime Syntax Not Supported
 
 **Area**: Area 9
+**Schema Ref**: Lines 726-740 (variable_interpolation - ${} vs {{}})
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -640,6 +678,7 @@ cargo test interpolate_runtime_not_supported -- --nocapture
 ### EPOC-041: Single Turn — No Tool Call
 
 **Area**: Area 10
+**Schema Ref**: Lines 196-497 (agentic_workflow steps - generative_agent pattern)
 **Test Type**: Unit (with mock backend)
 **Command**:
 ```bash
@@ -653,6 +692,7 @@ cargo test react_agent_single_turn -- --nocapture
 ### EPOC-042: Multi-Turn with Tool Call
 
 **Area**: Area 10
+**Schema Ref**: Lines 196-497 (agentic_workflow steps - generative_agent pattern)
 **Test Type**: Unit (with mock backend)
 **Command**:
 ```bash
@@ -666,6 +706,7 @@ cargo test react_agent_multi_turn -- --nocapture
 ### EPOC-043: Max Turns Enforced
 
 **Area**: Area 10
+**Schema Ref**: Lines 95-102 (execution.max_turns)
 **Test Type**: Unit (with mock backend)
 **Command**:
 ```bash
@@ -679,6 +720,7 @@ cargo test react_agent_max_turns -- --nocapture
 ### EPOC-044: final_answer Terminates Loop
 
 **Area**: Area 10
+**Schema Ref**: Lines 196-497 (agentic_workflow steps)
 **Test Type**: Unit (with mock backend)
 **Command**:
 ```bash
@@ -692,6 +734,7 @@ cargo test react_agent_final_answer -- --nocapture
 ### EPOC-045: Tool Result Appended to Messages
 
 **Area**: Area 10
+**Schema Ref**: Lines 196-497 (agentic_workflow steps)
 **Test Type**: Unit (with mock backend)
 **Command**:
 ```bash
@@ -707,6 +750,7 @@ cargo test react_agent_message_history -- --nocapture
 ### EPOC-046: model_list Tool
 
 **Area**: Area 11
+**Schema Ref**: Lines 606-676 (tool_permissions)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -720,6 +764,7 @@ cargo test tool_model_list -- --nocapture
 ### EPOC-047: model_load Tool
 
 **Area**: Area 11
+**Schema Ref**: Lines 606-676 (tool_permissions)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -733,6 +778,7 @@ cargo test tool_model_load -- --nocapture
 ### EPOC-048: model_unload Tool
 
 **Area**: Area 11
+**Schema Ref**: Lines 606-676 (tool_permissions)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -746,6 +792,7 @@ cargo test tool_model_unload -- --nocapture
 ### EPOC-049: chat Tool
 
 **Area**: Area 11
+**Schema Ref**: Lines 606-676 (tool_permissions)
 **Test Type**: Unit (with mock backend)
 **Command**:
 ```bash
@@ -759,6 +806,7 @@ cargo test tool_chat -- --nocapture
 ### EPOC-050: file_read Tool
 
 **Area**: Area 11
+**Schema Ref**: Lines 608-621 (file_operations)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -772,6 +820,7 @@ cargo test tool_file_read -- --nocapture
 ### EPOC-051: file_read Tool — Path Traversal Blocked
 
 **Area**: Area 11
+**Schema Ref**: Lines 608-621 (file_operations - allowed_paths, forbidden_paths)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -785,6 +834,7 @@ cargo test tool_file_read_traversal -- --nocapture
 ### EPOC-052: final_answer Tool
 
 **Area**: Area 11
+**Schema Ref**: Lines 606-676 (tool_permissions)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -800,6 +850,7 @@ cargo test tool_final_answer -- --nocapture
 ### EPOC-053: Execute Step — Success on First Try
 
 **Area**: Area 12
+**Schema Ref**: Lines 245-268 (retry configuration) + Lines 196-497 (agentic_workflow steps)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -813,6 +864,7 @@ cargo test executor_success_first_try -- --nocapture
 ### EPOC-054: Execute Step — Retry and Succeed
 
 **Area**: Area 12
+**Schema Ref**: Lines 245-268 (retry configuration)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -826,6 +878,7 @@ cargo test executor_retry_success -- --nocapture
 ### EPOC-055: Execute Step — All Retries Exhausted
 
 **Area**: Area 12
+**Schema Ref**: Lines 245-268 (retry configuration)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -839,6 +892,7 @@ cargo test executor_all_retries_exhausted -- --nocapture
 ### EPOC-056: Exponential Backoff Delays
 
 **Area**: Area 12
+**Schema Ref**: Lines 245-268 (retry configuration - backoff strategies)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -852,6 +906,7 @@ cargo test executor_exponential_backoff -- --nocapture
 ### EPOC-057: Linear and Fixed Backoff
 
 **Area**: Area 12
+**Schema Ref**: Lines 245-268 (retry configuration - backoff strategies)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -865,6 +920,7 @@ cargo test executor_linear_fixed_backoff -- --nocapture
 ### EPOC-058: Default Retry Config
 
 **Area**: Area 12
+**Schema Ref**: Lines 245-268 (retry configuration - step defaults)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -880,6 +936,7 @@ cargo test executor_default_retry -- --nocapture
 ### EPOC-059: Streaming Collect to String
 
 **Area**: Area 13
+**Schema Ref**: Lines 196-497 (agentic_workflow execution - streaming)
 **Test Type**: Unit (with mock backend)
 **Command**:
 ```bash
@@ -893,6 +950,7 @@ cargo test streaming_collect -- --nocapture
 ### EPOC-060: Streaming Done Chunk Terminates
 
 **Area**: Area 13
+**Schema Ref**: Lines 196-497 (agentic_workflow execution - streaming)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -906,6 +964,7 @@ cargo test streaming_done_chunk -- --nocapture
 ### EPOC-061: Stream Implements futures::Stream
 
 **Area**: Area 13
+**Schema Ref**: Lines 196-497 (agentic_workflow execution - streaming)
 **Test Type**: Compile-time
 **Command**:
 ```bash
@@ -921,6 +980,7 @@ cargo check --lib
 ### EPOC-062: Save and Load Checkpoint
 
 **Area**: Area 14
+**Schema Ref**: Lines 568-583 (checkpointing configuration)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -934,6 +994,7 @@ cargo test persistence_save_load -- --nocapture
 ### EPOC-063: List Checkpoints for Workflow
 
 **Area**: Area 14
+**Schema Ref**: Lines 568-583 (checkpointing configuration)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -947,6 +1008,7 @@ cargo test persistence_list_checkpoints -- --nocapture
 ### EPOC-064: Clear Checkpoints
 
 **Area**: Area 14
+**Schema Ref**: Lines 568-583 (checkpointing configuration)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -960,6 +1022,7 @@ cargo test persistence_clear_checkpoints -- --nocapture
 ### EPOC-065: Checkpoint Key Format
 
 **Area**: Area 14
+**Schema Ref**: Lines 568-583 (checkpointing configuration)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -973,6 +1036,7 @@ cargo test persistence_key_format -- --nocapture
 ### EPOC-066: Load Nonexistent Checkpoint
 
 **Area**: Area 14
+**Schema Ref**: Lines 568-583 (checkpointing configuration)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -983,24 +1047,27 @@ cargo test persistence_load_nonexistent -- --nocapture
 
 ---
 
-## Section 15: Tool Sandboxing (Sandlock)
+## Section 15: Tool Sandboxing (Landlock/namespace)
 
 ### EPOC-067: Default Sandbox Configuration
 
 **Area**: Area 15
+**Schema Ref**: Lines 606-676 (tool_permissions - restrictions)
 **Test Type**: Unit
 **Command**:
 ```bash
 cargo test sandbox_default_config -- --nocapture
 ```
-**Expected**: ToolSandbox created with Landlock=true, seccomp=true, memory=512MB, CPU=30s, network_restricted=true.
+**Expected**: ToolSandbox created with Landlock=true or namespace-based, memory=512MB, CPU=30s, network_restricted=true.
 **Pass Criteria**: ✅ Config matches defaults.
+**Note**: sandlock crate does NOT exist. Uses Landlock LSM or namespace-based approach.
 
 ---
 
 ### EPOC-068: Filesystem Access Restriction
 
 **Area**: Area 15
+**Schema Ref**: Lines 608-621 (file_operations - allowed_paths, forbidden_paths)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -1014,6 +1081,7 @@ cargo test sandbox_filesystem_restriction -- --nocapture
 ### EPOC-069: Network Access Restriction
 
 **Area**: Area 15
+**Schema Ref**: Lines 623-635 (web_operations - allowed_domains, forbidden_domains)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -1027,6 +1095,7 @@ cargo test sandbox_network_restriction -- --nocapture
 ### EPOC-070: Sandboxed Tool Execution
 
 **Area**: Area 15
+**Schema Ref**: Lines 606-676 (tool_permissions)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -1037,57 +1106,65 @@ cargo test sandboxed_tool_execution -- --nocapture
 
 ---
 
-## Section 16: Mock Testing (VidaiMock)
+## Section 16: Mock Testing (HTTP mock server)
 
 ### EPOC-071: Slow Streaming Scenario
 
 **Area**: Area 16
+**Schema Ref**: N/A (implementation detail)
 **Test Type**: Integration
 **Command**:
 ```bash
-cargo test vidaimock_slow_streaming -- --nocapture --ignored
+cargo test mock_slow_streaming -- --nocapture --ignored
 ```
 **Expected**: Mock server simulates 5s TTFT, 1 token/sec. Agent waits for response.
 **Pass Criteria**: ✅ Agent handles slow streaming without timeout.
+**Note**: vidaimock crate does NOT exist. Uses simple HTTP mock server pattern.
 
 ---
 
 ### EPOC-072: Dropped Connections Scenario
 
 **Area**: Area 16
+**Schema Ref**: N/A (implementation detail)
 **Test Type**: Integration
 **Command**:
 ```bash
-cargo test vidaimock_dropped_connections -- --nocapture --ignored
+cargo test mock_dropped_connections -- --nocapture --ignored
 ```
 **Expected**: 10% drop rate. Agent retries on connection drop.
 **Pass Criteria**: ✅ Agent recovers from drops.
+**Note**: vidaimock crate does NOT exist. Uses simple HTTP mock server pattern.
 
 ---
 
 ### EPOC-073: Rate Limiting Scenario
 
 **Area**: Area 16
+**Schema Ref**: N/A (implementation detail)
 **Test Type**: Integration
 **Command**:
 ```bash
-cargo test vidaimock_rate_limiting -- --nocapture --ignored
+cargo test mock_rate_limiting -- --nocapture --ignored
 ```
 **Expected**: 60 RPM limit. Rapid requests get 429, agent backs off.
 **Pass Criteria**: ✅ Agent respects rate limits.
+**Note**: vidaimock crate does NOT exist. Uses simple HTTP mock server pattern.
 
 ---
 
 ### EPOC-074: Malformed Responses Scenario
 
 **Area**: Area 16
+**Schema Ref**: N/A (implementation detail)
 **Test Type**: Integration
 **Command**:
 ```bash
-cargo test vidaimock_malformed_responses -- --nocapture --ignored
+cargo test mock_malformed_responses -- --nocapture --ignored
 ```
 **Expected**: 1% malformed SSE chunks. Agent handles parse errors gracefully.
 **Pass Criteria**: ✅ No panic on malformed data.
+**Note**: vidaimock crate does NOT exist. Uses simple HTTP mock server pattern.
 
 ---
 
@@ -1096,6 +1173,7 @@ cargo test vidaimock_malformed_responses -- --nocapture --ignored
 ### EPOC-075: Accept Compatible Schema Version
 
 **Area**: Area 17
+**Schema Ref**: Lines 14-20 (workflow metadata) + Lines 803-805 (schema_version)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -1109,6 +1187,7 @@ cargo test schema_version_compatible -- --nocapture
 ### EPOC-076: Reject Incompatible Schema Version
 
 **Area**: Area 17
+**Schema Ref**: Lines 14-20 (workflow metadata) + Lines 803-805 (schema_version)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -1122,6 +1201,7 @@ cargo test schema_version_incompatible -- --nocapture
 ### EPOC-077: Missing Schema Version Uses Default
 
 **Area**: Area 17
+**Schema Ref**: Lines 14-20 (workflow metadata) + Lines 803-805 (schema_version)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -1137,6 +1217,7 @@ cargo test schema_version_default -- --nocapture
 ### EPOC-078: Full Workflow Execution (Live)
 
 **Area**: Area 18
+**Schema Ref**: Lines 14-805 (full unified workflow schema)
 **Test Type**: Integration (requires Docker + live server)
 **Command**:
 ```bash
@@ -1150,6 +1231,7 @@ cargo test e2e_workflow_execution -- --nocapture --ignored
 ### EPOC-079: Template Interpolation in Workflow
 
 **Area**: Area 18
+**Schema Ref**: Lines 726-740 (variable_interpolation) + Lines 196-497 (agentic_workflow steps)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -1163,6 +1245,7 @@ cargo test e2e_template_interpolation -- --nocapture
 ### EPOC-080: Step-Level Model Overrides Applied
 
 **Area**: Area 18
+**Schema Ref**: Lines 196-497 (agentic_workflow steps - model_overrides)
 **Test Type**: Unit
 **Command**:
 ```bash
@@ -1176,6 +1259,7 @@ cargo test e2e_model_overrides -- --nocapture
 ### EPOC-081: No Hardcoded Values
 
 **Area**: Area 18
+**Schema Ref**: Lines 14-805 (full schema - all configurable)
 **Test Type**: Audit (manual)
 **Command**:
 ```bash
@@ -1192,6 +1276,7 @@ grep -rn "localhost\|8080\|512\|0.7" src/backend/ src/model/ src/agent/ --includ
 ### EPOC-082: Existing Commands Still Work
 
 **Area**: Area 19
+**Schema Ref**: Lines 196-497 (agentic_workflow) + Lines 14-20 (workflow metadata)
 **Test Type**: Manual (live)
 **Command**:
 ```bash
@@ -1207,6 +1292,7 @@ grep -rn "localhost\|8080\|512\|0.7" src/backend/ src/model/ src/agent/ --includ
 ### EPOC-083: Workflow Execution Command
 
 **Area**: Area 19
+**Schema Ref**: Lines 196-497 (agentic_workflow)
 **Test Type**: Manual (live)
 **Command**:
 ```bash
@@ -1220,6 +1306,7 @@ grep -rn "localhost\|8080\|512\|0.7" src/backend/ src/model/ src/agent/ --includ
 ### EPOC-084: Deprecation Warning for Old Config
 
 **Area**: Area 19
+**Schema Ref**: N/A (CLI behavior, not schema)
 **Test Type**: Manual (live)
 **Command**:
 ```bash
@@ -1235,6 +1322,7 @@ grep -rn "localhost\|8080\|512\|0.7" src/backend/ src/model/ src/agent/ --includ
 ### EPOC-085: Clean Build (Release, All Features)
 
 **Area**: Area 20
+**Schema Ref**: N/A (code quality, not schema)
 **Test Type**: Automated
 **Command**:
 ```bash
@@ -1248,6 +1336,7 @@ cargo build --release --all-features 2>&1 | grep -E "warning|error"
 ### EPOC-086: Clippy Clean
 
 **Area**: Area 20
+**Schema Ref**: N/A (code quality, not schema)
 **Test Type**: Automated
 **Command**:
 ```bash
@@ -1261,6 +1350,7 @@ cargo clippy --all-features -- -W clippy::all 2>&1 | grep -E "warning|error"
 ### EPOC-087: Unit Tests Pass
 
 **Area**: Area 20
+**Schema Ref**: N/A (code quality, not schema)
 **Test Type**: Automated
 **Command**:
 ```bash
@@ -1273,13 +1363,13 @@ cargo test --lib --all-features 2>&1
 
 ## Test Execution Order
 
-**Phase 1: Provider Config (01-provider-config)**
+**Phase 1: Provider Config (Lines 27-57)**
 EPOC-001 → EPOC-008 → EPOC-009 → EPOC-011 → EPOC-012 → EPOC-018 → EPOC-019 → EPOC-021
 
-**Phase 2: Model Schema (02-model-schema)**
+**Phase 2: Model Schema (Lines 64-158)**
 EPOC-022 → EPOC-026 → EPOC-027 → EPOC-031 → EPOC-032 → EPOC-036 → EPOC-037 → EPOC-040
 
-**Phase 3: Agent React (03-agent-react)**
+**Phase 3: Agent React (Lines 196-497)**
 EPOC-041 → EPOC-045 → EPOC-046 → EPOC-052 → EPOC-053 → EPOC-058 → EPOC-059 → EPOC-061
 
 **Phase 4: Persistence + Sandboxing + Mock**

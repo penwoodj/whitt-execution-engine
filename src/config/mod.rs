@@ -13,6 +13,8 @@
 //!
 //! All defaults match llama.cpp upstream defaults where applicable.
 
+pub mod provider;
+
 use garde::Validate;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;

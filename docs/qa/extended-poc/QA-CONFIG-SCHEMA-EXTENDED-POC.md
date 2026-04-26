@@ -1,6 +1,6 @@
 # QA Config Schema — Extended POC
 
-**Plan Suite**: `docs/plans/extended-poc/`
+**Schema**: `docs/schema/unified-workflow-schema.yml` (805 lines)
 **Date**: 2026-04-26
 **Status**: 🔴 NOT STARTED — Schema definition for QA testing
 
@@ -8,7 +8,7 @@
 
 ## Unified Workflow YAML Schema (v2.0)
 
-This document defines the YAML schema structure that the extended POC must parse and validate. All structs map to the unified-workflow-schema.yml.
+This document defines the YAML schema structure that the extended POC must parse and validate. All structs map to unified-workflow-schema.yml (Lines 14-805).
 
 ### Top-Level Structure
 
