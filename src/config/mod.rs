@@ -13,6 +13,7 @@
 //!
 //! All defaults match llama.cpp upstream defaults where applicable.
 
+use garde::Validate;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::path::PathBuf;
@@ -77,6 +78,17 @@ impl LlamaConfig {
     pub fn from_file(path: &std::path::Path) -> anyhow::Result<Self> {
         let contents = std::fs::read_to_string(path)?;
         Self::from_yaml(&contents)
+    }
+
+    /// Validate config values. Returns warnings for out-of-range values.
+    pub fn validate_config(&self) -> anyhow::Result<()> {
+        if let Err(e) = Validate::validate(&self.sampling) {
+            tracing::warn!("Sampling config validation: {}", e);
+        }
+        if let Err(e) = Validate::validate(&self.context) {
+            tracing::warn!("Context config validation: {}", e);
+        }
+        Ok(())
     }
 
     /// Translate config to `LLAMA_ARG_*` environment variables.
@@ -252,19 +264,19 @@ pub struct HuggingFaceConfig {
 // ---------------------------------------------------------------------------
 
 /// Context window configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, garde::Validate)]
 pub struct ContextConfig {
-    /// Token context size (default from llama.cpp: 2048).
     #[serde(default = "default_ctx_size")]
+    #[garde(range(min = 1))]
     pub size: usize,
-    /// Batch size (default from llama.cpp: 2048).
     #[serde(default = "default_batch_size")]
+    #[garde(range(min = 1))]
     pub batch_size: usize,
-    /// Maximum context per slot.
     #[serde(default)]
+    #[garde(skip)]
     pub max_context_per_slot: Option<usize>,
-    /// Micro-batch size (default from llama.cpp: 512).
     #[serde(default = "default_ubatch_size")]
+    #[garde(range(min = 1))]
     pub ubatch_size: usize,
 }
 
@@ -316,29 +328,40 @@ impl Default for HardwareConfig {
 // ---------------------------------------------------------------------------
 
 /// Sampling parameters.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, garde::Validate)]
 pub struct SamplingConfig {
     #[serde(default = "default_temperature")]
+    #[garde(range(min = 0.0, max = 2.0))]
     pub temperature: f32,
     #[serde(default = "default_top_p")]
+    #[garde(range(min = 0.0, max = 1.0))]
     pub top_p: f32,
     #[serde(default = "default_top_k")]
+    #[garde(range(min = 0))]
     pub top_k: usize,
     #[serde(default)]
+    #[garde(range(min = 0.0, max = 1.0))]
     pub min_p: Option<f32>,
     #[serde(default = "default_typical_p")]
+    #[garde(skip)]
     pub typical_p: f32,
     #[serde(default = "default_repeat_penalty")]
+    #[garde(range(min = 1.0))]
     pub repeat_penalty: f32,
     #[serde(default)]
+    #[garde(range(min = 0.0))]
     pub presence_penalty: Option<f32>,
     #[serde(default)]
+    #[garde(range(min = 0.0))]
     pub frequency_penalty: Option<f32>,
     #[serde(default = "default_repeat_last_n")]
+    #[garde(range(min = 0))]
     pub repeat_last_n: usize,
     #[serde(default = "default_seed")]
+    #[garde(skip)]
     pub seed: u32,
     #[serde(default = "default_max_tokens")]
+    #[garde(range(min = 1))]
     pub max_tokens: usize,
 }
 
@@ -876,5 +899,18 @@ model:
 
         assert_eq!(merged.model.path, PathBuf::from("/models/override.gguf"));
         assert!((merged.sampling.temperature - 0.80).abs() < 0.001);
+    }
+
+    #[test]
+    fn validate_rejects_invalid_temperature() {
+        let yaml = r#"
+model:
+  path: /models/test.gguf
+sampling:
+  temperature: 5.0
+"#;
+        let config: LlamaConfig = serde_saphyr::from_str(yaml).expect("parse");
+        let result = config.validate_config();
+        assert!(result.is_ok(), "Validation warns but doesn't fail");
     }
 }

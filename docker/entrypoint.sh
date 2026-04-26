@@ -535,9 +535,7 @@ start_server() {
         server_args="$server_args --slots"
     fi
 
-    # Disable prompt caching to prevent Vulkan backend crash
-    # (GGML_ASSERT tensor->data != NULL during prompt cache save)
-    server_args="$server_args --no-cache-prompt --slot-prompt-similarity 0.0"
+    server_args="$server_args --no-cache-prompt --slot-prompt-similarity 1.0 --no-cache-idle-slots"
 
     log_info "Server arguments: $server_args"
     log_debug "Full command: /usr/local/bin/llama-server $server_args"
@@ -583,6 +581,49 @@ main() {
 
     # Translate config to env vars
     translate_config "$config_path"
+
+    # Per-model config override (if MODEL_NAME is set)
+    if [ -n "${MODEL_NAME:-}" ] && [ -f "/config/models/${MODEL_NAME}.yml" ]; then
+        echo "[CONFIG] Loading per-model override: ${MODEL_NAME}"
+        local per_model_config="/config/models/${MODEL_NAME}.yml"
+        CTX_SIZE=$(yq '.context.size // ""' "$per_model_config" 2>/dev/null || echo "")
+        [ -n "$CTX_SIZE" ] && export LLAMA_ARG_CTX_SIZE="$CTX_SIZE"
+
+        BATCH_SIZE=$(yq '.context.batch_size // ""' "$per_model_config" 2>/dev/null || echo "")
+        [ -n "$BATCH_SIZE" ] && export LLAMA_ARG_BATCH_SIZE="$BATCH_SIZE"
+
+        TEMPERATURE=$(yq '.sampling.temperature // ""' "$per_model_config" 2>/dev/null || echo "")
+        [ -n "$TEMPERATURE" ] && export LLAMA_ARG_TEMP="$TEMPERATURE"
+
+        TOP_P=$(yq '.sampling.top_p // ""' "$per_model_config" 2>/dev/null || echo "")
+        [ -n "$TOP_P" ] && export LLAMA_ARG_TOP_P="$TOP_P"
+
+        TOP_K=$(yq '.sampling.top_k // ""' "$per_model_config" 2>/dev/null || echo "")
+        [ -n "$TOP_K" ] && export LLAMA_ARG_TOP_K="$TOP_K"
+
+        MAX_TOKENS=$(yq '.sampling.max_tokens // ""' "$per_model_config" 2>/dev/null || echo "")
+        [ -n "$MAX_TOKENS" ] && export LLAMA_ARG_N_PREDICT="$MAX_TOKENS"
+
+        REPEAT_PENALTY=$(yq '.sampling.repeat_penalty // ""' "$per_model_config" 2>/dev/null || echo "")
+        [ -n "$REPEAT_PENALTY" ] && export LLAMA_ARG_REPEAT_PENALTY="$REPEAT_PENALTY"
+
+        GPU_LAYERS=$(yq '.hardware.gpu_layers // ""' "$per_model_config" 2>/dev/null || echo "")
+        [ -n "$GPU_LAYERS" ] && export LLAMA_ARG_N_GPU_LAYERS="$GPU_LAYERS"
+
+        THREADS=$(yq '.hardware.threads // ""' "$per_model_config" 2>/dev/null || echo "")
+        [ -n "$THREADS" ] && export LLAMA_ARG_N_THREADS="$THREADS"
+
+        CACHE_TYPE_K=$(yq '.cache.cache_type_k // ""' "$per_model_config" 2>/dev/null || echo "")
+        [ -n "$CACHE_TYPE_K" ] && export LLAMA_ARG_CACHE_TYPE_K="$CACHE_TYPE_K"
+
+        CACHE_TYPE_V=$(yq '.cache.cache_type_v // ""' "$per_model_config" 2>/dev/null || echo "")
+        [ -n "$CACHE_TYPE_V" ] && export LLAMA_ARG_CACHE_TYPE_V="$CACHE_TYPE_V"
+
+        KV_CACHE_SIZE=$(yq '.cache.kv_cache_size // ""' "$per_model_config" 2>/dev/null || echo "")
+        [ -n "$KV_CACHE_SIZE" ] && export LLAMA_ARG_KV_CACHE_SIZE="$KV_CACHE_SIZE"
+
+        echo "[CONFIG] Applied per-model config for ${MODEL_NAME}"
+    fi
 
     # Download model if specified in config
     if command -v yq &> /dev/null; then

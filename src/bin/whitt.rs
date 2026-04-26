@@ -820,11 +820,14 @@ async fn parse_and_execute_tool(
     use regex::Regex;
 
     let think_re = Regex::new(r"<think>(.*?)</think>").unwrap();
-    let act_re = Regex::new(r"<act>(.*?)</act>").unwrap();
+    let act_re = Regex::new(r"<act>([\s\S]*?)</act>").unwrap();
 
     let _thought = think_re.captures(content).and_then(|c| c.get(1)).map(|m| m.as_str());
 
-    if let Some(act) = act_re.captures(content).and_then(|c| c.get(1)).map(|m| m.as_str()) {
+    // Take the LAST <act> block — earlier ones may be inside <result> from prior turns
+    let act = act_re.captures_iter(content).last().and_then(|c| c.get(1)).map(|m| m.as_str());
+
+    if let Some(act) = act {
         let tool_call: serde_json::Value = serde_json::from_str(act).context("Failed to parse tool call JSON")?;
         let tool = tool_call.get("tool").and_then(|t| t.as_str()).context("Missing tool name")?;
         let input = tool_call.get("input").context("Missing input")?;
