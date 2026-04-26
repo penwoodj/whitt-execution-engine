@@ -5,6 +5,8 @@
 
 pub mod llm_backend;
 pub mod llama_vulkan;
+pub mod mock_backend;
 
 pub use llm_backend::{LlmBackend, LlmError, BackendCapabilities, HealthStatus};
 pub use llama_vulkan::LlamaCppVulkanBackend;
+pub use mock_backend::{MockError, MockLlmBackend};
