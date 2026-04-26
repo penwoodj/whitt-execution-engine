@@ -14,6 +14,7 @@
 //! All defaults match llama.cpp upstream defaults where applicable.
 
 pub mod provider;
+pub mod unified;
 
 use garde::Validate;
 use serde::{Deserialize, Serialize};

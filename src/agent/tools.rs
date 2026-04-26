@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tracing::debug;
+use crate::backend::llm_backend::{LlmBackend, ChatMessage};
+use crate::model::registry::{ModelLifecycle, ThreadSafeModelRegistry};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
@@ -69,56 +71,13 @@ impl Default for ToolRegistry {
     }
 }
 
-// TODO: Replace with actual ModelRegistry type when implemented
-// Placeholder types for ModelRegistry and LlmBackend
-pub struct ModelRegistry {
-    // Placeholder - will be replaced with actual implementation
-}
-
-#[allow(dead_code)]
-impl ModelRegistry {
-    pub fn new() -> Self {
-        Self {}
-    }
-
-    pub fn get_model_state(&self, _name: &str) -> ModelLifecycleState {
-        ModelLifecycleState::Unloaded
-    }
-
-    pub fn set_model_state(&self, _name: &str, _state: ModelLifecycleState) {
-        // Placeholder - will be replaced with actual implementation
-    }
-}
-
-impl Default for ModelRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum ModelLifecycleState {
-    Unloaded,
-    Loading,
-    Active,
-    Error { reason: String },
-}
-
-// TODO: Replace with actual LlmBackend trait when implemented
-#[async_trait::async_trait]
-pub trait LlmBackend: Send + Sync {
-    async fn load_model(&self, name: &str) -> Result<(), anyhow::Error>;
-    async fn unload_model(&self, name: &str) -> Result<(), anyhow::Error>;
-    async fn chat(&self, model: &str, message: &str, temperature: Option<f32>) -> Result<String, anyhow::Error>;
-}
-
 // 1. ModelListTool
 pub struct ModelListTool {
-    registry: Arc<Mutex<ModelRegistry>>,
+    registry: Arc<Mutex<crate::model::registry::ThreadSafeModelRegistry>>,
 }
 
 impl ModelListTool {
-    pub fn new(registry: Arc<Mutex<ModelRegistry>>) -> Self {
+    pub fn new(registry: Arc<Mutex<crate::model::registry::ThreadSafeModelRegistry>>) -> Self {
         Self { registry }
     }
 }
@@ -145,18 +104,7 @@ impl Tool for ModelListTool {
         debug!("Executing ModelListTool");
         let registry = self.registry.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
 
-        // Placeholder - return mock data
-        let models = vec![
-            serde_json::json!({
-                "name": "llama-3.2-3b-instruct",
-                "state": registry.get_model_state("llama-3.2-3b-instruct")
-            }),
-            serde_json::json!({
-                "name": "llama3.2",
-                "state": registry.get_model_state("llama3.2")
-            }),
-        ];
-
+        let models = registry.list_models();
         let output = serde_json::to_string_pretty(&models)?;
         Ok(ToolResult {
             tool_name: "model_list".to_string(),
@@ -169,12 +117,12 @@ impl Tool for ModelListTool {
 
 // 2. ModelLoadTool
 pub struct ModelLoadTool {
-    registry: Arc<Mutex<ModelRegistry>>,
+    registry: Arc<Mutex<ThreadSafeModelRegistry>>,
     backend: Arc<dyn LlmBackend>,
 }
 
 impl ModelLoadTool {
-    pub fn new(registry: Arc<Mutex<ModelRegistry>>, backend: Arc<dyn LlmBackend>) -> Self {
+    pub fn new(registry: Arc<Mutex<ThreadSafeModelRegistry>>, backend: Arc<dyn LlmBackend>) -> Self {
         Self { registry, backend }
     }
 }
@@ -210,20 +158,12 @@ impl Tool for ModelLoadTool {
 
         debug!("Executing ModelLoadTool for model: {}", model_name);
 
-        // Set state to Loading
-        self.registry
-            .lock()
-            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?
-            .set_model_state(model_name, ModelLifecycleState::Loading);
-
-        // Load model
         match self.backend.load_model(model_name).await {
             Ok(_) => {
-                // Set state to Active
-                self.registry
+                let _ = self.registry
                     .lock()
                     .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?
-                    .set_model_state(model_name, ModelLifecycleState::Active);
+                    .set_state(model_name, ModelLifecycle::Loaded);
 
                 Ok(ToolResult {
                     tool_name: "model_load".to_string(),
@@ -233,15 +173,12 @@ impl Tool for ModelLoadTool {
                 })
             }
             Err(e) => {
-                // Set state to Error
-                self.registry
+                let _ = self.registry
                     .lock()
                     .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?
-                    .set_model_state(
+                    .set_state(
                         model_name,
-                        ModelLifecycleState::Error {
-                            reason: e.to_string(),
-                        },
+                        ModelLifecycle::Error(e.to_string()),
                     );
 
                 Ok(ToolResult {
@@ -261,12 +198,12 @@ impl Tool for ModelLoadTool {
 
 // 3. ModelUnloadTool
 pub struct ModelUnloadTool {
-    registry: Arc<Mutex<ModelRegistry>>,
+    registry: Arc<Mutex<ThreadSafeModelRegistry>>,
     backend: Arc<dyn LlmBackend>,
 }
 
 impl ModelUnloadTool {
-    pub fn new(registry: Arc<Mutex<ModelRegistry>>, backend: Arc<dyn LlmBackend>) -> Self {
+    pub fn new(registry: Arc<Mutex<ThreadSafeModelRegistry>>, backend: Arc<dyn LlmBackend>) -> Self {
         Self { registry, backend }
     }
 }
@@ -304,10 +241,10 @@ impl Tool for ModelUnloadTool {
 
         match self.backend.unload_model(model_name).await {
             Ok(_) => {
-                self.registry
+                let _ = self.registry
                     .lock()
                     .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?
-                    .set_model_state(model_name, ModelLifecycleState::Unloaded);
+                    .set_state(model_name, ModelLifecycle::Unloaded);
 
                 Ok(ToolResult {
                     tool_name: "model_unload".to_string(),
@@ -383,14 +320,17 @@ impl Tool for ChatTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing or invalid message argument"))?;
 
-        let temperature = arguments.get("temperature").and_then(|v| v.as_f64()).map(|t| t as f32);
+        debug!("Executing ChatTool for model: {}", model_name);
 
-        debug!("Executing ChatTool for model: {}, temperature: {:?}", model_name, temperature);
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: message.to_string(),
+        }];
 
-        match self.backend.chat(model_name, message, temperature).await {
+        match self.backend.chat(messages, model_name).await {
             Ok(response) => Ok(ToolResult {
                 tool_name: "chat".to_string(),
-                output: response,
+                output: response.content,
                 success: true,
                 metadata: HashMap::new(),
             }),

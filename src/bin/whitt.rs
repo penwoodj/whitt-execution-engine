@@ -36,7 +36,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Chat with the model
+    /// Chat with model
     Chat {
         /// Prompt (if provided, one-shot mode; otherwise, REPL mode)
         prompt: Option<String>,
@@ -125,6 +125,16 @@ enum Commands {
         /// Number of concurrent requests
         #[arg(short = 'c', long, default_value = "1")]
         concurrent: usize,
+    },
+
+    /// Load and validate unified YAML workflow configuration
+    Workflow {
+        /// Path to unified YAML workflow file
+        workflow_file: PathBuf,
+
+        /// Show loaded configuration details
+        #[arg(long)]
+        show_config: bool,
     },
 
     /// Download model from HuggingFace
@@ -226,6 +236,10 @@ async fn main() -> Result<()> {
 
         Commands::Download { repo, file, output } => {
             download_command(&repo, file, &output).await
+        }
+
+        Commands::Workflow { workflow_file, show_config } => {
+            workflow_command(&workflow_file, show_config).await
         }
     }
 }
@@ -974,6 +988,64 @@ async fn download_command(repo: &str, file: Option<String>, output: &Path) -> Re
         .context("Download failed")?;
 
     println!("Downloaded {} bytes ({:.1} MB)", bytes, bytes as f64 / 1_048_576.0);
+    Ok(())
+}
+
+async fn workflow_command(workflow_file: &Path, show_config: bool) -> Result<()> {
+    use whitt_execution_engine::config::unified::UnifiedConfig;
+
+    if !workflow_file.exists() {
+        anyhow::bail!("Workflow file not found: {}", workflow_file.display());
+    }
+
+    println!("Loading unified workflow: {}", workflow_file.display());
+
+    let config = UnifiedConfig::from_file(workflow_file)
+        .context("Failed to load unified config")?;
+
+    println!("\n=== Unified Configuration ===");
+    println!("Schema Version: {}", config.schema_version);
+
+    println!("\nProviders:");
+    for (name, provider) in &config.providers.providers {
+        println!("  - {}", name);
+        if let Some(config) = &provider.config {
+            println!("      Host: {}:{}", config.host, config.port);
+        }
+        if let Some(requests) = &provider.requests {
+            println!("      Timeout: {}s, Max Retries: {}", requests.request_timeout_secs,
+                requests.retry.as_ref().map(|r| r.max_retries).unwrap_or(3));
+        }
+    }
+
+    println!("\nModels:");
+    for (name, model) in &config.models.models {
+        println!("  - {}", name);
+        println!("      Name: {}", model.name);
+        println!("      Host Type: {}", model.host.r#type);
+    }
+
+    if show_config {
+        println!("\n=== Model Configuration Resolution ===");
+        for model_name in config.models.models.keys() {
+            match config.resolve_model_config(model_name, None) {
+                Ok(resolved) => {
+                    println!("  Model: {}", model_name);
+                    println!("    Host: {}:{}", resolved.host, resolved.port);
+                    println!("    Temperature: {:?}", resolved.temperature);
+                    println!("    Max Tokens: {:?}", resolved.max_tokens);
+                    println!("    Timeout: {}s", resolved.timeout_secs);
+                    println!("    Max Retries: {}", resolved.max_retries);
+                }
+                Err(e) => {
+                    println!("  Model: {}", model_name);
+                    println!("    Error: {}", e);
+                }
+            }
+        }
+    }
+
+    println!("\n✓ Workflow configuration loaded and validated successfully");
     Ok(())
 }
 

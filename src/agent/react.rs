@@ -1,22 +1,7 @@
-use crate::agent::tools::{ToolCall, ToolRegistry, ToolResult, LlmBackend};
-use serde::{Deserialize, Serialize};
+use crate::agent::tools::{ToolCall, ToolRegistry, ToolResult};
+use crate::backend::llm_backend::{LlmBackend, ChatMessage, ChatResponse};
 use std::sync::Arc;
 use tracing::debug;
-
-// TODO: Replace with actual types from backend module when implemented
-// Placeholder message and response types
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatMessage {
-    pub role: String,
-    pub content: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatResponse {
-    pub content: String,
-    pub tool_calls: Option<Vec<ToolCall>>,
-    pub tokens_used: u64,
-}
 
 #[derive(Debug, Clone)]
 pub struct AgentResponse {
@@ -179,15 +164,15 @@ When you have the final answer, use the final_answer tool."#
 
                     tool_results.push(tool_result.clone());
 
-                    // Check if this is a final answer
                     if tool_call.name == "final_answer" || tool_result.metadata.get("type") == Some(&"final_answer".to_string()) {
                         debug!("Final answer received, ending ReAct loop");
+                        let tokens_used = *llm_response.usage.get("total_tokens").unwrap_or(&0);
                         return Ok(AgentResponse {
                             final_answer: tool_result.output,
                             tool_calls,
                             tool_results,
                             iterations: iteration + 1,
-                            total_tokens: llm_response.tokens_used + total_tokens,
+                            total_tokens: tokens_used + total_tokens,
                         });
                     }
 
@@ -201,25 +186,24 @@ When you have the final answer, use the final_answer tool."#
                         content: tool_result.output,
                     });
 
-                    total_tokens += llm_response.tokens_used;
+                    let tokens_used = *llm_response.usage.get("total_tokens").unwrap_or(&0);
+                    total_tokens += tokens_used;
                 }
                 None => {
-                    // No tool call, treat as direct response
                     debug!("No tool call detected, treating as direct response");
 
-                    // If no tool call after iterations, this is likely the final answer
+                    let tokens_used = *llm_response.usage.get("total_tokens").unwrap_or(&0);
                     return Ok(AgentResponse {
                         final_answer: llm_response.content,
                         tool_calls,
                         tool_results,
                         iterations: iteration + 1,
-                        total_tokens: llm_response.tokens_used + total_tokens,
+                        total_tokens: tokens_used + total_tokens,
                     });
                 }
             }
         }
 
-        // Max iterations reached, return best effort
         debug!("Max iterations reached, returning best effort");
 
         Ok(AgentResponse {
@@ -237,29 +221,16 @@ When you have the final answer, use the final_answer tool."#
     async fn call_llm(&self, messages: &[ChatMessage]) -> Result<ChatResponse, anyhow::Error> {
         debug!("Calling LLM with {} messages", messages.len());
 
-        // Convert messages to a single prompt
-        let prompt = messages
-            .iter()
-            .map(|m| format!("{}: {}\n", m.role, m.content))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        // Call backend
-        let response_content = self
+        let response = self
             .backend
-            .chat(&self.model, &prompt, None)
+            .chat(messages.to_vec(), &self.model)
             .await
             .map_err(|e| anyhow::anyhow!("LLM call failed: {}", e))?;
 
-        // Mock tokens used (backend should provide this in real implementation)
-        let tokens_used = prompt.len() as u64 + response_content.len() as u64;
+        let tokens_used = *response.usage.get("total_tokens").unwrap_or(&0);
 
         debug!("LLM response received, tokens used: {}", tokens_used);
 
-        Ok(ChatResponse {
-            content: response_content,
-            tool_calls: None,
-            tokens_used,
-        })
+        Ok(response)
     }
 }
