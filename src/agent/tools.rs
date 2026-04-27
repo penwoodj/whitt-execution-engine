@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use tracing::debug;
 use crate::backend::llm_backend::{LlmBackend, ChatMessage};
 use crate::model::registry::{ModelLifecycle, ThreadSafeModelRegistry};
+use crate::agent::sandbox::{ToolSandbox, SandboxConfig, FileOperation};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
@@ -350,16 +351,13 @@ impl Tool for ChatTool {
 
 // 5. FileReadTool
 pub struct FileReadTool {
-    allowed_paths: Vec<std::path::PathBuf>,
+    sandbox: ToolSandbox,
 }
 
 impl FileReadTool {
-    pub fn new(allowed_paths: Vec<std::path::PathBuf>) -> Self {
-        Self { allowed_paths }
-    }
-
-    fn is_path_allowed(&self, path: &std::path::Path) -> bool {
-        self.allowed_paths.iter().any(|allowed| path.starts_with(allowed))
+    pub fn new(config: SandboxConfig) -> Self {
+        let sandbox = ToolSandbox::new(config);
+        Self { sandbox }
     }
 }
 
@@ -395,14 +393,14 @@ impl Tool for FileReadTool {
         let path = std::path::PathBuf::from(path_str);
         debug!("Executing FileReadTool for path: {}", path_str);
 
-        if !self.is_path_allowed(&path) {
+        if let Err(e) = self.sandbox.validate_file_access(&path, FileOperation::Read) {
             return Ok(ToolResult {
                 tool_name: "file_read".to_string(),
-                output: format!("Access denied: path '{}' is not in allowed paths", path_str),
+                output: format!("Access denied: {}", e),
                 success: false,
                 metadata: {
                     let mut meta = HashMap::new();
-                    meta.insert("error".to_string(), "Path not allowed".to_string());
+                    meta.insert("error".to_string(), e.to_string());
                     meta
                 },
             });
@@ -485,5 +483,67 @@ impl Tool for FinalAnswerTool {
                 meta
             },
         })
+    }
+}
+
+pub struct ToolExecutor {
+    registry: ToolRegistry,
+    sandbox_config: SandboxConfig,
+}
+
+impl ToolExecutor {
+    pub fn new(registry: ToolRegistry, sandbox_config: SandboxConfig) -> Self {
+        Self {
+            registry,
+            sandbox_config,
+        }
+    }
+
+    pub async fn execute_tool(&self, tool_name: &str, args: HashMap<String, serde_json::Value>) -> Result<ToolResult, anyhow::Error> {
+        let tool = self.registry.get(tool_name)
+            .ok_or_else(|| anyhow::anyhow!("Tool not found: {}", tool_name))?;
+
+        if tool_name == "file_read" {
+            if let Some(path_value) = args.get("path") {
+                if let Some(path_str) = path_value.as_str() {
+                    let path = std::path::PathBuf::from(path_str);
+                    debug!("Checking sandbox permissions for path: {}", path_str);
+
+                    match ToolSandbox::new(self.sandbox_config.clone()).is_path_allowed(&path) {
+                        Ok(allowed) => {
+                            if !allowed {
+                                debug!("Sandbox denied access to path: {}", path_str);
+                                return Ok(ToolResult {
+                                    tool_name: tool_name.to_string(),
+                                    output: format!("Access denied by sandbox: path '{}' is not allowed", path_str),
+                                    success: false,
+                                    metadata: {
+                                        let mut meta = HashMap::new();
+                                        meta.insert("error".to_string(), "Sandbox access denied".to_string());
+                                        meta
+                                    },
+                                });
+                            }
+                            debug!("Sandbox allowed access to path: {}", path_str);
+                        }
+                        Err(e) => {
+                            debug!("Sandbox validation error for path {}: {}", path_str, e);
+                            return Ok(ToolResult {
+                                tool_name: tool_name.to_string(),
+                                output: format!("Sandbox validation error: {}", e),
+                                success: false,
+                                metadata: {
+                                    let mut meta = HashMap::new();
+                                    meta.insert("error".to_string(), e.to_string());
+                                    meta
+                                },
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        tool.execute(args).await
     }
 }
