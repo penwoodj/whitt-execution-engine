@@ -665,3 +665,11 @@ impl StepExecutor for MockStepExecutor {
 ```
 
 Full integration with StepExecutor will be completed in Task 04.
+
+---
+
+## QA Cross-References
+
+- **QA Criteria**: [QA-01-04](../../qa/phase-01/QA-CRITERIA.md)
+- **Test Cases**: [P01-007](../../qa/phase-01/QA-TEST-CASES.md), [P01-008](../../qa/phase-01/QA-TEST-CASES.md), [P01-009](../../qa/phase-01/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (execution engine component)

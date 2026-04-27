@@ -277,3 +277,11 @@ mod tests {
 - [ ] **Step 4: Run tests**
 
 - [ ] **Step 5: Commit**
+
+---
+
+## QA Cross-References
+
+- **QA Criteria**: ['$qa_criteria']('$file')
+- **Test Cases**: ['$test_case']('$file')
+- **Schema Ref**: $schema_ref

@@ -23,7 +23,14 @@ Define scope boundaries and implement risk assessment models. This ensures auton
 
 ---
 
-## Implementation Steps
+## QA Cross-References
+
+- **QA Criteria**: [QA-06-08](../../qa/phase-06/QA-CRITERIA.md)
+- **Test Cases**: [P06-031 through P06-033](../../qa/phase-06/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (new feature - boundary enforcement and risk assessment)
+
+---
+
 
 ### Step 1: Define scope boundaries
 

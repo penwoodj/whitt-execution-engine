@@ -23,7 +23,14 @@ Expose autonomy controls and metrics viewing through the CLI. This provides oper
 
 ---
 
-## Implementation Steps
+## QA Cross-References
+
+- **QA Criteria**: [QA-06-10](../../qa/phase-06/QA-CRITERIA.md)
+- **Test Cases**: [P06-037 through P06-039](../../qa/phase-06/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (new feature - CLI commands for autonomy control and metrics viewing)
+
+---
+
 
 ### Step 1: Implement autonomy CLI commands
 

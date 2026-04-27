@@ -746,3 +746,36 @@ See [validation/05-web-scraping.md](../validation/05-web-scraping.md)
 ## Test Specifications
 
 See [tests/05-web-scraping.md](../tests/05-web-scraping.md)
+
+
+---
+
+## QA Cross-References
+
+### QA Criteria
+- **QA Area**: Area 6 - Web Scraping
+- **QA Criteria**: [../../qa/phase-04/QA-CRITERIA.md#area-6-web-scraping](../../qa/phase-04/QA-CRITERIA.md#area-6-web-scraping)
+- **Priority**: P1
+- **Test Types**: Unit, Integration
+
+### Test Cases
+- **Test Cases**: [../../qa/phase-04/QA-TEST-CASES.md](../../qa/phase-04/QA-TEST-CASES.md)
+- **Key Tests**:
+  - P04-025: HTML parsing
+  - P04-026: Rate limiting per-domain
+  - P04-027: Robots.txt compliance
+  - P04-028: Content extraction
+  - P04-029: Request timeout
+  - P04-030: Cache invalidation
+
+### Schema References
+- **Schema File**: [../../../schema/unified-workflow-schema.yml](../../../schema/unified-workflow-schema.yml)
+- **Schema Section**: Lines 623-649 (web_operations.fetch/scrape: timeouts, policies, caching)
+- **Key Fields**:
+  - `web_operations.fetch.timeout_seconds` (line 630)
+  -   - `web_operations.fetch.respect_robots_txt` (line 632)
+  -   - `web_operations.scrape.parse_html` (line 635)
+
+### Related Documentation
+- **Cross-References**: [../../qa/phase-04/CROSS-REF.md](../../qa/phase-04/CROSS-REF.md)
+- **Phase Plan**: [../plan.md](../plan.md)

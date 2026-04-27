@@ -523,3 +523,130 @@ Task 08 implements automation UI integration with:
 ✅ ADR-0007 compliance (manual control via UI)
 
 **Phase 6 Complete!** All automation tasks implemented.
+
+---
+
+## Implementation Research
+
+### Recommended Libraries
+
+| Library | Version | Purpose | Notes |
+|---------|---------|---------|-------|
+| actix-web | 4.4 | Web framework | Backend API endpoints |
+| actix-cors | 0.6 | CORS support | Cross-origin requests |
+| tokio | 1.35 | Async runtime | Core async infrastructure |
+| serde | 1.0 | Serialization | JSON support |
+| serde_json | 1.0 | JSON format | Standard JSON I/O |
+| thiserror | 1.0 | Error handling | Type-safe errors |
+| anyhow | 1.0 | Error composition | Flexible error handling |
+
+### Key Design Decisions
+
+- **Backend API**: Actix-web REST endpoints for automation management
+- **Frontend UI**: React components for experiments, merge proposals, refinements
+- **Manual approval**: UI provides approve/reject interface for merge proposals
+- **Refinement capture**: Form-based input for manual refinements
+- **Audit trail**: All UI actions logged to provenance system
+- **ADR-0007 compliance**: UI provides manual control, no auto-commits
+
+### Implementation Pattern
+
+\`\`\`rust
+// Backend API endpoints
+use actix_web::{web, HttpResponse, Responder};
+
+#[derive(serde::Serialize)]
+struct Experiment {
+    id: String,
+    name: String,
+    description: String,
+    status: String,
+    created_at: String,
+}
+
+pub async fn list_experiments() -> impl Responder {
+    // Load experiments from storage
+    let experiments = vec![]; // TODO: Load from actual storage
+    
+    HttpResponse::Ok().json(experiments)
+}
+
+pub async fn get_experiment(path: web::Path<String>) -> impl Responder {
+    let id = path.into_inner();
+    // Load experiment from storage
+    HttpResponse::Ok().json(serde_json::json!({ "id": id }))
+}
+
+pub async fn create_experiment(
+    data: web::Json<CreateExperimentRequest>,
+) -> impl Responder {
+    // Create experiment
+    HttpResponse::Ok().json(serde_json::json!({ "id": "new-id" }))
+}
+
+pub fn configure(cfg: &mut web::ServiceConfig) {
+    cfg.service(
+        web::scope("/automation")
+            .route("/experiments", web::get().to(list_experiments))
+            .route("/experiments", web::post().to(create_experiment))
+            .route("/experiments/{id}", web::get().to(get_experiment))
+    );
+}
+\`\`\`
+
+### Dependencies on Prior Phases
+
+- **Phase 5 Tasks 00-07**: All Phase 5 tasks (schedule, experiment, merge, refine, rollback)
+- **Phase 2**: CLI integration (existing CLI structure)
+- **Phase 1-3**: Core execution engine (workflow execution via API)
+
+### Testing Strategy
+
+- **Unit**: API endpoint handlers, data validation
+- **Integration**: Full backend API workflow with frontend UI
+- **Property**: API endpoints return consistent results for given inputs
+
+### Schema Alignment
+
+- **Schema Ref**: Lines 110-148 (provenance tracking for UI operations)
+- **Schema Ref**: Lines 110-148 (provenance tracking for manual operations)
+
+### Critical Constraints
+
+- **MUST** provide manual approval/rejection interface via UI
+- **MUST** support refinement capture form (what, why, who)
+- **MUST** log all UI actions to provenance system
+- **MUST** provide experiments dashboard (create, list, status)
+- **MUST** provide merge proposals review interface
+- **MUST NOT** auto-commit merge proposals (ADR-0007 requirement)
+- **MUST NOT** allow destructive operations without confirmation
+
+
+
+---
+
+## QA Cross-References
+
+### QA Criteria
+- **QA Area**: Area 9 - Automation UI Integration
+- **QA Criteria**: [../../qa/phase-05/QA-CRITERIA.md#area-9-automation-ui-integration](../../qa/phase-05/QA-CRITERIA.md#area-9-automation-ui-integration)
+- **Priority**: P2
+- **Test Types**: Integration, E2E
+
+### Test Cases
+- **Test Cases**: [../../qa/phase-05/QA-TEST-CASES.md](../../qa/phase-05/QA-TEST-CASES.md)
+- **Key Tests**:
+  - P05-028: Experiments dashboard
+  - P05-029: Merge proposals review interface
+  - P05-030: Refinement capture form
+  - P05-031: Backend API endpoints
+  - P05-032: UI components (React-based)
+
+### Schema References
+- **Schema File**: [../../../schema/unified-workflow-schema.yml](../../../schema/unified-workflow-schema.yml)
+- **Schema Section**: N/A (new feature - React-based UI)
+
+
+### Related Documentation
+- **Cross-References**: [../../qa/phase-05/CROSS-REF.md](../../qa/phase-05/CROSS-REF.md)
+- **Phase Plan**: [../plan.md](../plan.md)

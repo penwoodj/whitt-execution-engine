@@ -23,7 +23,14 @@ Evaluate stop conditions during autonomous loop execution. This enforces bounded
 
 ---
 
-## Implementation Steps
+## QA Cross-References
+
+- **QA Criteria**: [QA-06-06](../../qa/phase-06/QA-CRITERIA.md)
+- **Test Cases**: [P06-023 through P06-026](../../qa/phase-06/QA-TEST-CASES.md)
+- **Schema Ref**: [Lines 503-598](../../schema/unified-workflow-schema.yml) (workflow_execution_strategy - stop conditions)
+
+---
+
 
 ### Step 1: Define stop condition types
 

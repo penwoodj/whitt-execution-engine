@@ -244,7 +244,7 @@ impl PermissionManager {
         // Command injection prevention (for shell tools)
         if self.config.guardrails.command_injection_prevention {
             if tool_name == "shell.exec" || tool_name.starts_with("shell.") {
-                let dangerous_patterns = ["; ", " && ", " || ", "| ", "`", "$(", "evalue"];
+                let dangerous_patterns = ["; ", " && ", " || ", "| ", "`", "$(", "eval"];
                 for pattern in dangerous_patterns {
                     if input.contains(pattern) {
                         anyhow::bail!("Potential command injection detected: {}", pattern);
@@ -522,7 +522,7 @@ git commit -m "test(tools): add permission manager integration tests"
 
 ## Summary
 
-This task implements the tool permission system including:
+This task implements tool permission system including:
 
 1. **Permission configuration** with allow/deny lists and step restrictions
 2. **Permission manager** with evaluation logic and guardrails
@@ -541,3 +541,64 @@ This task implements the tool permission system including:
 - Allowed/denied path lists
 
 **Next:** Task 08 - Tool Execution Framework
+
+---
+
+## Implementation Status
+
+**Status**: ✅ IMPLEMENTED
+
+### What Exists
+- Tool sandbox with permissions implemented in `src/agent/sandbox.rs` (297 lines)
+- `ToolSandbox` struct provides execution context with permission checking
+- Permission model: `ToolPermission::Denied(reason)` and `ToolPermission::Allowed`
+- Guardrails enforcement: `check_path_traversal()`, `check_command_injection()`
+- File operation guards: `can_read_path()`, `can_write_path()`, `can_delete_path()`
+- Safe path detection: `/tmp`, `/workspace`, current working directory
+- Dangerous path detection: `/etc`, `/root`, system paths
+
+### Implementation Details
+- **File**: `src/agent/sandbox.rs` (297 lines)
+- **Struct**: `ToolSandbox`
+- **Key Methods**:
+  - `check_permission(tool: &str, input: &str) -> ToolPermission`
+  - `check_path_traversal(input: &str) -> Result<()>`
+  - `check_command_injection(input: &str) -> Result<()>`
+  - `can_read_path(path: &str) -> bool`
+  - `can_write_path(path: &str) -> bool`
+  - `can_delete_path(path: &str) -> bool`
+- **Guardrails**:
+  - Path traversal: blocks `../`, `..\\`, `/etc/passwd`, `/etc/shadow`, `/root/`
+  - Command injection: blocks shell operators (`&&`, `||`, `|`, `` ` ``, `$()`, `eval`)
+  - Allowed paths: `/tmp`, `/workspace`, CWD
+  - Denied paths: `/etc`, `/root`, system directories
+
+### Alignment with Task Spec
+- ✅ Permission system exists (as `ToolSandbox` instead of separate `PermissionManager`)
+- ✅ Allow/deny logic implemented (via `ToolPermission` enum)
+- ✅ Guardrails enforcement (path traversal, command injection)
+- ✅ Safe/denied path detection
+- ⚠️ Structure differs: implemented as part of sandbox, not separate permissions module
+- ❌ No allow/deny configuration files (hardcoded in sandbox)
+- ❌ No confirmation flow (binary allow/deny, no interactive prompts)
+- ❌ No step-specific restrictions (global only)
+
+### What's Missing
+- Separate `src/tools/permissions/` module structure (integrated into sandbox)
+- Configuration-driven allow/deny lists (currently hardcoded)
+- Interactive confirmation flow
+- Per-step restrictions
+- YAML configuration for permission policies
+- Wiremock tests for permission manager
+
+### QA Coverage
+- No dedicated QA file found for Phase 02 task 07
+- Tests should verify: permission evaluation, guardrails enforcement, path safety
+
+---
+
+## QA Cross-References
+
+- **QA Criteria**: ['$qa_criteria']('$file')
+- **Test Cases**: ['$test_case']('$file')
+- **Schema Ref**: $schema_ref

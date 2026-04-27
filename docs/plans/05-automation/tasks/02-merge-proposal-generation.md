@@ -778,3 +778,105 @@ Task 02 implements merge proposal generation with:
 ✅ ADR-0007 compliance (proposals are outputs only)
 
 **Next Steps:** Task 03 (Manual Refinement Capture)
+
+---
+
+## Implementation Research
+
+### Recommended Libraries
+
+| Library | Version | Purpose | Notes |
+|---------|---------|---------|-------|
+| git2 | 0.18 | Git operations | Diff generation, branch management |
+| tokio | 1.35 | Async runtime | Core async infrastructure |
+| serde | 1.0 | Serialization | JSON support |
+| serde_json | 1.0 | JSON format | Standard JSON I/O |
+| thiserror | 1.0 | Error handling | Type-safe errors |
+| anyhow | 1.0 | Error composition | Flexible error handling |
+
+### Key Design Decisions
+
+- **Diff generation**: Git2-based comprehensive diffs between experiment and base branches
+- **Validation criteria**: Test passage, code quality checks, pattern validation
+- **Confidence scoring**: High (all criteria pass), Medium (some warnings), Low (major issues)
+- **Artifact management**: Proposals written to `./workspace/merge-proposals/` (never auto-committed)
+- **Manual approval**: CLI/UI integration for proposal review and approval (Task 03, Task 07)
+- **Audit trail**: Proposals linked to experiments and refinement events
+- **ADR-0007 compliance**: Proposals are outputs only (written to workspace), never auto-committed
+
+### Implementation Pattern
+
+```rust
+use automation_merge::{MergeProposalGenerator, MergeValidator, ConfidenceScorer, ProposalArtifactManager};
+
+// Pattern: Generate merge proposal
+let generator = MergeProposalGenerator::new("/path/to/repo");
+
+let proposal = generator.generate_diff("experiment-branch", "main").await?;
+
+// Pattern: Validate proposal
+let validator = MergeValidator::new(ValidationCriteria {
+    require_tests_pass: true,
+    check_code_quality: true,
+    validate_patterns: true,
+});
+
+let validation = validator.validate(&proposal).await?;
+
+// Pattern: Score confidence
+let scorer = ConfidenceScorer::new();
+let confidence = scorer.score_confidence(&proposal, &validation).await?;
+
+// Pattern: Write proposal artifact
+let artifact_manager = ProposalArtifactManager::new("./workspace/merge-proposals");
+artifact_manager.write_proposal(&proposal, &validation, &confidence).await?;
+
+// Pattern: Read proposal artifact
+let loaded_proposal = artifact_manager.read_proposal(&proposal.id).await?;
+
+// Pattern: List all proposals
+let proposals = artifact_manager.list_proposals().await?;
+
+// Pattern: Delete proposal (after merge or rejection)
+artifact_manager.delete_proposal(&proposal.id).await?;
+
+// Pattern: Link proposal to refinement
+// When Task 03 captures manual refinements, link them to proposal
+```
+
+### Dependencies on Prior Phases
+
+- **Phase 5 Task 01**: Git Experiment Framework (experiment branch management)
+- **Phase 5 Task 03**: Manual Refinement Capture (refinement event linking)
+- **Phase 5 Task 07**: Automation CLI (proposal review commands)
+
+### Testing Strategy
+
+- **Unit**: Diff generation, validation criteria, confidence scoring logic
+- **Integration**: Full proposal generation workflow with artifact management
+- **Property**: Confidence scoring produces consistent results for given validation criteria
+
+### Schema Alignment
+
+- **Schema Ref**: Lines 110-148 (provenance tracking for proposal operations)
+- **Schema Ref**: Lines 110-148 (provenance tracking for merge operations)
+
+### Critical Constraints
+
+- **MUST** write proposals to `./workspace/merge-proposals/` (never auto-commit)
+- **MUST** validate proposals against configurable criteria
+- **MUST** score proposal confidence (high/medium/low)
+- **MUST** support manual approval via CLI/UI (Task 03, Task 07)
+- **MUST** maintain audit trail (link proposals to experiments/refinements)
+- **MUST NOT** auto-commit proposals (ADR-0007 requirement)
+- **MUST NOT** write proposals outside `./workspace/`
+
+
+## QA Cross-References
+
+### QA Criteria
+- **QA Area**: Area 3 - Merge Proposal Generation
+- **QA Criteria**: [../../qa/phase-05/QA-CRITERIA.md#area-3-merge-proposal-generation](../../qa/phase-05/QA-CRITERIA.md#area-3-merge-proposal-generation)
+- **Priority**: P1
+- **Test Types**: Unit, Integration
+

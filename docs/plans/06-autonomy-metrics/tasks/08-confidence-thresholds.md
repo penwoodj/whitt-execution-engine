@@ -23,7 +23,14 @@ Compute confidence from metrics and enforce threshold-based decisions. This enab
 
 ---
 
-## Implementation Steps
+## QA Cross-References
+
+- **QA Criteria**: [QA-06-09](../../qa/phase-06/QA-CRITERIA.md)
+- **Test Cases**: [P06-034 through P06-036](../../qa/phase-06/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (new feature - computed from metrics)
+
+---
+
 
 ### Step 1: Define threshold structure
 

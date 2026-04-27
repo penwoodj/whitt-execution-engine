@@ -467,3 +467,11 @@ Task 5 is complete when:
 - ✅ Insights engine with actionable recommendations
 - ✅ All tests passing
 - ✅ Documentation complete
+
+---
+
+## QA Cross-References
+
+- **QA Criteria**: ['$qa_criteria']('$file')
+- **Test Cases**: ['$test_case']('$file')
+- **Schema Ref**: $schema_ref

@@ -592,3 +592,164 @@ See [validation/08-memory-search-integration.md](../validation/08-memory-search-
 ## Test Specifications
 
 See [tests/08-memory-search-integration.md](../tests/08-memory-search-integration.md)
+
+---
+
+## QA Cross-References
+
+### QA Criteria
+- **QA Area**: Area 9 - Memory & Search Integration
+- **QA Criteria**: [../../qa/phase-04/QA-CRITERIA.md#area-9-memory--search-integration](../../qa/phase-04/QA-CRITERIA.md#area-9-memory--search-integration)
+- **Priority**: P0
+- **Test Types**: Integration, E2E
+
+### Test Cases
+- **Test Cases**: [../../qa/phase-04/QA-TEST-CASES.md](../../qa/phase-04/QA-TEST-CASES.md)
+- **Key Tests**: 
+  - P04-045: Workflow engine integration
+  - P04-046: Tool nodes
+  - P04-047: CLI commands (store/search/delete/list)
+  - P04-048: UI memory browser
+  - P04-049: Variable interpolation
+  - P04-050: RAG injection
+  - P04-051: Error propagation
+  - P04-052: End-to-end memory workflow
+  - P04-053: Cross-component communication
+  - P04-054: Memory constraints enforcement
+
+### Schema References
+- **Schema File**: [../../../schema/unified-workflow-schema.yml](../../../schema/unified-workflow-schema.yml)
+- **Schema Section**: Lines 196-497 (agentic_workflow steps), Lines 701-710 (workspace directories)
+- **Key Fields**:
+  - `agentic_workflow` (lines 196-497)
+  - `workspace.rag_knowledge_base` (lines 701-703)
+  - `workspace.backups` (lines 711-723)
+
+### Related Documentation
+- **Cross-References**: [../../qa/phase-04/CROSS-REF.md](../../qa/phase-04/CROSS-REF.md)
+- **Phase Plan**: [../plan.md](../plan.md)
+
+---
+
+## Implementation Research
+
+### Recommended Libraries
+
+| Library | Version | Purpose | Notes |
+|---------|---------|---------|-------|
+| tokio | 1.35 | Async runtime | Core async infrastructure |
+| serde | 1.0 | Serialization | JSON support |
+| serde_json | 1.0 | JSON format | Standard JSON I/O |
+| thiserror | 1.0 | Error handling | Type-safe errors |
+| clap | 4.4 | CLI parsing | Argument parsing and help generation |
+| colored | 2.0 | Terminal colors | CLI output formatting |
+| tracing | 0.1 | Logging | Structured logging |
+| tracing-subscriber | 0.3 | Logging subscriber | Console output |
+| anyhow | 1.0 | Error composition | Flexible error handling |
+| agentsdk-memory | 0.1.0 | Memory storage | Memory CRUD operations |
+| agentsdk-search | 0.1.0 | Search engine | Hybrid search orchestration |
+| agentsdk-provenance | 0.1.0 | Provenance tracking | Trace recording |
+| agentsdk-garbage | 0.1.0 | Garbage collection | GC management |
+
+### Key Design Decisions
+
+- **Tool nodes**: Memory search and storage tools for workflow integration
+- **CLI commands**: Search, store, retrieve, list, provenance, GC operations
+- **Context injection**: Tools inject memory context into workflow execution
+- **Provenance recording**: All tool operations create trace records
+- **UI integration**: Browser-based memory viewer and search interface
+- **Clap-based CLI**: Structured command parsing with subcommands
+- **Colored output**: Terminal colors for better readability
+- **Async execution**: All CLI commands are async (tokio::main)
+
+### Implementation Pattern
+
+```rust
+// Pattern: Tool implementation with provenance
+pub async fn execute_memory_search(
+    memory_ops: Arc<MemoryOperations>,
+    search_engine: Arc<SearchEngine>,
+    provenance_store: Arc<ProvenanceStore>,
+    query: String,
+    limit: usize,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    // Record query provenance
+    let trace_id = TraceId::new();
+    provenance_store.record(ProvenanceRecord {
+        trace_id: trace_id.clone(),
+        parent_trace_id: None,
+        operation: OperationType::SearchQuery,
+        source: OperationSource::Tool("memory-search".to_string()),
+        timestamp: chrono::Utc::now(),
+        memory_id: None,
+        content_hash: None,
+        metadata: serde_json::json!({"query": query}),
+    }).await?;
+
+    // Execute search
+    let search_query = SearchQuery::new(query).with_limit(limit);
+    let results = search_engine.search(search_query).await?;
+
+    // Record result provenance
+    provenance_store.record(ProvenanceRecord {
+        trace_id: TraceId::new(),
+        parent_trace_id: Some(trace_id),
+        operation: OperationType::SearchResult,
+        source: OperationSource::Tool("memory-search".to_string()),
+        timestamp: chrono::Utc::now(),
+        memory_id: None,
+        content_hash: None,
+        metadata: serde_json::json!({"result_count": results.len()}),
+    }).await?;
+
+    Ok(serde_json::to_value(results)?)
+}
+
+// Pattern: CLI command with Clap
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    tracing_subscriber::fmt::init();
+    
+    let cli = Cli::parse();
+    match cli.command {
+        Commands::Search { query, limit } => {
+            let memory_ops = Arc::new(MemoryOperations::new("./workspace/memory"));
+            let search_engine = Arc::new(create_search_engine());
+            let results = execute_memory_search(memory_ops, search_engine, query, limit).await?;
+            println!("{}", serde_json::to_string_pretty(&results)?);
+        }
+        Commands::Store { data, tags } => {
+            // Store implementation
+        }
+        Commands::Retrieve { id } => {
+            // Retrieve implementation
+        }
+        _ => {}
+    }
+    
+    Ok(())
+}
+
+// Pattern: Tool registration in workflow
+// In workflow engine, register tools:
+registry.register_tool("memory_search", Arc::new(MemorySearchTool::new(...)));
+registry.register_tool("memory_store", Arc::new(MemoryStorageTool::new(...)));
+```
+
+### Dependencies on Prior Phases
+
+- **Phase 4 Task 00-07**: All Phase 4 tasks (memory, search, provenance, garbage collection)
+- **Phase 1-3**: Core execution engine (workflow integration)
+- **Phase 2**: CLI integration (existing CLI structure)
+
+### Testing Strategy
+
+- **Unit**: Tool execution, CLI command parsing, context injection
+- **Integration**: Full workflow with memory search and storage tools
+- **Property**: Provenance traces are recorded for all operations
+
+### Schema Alignment
+
+- **Schema Ref**: Lines 110-148 (provenance tracking for tool operations)
+- **Schema Ref**: Lines 68-96 (memory data structures for tool operations)
+- **Schema Ref**: Lines 110-148 (tool context injection for workflow execution)

@@ -377,3 +377,11 @@ pub use loop_::{LoopError, LoopResult, LoopRunner, LoopType};
 - [ ] **Step 5: Run tests**
 
 - [ ] **Step 6: Commit**
+
+---
+
+## QA Cross-References
+
+- **QA Criteria**: ['$qa_criteria']('$file')
+- **Test Cases**: ['$test_case']('$file')
+- **Schema Ref**: $schema_ref

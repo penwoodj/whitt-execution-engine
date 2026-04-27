@@ -571,3 +571,113 @@ Task 03 implements manual refinement capture with:
 ✅ ADR-0007 compliance (all refinements artifacted)
 
 **Next Steps:** Task 04 (Experiment Result Tracking) or Task 07 (Automation CLI)
+
+---
+
+## Implementation Research
+
+### Recommended Libraries
+
+| Library | Version | Purpose | Notes |
+|---------|---------|---------|-------|
+| tokio | 1.35 | Async runtime | Core async infrastructure |
+| serde | 1.0 | Serialization | JSON support |
+| serde_json | 1.0 | JSON format | Standard JSON I/O |
+| thiserror | 1.0 | Error handling | Type-safe errors |
+| anyhow | 1.0 | Error composition | Flexible error handling |
+| chrono | 0.4 | Timestamps | Immutable event timestamps |
+
+### Key Design Decisions
+
+- **Event types**: Approve, Reject, Refine, Comment (manual operation tracking)
+- **Event capture**: What (operation), why (reason), who (user), when (timestamp)
+- **Artifact linking**: Refinements linked to merge proposals, experiments, results
+- **Immutable log**: All events written to `./workspace/refinements/` (never modified)
+- **Approval workflows**: Approve/reject with optional comments and reasons
+- **Rollback support**: Refinement events enable rollback via event reversal
+- **ADR-0007 compliance**: All manual refinements preserved as artifacted events
+
+### Implementation Pattern
+
+```rust
+use automation_refinement::{RefinementManager, RefinementEvent, RefinementType};
+
+// Pattern: Create refinement manager
+let manager = RefinementManager::new("/path/to/repo")?;
+
+// Pattern: Create refinement event
+let event = RefinementEvent {
+    id: uuid::Uuid::new_v4().to_string(),
+    event_type: RefinementType::Approve,
+    target_type: "merge_proposal".to_string(),
+    target_id: "proposal-123".to_string(),
+    reason: "All tests pass, code quality high".to_string(),
+    user: "user@example.com".to_string(),
+    timestamp: chrono::Utc::now(),
+    artifact_id: Some("refinement-456".to_string()),
+};
+
+let event_id = manager.create_refinement(event).await?;
+
+// Pattern: Get all refinements for a target
+let refinements = manager.get_refinements("merge_proposal", "proposal-123").await?;
+
+// Pattern: Get all refinements
+let all_refinements = manager.get_all_refinements().await?;
+
+// Pattern: Link refinement to artifact
+manager.link_to_artifact(&event_id, "experiment-result-789").await?;
+
+// Pattern: Rollback via event reversal
+// To rollback an approval, create a Reject refinement event
+let rollback_event = RefinementEvent {
+    event_type: RefinementType::Reject,
+    target_type: "refinement".to_string(),
+    target_id: event_id,
+    reason: "Rollback: approval rescinded".to_string(),
+    user: "admin@example.com".to_string(),
+    timestamp: chrono::Utc::now(),
+    artifact_id: None,
+};
+
+manager.create_refinement(rollback_event).await?;
+
+// Pattern: Query refinement event
+let loaded_event = manager.get_refinement(&event_id).await?;
+```
+
+### Dependencies on Prior Phases
+
+- **Phase 5 Task 02**: Merge Proposal Generation (merge proposal targets)
+- **Phase 5 Task 04**: Experiment Result Tracking (result linking)
+- **Phase 5 Task 07**: Automation CLI (refinement commands)
+
+### Testing Strategy
+
+- **Unit**: Event creation, event linking, refinement querying
+- **Integration**: Full refinement workflow with artifact linking and rollback
+- **Property**: Immutable event log prevents modification after creation
+
+### Schema Alignment
+
+- **Schema Ref**: Lines 110-148 (provenance tracking for refinement operations)
+- **Schema Ref**: Lines 110-148 (provenance tracking for manual operations)
+
+### Critical Constraints
+
+- **MUST** write refinement events to `./workspace/refinements/` (never modified after write)
+- **MUST** capture what, why, who, when for every refinement
+- **MUST** support artifact linking (merge proposals, experiments, results)
+- **MUST** support rollback via event reversal
+- **MUST NOT** modify events after creation (immutable log)
+- **MUST NOT** allow deletion without audit trail
+
+
+## QA Cross-References
+
+### QA Criteria
+- **QA Area**: Area 4 - Manual Refinement Capture
+- **QA Criteria**: [../../qa/phase-05/QA-CRITERIA.md#area-4-manual-refinement-capture](../../qa/phase-05/QA-CRITERIA.md#area-4-manual-refinement-capture)
+- **Priority**: P1
+- **Test Types**: Unit, Integration
+

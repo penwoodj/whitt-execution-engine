@@ -628,3 +628,34 @@ See [validation/02-semantic-search.md](../validation/02-semantic-search.md)
 ## Test Specifications
 
 See [tests/02-semantic-search.md](../tests/02-semantic-search.md)
+
+
+---
+
+## QA Cross-References
+
+### QA Criteria
+- **QA Area**: Area 3 - Semantic Search
+- **QA Criteria**: [../../qa/phase-04/QA-CRITERIA.md#area-3-semantic-search](../../qa/phase-04/QA-CRITERIA.md#area-3-semantic-search)
+- **Priority**: P0
+- **Test Types**: Unit, Integration
+
+### Test Cases
+- **Test Cases**: [../../qa/phase-04/QA-TEST-CASES.md](../../qa/phase-04/QA-TEST-CASES.md)
+- **Key Tests**:
+  - P04-011: Embedding generation
+  - P04-012: Vector storage
+  - P04-013: Similarity search
+  - P04-014: Embedding cache
+
+### Schema References
+- **Schema File**: [../../../schema/unified-workflow-schema.yml](../../../schema/unified-workflow-schema.yml)
+- **Schema Section**: Lines 682-696 (memory/rag - embedding configuration)
+- **Key Fields**:
+  - `memory.rag.embedding_model` (lines 682-690)
+  -   - `memory.rag.cache.enabled` (line 692)
+  -   - `memory.rag.cache.ttl_seconds` (line 693)
+
+### Related Documentation
+- **Cross-References**: [../../qa/phase-04/CROSS-REF.md](../../qa/phase-04/CROSS-REF.md)
+- **Phase Plan**: [../plan.md](../plan.md)

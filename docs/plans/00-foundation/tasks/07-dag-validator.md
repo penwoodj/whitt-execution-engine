@@ -236,3 +236,11 @@ cargo test dag_test
 **Anti-Drift Check:** Verify task 7 implements ONLY DAG validation. No policy compilation or persistence yet.
 
 **Next:** Proceed to Task 8 (Policy Compiler)
+
+---
+
+## QA Cross-References
+
+- **QA Criteria**: ['$qa_criteria']('$file')
+- **Test Cases**: ['$test_case']('$file')
+- **Schema Ref**: $schema_ref

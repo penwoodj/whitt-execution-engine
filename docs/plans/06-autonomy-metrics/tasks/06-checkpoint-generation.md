@@ -23,7 +23,14 @@ Generate periodic and event-triggered checkpoints for state preservation. Checkp
 
 ---
 
-## Implementation Steps
+## QA Cross-References
+
+- **QA Criteria**: [QA-06-07](../../qa/phase-06/QA-CRITERIA.md)
+- **Test Cases**: [P06-027 through P06-030](../../qa/phase-06/QA-TEST-CASES.md)
+- **Schema Ref**: [Lines 568-583](../../schema/unified-workflow-schema.yml) (checkpointing in workflow_execution_strategy)
+
+---
+
 
 ### Step 1: Define checkpoint structure
 

@@ -23,7 +23,14 @@ Implement pause, stop, modify, and scope-change controls that are ALWAYS availab
 
 ---
 
-## Implementation Steps
+## QA Cross-References
+
+- **QA Criteria**: [QA-06-03](../../qa/phase-06/QA-CRITERIA.md)
+- **Test Cases**: [P06-011 through P06-014](../../qa/phase-06/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (new feature - always available at all autonomy levels)
+
+---
+
 
 ### Step 1: Define override control types
 

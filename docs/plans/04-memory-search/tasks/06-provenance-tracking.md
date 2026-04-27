@@ -704,3 +704,36 @@ See [validation/06-provenance-tracking.md](../validation/06-provenance-tracking.
 ## Test Specifications
 
 See [tests/06-provenance-tracking.md](../tests/06-provenance-tracking.md)
+
+
+---
+
+## QA Cross-References
+
+### QA Criteria
+- **QA Area**: Area 7 - Provenance Tracking
+- **QA Criteria**: [../../qa/phase-04/QA-CRITERIA.md#area-7-provenance-tracking](../../qa/phase-04/QA-CRITERIA.md#area-7-provenance-tracking)
+- **Priority**: P1
+- **Test Types**: Unit, Integration
+
+### Test Cases
+- **Test Cases**: [../../qa/phase-04/QA-TEST-CASES.md](../../qa/phase-04/QA-TEST-CASES.md)
+- **Key Tests**:
+  - P04-031: Source attribution
+  - P04-032: Immutable event log
+  - P04-033: Artifact linking
+  - P04-034: Timestamp preservation
+  - P04-035: Hash verification
+  - P04-036: Provenance query
+
+### Schema References
+- **Schema File**: [../../../schema/unified-workflow-schema.yml](../../../schema/unified-workflow-schema.yml)
+- **Schema Section**: Lines 110-148 (provenance tracking: source_uri, timestamp, checksum)
+- **Key Fields**:
+  - `provenance.source_uri` (line 112)
+  -   - `provenance.timestamp` (line 113)
+  -   - `provenance.checksum` (line 114)
+
+### Related Documentation
+- **Cross-References**: [../../qa/phase-04/CROSS-REF.md](../../qa/phase-04/CROSS-REF.md)
+- **Phase Plan**: [../plan.md](../plan.md)

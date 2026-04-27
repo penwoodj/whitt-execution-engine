@@ -53,6 +53,8 @@ This phase **requires** completion of Phases 0-4:
 - **Phase 4**: Tool execution and resource management
 - **Phase 5**: Error handling, logging, and observability
 
+> ⚠️ **Critical Review #2 Finding**: Error handling is phase-local; no cross-phase error propagation strategy. Phase 05 needs to extend `src/error.rs` with new `ScheduleError` variant for cron/automation operations. Add as dependency item for all tasks. See [upstream-critical-review-02.md](../../research/upstream-critical-review-02.md) Factor 2.
+
 ### Critical Dependencies
 
 - `workflow_ir::ExecutionEngine` - For executing scheduled workflows
@@ -501,3 +503,41 @@ See individual task files for detailed implementation steps.
 - Status: Draft
 - Reviewer: TBD
 - Approved: TBD
+
+## QA Documentation
+
+This phase has comprehensive QA documentation covering all implementation tasks:
+
+### QA Files
+
+- **QA Criteria**: [../qa/phase-05/QA-CRITERIA.md](../qa/phase-05/QA-CRITERIA.md) — Detailed acceptance criteria for all 9 tasks with ADR-0007 compliance
+- **QA Test Cases**: [../qa/phase-05/QA-TEST-CASES.md](../qa/phase-05/QA-TEST-CASES.md) — Specific test cases for each QA area
+- **Cross-References**: [../qa/phase-05/CROSS-REF.md](../qa/phase-05/CROSS-REF.md) — Bidirectional links between plan tasks and QA areas
+
+### QA Areas
+
+| QA Area | Task File | Priority | Test Types |
+|----------|-----------|------------|-------------|
+| Area 1: Cron Scheduler | tasks/00-cron-scheduler.md | P0 | Unit, Integration |
+| Area 2: Git Experiment Framework | tasks/01-git-experiment-framework.md | P0 | Unit, Integration |
+| Area 3: Merge Proposal Generation | tasks/02-merge-proposal-generation.md | P1 | Unit, Integration |
+| Area 4: Manual Refinement Capture | tasks/03-manual-refinement-capture.md | P1 | Unit, Integration |
+| Area 5: Experiment Result Tracking | tasks/04-experiment-result-tracking.md | P1 | Unit, Integration |
+| Area 6: Rollback & Cleanup | tasks/05-rollback-cleanup.md | P1 | Unit, Integration |
+| Area 7: Scheduling Policy Compiler | tasks/06-scheduling-policy-compiler.md | P0 | Unit, Integration |
+| Area 8: Automation CLI | tasks/07-automation-cli.md | P0 | Integration, E2E |
+| Area 9: Automation UI Integration | tasks/08-automation-ui-integration.md | P2 | Integration, E2E |
+
+### Verification Protocol
+
+Before claiming any task or phase complete:
+
+1. **Unit tests**: Run `cargo test --lib` — all tests must PASS
+2. **Integration tests**: Run `cargo test --test` — all tests must PASS
+3. **Clippy**: Run `cargo clippy --all-features -- -W clippy::all` — 0 warnings
+4. **LSP diagnostics**: Run on all changed files — 0 errors
+5. **Build**: Run `cargo build --release --all-features` — exit code 0
+6. **Manual verification**: For CLI/Docker features, test actual commands
+
+See [AGENTS.md](../../AGENTS.md) for full verification protocol.
+

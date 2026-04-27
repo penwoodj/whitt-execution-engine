@@ -652,3 +652,11 @@ This task implements RAG integration including:
 - Hybrid retrieval (semantic + keyword)
 
 **Next:** Task 12 - Self-Improvement Loop
+
+---
+
+## QA Cross-References
+
+- **QA Criteria**: ['$qa_criteria']('$file')
+- **Test Cases**: ['$test_case']('$file')
+- **Schema Ref**: $schema_ref

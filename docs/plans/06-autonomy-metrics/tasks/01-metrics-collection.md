@@ -1255,3 +1255,111 @@ After completing Task 01:
 ---
 
 **End of Task 01**
+
+---
+
+## Implementation Research
+
+### Recommended Libraries
+
+| Library | Version | Purpose | Notes |
+|---------|---------|---------|-------|
+| prometheus | 0.13 | Prometheus client | Metrics export to Prometheus |
+| dashmap | 5.5 | Concurrent hashmap | Thread-safe metric storage |
+| ahash | 0.8 | Hash function | Fast metric aggregation |
+| tokio | 1.35 | Async runtime | Core async infrastructure |
+| serde | 1.0 | Serialization | JSON support |
+| serde_json | 1.0 | JSON format | Standard JSON I/O |
+| thiserror | 1.0 | Error handling | Type-safe errors |
+| anyhow | 1.0 | Error composition | Flexible error handling |
+
+### Key Design Decisions
+
+- **Metric types**: Counter (monotonic), Gauge (up/down), Histogram (distribution), Summary (quantiles)
+- **Instrumentation macros**: Easy-to-use macros for collecting metrics at runtime
+- **Aggregation logic**: Sum, avg, p50, p95, p99 for histogram summaries
+- **In-memory storage**: Dashmap for thread-safe concurrent access with TTL
+- **Export formats**: Prometheus (for production) and JSON (for development)
+- **Performance overhead**: < 5% overhead requirement (verified with benchmarks)
+- **Tracing integration**: Metrics collected within tracing spans
+
+### Implementation Pattern
+
+\`\`\`rust
+use metrics::{MetricsCollector, counter!, gauge!, histogram!, labels};
+
+// Pattern: Define metrics
+counter!(workflow_executions_total, "Total number of workflow executions");
+counter!(workflow_successes_total, "Total number of successful workflow executions");
+gauge!(active_workflows, "Number of currently active workflows");
+histogram!(workflow_duration_seconds, "Workflow execution duration in seconds");
+
+// Pattern: Collect metrics
+let metrics = MetricsCollector::new();
+
+// Increment counter
+metrics.workflow_executions_total.increment(&[
+    ("workflow_id", "workflow-123"),
+    ("autonomy_level", "high"),
+]);
+
+// Set gauge value
+metrics.active_workflows.set(42.0, &[
+    ("workspace", "production"),
+]);
+
+// Record histogram observation
+metrics.workflow_duration_seconds.observe(123.45, &[
+    ("workflow_type", "deployment"),
+]);
+
+// Pattern: Create labeled metric with context
+counter!(workflow_executions_total).increment_with_labels(&[
+    ("workflow_id", "workflow-123"),
+    ("autonomy_level", "high"),
+    ("stage", "deployment"),
+]);
+
+// Pattern: Export to Prometheus
+let prometheus_exporter = metrics.export_prometheus()?;
+
+// Pattern: Export to JSON
+let json_export = metrics.export_json()?;
+\`\`\`
+
+### Dependencies on Prior Phases
+
+- **Phase 2**: Tracing Infrastructure (metrics integrated into spans)
+- **Phase 6 Task 00**: Autonomous Loop Contracts (goal tracking metrics)
+- **Phase 6 Task 04**: Success Regression Dashboards (metrics consumption)
+
+### Testing Strategy
+
+- **Unit**: Metric type operations, aggregation logic, export functionality
+- **Integration**: Full metrics collection workflow with tracing integration
+- **Property**: Performance overhead < 5% (verified with benchmarks)
+
+### Schema Alignment
+
+- **Schema Ref**: Lines 110-148 (provenance tracking for metric collection)
+- **Schema Ref**: Lines 110-148 (provenance tracking for workflow execution)
+
+### Critical Constraints
+
+- **MUST** provide Counter, Gauge, Histogram, and Summary metric types
+- **MUST** integrate with existing tracing infrastructure
+- **MUST** ensure performance overhead < 5%
+- **MUST** export to Prometheus format for production
+- **MUST** export to JSON format for development
+- **MUST NOT** add more than 5% performance overhead
+
+---
+
+## QA Cross-References
+
+- **QA Criteria**: [QA-06-02](../../qa/phase-06/QA-CRITERIA.md)
+- **Test Cases**: [P06-006 through P06-010](../../qa/phase-06/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (new feature - instrumentation integrated into tracing)
+
+---
+

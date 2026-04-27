@@ -31,7 +31,7 @@ YamlSyntax { message: String },
 SchemaValidation {
     field: String,
     message: String,
-    value: Option<String>,
+    value: Option<String>>,
 },
 
 #[error("Type error: expected {expected}, found {found}")]
@@ -83,7 +83,7 @@ Threshold {
     threshold: String,
     message: String,
     actual: Option<f64>,
-    expected: Option<String>,
+    expected: Option<String>>,
 },
 
 #[error("Default value error: {field}: {message}")]
@@ -113,7 +113,7 @@ Add these convenience constructors to `src/error.rs`:
 
 ```rust
 impl Error {
-    pub fn parse(line: usize, column: usize, message: impl Into<String>) -> Self {
+    pub fn parse(line: usize, column: usize, message: impl Into<String>>) -> Self {
         Self::Parse {
             line,
             column,
@@ -121,16 +121,16 @@ impl Error {
         }
     }
 
-    pub fn yaml_syntax(message: impl Into<String>) -> Self {
+    pub fn yaml_syntax(message: impl Into<String>>) -> Self {
         Self::YamlSyntax {
             message: message.into(),
         }
     }
 
     pub fn schema_validation(
-        field: impl Into<String>,
-        message: impl Into<String>,
-        value: Option<String>,
+        field: impl Into<String>>,
+        message: impl Into<String>>,
+        value: Option<String>>,
     ) -> Self {
         Self::SchemaValidation {
             field: field.into(),
@@ -140,9 +140,9 @@ impl Error {
     }
 
     pub fn type_error(
-        expected: impl Into<String>,
-        found: impl Into<String>,
-        location: impl Into<String>,
+        expected: impl Into<String>>,
+        found: impl Into<String>>,
+        location: impl Into<String>>,
     ) -> Self {
         Self::Type {
             expected: expected.into(),
@@ -151,43 +151,43 @@ impl Error {
         }
     }
 
-    pub fn undefined_reference(reference: impl Into<String>) -> Self {
+    pub fn undefined_reference(reference: impl Into<String>>) -> Self {
         Self::UndefinedReference {
             reference: reference.into(),
         }
     }
 
-    pub fn circular_dependency(cycle: impl Into<String>) -> Self {
+    pub fn circular_dependency(cycle: impl Into<String>>) -> Self {
         Self::CircularDependency {
             cycle: cycle.into(),
         }
     }
 
-    pub fn policy_inheritance(message: impl Into<String>) -> Self {
+    pub fn policy_inheritance(message: impl Into<String>>) -> Self {
         Self::PolicyInheritance {
             message: message.into(),
         }
     }
 
-    pub fn policy_override(message: impl Into<String>) -> Self {
+    pub fn policy_override(message: impl Into<String>>) -> Self {
         Self::PolicyOverride {
             message: message.into(),
         }
     }
 
-    pub fn interpolation(variable: impl Into<String>) -> Self {
+    pub fn interpolation(variable: impl Into<String>>) -> Self {
         Self::Interpolation {
             variable: variable.into(),
         }
     }
 
-    pub fn unknown_scope(scope: impl Into<String>) -> Self {
+    pub fn unknown_scope(scope: impl Into<String>>) -> Self {
         Self::UnknownScope {
             scope: scope.into(),
         }
     }
 
-    pub fn database(operation: impl Into<String>, message: impl Into<String>) -> Self {
+    pub fn database(operation: impl Into<String>>, message: impl Into<String>>) -> Self {
         Self::Database {
             operation: operation.into(),
             message: message.into(),
@@ -195,9 +195,9 @@ impl Error {
     }
 
     pub fn file_system(
-        operation: impl Into<String>,
+        operation: impl Into<String>>,
         path: PathBuf,
-        reason: impl Into<String>,
+        reason: impl Into<String>>,
     ) -> Self {
         Self::FileSystem {
             operation,
@@ -207,10 +207,10 @@ impl Error {
     }
 
     pub fn threshold(
-        threshold: impl Into<String>,
-        message: impl Into<String>,
+        threshold: impl Into<String>>,
+        message: impl Into<String>>,
         actual: Option<f64>,
-        expected: Option<String>,
+        expected: Option<String>>,
     ) -> Self {
         Self::Threshold {
             threshold: threshold.into(),
@@ -221,9 +221,9 @@ impl Error {
     }
 
     pub fn default(
-        field: impl Into<String>,
-        message: impl Into<String>,
-        value: impl Into<String>,
+        field: impl Into<String>>,
+        message: impl Into<String>>,
+        value: impl Into<String>>,
     ) -> Self {
         Self::Default {
             field: field.into(),
@@ -232,19 +232,19 @@ impl Error {
         }
     }
 
-    pub fn dag_validation(message: impl Into<String>) -> Self {
+    pub fn dag_validation(message: impl Into<String>>) -> Self {
         Self::DagValidation {
             message: message.into(),
         }
     }
 
-    pub fn ir_compilation(message: impl Into<String>) -> Self {
+    pub fn ir_compilation(message: impl Into<String>>) -> Self {
         Self::IrCompilation {
             message: message.into(),
         }
     }
 
-    pub fn invalid_version(version: impl Into<String>) -> Self {
+    pub fn invalid_version(version: impl Into<String>>) -> Self {
         Self::InvalidVersion {
             version: version.into(),
         }
@@ -343,7 +343,7 @@ fn test_error_display() {
 fn test_error_source() {
     let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
     let error: Error = io_error.into();
-    assert!(matches!(error, Error::Io(_)));
+    assert!(matches!(error, Error::Io(_))));
 }
 
 #[test]
@@ -390,7 +390,7 @@ cargo test error_test
 # Check that all error variants from plan.md are implemented
 
 # 4. Error constructors work
-# Test each constructor returns the expected error type
+# Test each constructor returns to expected error type
 ```
 
 **Checkpoint Criteria:**
@@ -402,3 +402,105 @@ cargo test error_test
 - ✅ Error sources are properly wrapped (thiserror)
 
 **Next:** Proceed to Task 2 (Schema Types)
+
+---
+
+## Implementation Status
+
+**Status**: ⚠️ PARTIAL
+
+### What Exists
+- **[src/error.rs](../../src/error.rs)**: Basic error module implemented with:
+  - `Error` enum with core error variants (60+ lines) ✅
+  - `Result<T>` type alias ✅
+  - Error variants: `Config`, `Model`, `Agent`, `Backend`, `Client`, `Tool`, `Storage`, `Serialization`, `Io`, `Validation` ✅
+  - `Config` variants: `Missing`, `Parse`, `Validation`, `Merge` ✅
+  - `Model` variants: `NotFound`, `AlreadyLoaded`, `LoadFailed`, `UnloadFailed`, `InvalidState` ✅
+  - `Agent` variants: `ExecutionFailed`, `ToolFailed`, `MaxIterationsExceeded`, `InvalidStepReference`, `InvalidLoopCondition` ✅
+  - `Backend` variants: `Connection`, `Timeout`, `RateLimited`, `ModelNotLoaded`, `InvalidRequest` ✅
+  - `Client` variants: `RequestFailed`, `ResponseParse`, `DownloadFailed` ✅
+  - `Tool` variants: `ExecutionFailed`, `PermissionDenied`, `InvalidArguments` ✅
+  - `Storage`, `Serialization`, `Io`, `Validation` base variants ✅
+
+- **Error constructors** (partial):
+  - Some constructors implemented (e.g., `from_io`, `from_serialization`, `from_model`) ✅
+  - `thiserror::Error` derive attribute applied ✅
+
+- **Tests**: `tests/error_test.rs` exists with basic error tests ✅
+
+- **Dependencies**: `bincode` present in [Cargo.toml](../../Cargo.toml) (line 22) ✅
+
+### What's Missing
+- **Error variants** not implemented (per plan):
+  - `Parse` (line/column/message) - NOT IMPLEMENTED (plan lines 20-25)
+  - `YamlSyntax` (message) - NOT IMPLEMENTED (plan lines 27-28)
+  - `SchemaValidation` (field/message/value) - NOT IMPLEMENTED (plan lines 30-35)
+  - `Type` (expected/found/location) - NOT IMPLEMENTED (plan lines 37-42)
+  - `UndefinedReference` (reference) - NOT IMPLEMENTED (plan lines 44-45)
+  - `CircularDependency` (cycle) - NOT IMPLEMENTED (plan lines 47-48)
+  - `PolicyInheritance` (message) - NOT IMPLEMENTED (plan lines 50-51)
+  - `PolicyOverride` (message) - NOT IMPLEMENTED (plan lines 53-54)
+  - `Interpolation` (variable) - NOT IMPLEMENTED (plan lines 56-57)
+  - `UnknownScope` (scope) - NOT IMPLEMENTED (plan lines 59-60)
+  - `Threshold` (threshold/message/actual/expected) - NOT IMPLEMENTED (plan lines 81-87)
+  - `Default` (field/message/value) - NOT IMPLEMENTED (plan lines 89-94)
+  - `DagValidation` (message) - NOT IMPLEMENTED (plan lines 96-97)
+  - `IrCompilation` (message) - NOT IMPLEMENTED (plan lines 99-100)
+  - `InvalidVersion` (version) - NOT IMPLEMENTED (plan lines 102-103)
+
+- **Error constructors** not implemented (per plan):
+  - `parse(line, column, message)` - NOT IMPLEMENTED (plan lines 116-122)
+  - `yaml_syntax(message)` - NOT IMPLEMENTED (plan lines 124-128)
+  - `schema_validation(field, message, value)` - NOT IMPLEMENTED (plan lines 130-140)
+  - `type_error(expected, found, location)` - NOT IMPLEMENTED (plan lines 142-152)
+  - `undefined_reference(reference)` - NOT IMPLEMENTED (plan lines 154-158)
+  - `circular_dependency(cycle)` - NOT IMPLEMENTED (plan lines 160-164)
+  - `policy_inheritance(message)` - NOT IMPLEMENTED (plan lines 166-170)
+  - `policy_override(message)` - NOT IMPLEMENTED (plan lines 172-176)
+  - `interpolation(variable)` - NOT IMPLEMENTED (plan lines 178-182)
+  - `unknown_scope(scope)` - NOT IMPLEMENTED (plan lines 184-188)
+  - `database(operation, message)` - NOT IMPLEMENTED (plan lines 190-195)
+  - `file_system(operation, path, reason)` - NOT IMPLEMENTED (plan lines 197-207)
+  - `threshold(threshold, message, actual, expected)` - NOT IMPLEMENTED (plan lines 209-221)
+  - `default(field, message, value)` - NOT IMPLEMENTED (plan lines 223-232)
+  - `dag_validation(message)` - NOT IMPLEMENTED (plan lines 235-239)
+  - `ir_compilation(message)` - NOT IMPLEMENTED (plan lines 241-245)
+  - `invalid_version(version)` - NOT IMPLEMENTED (plan lines 247-251)
+
+- **Error type differences**:
+  - Plan expects 20+ error variants with specific names (`Parse`, `YamlSyntax`, `SchemaValidation`, etc.)
+  - Current implementation has different organization (Config, Model, Agent, Backend, etc.)
+  - Plan uses ` sled::Error` wrapper for `Storage` variant (line 63)
+  - Plan uses `bincode::Error` wrapper for `Serialization` variant (line 65)
+  - Current implementation may have `Database` variant but it's structured differently than plan
+
+### QA Coverage
+- **Status**: No dedicated QA tests for this task in EPOC findings
+- **Coverage**: From EPOC Extended POC findings:
+  - **AREA-20 BUILD HYGIENE** (Area 20) - ✅ PASS - 91/91 tests passing, 0 clippy warnings
+- **Note**: Error tests exist in `tests/error_test.rs` but use current implementation's error structure, not plan's expected structure
+
+### Schema Alignment
+- **Schema Ref**: Lines 14-21 (identification), Lines 196-353 (agentic_workflow section with errors)
+- **Coverage**: Not applicable - error types don't map directly to schema lines
+- **Gaps**: Error handling infrastructure exists but doesn't match plan's expected error hierarchy for schema validation and YAML parsing
+
+### Evidence
+- **Build**: ✅ `cargo build` passes
+- **Clippy**: ✅ `cargo clippy -- -D warnings` passes
+- **Tests**: ✅ `cargo test --lib` passes (includes error tests)
+- **Line Count**: `src/error.rs` has 60+ lines (plan expects 151-300 lines)
+
+### Plan vs Reality Notes
+- **Plan structure**: 20+ specific error variants with hierarchical organization (Parse → YamlSyntax, SchemaValidation, Type, etc.)
+- **Current reality**: Different error organization (Config, Model, Agent, Backend, Client, Tool categories)
+- **Incompatibility**: Tests in plan use error constructors like `Error::parse(10, 5, "unexpected token")` which don't exist in current implementation
+- **Dependencies**: `bincode` is in Cargo.toml but current code doesn't use sled/SQLite serialization directly (uses JSON file storage in persistence.rs)
+
+---
+
+## QA Cross-References
+
+- **QA Criteria**: [QA-00-02](../../qa/phase-00/QA-CRITERIA.md)
+- **Test Cases**: [P00-002](../../qa/phase-00/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (error handling)

@@ -26,7 +26,14 @@ Implement the contract system for autonomous loops that defines goals, stop cond
 
 ---
 
-## Implementation Steps
+## QA Cross-References
+
+- **QA Criteria**: [QA-06-01](../../qa/phase-06/QA-CRITERIA.md)
+- **Test Cases**: [P06-001 through P06-005](../../qa/phase-06/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (new feature - infrastructure for bounded autonomous execution)
+
+---
+
 
 ### Step 1: Define core contract types
 
@@ -1016,3 +1023,115 @@ After completing Task 00:
 |-------|-------------|
 | [Parent Plan](../plan.md) | Autonomy & Metrics phase implementation plan |
 | [Validation Criteria](../validation/acceptance-criteria.md) | Acceptance criteria for autonomy & metrics phase |
+
+---
+
+## Implementation Research
+
+### Recommended Libraries
+
+| Library | Version | Purpose | Notes |
+|---------|---------|---------|-------|
+| serde | 1.0 | Serialization | JSON/YAML support |
+| serde_yaml | 0.9 | YAML format | Contract serialization |
+| chrono | 0.4 | Timestamps | Time-based stop conditions |
+| regex | 1.10 | Pattern matching | Goal pattern validation |
+| tokio | 1.35 | Async runtime | Core async infrastructure |
+| thiserror | 1.0 | Error handling | Type-safe errors |
+| anyhow | 1.0 | Error composition | Flexible error handling |
+
+### Key Design Decisions
+
+- **Contract structure**: Goals, stop conditions, autonomy levels (low/medium/high)
+- **Autonomy levels**: Low (per-action confirmation), Medium (batch confirmation), High (bounded with checkpoints)
+- **Goal types**: WorkflowCompletion, TaskCompletion, MetricTarget
+- **Stop conditions**: Time, iteration, quality, intervention, resource limits
+- **Success criteria**: DeploymentSuccess, TaskSuccess, MetricValue with thresholds
+- **Contract validation**: Validate contracts at compile time
+- **Bounded enforcement**: Enforce all stop conditions at runtime
+
+### Implementation Pattern
+
+\`\`\`rust
+use autonomy_contracts::{AutonomousLoopContract, AutonomyLevel, Goal, StopCondition, BoundedExecutionEnforcer};
+
+// Pattern: Define autonomous loop contract
+let contract = AutonomousLoopContract {
+    version: "1.0".to_string(),
+    autonomy_level: AutonomyLevel::High {
+        checkpoint_interval: Duration::minutes(10),
+    },
+    goal: Goal {
+        goal_type: GoalType::WorkflowCompletion,
+        target_workflow: "workflow-id".to_string(),
+        success_criteria: vec![
+            SuccessCriterion {
+                criterion_type: CriterionType::TaskSuccess,
+                threshold: 100.0,
+                operator: ComparisonOperator::Above,
+            }
+        ],
+    },
+    stop_conditions: vec![
+        StopCondition::TimeLimit { max_duration: Duration::hours(1) },
+        StopCondition::IterationLimit { max_iterations: 100 },
+        StopCondition::InterventionTrigger {},
+    ],
+    scope: ScopeBoundary {
+        max_budget_usd: 1000,
+        max_compute_hours: 10,
+    },
+};
+
+// Pattern: Create bounded execution enforcer
+let enforcer = BoundedExecutionEnforcer::new(contract)?;
+
+// Pattern: Execute bounded loop
+let result = enforcer.execute_bounded_loop().await?;
+
+// Pattern: Check stop conditions
+if enforcer.should_stop() {
+    println!("Stop condition triggered: {:?}", enforcer.get_stop_reason());
+}
+
+// Pattern: Get execution stats
+let stats = enforcer.get_execution_stats()?;
+println!("Actions taken: {}, Time elapsed: {:?}",
+    stats.actions_taken, stats.time_elapsed);
+\`\`\`
+
+### Dependencies on Prior Phases
+
+- **Phase 0-6**: All prior phases (complete system foundation)
+- **Phase 6 Task 01**: Metrics Collection (goal tracking metrics)
+- **Phase 6 Task 05**: Stop Condition Evaluation (stop condition logic)
+
+### Testing Strategy
+
+- **Unit**: Contract parsing, validation logic, enforcement logic
+- **Integration**: Full bounded execution workflow with contract enforcement
+- **Property**: Bounded enforcer stops execution on all stop conditions
+
+### Schema Alignment
+
+- **Schema Ref**: Lines 110-148 (provenance tracking for autonomous operations)
+- **Schema Ref**: Lines 110-148 (provenance tracking for loop execution)
+
+### Critical Constraints
+
+- **MUST** define explicit goals and stop conditions in contracts
+- **MUST** enforce all stop conditions at runtime
+- **MUST** support three autonomy levels (low/medium/high)
+- **MUST** provide human override at all autonomy levels (ADR-0008 requirement)
+- **MUST** track execution progress and statistics
+- **MUST NOT** allow unlimited autonomous execution
+- **MUST NOT** ignore any stop condition
+
+---
+
+## QA Cross-References
+
+- **QA Criteria**: [QA-06-01](../../qa/phase-06/QA-CRITERIA.md)
+- **Test Cases**: [P06-001 through P06-005](../../qa/phase-06/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (new feature - infrastructure for bounded autonomous execution)
+

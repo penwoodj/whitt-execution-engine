@@ -24,7 +24,14 @@ Track all human interventions with full context and reason tracking. This ensure
 
 ---
 
-## Implementation Steps
+## QA Cross-References
+
+- **QA Criteria**: [QA-06-04](../../qa/phase-06/QA-CRITERIA.md)
+- **Test Cases**: [P06-015 through P06-018](../../qa/phase-06/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (new feature - structured logging of all human interventions)
+
+---
+
 
 ### Step 1: Define intervention event structures
 

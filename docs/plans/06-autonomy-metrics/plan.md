@@ -304,9 +304,11 @@ whitt-execution-engine/
 
 ### 4. Observability Integrated, Not Bolted On
 
-**Constraint**: Observability MUST be integrated into the runtime, not added as an afterthought.
+**Constraint**: Observability MUST be integrated into runtime, not added as an afterthought.
 
 **Implementation**: Metrics collection uses the existing tracing infrastructure. Every span emitted by the workflow engine includes metric instrumentation. No separate metrics collection thread is spawned.
+
+> ⚠️ **Critical Review #2 Finding**: Error handling is phase-local; no cross-phase error propagation strategy. Phase 06 needs to extend `src/error.rs` with new `MetricError` variant for metrics collection/dashboards operations. Add as dependency item for all tasks. See [upstream-critical-review-02.md](../../research/upstream-critical-review-02.md) Factor 2.
 
 ### 5. No Silent Failures
 
@@ -347,6 +349,8 @@ whitt-execution-engine/
 **File**: `tasks/01-metrics-collection.md`
 
 **Goal**: Implement comprehensive metrics collection integrated into the tracing infrastructure.
+
+> ⚠️ **Critical Review #2 Finding**: Logging exists but no structured telemetry pipeline. Phase 06 needs a telemetry schema definition task before implementing dashboards. Add structured JSON logging and event emission as prerequisites. See [upstream-critical-review-02.md](../../research/upstream-critical-review-02.md) Factor 5.
 
 **Key Deliverables**:
 - Metric types: `Counter`, `Gauge`, `Histogram`, `Summary`

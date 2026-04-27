@@ -681,3 +681,111 @@ See [validation/01-fulltext-search.md](../validation/01-fulltext-search.md)
 ## Test Specifications
 
 See [tests/01-fulltext-search.md](../tests/01-fulltext-search.md)
+
+---
+
+## QA Cross-References
+
+### QA Criteria
+- **QA Area**: Area 2 - Full-Text Search
+- **QA Criteria**: [../../qa/phase-04/QA-CRITERIA.md#area-2-fulltext-search](../../qa/phase-04/QA-CRITERIA.md#area-2-fulltext-search)
+- **Priority**: P0
+- **Test Types**: Unit, Integration
+- **Note**: New feature - not in schema yet
+
+### Test Cases
+- **Test Cases**: [../../qa/phase-04/QA-TEST-CASES.md](../../qa/phase-04/QA-TEST-CASES.md)
+- **Key Tests**: 
+  - P04-005: Tantivy index creation
+  - P04-006: Exact query execution
+  - P04-007: Boolean queries (AND/OR/NOT)
+  - P04-008: Phrase search
+  - P04-009: Wildcard search
+  - P04-010: Fuzzy search
+
+### Schema References
+- **Schema File**: [../../../schema/unified-workflow-schema.yml](../../../schema/unified-workflow-schema.yml)
+- **Schema Section**: N/A (new feature - not in schema yet)
+- **Note**: Full-text search will be integrated with memory structures
+
+### Related Documentation
+- **Cross-References**: [../../qa/phase-04/CROSS-REF.md](../../qa/phase-04/CROSS-REF.md)
+- **Phase Plan**: [../plan.md](../plan.md)
+
+---
+
+## Implementation Research
+
+### Recommended Libraries
+
+| Library | Version | Purpose | Notes |
+|---------|---------|---------|-------|
+| tantivy | 0.22 | Full-text search engine | Rust-based Lucene, high performance |
+| tokio | 1.35 | Async runtime | Core async infrastructure |
+| serde | 1.0 | Serialization | JSON support |
+| serde_json | 1.0 | JSON format | Standard JSON I/O |
+| thiserror | 1.0 | Error handling | Type-safe errors |
+| chrono | 0.4 | Timestamps | DateTime handling |
+| uuid | 1.6 | Unique IDs | Memory ID generation |
+| agentsdk-memory | 0.1.0 | Memory storage | Phase 4 task 00 dependency |
+| tempfile | 3.8 | Testing temp dirs | Isolated test storage |
+
+### Key Design Decisions
+
+- **Tantivy indexing**: In-memory Lucene-based indexing with fast queries and BM25 ranking
+- **Schema definition**: Indexed fields include id, content, title, tags, memory_type, timestamps, version
+- **Query parsing**: Tantivy's QueryParser supports Lucene query syntax (AND, OR, NOT, phrase, wildcard)
+- **BM25 scoring**: Default ranking algorithm, extensible for custom scoring
+- **Result highlighting**: Term-based snippet extraction with configurable tags
+- **Filter operators**: Equals, Contains, GreaterThan, LessThan for field filtering
+
+### Implementation Pattern
+
+```rust
+use agentsdk_search::{FullTextSearchIndex, SearchQuery, SearchResult};
+
+// Pattern: Index memory on write
+pub async fn on_memory_write(
+    ops: &MemoryOperations,
+    index: &FullTextSearchIndex,
+    id: &MemoryId,
+) -> Result<(), SearchError> {
+    let memory = ops.get_structured(id, None).await?;
+    index.index_memory(&memory).await?;
+    Ok(())
+}
+
+// Pattern: Search with query parsing
+pub async fn search_memories(
+    index: &FullTextSearchIndex,
+    query_str: &str,
+    limit: usize,
+) -> Result<Vec<SearchResult>, SearchError> {
+    let query = SearchQuery::new(query_str.to_string())
+        .with_limit(limit);
+    
+    let parsed = query.parse(index)?;
+    let searcher = index.searcher();
+    let top_docs = searcher.search(&parsed, &TopDocs::with_limit(limit))?;
+    
+    let results = rank_results(&searcher, top_docs, index.schema());
+    Ok(results)
+}
+```
+
+### Dependencies on Prior Phases
+
+- **Phase 4 Task 00**: Local Memory Storage (memory CRUD operations)
+- **Phase 1-3**: Core execution engine (for workflow integration)
+
+### Testing Strategy
+
+- **Unit**: Index creation, schema validation, query construction
+- **Integration**: Full search workflow with memory indexing and retrieval
+- **Property**: BM25 scoring produces consistent rankings
+
+### Schema Alignment
+
+- **Schema Ref**: Lines 68-96 (memory data structures for indexing)
+- **Schema Ref**: Lines 150-172 (unstructured memory for search)
+- **Schema Ref**: Lines 68-96 (structured memory with tags field for filtering)

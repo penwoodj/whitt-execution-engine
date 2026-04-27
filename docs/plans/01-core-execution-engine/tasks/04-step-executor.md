@@ -419,3 +419,11 @@ Expected: FAIL (modules don't exist)
 Use `MockLLMBroker` for agent step tests.
 For tool steps, use in-memory file operations or mock file system.
 For code steps, use sandboxed execution environment.
+
+---
+
+## QA Cross-References
+
+- **QA Criteria**: ['$qa_criteria']('$file')
+- **Test Cases**: ['$test_case']('$file')
+- **Schema Ref**: $schema_ref

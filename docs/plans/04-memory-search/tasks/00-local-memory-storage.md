@@ -945,6 +945,35 @@ See [tests/00-local-memory-storage.md](../tests/00-local-memory-storage.md)
 
 ---
 
+## QA Cross-References
+
+### QA Criteria
+- **QA Area**: Area 1 - Local Memory Storage
+- **QA Criteria**: [../../qa/phase-04/QA-CRITERIA.md#area-1-local-memory-storage](../../qa/phase-04/QA-CRITERIA.md#area-1-local-memory-storage)
+- **Priority**: P0
+- **Test Types**: Unit, Integration
+
+### Test Cases
+- **Test Cases**: [../../qa/phase-04/QA-TEST-CASES.md](../../qa/phase-04/QA-TEST-CASES.md)
+- **Key Tests**: 
+  - P04-001: CRUD operations
+  - P04-002: Blob storage
+  - P04-003: Document collections
+  - P04-004: Versioning system
+
+### Schema References
+- **Schema File**: [../../../schema/unified-workflow-schema.yml](../../../schema/unified-workflow-schema.yml)
+- **Schema Section**: Lines 701-710 (workspace directories: rag_knowledge_base, backups)
+- **Key Fields**:
+  - `workspace.rag_knowledge_base` (lines 701-703)
+  - `workspace.backups` (lines 711-723)
+
+### Related Documentation
+- **Cross-References**: [../../qa/phase-04/CROSS-REF.md](../../qa/phase-04/CROSS-REF.md)
+- **Phase Plan**: [../plan.md](../plan.md)
+
+---
+
 ## 🔗 Related Documentation
 
 | Link | Description |
@@ -952,3 +981,84 @@ See [tests/00-local-memory-storage.md](../tests/00-local-memory-storage.md)
 | [Parent Plan](../plan.md) | Memory & Search phase implementation plan |
 | [Validation Criteria](../validation/00-local-memory-storage.md) | Validation criteria for local memory storage |
 | [Test Specification](../tests/00-local-memory-storage.md) | Test specifications for local memory storage |
+
+---
+
+## Implementation Research
+
+### Recommended Libraries
+
+| Library | Version | Purpose | Notes |
+|---------|---------|---------|-------|
+| tokio | 1.35 | Async runtime | Core async infrastructure |
+| serde | 1.0 | Serialization | JSON support for structured data |
+| serde_json | 1.0 | JSON format | Standard JSON I/O |
+| uuid | 1.6 | Unique IDs | Memory ID generation |
+| chrono | 0.4 | Timestamps | DateTime handling |
+| sha2 | 0.10 | Hash computation | Content integrity verification |
+| thiserror | 1.0 | Error handling | Type-safe errors |
+| async-trait | 0.1 | Trait definitions | Storage backend interface |
+| tempfile | 3.8 | Testing temp dirs | Isolated test storage |
+
+### Key Design Decisions
+
+- **Filesystem-first storage**: Use tokio::fs for all I/O operations, no SQLite dependency (simpler architecture)
+- **Version as native u64**: Version stored as native integer, not string - simpler, type-safe comparisons
+- **SHA-256 for integrity**: Every memory write produces hash for verification (adr-0006 compliance)
+- **Trait-based storage**: `StorageBackend` trait enables future vector database backends (qdrant, pgvector, etc.)
+- **Structured vs Unstructured**: Enum types with distinct schemas for optimization
+- **Versioning on write**: Create version backup before updating (immutable history)
+
+### Implementation Pattern
+
+```rust
+use agentsdk_memory::{MemoryOperations, MemoryId, MemoryType};
+
+// Key pattern: version-backed updates
+pub async fn update_structured(
+    ops: &MemoryOperations,
+    id: &MemoryId,
+    data: serde_json::Value,
+    expected_version: u64,
+) -> Result<u64, agentsdk_memory::MemoryError> {
+    let mut memory = ops.get_structured(&id, Some(expected_version)).await?;
+    
+    // Create version backup
+    let version = memory.version;
+    ops.version_manager.create_version(&id, &memory).await?;
+    
+    // Update memory
+    memory.data = data;
+    memory.version += 1;
+    memory.updated_at = chrono::Utc::now();
+    
+    // Store updated version
+    let reference = ops.storage.store_structured(&memory).await?;
+    Ok(reference.version)
+}
+
+// Hash computation for content integrity
+pub fn compute_content_hash(content: &[u8]) -> String {
+    use sha2::Sha256;
+    hex::encode(Sha256::digest(content))
+}
+```
+
+### Dependencies on Prior Phases
+
+- **Phase 0**: Core execution engine (for workflow integration)
+- **Phase 1-3**: Tool execution (for tool node integration)
+- **Phase 2-3**: Tracing infrastructure (for observability)
+
+### Testing Strategy
+
+- **Unit**: CRUD operations in isolation with tempdir
+- **Integration**: Full CRUD workflow with version verification
+- **Property**: Version conflict detection is consistent
+
+### Schema Alignment
+
+- **Schema Ref**: Lines 68-96 (memory data structures)
+- **Schema Ref**: Lines 150-172 (unstructured memory)
+- **Schema Ref**: Lines 165-172 (versioned references)
+- **Schema Ref**: Lines 110-148 (provenance tracking needs content hashes)

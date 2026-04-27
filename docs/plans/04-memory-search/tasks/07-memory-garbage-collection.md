@@ -704,3 +704,34 @@ See [validation/07-memory-garbage-collection.md](../validation/07-memory-garbage
 ## Test Specifications
 
 See [tests/07-memory-garbage-collection.md](../tests/07-memory-garbage-collection.md)
+
+
+---
+
+## QA Cross-References
+
+### QA Criteria
+- **QA Area**: Area 8 - Memory Garbage Collection
+- **QA Criteria**: [../../qa/phase-04/QA-CRITERIA.md#area-8-memory-garbage-collection](../../qa/phase-04/QA-CRITERIA.md#area-8-memory-garbage-collection)
+- **Priority**: P2
+- **Test Types**: Unit, Integration
+
+### Test Cases
+- **Test Cases**: [../../qa/phase-04/QA-TEST-CASES.md](../../qa/phase-04/QA-TEST-CASES.md)
+- **Key Tests**:
+  - P04-038: TTL-based expiration
+  - P04-039: Access-frequency retention
+  - P04-040: Manual GC trigger
+  - P04-041: GC metrics
+  - P04-042: Memory cleanup verification
+  - P04-043: GC error handling
+  - P04-044: Schema compliance
+
+### Schema References
+- **Schema File**: [../../../schema/unified-workflow-schema.yml](../../../schema/unified-workflow-schema.yml)
+- **Schema Section**: N/A (new feature - GC policies)
+
+
+### Related Documentation
+- **Cross-References**: [../../qa/phase-04/CROSS-REF.md](../../qa/phase-04/CROSS-REF.md)
+- **Phase Plan**: [../plan.md](../plan.md)

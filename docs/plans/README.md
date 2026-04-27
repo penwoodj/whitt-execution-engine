@@ -12,6 +12,22 @@ Implementation plans and architecture documentation for the Whitt Execution Engi
 - [06-autonomy-metrics](./06-autonomy-metrics/) - Autonomy & Metrics phase: Bounded loops, objective metrics, and dashboards
 - [07-final-validation](./07-final-validation/) - Final Validation phase: Comprehensive validation of all features
 
+## Phase Boundary Contracts
+
+This section defines the data types that flow between phase boundaries. Each phase must document the interfaces it exposes to the next phase.
+
+| From Phase | To Phase | Data Contract | Status |
+|-----------|----------|---------------|--------|
+| 00 (Foundation) | 01 (Core) | `UnifiedConfig`, `ModelSpec` | ✅ Defined |
+| 01 (Core) | 02 (CLI) | `ReactAgent`, `ToolRegistry` | ⚠️ Implicit |
+| 02 (CLI) | 03 (Quality) | `WorkflowState`, `Checkpoint` | ❌ Needs definition |
+| 03 (Quality) | 04 (Memory) | `SearchResult`, `MemoryEntry` | ❌ Needs definition |
+| 04 (Memory) | 05 (Automation) | `ScheduleEntry`, `CronExpr` | ❌ Needs definition |
+| 05 (Automation) | 06 (Metrics) | `MetricEvent`, `Dashboard` | ❌ Needs definition |
+| 06 (Metrics) | 07 (Validation) | `BenchmarkResult`, `Report` | ❌ Needs definition |
+
+> ⚠️ **Critical Review #2 Finding**: Phase boundaries have implicit data dependencies but no explicit contracts. Risk: incompatible implementations between phases. See [upstream-critical-review-02.md](../research/upstream-critical-review-02.md) Factor 1.
+
 ## Additional Documentation
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - Overall architecture and design decisions
 - [testing-strategy.md](./testing-strategy.md) - Testing strategy and automation

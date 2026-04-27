@@ -351,3 +351,111 @@ Task 06 implements scheduling policy compiler with:
 ✅ ADR-0007 compliance (compile-time, not runtime interpretation)
 
 **Next Steps:** Task 07 (Automation CLI)
+
+---
+
+## Implementation Research
+
+### Recommended Libraries
+
+| Library | Version | Purpose | Notes |
+|---------|---------|---------|-------|
+| cron | 0.12 | Cron parsing | Cron expression validation |
+| tokio | 1.35 | Async runtime | Core async infrastructure |
+| serde | 1.0 | Serialization | JSON support |
+| serde_json | 1.0 | JSON format | Standard JSON I/O |
+| thiserror | 1.0 | Error handling | Type-safe errors |
+| anyhow | 1.0 | Error composition | Flexible error handling |
+
+### Key Design Decisions
+
+- **Policy compilation**: Compile cron expressions to SchedulingNode at policy definition time
+- **No runtime parsing**: Cron expressions are validated once, not interpreted at runtime
+- **SchedulingNode variant**: New WorkflowIR node type for pre-compiled scheduling metadata
+- **Resource limits**: Compile max concurrent jobs, memory limits, duration limits
+- **ADR-0007 compliance**: Policies compiled at definition time, not runtime interpretation
+
+### Implementation Pattern
+
+\`\`\`rust
+use automation_compiler::{SchedulingPolicyCompiler, SchedulingNodeCompiler, ResourceLimits};
+
+// Pattern: Compile scheduling policy
+let compiler = SchedulingPolicyCompiler::new()?;
+
+let policy = compiler.compile_policy("
+  schedule:
+    cron: '0 9 * * 1-5'
+    workflow_id: 'daily-report'
+    resource_limits:
+      max_concurrent: 3
+      max_memory_mb: 8192
+").await?;
+
+// Pattern: Compile to SchedulingNode
+let scheduler_node = compiler.compile_to_scheduling_node(&policy).await?;
+
+// Pattern: Add to WorkflowIR
+workflow_ir.add_node(scheduler_node).await?;
+
+// Pattern: Validate compiled node
+let validation = compiler.validate_scheduling_node(&scheduler_node).await?;
+
+// Pattern: Get compiled metadata
+let metadata = scheduler_node.get_scheduling_metadata()?;
+\`\`\`
+
+### Dependencies on Prior Phases
+
+- **Phase 0-3**: WorkflowIR (SchedulingNode variant integration)
+- **Phase 5 Task 00**: Cron Scheduler (scheduling metadata)
+- **Phase 5 Task 07**: Automation CLI (policy management commands)
+
+### Testing Strategy
+
+- **Unit**: Cron expression validation, compilation logic, resource limit validation
+- **Integration**: Full policy compilation workflow with WorkflowIR integration
+- **Property**: Compiled scheduling node contains all necessary metadata (cron, limits, targets)
+
+### Schema Alignment
+
+- **Schema Ref**: Lines 110-148 (provenance tracking for policy compilation)
+- **Schema Ref**: Lines 68-96 (workflow scheduling node structure)
+
+### Critical Constraints
+
+- **MUST** compile cron expressions at policy definition time (not runtime)
+- **MUST** validate cron expressions before compilation
+- **MUST** create SchedulingNode variant in WorkflowIR
+- **MUST** include resource limits in compiled metadata
+- **MUST NOT** parse cron expressions at runtime (ADR-0007 requirement)
+- **MUST NOT** use tokio-cron-scheduler runtime parsing
+
+
+
+---
+
+## QA Cross-References
+
+### QA Criteria
+- **QA Area**: Area 7 - Scheduling Policy Compiler
+- **QA Criteria**: [../../qa/phase-05/QA-CRITERIA.md#area-7-scheduling-policy-compiler](../../qa/phase-05/QA-CRITERIA.md#area-7-scheduling-policy-compiler)
+- **Priority**: P0
+- **Test Types**: Unit, Integration
+
+### Test Cases
+- **Test Cases**: [../../qa/phase-05/QA-TEST-CASES.md](../../qa/phase-05/QA-TEST-CASES.md)
+- **Key Tests**:
+  - P05-023: Policy compilation
+  - P05-024: Cron expression compilation
+  - P05-025: SchedulingNode in WorkflowIR
+  - P05-026: Runtime no parsing
+
+### Schema References
+- **Schema File**: [../../../schema/unified-workflow-schema.yml](../../../schema/unified-workflow-schema.yml)
+- **Schema Section**: N/A (new feature - SchedulingNode in WorkflowIR)
+
+
+### Related Documentation
+- **Cross-References**: [../../qa/phase-05/CROSS-REF.md](../../qa/phase-05/CROSS-REF.md)
+- **Phase Plan**: [../plan.md](../plan.md)

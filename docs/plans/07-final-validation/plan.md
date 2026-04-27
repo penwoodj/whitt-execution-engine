@@ -68,9 +68,12 @@ cargo build --release 2>&1 | grep -i "error"  # Should be empty
 - **How:** Execute `04-workflow-execution-tests.md`
 
 ### Layer 6: Benchmark Scaling Tests
+
 - **What:** 5→20→50→120 model progressive scaling benchmarks
 - **Why:** Validates system handles increasing load
 - **How:** Execute `05-benchmark-5-model.md`, `06-benchmark-20-model.md`, `07-benchmark-50-model.md`, `08-benchmark-120-model.md`
+
+> ⚠️ **Critical Review #2 Finding**: Test infrastructure doesn't support Phase 07's 120-model benchmark requirement. Phase 07 needs a scalable mock infrastructure task before benchmark tasks. The mock infrastructure must simulate 120 concurrent models with configurable GPU/RAM limits. See [upstream-critical-review-02.md](../../research/upstream-critical-review-02.md) Factor 8.
 
 ### Layer 7: Meta-Validation
 - **What:** Workflow-generating-workflow test, cross-phase regression, final signoff
@@ -135,6 +138,16 @@ git add opencode/docs/plans/07-final-validation/00-system-log-verification.md
 git commit -m "feat: add validation file 00 - system log verification"
 ```
 
+#### QA Cross-References
+
+- **QA Criteria**: [QA-07-01](../qa/phase-07/QA-CRITERIA.md)
+- **Test Cases**: [P07-001 through P07-002](../qa/phase-07/QA-TEST-CASES.md)
+- **Schema Ref**: [Lines 14-805](../schema/unified-workflow-schema.yml) (full unified workflow schema - logging infrastructure)
+
+---
+
+
+
 ---
 
 ### Task 3: Write Validation File 01 - Unit Test Verification
@@ -164,6 +177,16 @@ git add opencode/docs/plans/07-final-validation/01-unit-test-verification.md
 git commit -m "feat: add validation file 01 - unit test verification"
 ```
 
+#### QA Cross-References
+
+- **QA Criteria**: [QA-07-02](../qa/phase-07/QA-CRITERIA.md)
+- **Test Cases**: [P07-003 through P07-006](../qa/phase-07/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (code quality - not schema-specific)
+
+---
+
+
+
 ---
 
 ### Task 4: Write Validation File 02 - Integration Test Verification
@@ -192,6 +215,16 @@ ls -l /home/jon/code/whitt-execution-engine/docs/plans/07-final-validation/02-in
 git add opencode/docs/plans/07-final-validation/02-integration-test-verification.md
 git commit -m "feat: add validation file 02 - integration test verification"
 ```
+
+#### QA Cross-References
+
+- **QA Criteria**: [QA-07-03](../qa/phase-07/QA-CRITERIA.md)
+- **Test Cases**: [P07-007](../qa/phase-07/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (cross-module data flows - not schema-specific)
+
+---
+
+
 
 ---
 
@@ -228,6 +261,16 @@ ls -l /home/jon/code/whitt-execution-engine/docs/plans/07-final-validation/03-cl
 git add opencode/docs/plans/07-final-validation/03-cli-live-testing.md
 git commit -m "feat: add validation file 03 - CLI live testing"
 ```
+
+#### QA Cross-References
+
+- **QA Criteria**: [QA-07-04](../qa/phase-07/QA-CRITERIA.md)
+- **Test Cases**: [P07-008 through P07-009](../qa/phase-07/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (CLI integration - existing CLI commands)
+
+---
+
+
 
 ---
 
@@ -275,6 +318,16 @@ git add opencode/docs/plans/07-final-validation/04-workflow-execution-tests.md
 git commit -m "feat: add validation file 04 - workflow execution tests"
 ```
 
+#### QA Cross-References
+
+- **QA Criteria**: [QA-07-05](../qa/phase-07/QA-CRITERIA.md)
+- **Test Cases**: [P07-010 through P07-011](../qa/phase-07/QA-TEST-CASES.md)
+- **Schema Ref**: [Lines 196-497](../schema/unified-workflow-schema.yml) (agentic_workflow)
+
+---
+
+
+
 ---
 
 ### Task 7: Write Validation File 05 - Benchmark 5 Model
@@ -307,6 +360,16 @@ ls -l /home/jon/code/whitt-execution-engine/docs/plans/07-final-validation/05-be
 git add opencode/docs/plans/07-final-validation/05-benchmark-5-model.md
 git commit -m "feat: add validation file 05 - benchmark 5 model"
 ```
+
+#### QA Cross-References
+
+- **QA Criteria**: [QA-07-06](../qa/phase-07/QA-CRITERIA.md)
+- **Test Cases**: [P07-012](../qa/phase-07/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (performance benchmarking - not schema-specific)
+
+---
+
+
 
 ---
 
@@ -341,6 +404,16 @@ ls -l /home/jon/code/whitt-execution-engine/docs/plans/07-final-validation/06-be
 git add opencode/docs/plans/07-final-validation/06-benchmark-20-model.md
 git commit -m "feat: add validation file 06 - benchmark 20 model"
 ```
+
+#### QA Cross-References
+
+- **QA Criteria**: [QA-07-07](../qa/phase-07/QA-CRITERIA.md)
+- **Test Cases**: [P07-013](../qa/phase-07/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (performance scaling verification)
+
+---
+
+
 
 ---
 
@@ -377,6 +450,16 @@ git add opencode/docs/plans/07-final-validation/07-benchmark-50-model.md
 git commit -m "feat: add validation file 07 - benchmark 50 model"
 ```
 
+#### QA Cross-References
+
+- **QA Criteria**: [QA-07-08](../qa/phase-07/QA-CRITERIA.md)
+- **Test Cases**: [P07-014](../qa/phase-07/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (stress testing with high concurrency)
+
+---
+
+
+
 ---
 
 ### Task 10: Write Validation File 08 - Benchmark 120 Model
@@ -412,6 +495,16 @@ ls -l /home/jon/code/whitt-execution-engine/docs/plans/07-final-validation/08-be
 git add opencode/docs/plans/07-final-validation/08-benchmark-120-model.md
 git commit -m "feat: add validation file 08 - benchmark 120 model"
 ```
+
+#### QA Cross-References
+
+- **QA Criteria**: [QA-07-09](../qa/phase-07/QA-CRITERIA.md)
+- **Test Cases**: [P07-015](../qa/phase-07/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (maximum stress test - CRITICAL from user requirement)
+
+---
+
+
 
 ---
 
@@ -472,6 +565,16 @@ git add opencode/docs/plans/07-final-validation/09-workflow-generation-test.md
 git commit -m "feat: add validation file 09 - workflow generation test"
 ```
 
+#### QA Cross-References
+
+- **QA Criteria**: [QA-07-10](../qa/phase-07/QA-CRITERIA.md)
+- **Test Cases**: [P07-016 through P07-019](../qa/phase-07/QA-TEST-CASES.md)
+- **Schema Ref**: [Lines 196-497](../schema/unified-workflow-schema.yml) (agentic_workflow) + [Lines 14-805](../schema/unified-workflow-schema.yml) (full unified workflow schema)
+
+---
+
+
+
 ---
 
 ### Task 12: Write Validation File 10 - Cross-Phase Regression
@@ -519,6 +622,16 @@ ls -l /home/jon/code/whitt-execution-engine/docs/plans/07-final-validation/10-cr
 git add opencode/docs/plans/07-final-validation/10-cross-phase-regression.md
 git commit -m "feat: add validation file 10 - cross-phase regression"
 ```
+
+#### QA Cross-References
+
+- **QA Criteria**: [QA-07-11](../qa/phase-07/QA-CRITERIA.md)
+- **Test Cases**: [P07-020 through P07-022](../qa/phase-07/QA-TEST-CASES.md)
+- **Schema Ref**: [Lines 14-805](../schema/unified-workflow-schema.yml) (full unified workflow schema)
+
+---
+
+
 
 ---
 
@@ -577,6 +690,16 @@ ls -l /home/jon/code/whitt-execution-engine/docs/plans/07-final-validation/11-fi
 git add opencode/docs/plans/07-final-validation/11-final-signoff.md
 git commit -m "feat: add validation file 11 - final signoff"
 ```
+
+#### QA Cross-References
+
+- **QA Criteria**: [QA-07-12](../qa/phase-07/QA-CRITERIA.md)
+- **Test Cases**: [P07-023 through P07-026](../qa/phase-07/QA-TEST-CASES.md)
+- **Schema Ref**: [Lines 14-805](../schema/unified-workflow-schema.yml) (full unified workflow schema)
+
+---
+
+
 
 ---
 

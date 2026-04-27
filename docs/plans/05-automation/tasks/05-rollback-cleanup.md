@@ -449,3 +449,100 @@ Task 05 implements rollback and cleanup with:
 ✅ ADR-0007 compliance (complete cleanup)
 
 **Next Steps:** Task 06 (Scheduling Policy Compiler) or Task 07 (Automation CLI)
+
+---
+
+## Implementation Research
+
+### Recommended Libraries
+
+| Library | Version | Purpose | Notes |
+|---------|---------|---------|-------|
+| git2 | 0.18 | Git operations | Branch deletion, worktree cleanup |
+| tokio | 1.35 | Async runtime | Core async infrastructure |
+| serde | 1.0 | Serialization | JSON support |
+| serde_json | 1.0 | JSON format | Standard JSON I/O |
+| thiserror | 1.0 | Error handling | Type-safe errors |
+| anyhow | 1.0 | Error composition | Flexible error handling |
+
+### Key Design Decisions
+
+- **Rollback procedures**: Delete merge commits, restore base branch state
+- **Cleanup operations**: Delete experiment branches, remove worktrees, clear artifacts
+- **Backup creation**: Create backup snapshots before rollback operations
+- **Atomic operations**: Rollback and cleanup are atomic (all-or-nothing)
+- **Safe mode**: Force flag required for destructive operations
+- **ADR-0007 compliance**: Failed experiments are fully cleaned up
+
+### Implementation Pattern
+
+\`\`\`rust
+use automation_cleanup::{RollbackManager, CleanupManager};
+
+// Pattern: Create rollback manager
+let rollback = RollbackManager::new("/path/to/repo")?;
+
+// Pattern: Rollback merge
+let backup_path = rollback.rollback_merge("main", "feature-branch").await?;
+
+// Pattern: Delete experiment branch
+let cleanup = CleanupManager::new("/path/to/repo")?;
+cleanup.delete_branch("feature-branch").await?;
+
+// Pattern: Remove worktree
+cleanup.remove_worktree("/path/to/worktree").await?;
+
+// Pattern: Clear artifacts
+cleanup.clear_artifacts("./workspace/experiment-artifacts").await?;
+
+// Pattern: Verify cleanup
+let verification = cleanup.verify_cleanup().await?;
+if !verification.is_clean {
+    eprintln!("Cleanup verification failed: {:?}", verification.issues);
+}
+
+// Pattern: List all experiments with cleanup status
+let experiments = cleanup.list_experiments().await?;
+for exp in experiments {
+    println!("{} - {} - {} (branch: {}, worktree: {})",
+        exp.id, exp.status, exp.cleanup_status, exp.branch, exp.worktree);
+}
+\`\`\`
+
+### Dependencies on Prior Phases
+
+- **Phase 5 Task 01**: Git Experiment Framework (branch/worktree management)
+- **Phase 5 Task 04**: Experiment Result Tracking (result cleanup)
+- **Phase 5 Task 07**: Automation CLI (cleanup commands)
+
+### Testing Strategy
+
+- **Unit**: Rollback operations, cleanup operations, verification logic
+- **Integration**: Full rollback and cleanup workflow with verification
+- **Property**: Atomic rollback ensures all-or-nothing behavior
+
+### Schema Alignment
+
+- **Schema Ref**: Lines 110-148 (provenance tracking for rollback operations)
+- **Schema Ref**: Lines 110-148 (provenance tracking for cleanup operations)
+
+### Critical Constraints
+
+- **MUST** create backup before rollback operations
+- **MUST** perform rollback and cleanup atomically (all-or-nothing)
+- **MUST** delete experiment branches after cleanup
+- **MUST** remove worktrees to prevent workspace pollution
+- **MUST** clear artifacts from \`./workspace/\`
+- **MUST** verify cleanup success (no orphaned branches/worktrees/artifacts)
+- **MUST NOT** proceed with incomplete cleanup
+- **MUST NOT** cleanup without verification
+
+
+## QA Cross-References
+
+### QA Criteria
+- **QA Area**: Area 6 - Rollback & Cleanup
+- **QA Criteria**: [../../qa/phase-05/QA-CRITERIA.md#area-6-rollback-cleanup](../../qa/phase-05/QA-CRITERIA.md#area-6-rollback-cleanup)
+- **Priority**: P1
+**Test Types**: Unit, Integration
+

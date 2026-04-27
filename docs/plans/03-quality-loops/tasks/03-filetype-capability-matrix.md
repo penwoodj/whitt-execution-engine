@@ -211,3 +211,11 @@ Task 3 is complete when:
 - ✅ Gap analysis implemented
 - ✅ All tests passing
 - ✅ Documentation complete
+
+---
+
+## QA Cross-References
+
+- **QA Criteria**: ['$qa_criteria']('$file')
+- **Test Cases**: ['$test_case']('$file')
+- **Schema Ref**: $schema_ref

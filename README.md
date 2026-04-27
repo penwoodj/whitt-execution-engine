@@ -774,12 +774,17 @@ The framework includes **53 example workflows across 19 categories** demonstrati
 
 | Component | Library | Why? |
 |-----------|----------|-------|
-| **YAML Parsing** | serde-saphyr | 1.5x faster than serde_yaml, schema validation |
-| **Code Generation** | Askama | Pre-compiled templates, 5-10x faster |
-| **Agent SDK** | AutoAgents | Production-ready agent orchestration |
+| **YAML Parsing** | serde-saphyr | Fast YAML parsing with serde integration |
+| **Code Generation** | Askama | Pre-compiled templates (planned for production mode) |
 | **Async Runtime** | tokio | Industry standard, battle-tested |
 | **Error Handling** | thiserror + anyhow | Type-safe for libraries |
 | **CLI** | clap | Argument parsing, help generation |
+| **LLM Backend** | llama-cpp-2 | Local LLM inference with Vulkan GPU support |
+| **HTTP Client** | reqwest | SSE streaming, API communication |
+| **Persistence** | rusqlite | SQLite workflow checkpointing |
+| **Template Engine** | minijinja | `${...}` variable interpolation |
+| **Property Testing** | proptest | Fuzz-style invariant testing |
+| **Benchmarking** | criterion | Statistical performance measurement |
 
 ---
 
@@ -787,49 +792,74 @@ The framework includes **53 example workflows across 19 categories** demonstrati
 
 ```
 src/
-  main.rs           # CLI entry point
-  lib.rs            # Library API
-  parser.rs         # YAML parsing (serde-saphyr)
-  generator.rs      # Code generation (Askama)
-  scheduler.rs      # Queue and scheduler
-  templates/        # Rust code templates
-  tools/            # Built-in tool implementations
-  agents/           # Agent scaffolding
+├── lib.rs              # Root module
+├── error.rs            # Error types
+├── config/             # YAML configuration (3 files)
+│   ├── mod.rs          # Config loading, validation, merge
+│   ├── provider.rs     # Provider-specific config
+│   └── unified.rs      # Unified config schema
+├── model/              # Model specifications (4 files)
+│   ├── schema.rs       # Model spec structs
+│   ├── registry.rs     # Model lifecycle
+│   ├── resource.rs     # Resource management
+│   └── interpolation.rs # Template interpolation
+├── agent/              # Agent execution engine (6 files)
+│   ├── tools.rs        # Tool registry, 6 tools
+│   ├── executor.rs     # Step execution
+│   ├── react.rs        # ReAct agent
+│   ├── streaming.rs    # SSE streaming
+│   ├── persistence.rs  # Workflow checkpointing
+│   └── sandbox.rs      # Tool sandbox security
+├── backend/            # LLM backends (3 files)
+│   ├── llm_backend.rs  # Backend trait
+│   ├── llama_vulkan.rs # Vulkan backend
+│   └── mock_backend.rs # Mock for testing
+├── client/             # HTTP client (5 files)
+│   ├── http_client.rs  # HTTP client with SSE
+│   ├── model_download.rs # HuggingFace download
+│   ├── docker_manager.rs # Docker management
+│   ├── prompt_chain.rs # Prompt chaining
+│   └── types.rs        # API types
+└── bin/                # CLI binaries (3 files)
+    ├── whitt.rs        # Main CLI
+    ├── model_chain.rs  # Model chain
+    └── poc_client.rs   # PoC client
 
-.opencode/           # System-of-record
-  workflows/        # Workflow specs and IR
-  runs/             # Execution artifacts, logs, hashes
-  metrics/          # Performance and quality metrics
+docs/
+├── schema/             # Unified workflow schema (source of truth)
+├── plans/              # 8-phase implementation plans (00-07)
+├── qa/                 # QA suites per phase + extended POC
+└── research/           # Upstream factor reviews
 ```
 
 ---
 
 ## Status
 
-🚧 **In Development - Early Phase**
+🚧 **In Development - Extended POC Complete**
 
 **Current Implementation Status** (April 2026):
-- ✅ Repository structure established
-- ✅ Error handling module (`src/error.rs`) implemented
-- ✅ Documentation structure complete (173 files)
-- ✅ YAML schema specification complete
-- ✅ Example workflows created (53 workflows across 19 categories)
-- ✅ CI/CD pipeline configured
-- ⏳ Parser implementation (planned)
-- ⏳ WorkflowIR compiler (planned)
-- ⏳ CLI interface (planned)
-- ⏳ Scheduler implementation (planned)
-- ⏳ Backend abstraction layer (planned)
+- ✅ Error handling module (`src/error.rs`)
+- ✅ YAML config parsing with serde-saphyr (providers, models, unified config)
+- ✅ Model specification with lifecycle management and resource limits
+- ✅ Variable interpolation with minijinja (`${...}` and `{{...}}`)
+- ✅ ReAct agent execution engine (step executor, loop runner, branch evaluator)
+- ✅ 6 built-in tools with sandbox security (model ops, chat, file read, final answer)
+- ✅ SSE streaming for real-time LLM responses
+- ✅ Workflow persistence (JSON + SQLite backends)
+- ✅ Vulkan GPU backend with llama.cpp (AMD GPU verified)
+- ✅ CLI with Chat, Model, Server, Agent, Download subcommands
+- ✅ Docker-based LLM server management
+- ✅ 124 tests passing (107 unit + 8 resilience + 4 E2E + 5 user flows)
+- ✅ 20/20 QA areas passing (extended POC validation)
+- ⏳ Workflow YAML execution (Phase 01)
+- ⏳ Full CLI workflow commands (Phase 01-02)
+- ⏳ Quality loops and benchmarks (Phase 03)
+- ⏳ Memory and search (Phase 04)
+- ⏳ Automation and scheduling (Phase 05)
+- ⏳ Autonomy metrics and dashboards (Phase 06)
 
-Roadmap by phase (see ADRs in `opencode/docs/reports/roadmap/`):
-
-**Phase 1: Foundation** (ADR-0001)
-- [x] Research complete (tech stack selection)
-- [x] Repository structure
-- [x] YAML schema specification
-- [x] Error handling module
-- [x] Documentation structure
-- [x] .opencode/ system-of-record
+**Roadmap**: 8-phase plan in `docs/plans/` (phases 00-07).
 - [ ] Parser implementation
 - [ ] WorkflowIR compiler
 

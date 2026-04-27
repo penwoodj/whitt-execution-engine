@@ -515,3 +515,117 @@ Task 07 implements automation CLI with:
 ✅ ADR-0007 compliance (manual control, no auto-commits)
 
 **Next Steps:** Task 08 (Automation UI Integration)
+
+---
+
+## Implementation Research
+
+### Recommended Libraries
+
+| Library | Version | Purpose | Notes |
+|---------|---------|---------|-------|
+| clap | 4.4 | CLI parsing | Argument parsing and help generation |
+| tokio | 1.35 | Async runtime | Core async infrastructure |
+| serde | 1.0 | Serialization | JSON support |
+| serde_json | 1.0 | JSON format | Standard JSON I/O |
+| thiserror | 1.0 | Error handling | Type-safe errors |
+| anyhow | 1.0 | Error composition | Flexible error handling |
+| colored | 2.0 | Terminal colors | CLI output formatting |
+| tabled | 0.14 | Table formatting | Pretty output for lists |
+
+### Key Design Decisions
+
+- **CLI structure**: Subcommands for schedule, experiment, merge, refine, rollback
+- **Manual approval**: CLI commands for approve/reject merge proposals (no auto-commits)
+- **Refinement capture**: Commands to create and list manual refinements
+- **Schedule management**: Create, list, cancel scheduled workflows
+- **Experiment management**: Create, list, status, cleanup experiments
+- **Rollback procedures**: Rollback merges, clean up artifacts
+- **ADR-0007 compliance**: Manual control over all automation actions
+
+### Implementation Pattern
+
+\`\`\`rust
+// CLI entry point
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let cli = AutomationCli::parse();
+    
+    match cli.command {
+        Commands::Schedule(ScheduleCommands::Create { id, workflow_id, cron, timezone }) => {
+            let scheduler = CronScheduler::new()?;
+            scheduler.add_schedule(&id, &workflow_id, &cron, &timezone).await?;
+            println!("Schedule created: {}", id);
+        }
+        Commands::Schedule(ScheduleCommands::List {}) => {
+            let scheduler = CronScheduler::new()?;
+            let schedules = scheduler.list_schedules().await?;
+            print_schedule_table(&schedules);
+        }
+        Commands::Experiment(ExperimentCommands::Create { name, branch }) => {
+            let manager = ExperimentManager::new()?;
+            let experiment = manager.create_experiment(&name, &branch).await?;
+            println!("Experiment created: {}", experiment.id);
+        }
+        Commands::Merge(MergeCommands::View { proposal_id }) => {
+            let manager = ProposalManager::new()?;
+            let proposal = manager.get_proposal(&proposal_id).await?;
+            print_proposal(&proposal);
+        }
+        Commands::Merge(MergeCommands::Approve { proposal_id, reason }) => {
+            let manager = ProposalManager::new()?;
+            let event_id = manager.approve_proposal(&proposal_id, &reason).await?;
+            println!("Proposal approved, event ID: {}", event_id);
+        }
+        Commands::Refine(RefineCommands::Create { target_type, target_id, comment }) => {
+            let manager = RefinementManager::new()?;
+            let event_id = manager.create_refinement(target_type, target_id, comment).await?;
+            println!("Refinement created, event ID: {}", event_id);
+        }
+        Commands::Rollback(RollbackCommands::Experiment { experiment_id }) => {
+            let manager = RollbackManager::new()?;
+            manager.rollback_experiment(&experiment_id).await?;
+            println!("Experiment rolled back");
+        }
+    }
+    
+    Ok(())
+}
+\`\`\`
+
+### Dependencies on Prior Phases
+
+- **Phase 5 Tasks 00-06**: All Phase 5 tasks (schedule, experiment, merge, refine, rollback)
+- **Phase 2**: CLI integration (existing CLI structure)
+- **Phase 5 Task 08**: Automation UI Integration (browser-based controls)
+
+### Testing Strategy
+
+- **Unit**: CLI command parsing, command validation
+- **Integration**: Full CLI workflow with all subcommands
+- **Property**: CLI commands produce expected outputs for given inputs
+
+### Schema Alignment
+
+- **Schema Ref**: Lines 110-148 (provenance tracking for CLI operations)
+- **Schema Ref**: Lines 110-148 (provenance tracking for manual operations)
+
+### Critical Constraints
+
+- **MUST** provide manual approval/rejection commands (no auto-commits)
+- **MUST** support refinement capture and listing
+- **MUST** provide schedule management (create, list, cancel)
+- **MUST** provide experiment management (create, list, status, cleanup)
+- **MUST** provide rollback procedures (experiment, cleanup-all, verify)
+- **MUST NOT** auto-commit merge proposals (ADR-0007 requirement)
+- **MUST NOT** allow destructive operations without confirmation
+
+
+## QA Cross-References
+
+### QA Criteria
+- **QA Area**: Area 8 - Automation CLI
+- **QA Criteria**: [../../qa/phase-05/QA-CRITERIA.md#area-8-automation-cli](../../qa/phase-05/QA-CRITERIA.md#area-8-automation-cli)
+- **Priority**: P0
+**Test Types**: Integration, E2E
+

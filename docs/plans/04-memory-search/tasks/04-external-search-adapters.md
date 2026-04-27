@@ -679,3 +679,36 @@ See [validation/04-external-search-adapters.md](../validation/04-external-search
 ## Test Specifications
 
 See [tests/04-external-search-adapters.md](../tests/04-external-search-adapters.md)
+
+
+---
+
+## QA Cross-References
+
+### QA Criteria
+- **QA Area**: Area 5 - External Search Adapters
+- **QA Criteria**: [../../qa/phase-04/QA-CRITERIA.md#area-5-external-search-adapters](../../qa/phase-04/QA-CRITERIA.md#area-5-external-search-adapters)
+- **Priority**: P1
+- **Test Types**: Unit, Integration
+
+### Test Cases
+- **Test Cases**: [../../qa/phase-04/QA-TEST-CASES.md](../../qa/phase-04/QA-TEST-CASES.md)
+- **Key Tests**:
+  - P04-019: Policy gate enforcement
+  - P04-020: DuckDuckGo API
+  - P04-021: Brave API
+  - P04-022: Rate limiting (100/hour)
+  - P04-023: Allowed/forbidden domains
+  - P04-024: Result caching with TTL
+
+### Schema References
+- **Schema File**: [../../../schema/unified-workflow-schema.yml](../../../schema/unified-workflow-schema.yml)
+- **Schema Section**: Lines 623-649 (web_operations.fetch: allowed/forbidden domains, rate limits)
+- **Key Fields**:
+  - `web_operations.fetch.allowed_domains` (line 627)
+  -   - `web_operations.fetch.forbidden_domains` (line 628)
+  -   - `web_operations.fetch.rate_limits.max_per_hour` (line 629)
+
+### Related Documentation
+- **Cross-References**: [../../qa/phase-04/CROSS-REF.md](../../qa/phase-04/CROSS-REF.md)
+- **Phase Plan**: [../plan.md](../plan.md)

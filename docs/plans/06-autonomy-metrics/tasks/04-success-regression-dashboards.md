@@ -24,7 +24,14 @@ Build real-time dashboards for success metrics with regression detection. This e
 
 ---
 
-## Implementation Steps
+## QA Cross-References
+
+- **QA Criteria**: [QA-06-05](../../qa/phase-06/QA-CRITERIA.md)
+- **Test Cases**: [P06-019 through P06-022](../../qa/phase-06/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (new feature - real-time dashboards)
+
+---
+
 
 ### Step 1: Define dashboard layout
 

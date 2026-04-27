@@ -533,3 +533,11 @@ This module provides the foundation for all workflow execution:
 - Used by checkpoint system for resumption
 
 The SessionStorage trait will be implemented using sled in Task 02.
+
+---
+
+## QA Cross-References
+
+- **QA Criteria**: [QA-01-01](../../qa/phase-01/QA-CRITERIA.md)
+- **Test Cases**: [P01-001](../../qa/phase-01/QA-TEST-CASES.md), [P01-002](../../qa/phase-01/QA-TEST-CASES.md)
+- **Schema Ref**: N/A (execution engine component)

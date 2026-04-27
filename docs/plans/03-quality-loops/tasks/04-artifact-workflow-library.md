@@ -316,3 +316,11 @@ Task 4 is complete when:
 - ✅ Review controls (approve/reject/status)
 - ✅ All tests passing
 - ✅ Documentation complete
+
+---
+
+## QA Cross-References
+
+- **QA Criteria**: ['$qa_criteria']('$file')
+- **Test Cases**: ['$test_case']('$file')
+- **Schema Ref**: $schema_ref

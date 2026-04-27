@@ -587,3 +587,34 @@ See [validation/03-search-query-engine.md](../validation/03-search-query-engine.
 ## Test Specifications
 
 See [tests/03-search-query-engine.md](../tests/03-search-query-engine.md)
+
+
+---
+
+## QA Cross-References
+
+### QA Criteria
+- **QA Area**: Area 4 - Hybrid Search Engine
+- **QA Criteria**: [../../qa/phase-04/QA-CRITERIA.md#area-4-hybrid-search-engine](../../qa/phase-04/QA-CRITERIA.md#area-4-hybrid-search-engine)
+- **Priority**: P0
+- **Test Types**: Unit, Integration
+
+### Test Cases
+- **Test Cases**: [../../qa/phase-04/QA-TEST-CASES.md](../../qa/phase-04/QA-TEST-CASES.md)
+- **Key Tests**:
+  - P04-015: Fusion algorithm
+  - P04-016: Query parsing
+  - P04-017: Re-ranking logic
+  - P04-018: Local memory first (ADR-0006)
+
+### Schema References
+- **Schema File**: [../../../schema/unified-workflow-schema.yml](../../../schema/unified-workflow-schema.yml)
+- **Schema Section**: Lines 682-696 (memory/rag - retrieval parameters)
+- **Key Fields**:
+  - `memory.rag.retrieval.similarity_threshold` (line 695)
+  -   - `memory.rag.retrieval.max_results` (line 694)
+  -   - `memory.rag.retrieval.include_sources` (line 696)
+
+### Related Documentation
+- **Cross-References**: [../../qa/phase-04/CROSS-REF.md](../../qa/phase-04/CROSS-REF.md)
+- **Phase Plan**: [../plan.md](../plan.md)

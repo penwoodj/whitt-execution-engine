@@ -1746,3 +1746,137 @@ Task 01 implements git experiment framework with:
 ✅ ADR-0007 compliance (branch isolation, no auto-commits)
 
 **Next Steps:** Task 02 (Merge Proposal Generation) or Task 05 (Rollback & Cleanup)
+
+---
+
+## Implementation Research
+
+### Recommended Libraries
+
+| Library | Version | Purpose | Notes |
+|---------|---------|---------|-------|
+| git2 | 0.18 | Git operations | Full git2 bindings |
+| tempfile | 3.8 | Temporary directories | Worktree isolation |
+| tokio | 1.35 | Async runtime | Core async infrastructure |
+| serde | 1.0 | Serialization | JSON support |
+| serde_json | 1.0 | JSON format | Standard JSON I/O |
+| thiserror | 1.0 | Error handling | Type-safe errors |
+| anyhow | 1.0 | Error composition | Flexible error handling |
+
+### Key Design Decisions
+
+- **Branch isolation**: Experiments run in isolated branches (never on main branch)
+- **Worktree management**: Git2 worktrees for parallel experiments without workspace pollution
+- **Merge policies**: Auto-merge, require-approval, block (configurable per experiment)
+- **Experiment manifest**: Track status, branch, results, artifacts in JSON manifest
+- **Cleanup procedures**: Delete worktrees and branches on failure/success (configurable)
+- **ADR-0007 compliance**: Experiments never on main branch, merge proposals are outputs only
+
+### Implementation Pattern
+
+```rust
+use automation_experiment::{GitExperimentManager, ExperimentConfig, MergePolicyType};
+
+// Pattern: Create experiment manager
+let manager = GitExperimentManager::new("/path/to/repo");
+
+// Pattern: Create experiment with isolation
+let config = ExperimentConfig {
+    base_branch: "main".to_string(),
+    experiment_branch: "experiment/test-feature".to_string(),
+    merge_policy: MergePolicyType::RequireApproval,
+    cleanup_on_failure: true,
+    keep_artifacts: false,
+};
+
+let experiment = manager.create_experiment(config).await?;
+
+// Pattern: Run experiment in worktree
+let result = manager.run_experiment(&experiment.id).await?;
+
+// Pattern: Evaluate merge policy
+let merge_decision = manager.evaluate_merge_policy(&experiment.id).await?;
+
+match merge_decision.policy_type {
+    MergePolicyType::AutoMerge => {
+        manager.auto_merge(&experiment.id).await?;
+    }
+    MergePolicyType::RequireApproval => {
+        // Generate merge proposal as output (no auto-commit)
+        let proposal = manager.generate_merge_proposal(&experiment.id).await?;
+        println!("Merge proposal: {}", serde_json::to_string_pretty(&proposal)?);
+    }
+    MergePolicyType::Block => {
+        println!("Experiment blocked by merge policy");
+    }
+}
+
+// Pattern: Rollback failed experiment
+if result.status == "failed" {
+    manager.rollback_experiment(&experiment.id).await?;
+}
+
+// Pattern: Cleanup experiment
+manager.cleanup_experiment(&experiment.id).await?;
+
+// Pattern: Query experiment status
+let status = manager.get_experiment_status(&experiment.id).await?;
+println!("Experiment status: {:?}", status);
+
+// Pattern: List all experiments
+let experiments = manager.list_experiments().await?;
+```
+
+### Dependencies on Prior Phases
+
+- **Phase 0-3**: Core execution engine (workflow execution for experiments)
+- **Phase 5 Task 00**: Cron Scheduler (scheduled experiment execution)
+- **Phase 5 Task 02**: Merge Proposal Generation (merge artifact generation)
+
+### Testing Strategy
+
+- **Unit**: Branch creation, worktree management, merge policy evaluation
+- **Integration**: Full experiment workflow with isolation, execution, cleanup
+- **Property**: Isolation enforcer rejects experiments on main branch
+
+### Schema Alignment
+
+- **Schema Ref**: Lines 110-148 (provenance tracking for experiment operations)
+- **Schema Ref**: Lines 110-148 (provenance tracking for git operations)
+
+### Critical Constraints
+
+- **MUST** enforce branch isolation (no experiments on main branch)
+- **MUST** use git2 worktrees for parallel experiment isolation
+- **MUST** generate merge proposals as outputs only (no auto-commits)
+- **MUST** support configurable merge policies (auto-merge, require-approval, block)
+- **MUST** cleanup worktrees and branches on failure/success
+- **MUST NOT** run experiments on main branch
+- **MUST NOT** auto-commit merge proposals (ADR-0007 requirement)
+
+
+## QA Cross-References
+- **QA Area**: Area 2 - Git Experiment Framework
+- **QA Criteria**: [../../qa/phase-05/QA-CRITERIA.md#area-2-git-experiment-framework](../../qa/phase-05/QA-CRITERIA.md#area-2-git-experiment-framework)
+- **Priority**: P0
+- **Test Types**: Unit, Integration
+
+### Test Cases
+- **Test Cases**: [../../qa/phase-05/QA-TEST-CASES.md](../../qa/phase-05/QA-TEST-CASES.md)
+
+- **Key Tests**: 
+  - P05-006: Branch isolation (ADR-0007)
+  - P05-007: Worktree management
+  - P05-008: Experiment lifecycle
+
+### Schema References
+- **Schema File**: [../../../schema/unified-workflow-schema.yml](../../../schema/unified-workflow-schema.yml)
+- **Schema Section**: N/A (new feature - infrastructure)
+- **Note**: Git experiment framework enforces branch isolation per ADR-0007
+
+
+### Related Documentation
+- **Cross-References**: [../../qa/phase-05/CROSS-REF.md](../../qa/phase-05/CROSS-REF.md)
+- **Phase Plan**: [../plan.md](../plan.md)
+
+

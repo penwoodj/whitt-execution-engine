@@ -1400,3 +1400,11 @@ Ready for Task 1: Generate-Verify-Repair Runtime
 |-------|-------------|
 | [Parent Plan](../plan.md) | Quality Loops phase implementation plan |
 | [Validation Criteria](../validation/acceptance-criteria.md) | Acceptance criteria for verifier interface |
+
+---
+
+## QA Cross-References
+
+- **QA Criteria**: ['$qa_criteria']('$file')
+- **Test Cases**: ['$test_case']('$file')
+- **Schema Ref**: $schema_ref

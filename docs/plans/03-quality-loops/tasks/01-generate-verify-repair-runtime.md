@@ -1593,3 +1593,11 @@ Task 1 is complete when:
 ## Handoff
 
 Ready for Task 2: Benchmark Harness
+
+---
+
+## QA Cross-References
+
+- **QA Criteria**: ['$qa_criteria']('$file')
+- **Test Cases**: ['$test_case']('$file')
+- **Schema Ref**: $schema_ref

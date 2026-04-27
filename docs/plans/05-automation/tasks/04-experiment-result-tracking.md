@@ -429,3 +429,109 @@ Task 04 implements experiment result tracking with:
 ✅ Unit tests
 
 **Next Steps:** Task 05 (Rollback & Cleanup) or Task 07 (Automation CLI)
+
+---
+
+## Implementation Research
+
+### Recommended Libraries
+
+| Library | Version | Purpose | Notes |
+|---------|---------|---------|-------|
+| tokio | 1.35 | Async runtime | Core async infrastructure |
+| serde | 1.0 | Serialization | JSON support |
+| serde_json | 1.0 | JSON format | Standard JSON I/O |
+| csv | 1.2 | CSV export | Export to CSV format |
+| thiserror | 1.0 | Error handling | Type-safe errors |
+| anyhow | 1.0 | Error composition | Flexible error handling |
+| chrono | 0.4 | Timestamps | Result timestamps |
+
+### Key Design Decisions
+
+- **Result storage**: Store experiment results with metadata in `./workspace/experiment-results/`
+- **Comparison logic**: Compare results across experiments (metrics, duration, success rates)
+- **Visualization**: Table format and summary helpers for result display
+- **Export formats**: JSON (structured) and CSV (spreadsheet compatibility)
+- **Metadata tracking**: Experiment ID, branch, timestamp, metrics, artifacts
+- **Query interface**: Filter results by experiment, date range, status
+
+### Implementation Pattern
+
+```rust
+use automation_tracking::{ResultTracker, ExperimentResult, ResultMetadata};
+
+// Pattern: Create result tracker
+let tracker = ResultTracker::new("./workspace/experiment-results")?;
+
+// Pattern: Store experiment result
+let result = ExperimentResult {
+    id: uuid::Uuid::new_v4().to_string(),
+    experiment_id: "experiment-123".to_string(),
+    branch: "feature-test".to_string(),
+    timestamp: chrono::Utc::now(),
+    status: "success".to_string(),
+    duration_seconds: 42.5,
+    metrics: serde_json::json!({
+        "accuracy": 0.95,
+        "precision": 0.92,
+        "recall": 0.88
+    }),
+    artifacts: vec!["result-456.json".to_string()],
+};
+
+let result_id = tracker.store_result(result).await?;
+
+// Pattern: Compare results
+let comparison = tracker.compare_results(vec!["exp-1", "exp-2", "exp-3"]).await?;
+
+// Pattern: Visualize as table
+let table = tracker.visualize_as_table(vec!["exp-1", "exp-2"]).await?;
+
+// Pattern: Export to JSON
+let json_export = tracker.export_json(vec!["exp-1"]).await?;
+std::fs::write("./workspace/results.json", json_export)?;
+
+// Pattern: Export to CSV
+let csv_export = tracker.export_csv(vec!["exp-1"]).await?;
+std::fs::write("./workspace/results.csv", csv_export)?;
+
+// Pattern: Query results
+let results = tracker.query_results(|result| {
+    result.experiment_id == "experiment-123"
+}).await?;
+```
+
+### Dependencies on Prior Phases
+
+- **Phase 5 Task 01**: Git Experiment Framework (experiment ID management)
+- **Phase 5 Task 02**: Merge Proposal Generation (result linking)
+- **Phase 5 Task 07**: Automation CLI (result query commands)
+
+### Testing Strategy
+
+- **Unit**: Result storage, comparison logic, export functionality
+- **Integration**: Full result tracking workflow with storage, comparison, export
+- **Property**: Comparison logic produces consistent rankings across multiple runs
+
+### Schema Alignment
+
+- **Schema Ref**: Lines 110-148 (provenance tracking for result storage)
+- **Schema Ref**: Lines 110-148 (provenance tracking for experiment operations)
+
+### Critical Constraints
+
+- **MUST** store results with complete metadata (experiment ID, branch, timestamp, metrics)
+- **MUST** provide comparison logic across experiments
+- **MUST** support export to JSON and CSV formats
+- **MUST** provide query interface for filtering results
+- **MUST** link results to experiments and merge proposals
+
+
+## QA Cross-References
+
+### QA Criteria
+- **QA Area**: Area 5 - Experiment Result Tracking
+- **QA Criteria**: [../../qa/phase-05/QA-CRITERIA.md#area-5-experiment-result-tracking](../../qa/phase-05/QA-CRITERIA.md#area-5-experiment-result-tracking)
+- **Priority**: P1
+**Test Types**: Unit, Integration
+

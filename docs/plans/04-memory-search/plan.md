@@ -23,6 +23,8 @@
 4. **ROBOTS.TXT ENFORCEMENT:** Web scraping must respect robots.txt with strict scope restrictions
 5. **PROVENANCE TRACKING:** All operations must record immutable timestamps, trace IDs, and content hashes
 
+> ⚠️ **Critical Review #2 Finding**: Error handling is phase-local; no cross-phase error propagation strategy. Phase 04 needs to extend `src/error.rs` with new `MemoryError` variant for search/storage operations. Add as dependency item for all tasks. See [upstream-critical-review-02.md](../../research/upstream-critical-review-02.md) Factor 2.
+
 ### Retrieval Planes
 
 **Plane 1: Local Memory (Primary)**
@@ -256,3 +258,41 @@ After Phase 5 completion, proceed to:
 **Document Version:** 1.0
 **Last Updated:** 2025-04-06
 **Status:** Ready for Implementation
+
+## QA Documentation
+
+This phase has comprehensive QA documentation covering all implementation tasks:
+
+### QA Files
+
+- **QA Criteria**: [../qa/phase-04/QA-CRITERIA.md](../qa/phase-04/QA-CRITERIA.md) — Detailed acceptance criteria for all 9 tasks with ADR-0006 compliance
+- **QA Test Cases**: [../qa/phase-04/QA-TEST-CASES.md](../qa/phase-04/QA-TEST-CASES.md) — Specific test cases for each QA area
+- **Cross-References**: [../qa/phase-04/CROSS-REF.md](../qa/phase-04/CROSS-REF.md) — Bidirectional links between plan tasks and QA areas
+
+### QA Areas
+
+| QA Area | Task File | Priority | Test Types |
+|----------|-----------|------------|-------------|
+| Area 1: Local Memory Storage | tasks/00-local-memory-storage.md | P0 | Unit, Integration |
+| Area 2: Full-Text Search | tasks/01-fulltext-search.md | P0 | Unit, Integration |
+| Area 3: Semantic Search | tasks/02-semantic-search.md | P0 | Unit, Integration |
+| Area 4: Hybrid Search Engine | tasks/03-search-query-engine.md | P0 | Unit, Integration |
+| Area 5: External Search Adapters | tasks/04-external-search-adapters.md | P1 | Unit, Integration |
+| Area 6: Web Scraping | tasks/05-web-scraping.md | P1 | Unit, Integration |
+| Area 7: Provenance Tracking | tasks/06-provenance-tracking.md | P1 | Unit, Integration |
+| Area 8: Memory Garbage Collection | tasks/07-memory-garbage-collection.md | P2 | Unit, Integration |
+| Area 9: Memory & Search Integration | tasks/08-memory-search-integration.md | P0 | Integration, E2E |
+
+### Verification Protocol
+
+Before claiming any task or phase complete:
+
+1. **Unit tests**: Run `cargo test --lib` — all tests must PASS
+2. **Integration tests**: Run `cargo test --test` — all tests must PASS
+3. **Clippy**: Run `cargo clippy --all-features -- -W clippy::all` — 0 warnings
+4. **LSP diagnostics**: Run on all changed files — 0 errors
+5. **Build**: Run `cargo build --release --all-features` — exit code 0
+6. **Manual verification**: For CLI/Docker features, test actual commands
+
+See [AGENTS.md](../../AGENTS.md) for full verification protocol.
+

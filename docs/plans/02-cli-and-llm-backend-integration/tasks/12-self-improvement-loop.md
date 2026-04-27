@@ -772,3 +772,11 @@ This task implements the self-improvement loop infrastructure including:
 - Configuration (setup)
 
 **Next:** Validation and Test Specifications
+
+---
+
+## QA Cross-References
+
+- **QA Criteria**: ['$qa_criteria']('$file')
+- **Test Cases**: ['$test_case']('$file')
+- **Schema Ref**: $schema_ref

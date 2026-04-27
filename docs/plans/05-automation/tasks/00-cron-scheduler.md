@@ -23,6 +23,8 @@ The cron scheduler is the foundation of time-based automation in the AgentSDK. I
 
 **ADR-0007 Compliance:** This task builds the scheduler infrastructure. The actual policy compilation happens in Task 06, which compiles cron expressions to WorkflowIR scheduling nodes (not interpreted at runtime).
 
+> ⚠️ **Critical Review #2 Finding**: Config merge logic exists but no hot-reload capability. Schedule updates need config hot-reload capability to support dynamic schedule changes without restarting the engine. Add as consideration for Task 00 (Cron Scheduler). See [upstream-critical-review-02.md](../../../research/upstream-critical-review-02.md) Factor 4.
+
 ---
 
 ## File Structure
@@ -1621,3 +1623,143 @@ Task 00 implements the foundational cron scheduling infrastructure with:
 |-------|-------------|
 | [Parent Plan](../plan.md) | Automation phase implementation plan |
 | [Validation Criteria](../validation/acceptance-criteria.md) | Acceptance criteria for automation phase |
+
+---
+
+## Implementation Research
+
+### Recommended Libraries
+
+| Library | Version | Purpose | Notes |
+|---------|---------|---------|-------|
+| tokio-cron-scheduler | 0.10 | Cron scheduling | Production-ready scheduler |
+| cron | 0.12 | Cron expression parsing | Flexible cron syntax |
+| chrono | 0.4 | Time handling | Timezone support |
+| chrono-tz | 0.8 | Timezone database | IANA timezone names |
+| sqlx | 0.7 | Database operations | Async SQLite support |
+| tokio | 1.35 | Async runtime | Core async infrastructure |
+| serde | 1.0 | Serialization | JSON support |
+| thiserror | 1.0 | Error handling | Type-safe errors |
+
+### Key Design Decisions
+
+- **Tokio-cron-scheduler**: Production-ready scheduler with timezone support and missed schedule detection
+- **Cron expression parsing**: Support standard cron syntax (min hour dom mon dow) with extensions
+- **Safety limits**: Max concurrent jobs (10 default), max job duration (3600s default), max missed schedules (5 default)
+- **Persistence**: SQLite database for schedule and job history storage
+- **Timezone support**: IANA timezone names via chrono-tz (UTC, America/New_York, Europe/London)
+- **Missed schedule handling**: Detect and re-execute jobs that were missed during downtime
+- **ADR-0007 compliance**: Infrastructure only - policy compilation happens in Task 06
+
+### Implementation Pattern
+
+```rust
+use automation_cron::{CronScheduler, ScheduledJob, ScheduleSafetyConfig};
+use tokio_cron_scheduler::{JobScheduler, Job};
+
+// Pattern: Create scheduler with safety limits
+let scheduler = CronScheduler::new(ScheduleSafetyConfig {
+    max_concurrent_jobs: 10,
+    max_job_duration_seconds: 3600,
+    max_missed_schedules: 5,
+    enabled_timezones: vec![
+        "UTC".to_string(),
+        "America/New_York".to_string(),
+        "Europe/London".to_string(),
+    ],
+});
+
+// Pattern: Add schedule
+let schedule_id = scheduler.add_schedule(
+    "daily_report",
+    "0 9 * * 1-5", // 9 AM Mon-Fri
+    "workflow:daily-report",
+    None, // Default timezone (UTC)
+).await?;
+
+// Pattern: Add schedule with timezone
+let scheduled_tz_id = scheduler.add_schedule(
+    "daily_report_ny",
+    "0 9 * * 1-5@America/New_York", // 9 AM EST
+    "workflow:daily-report",
+    None,
+).await?;
+
+// Pattern: Start scheduler
+let shutdown_handle = scheduler.start().await?;
+
+// Pattern: Handle job execution
+// In job handler, validate job hasn't exceeded duration limits
+// and update status in persistence
+
+// Pattern: Stop scheduler
+scheduler.stop().await?;
+
+// Pattern: List schedules
+let schedules = scheduler.list_schedules().await?;
+for schedule in schedules {
+    println!("{} - {} - {} (next: {:?})",
+        schedule.id, schedule.cron_expression, schedule.target, schedule.next_run);
+}
+
+// Pattern: Delete schedule
+scheduler.delete_schedule(&schedule_id).await?;
+
+// Pattern: Query job history
+let history = scheduler.get_job_history(&schedule_id, 10).await?;
+```
+
+### Dependencies on Prior Phases
+
+- **Phase 0-3**: Core execution engine (workflow execution for scheduled jobs)
+- **Phase 4**: Memory & Search (context injection for scheduled workflows)
+- **Phase 5 Task 06**: Scheduling Policy Compiler (policy compilation integration)
+
+### Testing Strategy
+
+- **Unit**: Cron expression parsing, validation logic, timezone conversion
+- **Integration**: Full scheduling workflow with job execution and persistence
+- **Property**: Cron schedules execute at expected times in UTC and configured timezones
+
+### Schema Alignment
+
+- **Schema Ref**: Lines 110-148 (provenance tracking for scheduled job execution)
+- **Schema Ref**: Lines 68-96 (execution context for workflow scheduling)
+
+### Critical Constraints
+
+- **MUST** use tokio-cron-scheduler (production-grade, tested)
+- **MUST** enforce safety limits (concurrent jobs, duration, missed schedules)
+- **MUST** persist schedules and job history to SQLite
+- **MUST** support timezone conversion (chrono-tz)
+- **MUST** detect and handle missed schedules
+- **MUST NOT** parse cron expressions at runtime (ADR-0007: compile at policy definition)
+
+
+---
+
+## QA Cross-References
+
+### QA Criteria
+- **QA Area**: Area 1 - Cron Scheduler
+- **QA Criteria**: [../../qa/phase-05/QA-CRITERIA.md#area-1-cron-scheduler](../../qa/phase-05/QA-CRITERIA.md#area-1-cron-scheduler)
+- **Priority**: P0
+- **Test Types**: Unit, Integration
+
+### Test Cases
+- **Test Cases**: [../../qa/phase-05/QA-TEST-CASES.md](../../qa/phase-05/QA-TEST-CASES.md)
+- **Key Tests**:
+  - P05-001: Cron expression compilation
+  - P05-002: Job scheduling
+  - P05-003: Job execution
+  - P05-004: Schedule management
+  - P05-005: Missed schedule detection
+
+### Schema References
+- **Schema File**: [../../../schema/unified-workflow-schema.yml](../../../schema/unified-workflow-schema.yml)
+- **Schema Section**: N/A (new feature - SchedulingNode in WorkflowIR)
+
+
+### Related Documentation
+- **Cross-References**: [../../qa/phase-05/CROSS-REF.md](../../qa/phase-05/CROSS-REF.md)
+- **Phase Plan**: [../plan.md](../plan.md)
