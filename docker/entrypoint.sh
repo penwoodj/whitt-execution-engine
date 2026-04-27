@@ -447,7 +447,7 @@ start_server() {
         server_args="$server_args -t $LLAMA_ARG_N_THREADS"
     fi
 
-    # GPU layers
+    # GPU layers (-1 = all layers on GPU, like LM Studio)
     if [ -n "$LLAMA_ARG_N_GPU_LAYERS" ] && [ "$LLAMA_ARG_N_GPU_LAYERS" != "0" ]; then
         server_args="$server_args -ngl $LLAMA_ARG_N_GPU_LAYERS"
     fi
@@ -525,6 +525,28 @@ start_server() {
         server_args="$server_args --cache-type-v $LLAMA_ARG_CACHE_TYPE_V"
     fi
 
+    # Flash Attention (default: enabled for Vulkan/CUDA/Metal like LM Studio)
+    if [ "${LLAMA_ARG_FLASH_ATTN:-}" = "true" ] || [ "$(get_yaml_value '.hardware.flash_attn' 'true')" = "true" ]; then
+        server_args="$server_args --flash-attn on"
+        log_info "Flash Attention enabled"
+    fi
+
+    # Prompt caching — DISABLED for Vulkan backend (known GGML_ASSERT crash in state_write_data)
+    # Vulkan cannot serialize KV cache state; must use --no-cache-prompt explicitly
+    cache_prompt=$(get_yaml_value '.server.cache_prompt' 'false')
+    if [ "$cache_prompt" = "true" ]; then
+        server_args="$server_args --cache-prompt"
+        log_info "Prompt caching enabled (may be unstable with Vulkan)"
+    else
+        server_args="$server_args --no-cache-prompt"
+        log_info "Prompt caching disabled (Vulkan safe mode)"
+    fi
+
+    # Continuous batching (default: enabled like LM Studio)
+    if [ "${LLAMA_ARG_CONT_BATCHING:-}" = "true" ] || [ "$(get_yaml_value '.server.cont_batching' 'true')" = "true" ]; then
+        server_args="$server_args --cont-batching"
+    fi
+
     # Metrics
     if [ -n "$LLAMA_ARG_METRICS" ]; then
         server_args="$server_args --metrics"
@@ -534,8 +556,6 @@ start_server() {
     if [ -n "$LLAMA_ARG_SLOTS_ENDPOINT" ]; then
         server_args="$server_args --slots"
     fi
-
-    server_args="$server_args --no-cache-prompt --slot-prompt-similarity 1.0 --no-cache-idle-slots"
 
     log_info "Server arguments: $server_args"
     log_debug "Full command: /usr/local/bin/llama-server $server_args"
@@ -621,6 +641,15 @@ main() {
 
         KV_CACHE_SIZE=$(yq '.cache.kv_cache_size // ""' "$per_model_config" 2>/dev/null || echo "")
         [ -n "$KV_CACHE_SIZE" ] && export LLAMA_ARG_KV_CACHE_SIZE="$KV_CACHE_SIZE"
+
+        FLASH_ATTN=$(yq '.hardware.flash_attn // ""' "$per_model_config" 2>/dev/null || echo "")
+        [ -n "$FLASH_ATTN" ] && export LLAMA_ARG_FLASH_ATTN="$FLASH_ATTN"
+
+        CACHE_PROMPT=$(yq '.server.cache_prompt // ""' "$per_model_config" 2>/dev/null || echo "")
+        [ -n "$CACHE_PROMPT" ] && export LLAMA_ARG_CACHE_PROMPT="$CACHE_PROMPT"
+
+        CONT_BATCHING=$(yq '.server.cont_batching // ""' "$per_model_config" 2>/dev/null || echo "")
+        [ -n "$CONT_BATCHING" ] && export LLAMA_ARG_CONT_BATCHING="$CONT_BATCHING"
 
         echo "[CONFIG] Applied per-model config for ${MODEL_NAME}"
     fi
