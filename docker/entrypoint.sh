@@ -25,6 +25,25 @@ log_debug() {
     fi
 }
 
+# Global helper to read YAML values (used by translate_config and start_server)
+get_yaml_value() {
+    local path="$1"
+    local default="$2"
+    local config_path="${3:-/config/config.yml}"
+
+    if [ ! -f "$config_path" ]; then
+        echo "$default"
+        return
+    fi
+
+    if command -v yq &> /dev/null; then
+        value=$(yq eval "$path" "$config_path" 2>/dev/null || echo "$default")
+        echo "$value"
+    else
+        echo "$default"
+    fi
+}
+
 # Function to download model from HuggingFace
 download_model() {
     local model_path="$1"
@@ -170,20 +189,6 @@ translate_config() {
     fi
 
     log_info "Translating config to environment variables..."
-
-    # Helper function to get YAML value
-    get_yaml_value() {
-        local path="$1"
-        local default="$2"
-
-        if command -v yq &> /dev/null; then
-            value=$(yq eval "$path" "$config_path" 2>/dev/null || echo "$default")
-            echo "$value"
-        else
-            # Fallback: use grep (less reliable)
-            echo "$default"
-        fi
-    }
 
     # Model path (required)
     model_path=$(get_yaml_value ".model.path" "/models/model.gguf")
@@ -542,8 +547,8 @@ start_server() {
         log_info "Prompt caching disabled (Vulkan safe mode)"
     fi
 
-    # Continuous batching (default: enabled like LM Studio)
-    if [ "${LLAMA_ARG_CONT_BATCHING:-}" = "true" ] || [ "$(get_yaml_value '.server.cont_batching' 'true')" = "true" ]; then
+    # Continuous batching — DISABLED for Vulkan backend (triggers KV cache serialization on slot release)
+    if [ "${LLAMA_ARG_CONT_BATCHING:-}" = "true" ] || [ "$(get_yaml_value '.server.cont_batching' 'false')" = "true" ]; then
         server_args="$server_args --cont-batching"
     fi
 
