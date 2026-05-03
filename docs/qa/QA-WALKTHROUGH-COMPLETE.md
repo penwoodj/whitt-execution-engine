@@ -1975,6 +1975,35 @@ For each scenario:
 
 ---
 
-**Document Version**: 1.0
+**Document Version**: 2.0
 **Last Updated**: 2026-05-03
+
+---
+
+## Verification Results (2026-05-03)
+
+**Commit**: `e668ddc` (initial-creation branch)
+**Server**: localhost:8081, qwen2.5-1.5b-instruct-q4_k_m.gguf
+**Test Suite**: 192 passed, 0 failed, 15 ignored
+**Clippy**: 0 warnings with --all-features
+**Benchmark Bug**: Fixed — fallback to first available model
+
+| User Flow | Live | Automated | Status |
+|-----------|------|-----------|--------|
+| UF-01: First-time user | ✅ list-models, server status, one-shot chat | Partial | ✅ PASS |
+| UF-02: REPL chat | ⚠️ Interactive only (requires TTY) | None | ⚠️ MANUAL ONLY |
+| UF-03: Pipe mode | ✅ streaming + non-streaming | Partial | ✅ PASS |
+| UF-04: Model management | ✅ list | Full (4 tests) | ✅ PASS |
+| UF-05: Agent + tool filtering | ✅ allowed-tools verified | Full (8 tests) | ✅ PASS |
+| UF-06: Benchmark | ✅ 37.67 tokens/sec (after fix) | None (live only) | ✅ PASS |
+| UF-07: Download | ⚠️ Not tested (requires HF download) | None | ⚠️ DEFERRED |
+| UF-08: Workflow | ⚠️ Config validates, no unified config available | Partial | ⚠️ PARTIAL |
+| UF-09: Server management | ✅ status, gpu detection | Partial | ✅ PASS |
+| UF-10: Sampling parameters | ✅ temp=0.1, max_tokens=10 | Full (5 tests) | ✅ PASS |
+| UF-11: Verifier system | ✅ via automated tests | Full (13 tests) | ✅ PASS |
+| UF-12: Error handling | ✅ nonexistent file, empty stdin, bad temp | Full (5 tests) | ✅ PASS |
+| UF-13: Config parsing | ✅ via automated tests | Full (18 tests) | ✅ PASS |
+| UF-14: Conversation save | ✅ JSON valid, roles correct | Full (3 tests) | ✅ PASS |
+
+**Summary**: 11/14 PASS, 2 PARTIAL/DEFERRED, 1 MANUAL ONLY
 **Status**: 📋 Documentation Complete — Ready for Verification Phase
