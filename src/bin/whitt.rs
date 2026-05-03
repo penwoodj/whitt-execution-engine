@@ -1105,9 +1105,17 @@ async fn benchmark_command(url: &str, prompt: Option<String>, max_tokens: usize,
     let client = LlamaHttpClient::new(url)?;
 
     let models = client.list_models().await?;
-    let loaded = models.iter().find(|m| m.status.value == "loaded")
-        .context("No model loaded. Load one first.")?;
-    let model_id = &loaded.id;
+    let model_id = match models.iter().find(|m| m.status.value == "loaded") {
+        Some(loaded) => {
+            tracing::info!(model = %loaded.id, "[WHT-BEN002] using loaded model");
+            loaded.id.clone()
+        }
+        None => {
+            let first = models.first().context("No models available on server")?;
+            tracing::info!(model = %first.id, "[WHT-BEN003] no loaded model, using first available");
+            first.id.clone()
+        }
+    };
 
     let prompt_text = prompt.unwrap_or_else(|| "The quick brown fox jumps over the lazy dog.".to_string());
     println!("Model: {}", model_id);
