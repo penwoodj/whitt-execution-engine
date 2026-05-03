@@ -30,7 +30,8 @@
 
 **Live Verification Date**: 2026-05-03 (re-verified from scratch)
 **Server**: localhost:8081, qwen2.5-1.5b-instruct-q4_k_m.gguf
-**Test Suite**: 186 passed, 0 failed, 15 ignored, 0 clippy warnings (--all-features)
+**Test Suite**: 195 passed, 0 failed, 15 ignored, 0 clippy warnings (--all-features)
+**Schema Alignment**: 12 misalignments fixed — all Rust structs now match unified-workflow-schema.yml
 
 ---
 

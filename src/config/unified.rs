@@ -1,7 +1,7 @@
 //! Unified schema config resolution.
 //!
 //! Provides unified loading and resolution of provider and model configurations
-//! from the unified YAML schema (v2.0).
+//! from unified YAML schema (v2.0).
 
 use crate::config::provider::ProvidersConfig;
 use crate::model::schema::ModelsConfig;
@@ -17,9 +17,33 @@ use tracing::debug;
 /// Complete unified configuration from unified YAML schema.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnifiedConfig {
+    /// Workflow ID (unique identifier).
+    pub workflow_id: Option<String>,
+
+    /// Workflow name (human-readable).
+    pub name: Option<String>,
+
+    /// Workflow description.
+    pub description: Option<String>,
+
+    /// Workflow version (semver).
+    #[serde(default = "default_version")]
+    pub version: String,
+
+    /// Workflow author.
+    pub author: Option<String>,
+
+    /// Workflow tags for categorization.
+    #[serde(default)]
+    pub tags: Vec<String>,
+
     /// Schema version (e.g., "2.0.0").
     #[serde(default = "default_schema_version")]
     pub schema_version: String,
+
+    /// Minimum schema version supported.
+    #[serde(default = "default_schema_version")]
+    pub min_schema_version: String,
 
     /// Provider configurations.
     pub providers: ProvidersConfig,
@@ -32,6 +56,10 @@ fn default_schema_version() -> String {
     "2.0.0".into()
 }
 
+fn default_version() -> String {
+    "1.0.0".into()
+}
+
 impl UnifiedConfig {
     /// Load unified config from a YAML string.
     pub fn from_yaml(yaml: &str) -> anyhow::Result<Self> {
@@ -39,6 +67,9 @@ impl UnifiedConfig {
 
         // Validate schema version
         config.validate_schema_version()?;
+
+        // Validate min_schema_version
+        config.validate_min_schema_version()?;
 
         Ok(config)
     }
@@ -49,7 +80,7 @@ impl UnifiedConfig {
         Self::from_yaml(&contents)
     }
 
-    /// Validate that the schema version is supported.
+    /// Validate that schema version is supported.
     pub fn validate_schema_version(&self) -> anyhow::Result<()> {
         let version = &self.schema_version;
 
@@ -72,6 +103,33 @@ impl UnifiedConfig {
         }
 
         debug!(version = %version, "Schema version validated");
+
+        Ok(())
+    }
+
+    /// Validate that min_schema_version is supported (>= 2.0.0).
+    pub fn validate_min_schema_version(&self) -> anyhow::Result<()> {
+        let version = &self.min_schema_version;
+
+        // Parse version string (e.g., "2.0.0")
+        let parts: Vec<&str> = version.split('.').collect();
+        if parts.len() < 2 {
+            anyhow::bail!("Invalid min_schema_version format: '{}'. Expected 'X.Y.Z'", version);
+        }
+
+        let major: u32 = parts[0]
+            .parse()
+            .map_err(|e| anyhow::anyhow!("Invalid major version: {}", e))?;
+
+        // min_schema_version must be 2.0.0 or higher
+        if major < 2 {
+            anyhow::bail!(
+                "min_schema_version '{}' is not supported. Minimum required: 2.0.0",
+                version
+            );
+        }
+
+        debug!(min_schema_version = %version, "min_schema_version validated");
 
         Ok(())
     }
@@ -122,13 +180,13 @@ impl UnifiedConfig {
         let port = if let Some(step) = step_overrides.and_then(|s| s.get("port")) {
             step.as_u64()
                 .map(|p| p as u32)
-                .unwrap_or(8080)
+                .unwrap_or(1234)
         } else if let Some(port) = model_spec.host.connection_settings.get("port") {
-            port.parse().unwrap_or(8080)
+            port.parse().unwrap_or(1234)
         } else if let Some(config) = &provider_config.config {
             config.port
         } else {
-            8080
+            1234
         };
 
         // Resolve temperature
@@ -222,11 +280,10 @@ mod tests {
         let yaml = r#"
 schema_version: "2.0.0"
 providers:
-  providers:
-    llama_cpp_with_vulkan:
-      config:
-        host: localhost
-        port: 8080
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 1234
 models:
   test-model:
     name: "Test Model"
@@ -234,7 +291,7 @@ models:
       type: "llama_cpp_with_vulkan"
       connection_settings:
         host: "localhost"
-        port: "8080"
+        port: "1234"
 "#;
         let config = UnifiedConfig::from_yaml(yaml).expect("parse");
         assert_eq!(config.schema_version, "2.0.0");
@@ -243,25 +300,17 @@ models:
     }
 
     #[test]
-    fn validate_schema_version_accepts_2_0_0() {
-        let yaml = r#"
-schema_version: "2.0.0"
-providers:
-  providers: {}
-models:
-"#;
-        let config = UnifiedConfig::from_yaml(yaml).expect("parse");
-        assert!(config.validate_schema_version().is_ok());
-    }
-
-    #[test]
     fn validate_schema_version_rejects_1_x() {
         let yaml = r#"
 schema_version: "1.5.0"
 providers:
-  providers: {}
+  test_provider: {}
 models:
-"#;
+  test-model:
+    name: "Test"
+    host:
+      type: "test_provider"
+        "#;
         let result = UnifiedConfig::from_yaml(yaml);
         assert!(result.is_err());
         assert!(result
@@ -275,15 +324,14 @@ models:
         let yaml = r#"
 schema_version: "2.0.0"
 providers:
-  providers:
-    llama_cpp_with_vulkan:
-      config:
-        host: provider-host
-        port: 9000
-      requests:
-        request_timeout_secs: 60
-        retry:
-          max_retries: 5
+  llama_cpp_with_vulkan:
+    config:
+      host: provider-host
+      port: 9000
+    requests:
+      request_timeout_secs: 60
+      retry:
+        max_retries: 5
 models:
   test-model:
     name: "Test Model"
@@ -291,7 +339,7 @@ models:
       type: "llama_cpp_with_vulkan"
       connection_settings:
         host: model-host
-        port: "8080"
+        port: "1234"
 "#;
         let config = UnifiedConfig::from_yaml(yaml).expect("parse");
         let resolved = config
@@ -300,7 +348,7 @@ models:
 
         // Model connection settings override provider defaults
         assert_eq!(resolved.host, "model-host");
-        assert_eq!(resolved.port, 8080);
+        assert_eq!(resolved.port, 1234);
 
         // Provider request settings apply when not overridden
         assert_eq!(resolved.timeout_secs, 60);
@@ -312,11 +360,10 @@ models:
         let yaml = r#"
 schema_version: "2.0.0"
 providers:
-  providers:
-    llama_cpp_with_vulkan:
-      config:
-        host: provider-host
-        port: 9000
+  llama_cpp_with_vulkan:
+    config:
+      host: provider-host
+      port: 9000
 models:
   test-model:
     name: "Test Model"
@@ -324,7 +371,7 @@ models:
       type: "llama_cpp_with_vulkan"
       connection_settings:
         host: model-host
-        port: "8080"
+        port: "1234"
 "#;
         let config = UnifiedConfig::from_yaml(yaml).expect("parse");
 
@@ -350,8 +397,7 @@ models:
         let yaml = r#"
 schema_version: "2.0.0"
 providers:
-  providers:
-    test_provider: {}
+  test_provider: {}
 models:
   test-model:
     name: "Test Model"
@@ -365,7 +411,7 @@ models:
 
         // Defaults when not specified
         assert_eq!(resolved.host, "test_provider");
-        assert_eq!(resolved.port, 8080);
+        assert_eq!(resolved.port, 1234);
         assert_eq!(resolved.temperature, None);
         assert_eq!(resolved.max_tokens, None);
         assert_eq!(resolved.timeout_secs, 120);
@@ -377,7 +423,7 @@ models:
         let yaml = r#"
 schema_version: "2.0.0"
 providers:
-  providers: {}
+  test_provider: {}
 models:
 "#;
         let config = UnifiedConfig::from_yaml(yaml).expect("parse");
@@ -391,7 +437,7 @@ models:
         let yaml = r#"
 schema_version: "2.0.0"
 providers:
-  providers: {}
+  test_provider: {}
 models:
   test-model:
     name: "Test Model"
@@ -402,5 +448,51 @@ models:
         let result = config.resolve_model_config("test-model", None);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[test]
+    fn parse_all_top_level_fields() {
+        let yaml = r#"
+workflow_id: "test-workflow"
+name: "Test Workflow"
+description: "A test workflow for verifying all fields"
+version: "1.5.2"
+author: "test-author"
+tags:
+  - test
+  - example
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+providers:
+  test_provider: {}
+models:
+"#;
+        let config = UnifiedConfig::from_yaml(yaml).expect("parse");
+        assert_eq!(config.workflow_id, Some("test-workflow".to_string()));
+        assert_eq!(config.name, Some("Test Workflow".to_string()));
+        assert_eq!(config.description, Some("A test workflow for verifying all fields".to_string()));
+        assert_eq!(config.version, "1.5.2");
+        assert_eq!(config.author, Some("test-author".to_string()));
+        assert_eq!(config.tags, vec!["test".to_string(), "example".to_string()]);
+        assert_eq!(config.schema_version, "2.0.0");
+        assert_eq!(config.min_schema_version, "2.0.0");
+    }
+
+    #[test]
+    fn parse_minimal_top_level_fields_with_defaults() {
+        let yaml = r#"
+providers:
+  test_provider: {}
+models:
+"#;
+        let config = UnifiedConfig::from_yaml(yaml).expect("parse");
+        assert_eq!(config.workflow_id, None);
+        assert_eq!(config.name, None);
+        assert_eq!(config.description, None);
+        assert_eq!(config.version, "1.0.0"); // default
+        assert_eq!(config.author, None);
+        assert_eq!(config.tags, Vec::<String>::new()); // empty vector by default
+        assert_eq!(config.schema_version, "2.0.0"); // default
+        assert_eq!(config.min_schema_version, "2.0.0"); // default
     }
 }

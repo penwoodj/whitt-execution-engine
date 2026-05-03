@@ -33,7 +33,7 @@
 - serde-saphyr handling of merge keys
 
 **What Passed**:
-- ✅ All structs deserialize correctly: ProviderConfig, LlamaCppVulkanProvider, ConnectionConfig, HostingConfig, GpuAllocation, CpuFallback, RequestsConfig, RetryConfig, BackoffConfig
+- ✅ All structs deserialize correctly: ProviderConfig, LlamaCppVulkanProvider, ConnectionConfig, HostingConfig, GpuAllocation, CpuFallback, RequestsConfig, RetryPolicyConfig
 - ✅ serde-saphyr parsing works correctly for all tested YAMLs
 - ✅ Defaults are correctly applied via default functions (not hardcoded in struct definitions)
 - ✅ BackoffStrategy enum parses correctly for all 3 variants
@@ -76,7 +76,7 @@ None. The provider config parsing implementation is complete and well-tested.
 - Port range validation (1-65535)
 - Timeout range validation (>= 1)
 - Retry configuration validation (max_retries, multiplier)
-- Other range validations (max_concurrent_models, vram_reservation_mb, max_gpu_utilization)
+- Other range validations (max_concurrent_models, vram_per_model_mb, max_gpu_utilization)
 
 **What Passed**:
 - ✅ Port validation works: `#[garde(range(min = 1, max = 65535))]` on `port` field
@@ -91,7 +91,7 @@ None. The provider config parsing implementation is complete and well-tested.
   - All fields in `LlamaCppConfig` except `port` and `connection_timeout_secs` are skipped
   - All fields in `HostingConfig` are skipped
   - All fields in `RequestsConfig` except `rate_limit_per_minute` are skipped
-  - All fields in `RetryConfig` and `BackoffConfig` are skipped
+  - All fields in `RetryPolicyConfig` are skipped
 - ⚠️ No validation for invalid strings (e.g., invalid host names, invalid strategies)
 
 ### Evidence
@@ -112,7 +112,7 @@ test config::provider::tests::defaults_apply ... ok
 **ISSUE-1**: Partial garde validation coverage
 - **Severity**: Medium
 - **Description**: Most provider config fields use `#[garde(skip)]`, meaning validation is not enforced at load time
-- **Fields Affected**: `config.host`, `config.connection_timeout_secs`, all `HostingConfig` fields, most `RequestsConfig` fields, all `RetryConfig` and `BackoffConfig` fields
+- **Fields Affected**: `config.host`, `config.connection_timeout_secs`, all `HostingConfig` fields, most `RequestsConfig` fields, all `RetryPolicyConfig` fields
 - **Impact**: Invalid values may not be caught until runtime
 - **Recommendation**: Add garde annotations for more fields, or document why validation is skipped
 

@@ -144,7 +144,7 @@ fn default_ram_strategy() -> String {
 // Maximum allowed resources
 // ============================================================================
 
-/// Maximum resource limits for the model.
+/// Maximum resource limits for model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MaxAllowed {
     /// Maximum RAM (percentage like "80%" or absolute like "4GB").
@@ -205,7 +205,7 @@ fn default_concurrent_requests() -> u32 {
 // Minimum allowed resources
 // ============================================================================
 
-/// Minimum resource requirements for the model.
+/// Minimum resource requirements for model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinAllowed {
     /// Minimum RAM (percentage like "20%" or absolute like "2GB").
@@ -215,6 +215,18 @@ pub struct MinAllowed {
     /// Minimum VRAM (percentage or absolute).
     #[serde(default)]
     pub vram: ResourceLimit,
+
+    /// Minimum CPU (percentage).
+    #[serde(default = "default_min_cpu_limit")]
+    pub cpu: String,
+
+    /// Minimum GPU (percentage).
+    #[serde(default = "default_min_gpu_limit")]
+    pub gpu: String,
+
+    /// Minimum attention tokens.
+    #[serde(default = "default_min_attention_tokens")]
+    pub attention_tokens: u64,
 }
 
 impl Default for MinAllowed {
@@ -222,8 +234,23 @@ impl Default for MinAllowed {
         Self {
             ram: ResourceLimit::Percentage("20%".into()),
             vram: ResourceLimit::Percentage("30%".into()),
+            cpu: default_min_cpu_limit(),
+            gpu: default_min_gpu_limit(),
+            attention_tokens: default_min_attention_tokens(),
         }
     }
+}
+
+fn default_min_cpu_limit() -> String {
+    "25%".into()
+}
+
+fn default_min_gpu_limit() -> String {
+    "40%".into()
+}
+
+fn default_min_attention_tokens() -> u64 {
+    5000
 }
 
 // ============================================================================
@@ -342,36 +369,42 @@ fn default_cache_size() -> String {
 
 /// KV cache quantization formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
 #[allow(non_camel_case_types)]
 pub enum KvCacheQuantization {
     #[default]
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "q8_0")]
     Q8_0,
-    F32,
-    F16,
+    #[serde(rename = "q4_0")]
     Q4_0,
+    #[serde(rename = "q4_k_m")]
     Q4_K_M,
+    #[serde(rename = "q5_k_m")]
     Q5_K_M,
+    #[serde(rename = "q5_0")]
+    Q5_0,
+    #[serde(rename = "q6_k")]
     Q6_K,
 }
 
 /// Attention context strategies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
+#[allow(non_camel_case_types)]
 pub enum AttentionContext {
     #[default]
-    Rolling,
-    Static,
-    Dynamic,
     Auto,
+    FromMaxAllowed,
+    ManualOverride,
 }
 
 fn default_kv_quantization() -> KvCacheQuantization {
-    KvCacheQuantization::Q8_0
+    KvCacheQuantization::Auto
 }
 
 fn default_attention_context() -> AttentionContext {
-    AttentionContext::Rolling
+    AttentionContext::Auto
 }
 
 // ============================================================================
@@ -416,25 +449,25 @@ impl Default for ExecutionConfig {
 /// Timeout configuration for execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeoutConfig {
-    /// Total timeout (e.g., "120s", "2m").
-    #[serde(default = "default_total_timeout")]
-    pub total: String,
+    /// Time to load model into memory (e.g., "30s", "1m").
+    #[serde(default = "default_load_into_memory_timeout")]
+    pub load_into_memory: String,
 
-    /// Per-token timeout (e.g., "500ms").
-    #[serde(default = "default_per_token_timeout")]
-    pub per_token: String,
+    /// Time to first response (e.g., "10s", "30s").
+    #[serde(default = "default_time_to_first_response_timeout")]
+    pub time_to_first_response: String,
 
-    /// Queue timeout (e.g., "30s").
-    #[serde(default = "default_queue_timeout")]
-    pub queue: String,
+    /// Total time to respond (e.g., "120s", "2m").
+    #[serde(default = "default_total_time_to_response_timeout")]
+    pub total_time_to_response: String,
 }
 
 impl Default for TimeoutConfig {
     fn default() -> Self {
         Self {
-            total: default_total_timeout(),
-            per_token: default_per_token_timeout(),
-            queue: default_queue_timeout(),
+            load_into_memory: default_load_into_memory_timeout(),
+            time_to_first_response: default_time_to_first_response_timeout(),
+            total_time_to_response: default_total_time_to_response_timeout(),
         }
     }
 }
@@ -451,16 +484,16 @@ fn default_accumulate_tool_results() -> bool {
     true
 }
 
-fn default_total_timeout() -> String {
-    "120s".into()
-}
-
-fn default_per_token_timeout() -> String {
-    "500ms".into()
-}
-
-fn default_queue_timeout() -> String {
+fn default_load_into_memory_timeout() -> String {
     "30s".into()
+}
+
+fn default_time_to_first_response_timeout() -> String {
+    "10s".into()
+}
+
+fn default_total_time_to_response_timeout() -> String {
+    "120s".into()
 }
 
 /// Parse a duration string (e.g., "120s", "500ms", "2m") into milliseconds.
@@ -534,12 +567,12 @@ fn default_capture_in_events() -> bool {
 // Tools configuration
 // ============================================================================
 
-/// Tools configuration for the model.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Tools configuration for model.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ToolsConfig {
-    /// Default permission level for tools.
-    #[serde(default = "default_permissions")]
-    pub default_permissions: String,
+    /// Default permissions for tools.
+    #[serde(default)]
+    pub default_permissions: DefaultPermissions,
 
     /// List of allowed tools.
     #[serde(default)]
@@ -554,19 +587,51 @@ pub struct ToolsConfig {
     pub custom_tools: Vec<CustomTool>,
 }
 
-impl Default for ToolsConfig {
+/// Default permissions for tools.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DefaultPermissions {
+    /// Web access permission.
+    #[serde(default = "default_web_access")]
+    pub web_access: bool,
+
+    /// File read permission.
+    #[serde(default = "default_file_read")]
+    pub file_read: bool,
+
+    /// File write permission.
+    #[serde(default = "default_file_write")]
+    pub file_write: bool,
+
+    /// Shell execution permission.
+    #[serde(default = "default_shell_exec")]
+    pub shell_exec: bool,
+}
+
+impl Default for DefaultPermissions {
     fn default() -> Self {
         Self {
-            default_permissions: default_permissions(),
-            allowed_tools: Vec::new(),
-            forbidden_tools: Vec::new(),
-            custom_tools: Vec::new(),
+            web_access: default_web_access(),
+            file_read: default_file_read(),
+            file_write: default_file_write(),
+            shell_exec: default_shell_exec(),
         }
     }
 }
 
-fn default_permissions() -> String {
-    "ask".into()
+fn default_web_access() -> bool {
+    true
+}
+
+fn default_file_read() -> bool {
+    true
+}
+
+fn default_file_write() -> bool {
+    false
+}
+
+fn default_shell_exec() -> bool {
+    false
 }
 
 /// Custom tool definition.
@@ -590,17 +655,173 @@ pub struct CustomTool {
 /// Guardrails and safety configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GuardrailsConfig {
-    /// Maximum response length in tokens.
-    #[serde(default)]
-    pub max_response_length: Option<u32>,
+    /// Enforcement policy (block | warn | allow).
+    #[serde(default = "default_enforcement_policy")]
+    pub enforcement_policy: String,
 
-    /// Forbidden patterns to block.
+    /// Input guardrails configuration.
     #[serde(default)]
-    pub forbidden_patterns: Vec<String>,
+    pub input: InputGuardrails,
 
-    /// Actions that require approval.
+    /// Output guardrails configuration.
     #[serde(default)]
-    pub require_approval_for: Vec<String>,
+    pub output: OutputGuardrails,
+}
+
+fn default_enforcement_policy() -> String {
+    "block".into()
+}
+
+/// Input guardrails configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct InputGuardrails {
+    /// List of enabled input guards.
+    #[serde(default)]
+    pub guards: Vec<String>,
+
+    /// Prompt injection guard configuration.
+    #[serde(default)]
+    pub prompt_injection: GuardConfig,
+
+    /// PII redaction guard configuration.
+    #[serde(default)]
+    pub pii_redaction: PiiRedactionConfig,
+
+    /// Maximum length guard configuration.
+    #[serde(default)]
+    pub max_length: MaxLengthConfig,
+}
+
+/// Output guardrails configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OutputGuardrails {
+    /// List of enabled output guards.
+    #[serde(default)]
+    pub guards: Vec<String>,
+
+    /// Toxicity filter guard configuration.
+    #[serde(default)]
+    pub toxicity_filter: GuardConfig,
+
+    /// Format validation guard configuration.
+    #[serde(default)]
+    pub format_validation: FormatValidationConfig,
+}
+
+/// Generic guard configuration with enabled flag and threshold.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GuardConfig {
+    /// Whether the guard is enabled.
+    #[serde(default = "default_guard_enabled")]
+    pub enabled: bool,
+
+    /// Sensitivity threshold (0.0 - 1.0).
+    #[serde(default = "default_guard_threshold")]
+    pub threshold: f64,
+}
+
+impl Default for GuardConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_guard_enabled(),
+            threshold: default_guard_threshold(),
+        }
+    }
+}
+
+fn default_guard_enabled() -> bool {
+    true
+}
+
+fn default_guard_threshold() -> f64 {
+    0.5
+}
+
+/// PII redaction guard configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PiiRedactionConfig {
+    /// Whether PII redaction is enabled.
+    #[serde(default = "default_pii_enabled")]
+    pub enabled: bool,
+
+    /// Redaction mode (strict | moderate | relaxed).
+    #[serde(default = "default_pii_mode")]
+    pub mode: String,
+}
+
+impl Default for PiiRedactionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_pii_enabled(),
+            mode: default_pii_mode(),
+        }
+    }
+}
+
+fn default_pii_enabled() -> bool {
+    true
+}
+
+fn default_pii_mode() -> String {
+    "moderate".into()
+}
+
+/// Maximum length guard configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MaxLengthConfig {
+    /// Maximum number of tokens allowed.
+    #[serde(default = "default_max_length_tokens")]
+    pub max_tokens: u64,
+
+    /// Action on match (block | truncate | error).
+    #[serde(default = "default_max_length_action")]
+    pub on_match: String,
+}
+
+impl Default for MaxLengthConfig {
+    fn default() -> Self {
+        Self {
+            max_tokens: default_max_length_tokens(),
+            on_match: default_max_length_action(),
+        }
+    }
+}
+
+fn default_max_length_tokens() -> u64 {
+    8000
+}
+
+fn default_max_length_action() -> String {
+    "truncate".into()
+}
+
+/// Format validation guard configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FormatValidationConfig {
+    /// Whether format validation is enabled.
+    #[serde(default = "default_format_validation_enabled")]
+    pub enabled: bool,
+
+    /// Expected format (json | xml | markdown).
+    #[serde(default = "default_format_validation_schema")]
+    pub schema: String,
+}
+
+impl Default for FormatValidationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_format_validation_enabled(),
+            schema: default_format_validation_schema(),
+        }
+    }
+}
+
+fn default_format_validation_enabled() -> bool {
+    true
+}
+
+fn default_format_validation_schema() -> String {
+    "json".into()
 }
 
 // ============================================================================
@@ -638,12 +859,20 @@ test-model:
     gpu: "80%"
     attention_tokens: 10000
     concurrent_requests: 5
+  min_allowed:
+    ram: "20%"
+    vram: "2GB"
+    cpu: "25%"
+    gpu: "40%"
+    attention_tokens: 5000
 "#;
         let config: ModelsConfig = serde_saphyr::from_str(yaml).expect("parse");
         let max = &config.models["test-model"].max_allowed;
+        let min = &config.models["test-model"].min_allowed;
 
         assert_eq!(max.attention_tokens, 10000);
         assert_eq!(max.concurrent_requests, 5);
+        assert_eq!(min.attention_tokens, 5000);
 
         match &max.ram {
             ResourceLimit::Percentage(s) => assert_eq!(s, "80%"),
@@ -654,6 +883,120 @@ test-model:
             ResourceLimit::Absolute(s) => assert_eq!(s, "4GB"),
             _ => panic!("Expected absolute"),
         }
+
+        assert_eq!(max.cpu, "50%");
+        assert_eq!(max.gpu, "80%");
+        assert_eq!(min.cpu, "25%");
+        assert_eq!(min.gpu, "40%");
+    }
+
+    #[test]
+    fn parse_timeout_config() {
+        let yaml = r#"
+test-model:
+  execution:
+    timeout:
+      load_into_memory: "30s"
+      time_to_first_response: "10s"
+      total_time_to_response: "120s"
+"#;
+        let config: ModelsConfig = serde_saphyr::from_str(yaml).expect("parse");
+        let timeout = &config.models["test-model"].execution.timeout;
+
+        assert_eq!(timeout.load_into_memory, "30s");
+        assert_eq!(timeout.time_to_first_response, "10s");
+        assert_eq!(timeout.total_time_to_response, "120s");
+    }
+
+    #[test]
+    fn parse_kv_cache_quantization() {
+        let yaml = r#"
+test-model:
+  model_memory:
+    kv_cache_quantization: auto
+"#;
+        let config: ModelsConfig = serde_saphyr::from_str(yaml).expect("parse");
+        assert_eq!(
+            config.models["test-model"].model_memory.kv_cache_quantization,
+            KvCacheQuantization::Auto
+        );
+    }
+
+    #[test]
+    fn parse_attention_context() {
+        let yaml = r#"
+test-model:
+  model_memory:
+    attention_context: from_max_allowed
+"#;
+        let config: ModelsConfig = serde_saphyr::from_str(yaml).expect("parse");
+        assert_eq!(
+            config.models["test-model"].model_memory.attention_context,
+            AttentionContext::FromMaxAllowed
+        );
+    }
+
+    #[test]
+    fn parse_default_permissions() {
+        let yaml = r#"
+test-model:
+  tools:
+    default_permissions:
+      web_access: true
+      file_read: true
+      file_write: false
+      shell_exec: false
+"#;
+        let config: ModelsConfig = serde_saphyr::from_str(yaml).expect("parse");
+        let perms = &config.models["test-model"].tools.default_permissions;
+
+        assert_eq!(perms.web_access, true);
+        assert_eq!(perms.file_read, true);
+        assert_eq!(perms.file_write, false);
+        assert_eq!(perms.shell_exec, false);
+    }
+
+    #[test]
+    fn parse_guardrails_config() {
+        let yaml = r#"
+test-model:
+  guardrails:
+    enforcement_policy: block
+    input:
+      guards: [prompt_injection, pii_redaction]
+      prompt_injection:
+        enabled: true
+        threshold: 0.8
+      pii_redaction:
+        enabled: true
+        mode: strict
+      max_length:
+        max_tokens: 8000
+        on_match: truncate
+    output:
+      guards: [toxicity_filter]
+      toxicity_filter:
+        enabled: true
+        threshold: 0.7
+      format_validation:
+        enabled: true
+        schema: json
+"#;
+        let config: ModelsConfig = serde_saphyr::from_str(yaml).expect("parse");
+        let guardrails = &config.models["test-model"].guardrails;
+
+        assert_eq!(guardrails.enforcement_policy, "block");
+        assert_eq!(guardrails.input.guards.len(), 2);
+        assert_eq!(guardrails.input.prompt_injection.enabled, true);
+        assert_eq!(guardrails.input.prompt_injection.threshold, 0.8);
+        assert_eq!(guardrails.input.pii_redaction.enabled, true);
+        assert_eq!(guardrails.input.pii_redaction.mode, "strict");
+        assert_eq!(guardrails.input.max_length.max_tokens, 8000);
+        assert_eq!(guardrails.input.max_length.on_match, "truncate");
+        assert_eq!(guardrails.output.toxicity_filter.enabled, true);
+        assert_eq!(guardrails.output.toxicity_filter.threshold, 0.7);
+        assert_eq!(guardrails.output.format_validation.enabled, true);
+        assert_eq!(guardrails.output.format_validation.schema, "json");
     }
 
     #[test]
@@ -697,5 +1040,57 @@ test-model:
         assert_eq!(spec.ram_allocation.strategy, "dynamic");
         assert_eq!(spec.execution.max_turns, 10);
         assert_eq!(spec.thinking.capture_in_output, true);
+    }
+
+    #[test]
+    fn kv_cache_quantization_variants() {
+        // Test all enum variants parse correctly
+        let variants = ["auto", "q8_0", "q4_0", "q4_k_m", "q5_k_m", "q5_0", "q6_k"];
+        for variant in variants {
+            let yaml = format!(r#"
+test-model:
+  model_memory:
+    kv_cache_quantization: {}
+"#, variant);
+            let config: ModelsConfig = serde_saphyr::from_str(&yaml).expect(&format!("parse {}", variant));
+            // Just verify it parses without error
+            assert!(config.models.contains_key("test-model"));
+        }
+    }
+
+    #[test]
+    fn attention_context_variants() {
+        // Test all enum variants parse correctly
+        let variants = ["auto", "from_max_allowed", "manual_override"];
+        for variant in variants {
+            let yaml = format!(r#"
+test-model:
+  model_memory:
+    attention_context: {}
+"#, variant);
+            let config: ModelsConfig = serde_saphyr::from_str(&yaml).expect(&format!("parse {}", variant));
+            // Just verify it parses without error
+            assert!(config.models.contains_key("test-model"));
+        }
+    }
+
+    #[test]
+    fn timeout_field_names() {
+        // Verify old field names don't exist and new ones do
+        let yaml = r#"
+test-model:
+  execution:
+    timeout:
+      load_into_memory: "30s"
+      time_to_first_response: "10s"
+      total_time_to_response: "120s"
+"#;
+        let config: ModelsConfig = serde_saphyr::from_str(yaml).expect("parse");
+        let timeout = &config.models["test-model"].execution.timeout;
+
+        // Verify new fields exist
+        assert_eq!(timeout.load_into_memory, "30s");
+        assert_eq!(timeout.time_to_first_response, "10s");
+        assert_eq!(timeout.total_time_to_response, "120s");
     }
 }

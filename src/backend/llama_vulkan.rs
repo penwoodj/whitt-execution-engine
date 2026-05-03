@@ -45,31 +45,30 @@ impl LlamaCppVulkanBackend {
         let connection_config = config.config.clone().unwrap_or_default();
         let requests_config = config.requests.clone().unwrap_or_default();
         let retry_config = requests_config.retry.unwrap_or_default();
-        let backoff_config = retry_config.backoff.unwrap_or_default();
 
         let host = connection_config.host;
         let port = connection_config.port;
         let base_url = format!("http://{}:{}", host, port);
         let timeout = Duration::from_secs(connection_config.connection_timeout_secs);
         let max_retries = retry_config.max_retries;
-        let backoff_strategy = match backoff_config.strategy.as_str() {
+        let backoff_strategy = match retry_config.backoff.as_str() {
             "exponential" => BackoffStrategy::Exponential {
-                initial_delay: Duration::from_secs(backoff_config.initial_delay_secs),
-                max_delay: Duration::from_secs(backoff_config.max_delay_secs),
-                multiplier: backoff_config.multiplier,
+                initial_delay: Duration::from_secs(retry_config.initial_delay),
+                max_delay: Duration::from_secs(retry_config.max_delay),
+                multiplier: retry_config.multiplier,
             },
             "linear" => BackoffStrategy::Linear {
-                initial_delay: Duration::from_secs(backoff_config.initial_delay_secs),
-                max_delay: Duration::from_secs(backoff_config.max_delay_secs),
+                initial_delay: Duration::from_secs(retry_config.initial_delay),
+                max_delay: Duration::from_secs(retry_config.max_delay),
                 increment: Duration::from_secs(1),
             },
             "fixed" => BackoffStrategy::Fixed {
-                delay: Duration::from_secs(backoff_config.initial_delay_secs),
+                delay: Duration::from_secs(retry_config.initial_delay),
             },
             _ => BackoffStrategy::Exponential {
-                initial_delay: Duration::from_secs(backoff_config.initial_delay_secs),
-                max_delay: Duration::from_secs(backoff_config.max_delay_secs),
-                multiplier: backoff_config.multiplier,
+                initial_delay: Duration::from_secs(retry_config.initial_delay),
+                max_delay: Duration::from_secs(retry_config.max_delay),
+                multiplier: retry_config.multiplier,
             },
         };
 
@@ -113,10 +112,21 @@ impl LlamaCppVulkanBackend {
             BackoffStrategy::Fixed { delay } => *delay,
         };
 
-        // Add jitter using fastrand (±20%)
-        let jitter = fastrand::f64() * 0.4 - 0.2; // -0.2 to +0.2
-        let delay_secs = base_delay.as_secs_f64() * (1.0 + jitter);
-        Duration::from_secs_f64(delay_secs.max(0.0))
+        let use_jitter = self.config
+            .requests
+            .as_ref()
+            .and_then(|r| r.retry.as_ref())
+            .map(|r| r.jitter)
+            .unwrap_or(true);
+
+        // Add jitter if enabled using fastrand (±20%)
+        if use_jitter {
+            let jitter = fastrand::f64() * 0.4 - 0.2; // -0.2 to +0.2
+            let delay_secs = base_delay.as_secs_f64() * (1.0 + jitter);
+            Duration::from_secs_f64(delay_secs.max(0.0))
+        } else {
+            base_delay
+        }
     }
 }
 

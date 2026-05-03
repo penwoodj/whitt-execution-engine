@@ -53,11 +53,10 @@ async fn test_yaml_to_agent_pipeline() {
     let yaml = r#"
 schema_version: "2.0.0"
 providers:
-  providers:
-    llama_cpp_with_vulkan:
-      config:
-        host: "http://localhost"
-        port: 8080
+  llama_cpp_with_vulkan:
+    config:
+      host: "http://localhost"
+      port: 1234
 models:
   global_config_path: "./configs/models"
   default_router: automatic
@@ -88,7 +87,7 @@ models:
     assert!(resolved.is_ok(), "Should resolve model config: {:?}", resolved);
     let resolved = resolved.unwrap();
     assert_eq!(resolved.host, "http://localhost");
-    assert_eq!(resolved.port, 8080);
+    assert_eq!(resolved.port, 1234);
 
     // Create mock backend with the resolved model name
     let backend = Arc::new(MockLlmBackend::new("test-model"));

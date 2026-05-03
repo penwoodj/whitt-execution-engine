@@ -10,7 +10,7 @@
 //!   llama_cpp_with_vulkan:
 //!     config:
 //!       host: "localhost"
-//!       port: 8080
+//!       port: 1234
 //!       connection_timeout_secs: 30
 //!     hosting:
 //!       max_concurrent_models: 2
@@ -18,11 +18,11 @@
 //!       gpu_allocation:
 //!         strategy: "priority"
 //!         device_ids: [0]
-//!         vram_reservation_mb: 512
+//!         vram_per_model_mb: 4096
 //!         max_gpu_utilization: 0.95
 //!       cpu_fallback:
 //!         enabled: true
-//!         max_cpu_threads: 4
+//!         cpu_cores_per_model: 2
 //!         ram_reservation_mb: 1024
 //!     requests:
 //!       max_concurrent_requests: 10
@@ -31,11 +31,11 @@
 //!       rate_limit_per_minute: 60
 //!       retry:
 //!         max_retries: 3
-//!         backoff:
-//!           strategy: "exponential"
-//!           initial_delay_secs: 1
-//!           max_delay_secs: 60
-//!           multiplier: 2.0
+//!         backoff: exponential
+//!         initial_delay: 1
+//!         max_delay: 60
+//!         multiplier: 2.0
+//!         jitter: true
 //! ```
 
 use serde::{Deserialize, Serialize};
@@ -48,8 +48,11 @@ use std::collections::HashMap;
 /// Collection of provider configurations keyed by provider name.
 ///
 /// Supports multiple providers (lmstudio, ollama, llama_cpp_with_vulkan).
+/// Uses `#[serde(flatten)]` to directly map provider keys (e.g., "lmstudio") to this struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProvidersConfig {
+    /// Flattened provider configurations - keys become top-level fields.
+    #[serde(flatten)]
     pub providers: HashMap<String, ProviderConfig>,
 }
 
@@ -157,10 +160,10 @@ pub struct GpuAllocation {
     #[garde(skip)]
     pub device_ids: Vec<u32>,
 
-    /// VRAM reservation per model in MB.
-    #[serde(default = "default_vram_reservation")]
+    /// VRAM allocation per model in MB.
+    #[serde(default = "default_vram_per_model")]
     #[garde(range(min = 1))]
-    pub vram_reservation_mb: usize,
+    pub vram_per_model_mb: usize,
 
     /// Maximum GPU utilization (0.0 to 1.0).
     #[serde(default = "default_max_gpu_utilization")]
@@ -173,7 +176,7 @@ impl Default for GpuAllocation {
         Self {
             strategy: default_gpu_strategy(),
             device_ids: default_device_ids(),
-            vram_reservation_mb: default_vram_reservation(),
+            vram_per_model_mb: default_vram_per_model(),
             max_gpu_utilization: default_max_gpu_utilization(),
         }
     }
@@ -187,10 +190,10 @@ pub struct CpuFallback {
     #[garde(skip)]
     pub enabled: bool,
 
-    /// Maximum CPU threads per model.
-    #[serde(default = "default_max_cpu_threads")]
+    /// CPU cores allocated per model.
+    #[serde(default = "default_cpu_cores_per_model")]
     #[garde(range(min = 1))]
-    pub max_cpu_threads: usize,
+    pub cpu_cores_per_model: usize,
 
     /// RAM reservation per model in MB.
     #[serde(default = "default_ram_reservation")]
@@ -202,7 +205,7 @@ impl Default for CpuFallback {
     fn default() -> Self {
         Self {
             enabled: default_cpu_fallback_enabled(),
-            max_cpu_threads: default_max_cpu_threads(),
+            cpu_cores_per_model: default_cpu_cores_per_model(),
             ram_reservation_mb: default_ram_reservation(),
         }
     }
@@ -250,6 +253,8 @@ impl Default for RequestsConfig {
 }
 
 /// Retry policy configuration.
+///
+/// Flattened structure matching schema: retry has flat keys, not nested backoff object.
 #[derive(Debug, Clone, Serialize, Deserialize, garde::Validate)]
 pub struct RetryPolicyConfig {
     /// Maximum number of retry attempts.
@@ -257,52 +262,41 @@ pub struct RetryPolicyConfig {
     #[garde(skip)]
     pub max_retries: u32,
 
-    /// Backoff strategy configuration.
-    #[serde(default)]
+    /// Backoff strategy: exponential, linear, fixed.
+    #[serde(default = "default_backoff_strategy")]
     #[garde(skip)]
-    pub backoff: Option<BackoffConfig>,
+    pub backoff: String,
+
+    /// Initial delay in seconds.
+    #[serde(default = "default_initial_delay")]
+    #[garde(skip)]
+    pub initial_delay: u64,
+
+    /// Maximum delay in seconds.
+    #[serde(default = "default_max_delay")]
+    #[garde(skip)]
+    pub max_delay: u64,
+
+    /// Backoff multiplier (for exponential strategy).
+    #[serde(default = "default_multiplier")]
+    #[garde(skip)]
+    pub multiplier: f64,
+
+    /// Add random jitter to retry delays (prevents thundering herd).
+    #[serde(default = "default_jitter")]
+    #[garde(skip)]
+    pub jitter: bool,
 }
 
 impl Default for RetryPolicyConfig {
     fn default() -> Self {
         Self {
             max_retries: default_max_retries(),
-            backoff: None,
-        }
-    }
-}
-
-/// Backoff strategy configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, garde::Validate)]
-pub struct BackoffConfig {
-    /// Backoff strategy: exponential, linear, fixed.
-    #[serde(default = "default_backoff_strategy")]
-    #[garde(skip)]
-    pub strategy: String,
-
-    /// Initial delay in seconds.
-    #[serde(default = "default_initial_delay")]
-    #[garde(skip)]
-    pub initial_delay_secs: u64,
-
-    /// Maximum delay in seconds.
-    #[serde(default = "default_max_delay")]
-    #[garde(skip)]
-    pub max_delay_secs: u64,
-
-    /// Backoff multiplier (for exponential strategy).
-    #[serde(default = "default_multiplier")]
-    #[garde(skip)]
-    pub multiplier: f64,
-}
-
-impl Default for BackoffConfig {
-    fn default() -> Self {
-        Self {
-            strategy: default_backoff_strategy(),
-            initial_delay_secs: default_initial_delay(),
-            max_delay_secs: default_max_delay(),
+            backoff: default_backoff_strategy(),
+            initial_delay: default_initial_delay(),
+            max_delay: default_max_delay(),
             multiplier: default_multiplier(),
+            jitter: default_jitter(),
         }
     }
 }
@@ -316,7 +310,7 @@ fn default_host() -> String {
 }
 
 fn default_port() -> u32 {
-    8080
+    1234
 }
 
 fn default_connection_timeout() -> u64 {
@@ -339,8 +333,8 @@ fn default_device_ids() -> Vec<u32> {
     vec![0]
 }
 
-fn default_vram_reservation() -> usize {
-    512
+fn default_vram_per_model() -> usize {
+    4096
 }
 
 fn default_max_gpu_utilization() -> f64 {
@@ -351,8 +345,8 @@ fn default_cpu_fallback_enabled() -> bool {
     true
 }
 
-fn default_max_cpu_threads() -> usize {
-    4
+fn default_cpu_cores_per_model() -> usize {
+    2
 }
 
 fn default_ram_reservation() -> usize {
@@ -395,6 +389,10 @@ fn default_multiplier() -> f64 {
     2.0
 }
 
+fn default_jitter() -> bool {
+    true
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -406,11 +404,10 @@ mod tests {
     #[test]
     fn parse_minimal_provider() {
         let yaml = r#"
-providers:
-  llama_cpp_with_vulkan:
-    config:
-      host: localhost
-      port: 8080
+llama_cpp_with_vulkan:
+  config:
+    host: localhost
+    port: 1234
 "#;
         let config: ProvidersConfig = serde_saphyr::from_str(yaml).expect("parse");
         assert!(config.providers.contains_key("llama_cpp_with_vulkan"));
@@ -419,36 +416,35 @@ providers:
     #[test]
     fn parse_full_provider() {
         let yaml = r#"
-providers:
-  llama_cpp_with_vulkan:
-    config:
-      host: localhost
-      port: 8080
-      connection_timeout_secs: 30
-    hosting:
-      max_concurrent_models: 2
-      model_offload_timeout_secs: 300
-      gpu_allocation:
-        strategy: priority
-        device_ids: [0]
-        vram_reservation_mb: 512
-        max_gpu_utilization: 0.95
-      cpu_fallback:
-        enabled: true
-        max_cpu_threads: 4
-        ram_reservation_mb: 1024
-    requests:
-      max_concurrent_requests: 10
-      request_timeout_secs: 120
-      queue_timeout_secs: 300
-      rate_limit_per_minute: 60
-      retry:
-        max_retries: 3
-        backoff:
-          strategy: exponential
-          initial_delay_secs: 1
-          max_delay_secs: 60
-          multiplier: 2.0
+llama_cpp_with_vulkan:
+  config:
+    host: localhost
+    port: 1234
+    connection_timeout_secs: 30
+  hosting:
+    max_concurrent_models: 2
+    model_offload_timeout_secs: 300
+    gpu_allocation:
+      strategy: priority
+      device_ids: [0]
+      vram_per_model_mb: 4096
+      max_gpu_utilization: 0.95
+    cpu_fallback:
+      enabled: true
+      cpu_cores_per_model: 2
+      ram_reservation_mb: 1024
+  requests:
+    max_concurrent_requests: 10
+    request_timeout_secs: 120
+    queue_timeout_secs: 300
+    rate_limit_per_minute: 60
+    retry:
+      max_retries: 3
+      backoff: exponential
+      initial_delay: 1
+      max_delay: 60
+      multiplier: 2.0
+      jitter: true
 "#;
         let config: ProvidersConfig = serde_saphyr::from_str(yaml).expect("parse");
         assert!(config.providers.contains_key("llama_cpp_with_vulkan"));
@@ -458,7 +454,7 @@ providers:
     fn defaults_apply() {
         let config = LlamaCppConfig::default();
         assert_eq!(config.host, "localhost");
-        assert_eq!(config.port, 8080);
+        assert_eq!(config.port, 1234);
         assert_eq!(config.connection_timeout_secs, 30);
     }
 
