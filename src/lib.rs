@@ -8,6 +8,7 @@ pub mod backend;
 pub mod config;
 pub mod error;
 pub mod model;
+pub mod quality;
 
 #[cfg(feature = "client")]
 pub mod client;
