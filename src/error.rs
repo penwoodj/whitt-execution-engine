@@ -64,6 +64,18 @@ pub enum Error {
 
     #[error("Invalid output path: {path}")]
     InvalidOutputPath { path: PathBuf },
+
+    #[error("Memory error: {message}")]
+    Memory { message: String },
+
+    #[error("Schedule error: {message}")]
+    Schedule { message: String },
+
+    #[error("Metric error: {message}")]
+    Metric { message: String },
+
+    #[error("Verification error: {message}")]
+    Verification { message: String },
 }
 
 impl Error {
@@ -146,6 +158,30 @@ impl Error {
     pub fn metrics_collection(reason: impl Into<String>) -> Self {
         Self::MetricsCollection {
             reason: reason.into(),
+        }
+    }
+
+    pub fn memory(message: impl Into<String>) -> Self {
+        Self::Memory {
+            message: message.into(),
+        }
+    }
+
+    pub fn schedule(message: impl Into<String>) -> Self {
+        Self::Schedule {
+            message: message.into(),
+        }
+    }
+
+    pub fn metric(message: impl Into<String>) -> Self {
+        Self::Metric {
+            message: message.into(),
+        }
+    }
+
+    pub fn verification(message: impl Into<String>) -> Self {
+        Self::Verification {
+            message: message.into(),
         }
     }
 }
