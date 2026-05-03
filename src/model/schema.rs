@@ -681,7 +681,7 @@ pub struct InputGuardrails {
 
     /// Prompt injection guard configuration.
     #[serde(default)]
-    pub prompt_injection: GuardConfig,
+    pub prompt_injection: PromptInjectionConfig,
 
     /// PII redaction guard configuration.
     #[serde(default)]
@@ -701,69 +701,74 @@ pub struct OutputGuardrails {
 
     /// Toxicity filter guard configuration.
     #[serde(default)]
-    pub toxicity_filter: GuardConfig,
+    pub toxicity_filter: ToxicityFilterConfig,
 
     /// Format validation guard configuration.
     #[serde(default)]
     pub format_validation: FormatValidationConfig,
 }
 
-/// Generic guard configuration with enabled flag and threshold.
+/// Prompt injection guard configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GuardConfig {
-    /// Whether the guard is enabled.
-    #[serde(default = "default_guard_enabled")]
-    pub enabled: bool,
+pub struct PromptInjectionConfig {
+    /// Sensitivity level (low | medium | high).
+    #[serde(default = "default_sensitivity")]
+    pub sensitivity: String,
 
-    /// Sensitivity threshold (0.0 - 1.0).
-    #[serde(default = "default_guard_threshold")]
-    pub threshold: f64,
+    /// Action on match (block | warn | sanitize).
+    #[serde(default = "default_on_match_block")]
+    pub on_match: String,
 }
 
-impl Default for GuardConfig {
+impl Default for PromptInjectionConfig {
     fn default() -> Self {
         Self {
-            enabled: default_guard_enabled(),
-            threshold: default_guard_threshold(),
+            sensitivity: default_sensitivity(),
+            on_match: default_on_match_block(),
         }
     }
 }
 
-fn default_guard_enabled() -> bool {
-    true
+fn default_sensitivity() -> String {
+    "medium".into()
 }
 
-fn default_guard_threshold() -> f64 {
-    0.5
+fn default_on_match_block() -> String {
+    "block".into()
 }
 
 /// PII redaction guard configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PiiRedactionConfig {
-    /// Whether PII redaction is enabled.
-    #[serde(default = "default_pii_enabled")]
-    pub enabled: bool,
+    /// Patterns to detect ([] = built-in, or custom regex strings).
+    #[serde(default)]
+    pub patterns: Vec<String>,
 
-    /// Redaction mode (strict | moderate | relaxed).
-    #[serde(default = "default_pii_mode")]
-    pub mode: String,
+    /// Replacement text for redacted content.
+    #[serde(default = "default_pii_replacement")]
+    pub replacement: String,
+
+    /// Action on match (sanitize | block | log_only).
+    #[serde(default = "default_on_match_sanitize")]
+    pub on_match: String,
 }
 
 impl Default for PiiRedactionConfig {
     fn default() -> Self {
         Self {
-            enabled: default_pii_enabled(),
-            mode: default_pii_mode(),
+            patterns: vec![],
+            replacement: default_pii_replacement(),
+            on_match: default_on_match_sanitize(),
         }
     }
 }
 
-fn default_pii_enabled() -> bool {
-    true
+fn default_pii_replacement() -> String {
+    "[REDACTED]".into()
 }
 
-fn default_pii_mode() -> String {
-    "moderate".into()
+fn default_on_match_sanitize() -> String {
+    "sanitize".into()
 }
 
 /// Maximum length guard configuration.
@@ -795,33 +800,63 @@ fn default_max_length_action() -> String {
     "truncate".into()
 }
 
+/// Toxicity filter guard configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToxicityFilterConfig {
+    /// Token patterns that trigger the filter.
+    #[serde(default)]
+    pub trigger_tokens: Vec<String>,
+
+    /// Action on match (block | warn | log_only).
+    #[serde(default = "default_on_match_block")]
+    pub on_match: String,
+}
+
+impl Default for ToxicityFilterConfig {
+    fn default() -> Self {
+        Self {
+            trigger_tokens: vec![],
+            on_match: default_on_match_block(),
+        }
+    }
+}
+
 /// Format validation guard configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FormatValidationConfig {
-    /// Whether format validation is enabled.
-    #[serde(default = "default_format_validation_enabled")]
-    pub enabled: bool,
-
     /// Expected format (json | xml | markdown).
-    #[serde(default = "default_format_validation_schema")]
-    pub schema: String,
+    #[serde(default = "default_format")]
+    pub format: String,
+
+    /// Whether to enforce strict validation.
+    #[serde(default = "default_strict")]
+    pub strict: bool,
+
+    /// Action on match (block | retry | error).
+    #[serde(default = "default_on_match_error")]
+    pub on_match: String,
 }
 
 impl Default for FormatValidationConfig {
     fn default() -> Self {
         Self {
-            enabled: default_format_validation_enabled(),
-            schema: default_format_validation_schema(),
+            format: default_format(),
+            strict: default_strict(),
+            on_match: default_on_match_error(),
         }
     }
 }
 
-fn default_format_validation_enabled() -> bool {
+fn default_format() -> String {
+    "json".into()
+}
+
+fn default_strict() -> bool {
     true
 }
 
-fn default_format_validation_schema() -> String {
-    "json".into()
+fn default_on_match_error() -> String {
+    "error".into()
 }
 
 // ============================================================================
@@ -965,38 +1000,42 @@ test-model:
     input:
       guards: [prompt_injection, pii_redaction]
       prompt_injection:
-        enabled: true
-        threshold: 0.8
+        sensitivity: high
+        on_match: block
       pii_redaction:
-        enabled: true
-        mode: strict
+        patterns: []
+        replacement: "[REDACTED]"
+        on_match: sanitize
       max_length:
         max_tokens: 8000
         on_match: truncate
     output:
       guards: [toxicity_filter]
       toxicity_filter:
-        enabled: true
-        threshold: 0.7
+        trigger_tokens: ["ignore previous instructions"]
+        on_match: block
       format_validation:
-        enabled: true
-        schema: json
+        format: json
+        strict: true
+        on_match: retry
 "#;
         let config: ModelsConfig = serde_saphyr::from_str(yaml).expect("parse");
         let guardrails = &config.models["test-model"].guardrails;
 
         assert_eq!(guardrails.enforcement_policy, "block");
         assert_eq!(guardrails.input.guards.len(), 2);
-        assert_eq!(guardrails.input.prompt_injection.enabled, true);
-        assert_eq!(guardrails.input.prompt_injection.threshold, 0.8);
-        assert_eq!(guardrails.input.pii_redaction.enabled, true);
-        assert_eq!(guardrails.input.pii_redaction.mode, "strict");
+        assert_eq!(guardrails.input.prompt_injection.sensitivity, "high");
+        assert_eq!(guardrails.input.prompt_injection.on_match, "block");
+        assert_eq!(guardrails.input.pii_redaction.patterns.len(), 0);
+        assert_eq!(guardrails.input.pii_redaction.replacement, "[REDACTED]");
+        assert_eq!(guardrails.input.pii_redaction.on_match, "sanitize");
         assert_eq!(guardrails.input.max_length.max_tokens, 8000);
         assert_eq!(guardrails.input.max_length.on_match, "truncate");
-        assert_eq!(guardrails.output.toxicity_filter.enabled, true);
-        assert_eq!(guardrails.output.toxicity_filter.threshold, 0.7);
-        assert_eq!(guardrails.output.format_validation.enabled, true);
-        assert_eq!(guardrails.output.format_validation.schema, "json");
+        assert_eq!(guardrails.output.toxicity_filter.trigger_tokens.len(), 1);
+        assert_eq!(guardrails.output.toxicity_filter.on_match, "block");
+        assert_eq!(guardrails.output.format_validation.format, "json");
+        assert_eq!(guardrails.output.format_validation.strict, true);
+        assert_eq!(guardrails.output.format_validation.on_match, "retry");
     }
 
     #[test]
