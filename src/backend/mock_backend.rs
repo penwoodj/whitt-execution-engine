@@ -3,6 +3,7 @@ use crate::backend::llm_backend::{
 };
 use async_trait::async_trait;
 use std::collections::HashMap;
+#[cfg(feature = "client")]
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -149,6 +150,7 @@ impl LlmBackend for MockLlmBackend {
         })
     }
 
+    #[cfg(feature = "client")]
     async fn chat_stream(
         &self,
         _messages: Vec<ChatMessage>,
@@ -399,6 +401,7 @@ mod tests {
         backend.unload_model("test-model").await.unwrap();
     }
 
+    #[cfg(feature = "client")]
     #[tokio::test]
     async fn test_mock_backend_streaming() {
         let backend = MockLlmBackend::new("test-model");
@@ -417,6 +420,7 @@ mod tests {
         assert_eq!(result, "Hello, world!");
     }
 
+    #[cfg(feature = "client")]
     #[tokio::test]
     async fn test_mock_backend_streaming_error() {
         let backend = MockLlmBackend::new("test-model");

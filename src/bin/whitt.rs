@@ -30,8 +30,12 @@ struct Cli {
     #[arg(short = 'v', long, global = true)]
     verbose: bool,
 
+    /// List available models and exit
+    #[arg(long, global = true)]
+    list_models: bool,
+
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -85,6 +89,10 @@ enum Commands {
         #[arg(long)]
         no_stream: bool,
 
+        /// Read prompt from stdin
+        #[arg(long)]
+        pipe: bool,
+
         /// Save conversation to JSON file
         #[arg(long)]
         save: Option<PathBuf>,
@@ -110,6 +118,22 @@ enum Commands {
         /// Max steps before giving up
         #[arg(long, default_value = "10")]
         max_steps: usize,
+
+        /// Allowed tools (comma-separated). Default: all tools.
+        #[arg(long)]
+        allowed_tools: Option<String>,
+
+        /// Forbidden tools (comma-separated)
+        #[arg(long)]
+        forbidden_tools: Option<String>,
+
+        /// Allowed file paths (comma-separated). Default: current directory.
+        #[arg(long)]
+        allowed_paths: Option<String>,
+
+        /// Forbidden file paths (comma-separated)
+        #[arg(long)]
+        forbidden_paths: Option<String>,
     },
 
     /// Benchmark model performance
@@ -193,7 +217,20 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    match cli.command {
+    if cli.list_models {
+        tracing::info!("[WHT-LM001] --list-models invoked, url={}", cli.url);
+        let client = LlamaHttpClient::new(&cli.url)?;
+        let models = client.list_models().await?;
+        tracing::info!("[WHT-LM002] --list-models returned {} models", models.len());
+        for model in &models {
+            println!("{}\t{}", model.id, model.status.value);
+        }
+        return Ok(());
+    }
+
+    let command = cli.command.context("No subcommand provided. Use --help for usage.")?;
+
+    match command {
         Commands::Chat {
             prompt,
             system,
@@ -207,16 +244,20 @@ async fn main() -> Result<()> {
             stop,
             seed,
             no_stream,
+            pipe,
             save,
         } => {
-            chat_command(&cli.url, cli.model, prompt, system, temperature, max_tokens, top_p, top_k, repeat_penalty, presence_penalty, frequency_penalty, stop, seed, no_stream, save).await
+            tracing::info!("[WHT-CHAT001] chat command, pipe={}, one_shot={}, stream={}", pipe, prompt.is_some(), !no_stream);
+            chat_command(&cli.url, cli.model, prompt, system, temperature, max_tokens, top_p, top_k, repeat_penalty, presence_penalty, frequency_penalty, stop, seed, no_stream, pipe, save).await
         }
 
         Commands::Model { action } => {
+            tracing::info!("[WHT-MOD001] model command dispatched");
             model_command(&cli.url, action).await
         }
 
         Commands::Server { action } => {
+            tracing::info!("[WHT-SRV001] server command");
             match action {
                 ServerAction::Status => server_status_command(&cli.url).await,
                 ServerAction::Start => server_start_command().await,
@@ -226,19 +267,23 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::Agent { task, max_steps } => {
-            agent_command(&cli.url, cli.model, task, max_steps, cli.verbose).await
+        Commands::Agent { task, max_steps, allowed_tools, forbidden_tools, allowed_paths, forbidden_paths } => {
+            tracing::info!("[WHT-AGT001] agent command, max_steps={}, task_len={}", max_steps, task.len());
+            agent_command(&cli.url, cli.model, task, max_steps, cli.verbose, AgentOpts { allowed_tools, forbidden_tools, allowed_paths, forbidden_paths }).await
         }
 
         Commands::Benchmark { prompt, max_tokens, concurrent } => {
+            tracing::info!("[WHT-BEN001] benchmark command, max_tokens={}, concurrent={}", max_tokens, concurrent);
             benchmark_command(&cli.url, prompt, max_tokens, concurrent).await
         }
 
         Commands::Download { repo, file, output } => {
+            tracing::info!("[WHT-DL001] download command, repo={}", repo);
             download_command(&repo, file, &output).await
         }
 
         Commands::Workflow { workflow_file, show_config } => {
+            tracing::info!("[WHT-WF001] workflow command, file={}", workflow_file.display());
             workflow_command(&workflow_file, show_config).await
         }
     }
@@ -260,6 +305,7 @@ async fn chat_command(
     stop: Option<Vec<String>>,
     seed: Option<u32>,
     no_stream: bool,
+    pipe: bool,
     save: Option<PathBuf>,
 ) -> Result<()> {
     let client = LlamaHttpClient::new(url)?;
@@ -272,8 +318,17 @@ async fn chat_command(
         match loaded {
             Some(m) => m.id.clone(),
             None => {
-                eprintln!("No model loaded and no model specified. Use 'whitt model load <name>' first.");
-                anyhow::bail!("No model loaded");
+                let first = models.first();
+                match first {
+                    Some(m) => {
+                        tracing::info!("[WHT-EML000] no loaded model, trying first available: {}", m.id);
+                        m.id.clone()
+                    }
+                    None => {
+                        eprintln!("No models available. Use 'whitt model load <name>' first.");
+                        anyhow::bail!("No models available");
+                    }
+                }
             }
         }
     };
@@ -306,7 +361,21 @@ async fn chat_command(
         anyhow::bail!("max_tokens must be >= 1, got {}", max_tokens);
     }
 
-    if let Some(p) = prompt {
+    let resolved_prompt = if pipe {
+        tracing::info!("[WHT-PIPE001] reading prompt from stdin");
+        use std::io::{self, Read};
+        let mut buf = String::new();
+        io::stdin().read_to_string(&mut buf).context("Failed to read from stdin")?;
+        if buf.trim().is_empty() {
+            anyhow::bail!("--pipe: stdin is empty");
+        }
+        tracing::info!("[WHT-PIPE002] stdin read OK, {} bytes", buf.len());
+        Some(buf)
+    } else {
+        prompt
+    };
+
+    if let Some(p) = resolved_prompt {
         one_shot_chat(&client, &model_id, p, system, temperature, max_tokens, top_p, top_k, repeat_penalty, presence_penalty, frequency_penalty, stop, seed, no_stream, save).await
     } else {
         repl_chat(&client, &model_id, system, temperature, max_tokens, top_p, top_k, repeat_penalty, presence_penalty, frequency_penalty, stop, seed).await
@@ -314,14 +383,25 @@ async fn chat_command(
 }
 
 async fn ensure_model_loaded(client: &LlamaHttpClient, model_id: &str) -> Result<()> {
+    tracing::info!("[WHT-EML001] ensure_model_loaded, model={}", model_id);
     let models = client.list_models().await?;
     if let Some(model) = models.iter().find(|m| m.id == model_id) {
         if model.status.value == "loaded" {
             return Ok(());
         }
     }
-    client.load_model(model_id).await?;
-    Ok(())
+    match client.load_model(model_id).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            if models.iter().any(|m| m.id == model_id) {
+                eprintln!("[MODEL] load API failed (server may auto-load on request): {}", e);
+                tracing::warn!("[WHT-EML002] load API failed but model exists in list, continuing");
+                Ok(())
+            } else {
+                Err(e)
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -452,7 +532,9 @@ async fn repl_chat(
     let mut messages = vec![ChatMessage::system(system_prompt.clone())];
 
     eprintln!("Whitt REPL (Ctrl-C or /exit to quit)");
-    eprintln!("Commands: /exit, /quit, /model <name>, /system <prompt>, /clear, /help");
+    eprintln!("Commands: /exit, /quit, /model <name>, /system <prompt>, /clear, /copy, /help");
+
+    let mut last_response = String::new();
 
     loop {
         let line = match rl.readline("whitt> ") {
@@ -494,13 +576,23 @@ async fn repl_chat(
                 }
                 Some(Cmd::Clear) => {
                     messages = vec![ChatMessage::system(system_prompt.clone())];
+                    last_response.clear();
                     eprintln!("Conversation cleared");
+                }
+                Some(Cmd::Copy) => {
+                    tracing::info!("[WHT-COPY001] /copy command invoked, has_response={}", !last_response.is_empty());
+                    if last_response.is_empty() {
+                        eprintln!("No response to copy yet");
+                    } else {
+                        copy_to_clipboard(&last_response);
+                    }
                 }
                 Some(Cmd::Help) => {
                     println!("/exit, /quit - Exit REPL");
                     println!("/model <name> - Switch model and clear history");
                     println!("/system <prompt> - Update system prompt and clear history");
                     println!("/clear - Clear conversation history");
+                    println!("/copy - Copy last response to clipboard");
                     println!("/help - Show this help");
                 }
                 None => {
@@ -558,7 +650,8 @@ async fn repl_chat(
         }
         println!();
 
-        messages.push(ChatMessage::assistant(full_response));
+        messages.push(ChatMessage::assistant(full_response.clone()));
+        last_response = full_response;
     }
 
     Ok(())
@@ -569,6 +662,7 @@ enum Cmd {
     Model(String),
     System(String),
     Clear,
+    Copy,
     Help,
 }
 
@@ -579,6 +673,7 @@ fn parse_command(line: &str) -> Option<Cmd> {
         Some(&"/model") => parts.get(1).map(|m| Cmd::Model(m.to_string())),
         Some(&"/system") => parts.get(1).map(|s| Cmd::System(s.to_string())),
         Some(&"/clear") => Some(Cmd::Clear),
+        Some(&"/copy") => Some(Cmd::Copy),
         Some(&"/help") => Some(Cmd::Help),
         _ => None,
     }
@@ -730,12 +825,20 @@ async fn server_logs_command() -> Result<()> {
     Ok(())
 }
 
+struct AgentOpts {
+    allowed_tools: Option<String>,
+    forbidden_tools: Option<String>,
+    allowed_paths: Option<String>,
+    forbidden_paths: Option<String>,
+}
+
 async fn agent_command(
     url: &str,
     model: Option<String>,
     task: String,
     max_steps: usize,
     verbose: bool,
+    opts: AgentOpts,
 ) -> Result<()> {
     let client = LlamaHttpClient::new(url)?;
 
@@ -747,24 +850,74 @@ async fn agent_command(
         match loaded {
             Some(m) => m.id.clone(),
             None => {
-                eprintln!("No model loaded. Use 'whitt model load <name>' first.");
-                anyhow::bail!("No model loaded");
+                let first = models.first();
+                match first {
+                    Some(m) => {
+                        tracing::info!("[WHT-AGT000] no loaded model, trying first available: {}", m.id);
+                        m.id.clone()
+                    }
+                    None => {
+                        eprintln!("No models available. Use 'whitt model load <name>' first.");
+                        anyhow::bail!("No models available");
+                    }
+                }
             }
         }
     };
 
     ensure_model_loaded(&client, &model_id).await?;
 
-    let system_prompt = r#"You are a ReAct agent that uses tools to solve tasks.
+    let forbidden: Vec<String> = opts.forbidden_tools
+        .as_deref()
+        .unwrap_or("")
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let allowed: Option<Vec<String>> = opts.allowed_tools.as_deref().map(|s| {
+        s.split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    });
+
+    let all_tools: &[(&str, &str)] = &[
+        ("model_list", "List all models (no input)"),
+        ("model_load", "Load a model (input: {\"model\": \"name\"})"),
+        ("model_unload", "Unload a model (input: {\"model\": \"name\"})"),
+        ("chat", "Send a chat message (input: {\"message\": \"text\"})"),
+        ("file_read", "Read a file (input: {\"path\": \"/path/to/file\"})"),
+        ("final_answer", "Return the final answer (input: {\"answer\": \"your answer\"})"),
+    ];
+
+    let available_tools: Vec<_> = all_tools
+        .iter()
+        .filter(|(name, _)| {
+            if forbidden.iter().any(|f| f == name) { return false; }
+            if let Some(ref a) = allowed { return a.iter().any(|x| x == name); }
+            true
+        })
+        .collect();
+
+    tracing::info!("[WHT-AGT002] tool filtering: {} available, forbidden={:?}, allowed={:?}", available_tools.len(), forbidden, allowed);
+
+    let tool_list = available_tools
+        .iter()
+        .map(|(name, desc)| format!("- {}: {}", name, desc))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let system_prompt = format!(r#"You are a ReAct agent that uses tools to solve tasks.
 Use the following format:
 
 
 
 <act>
-{
+{{
   "tool": "tool_name",
-  "input": {...}
-}
+  "input": {{...}}
+}}
 </act>
 
 <result>
@@ -772,16 +925,24 @@ The output from executing the tool.
 </result>
 
 Available tools:
-- model_list: List all models (no input)
-- model_load: Load a model (input: {"model": "name"})
-- model_unload: Unload a model (input: {"model": "name"})
-- chat: Send a chat message (input: {"message": "text"})
-- file_read: Read a file (input: {"path": "/path/to/file"})
-- final_answer: Return the final answer (input: {"answer": "your answer"})
+{}
 
 Use final_answer when you have completed the task.
 Always think before acting.
-Use JSON format for the <act> tag."#;
+ Use JSON format for the <act> tag."#, tool_list);
+
+    let sandbox: Option<whitt_execution_engine::agent::sandbox::SandboxConfig> = if opts.allowed_paths.is_some() || opts.forbidden_paths.is_some() {
+        Some(whitt_execution_engine::agent::sandbox::SandboxConfig {
+            allowed_paths: opts.allowed_paths.as_deref().unwrap_or("").split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+            forbidden_paths: opts.forbidden_paths.as_deref().unwrap_or("").split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+            allowed_patterns: vec![],
+            max_file_size_mb: 10,
+        })
+    } else {
+        None
+    };
+    tracing::info!("[WHT-AGT003] sandbox config: allowed_paths={:?}, forbidden_paths={:?}", 
+        sandbox.as_ref().map(|s| &s.allowed_paths), sandbox.as_ref().map(|s| &s.forbidden_paths));
 
     let mut messages = vec![
         ChatMessage::system(system_prompt.to_string()),
@@ -812,7 +973,7 @@ Use JSON format for the <act> tag."#;
 
         messages.push(ChatMessage::assistant(content.clone()));
 
-        if let Some(tool_result) = parse_and_execute_tool(&client, &content, verbose).await? {
+        if let Some(tool_result) = parse_and_execute_tool(&client, &content, verbose, &forbidden, &allowed, &sandbox).await? {
             if verbose {
                 eprintln!("Tool result:\n{}", tool_result);
             }
@@ -840,6 +1001,9 @@ async fn parse_and_execute_tool(
     client: &LlamaHttpClient,
     content: &str,
     verbose: bool,
+    forbidden: &[String],
+    allowed: &Option<Vec<String>>,
+    sandbox: &Option<whitt_execution_engine::agent::sandbox::SandboxConfig>,
 ) -> Result<Option<String>> {
     use regex::Regex;
 
@@ -856,9 +1020,22 @@ async fn parse_and_execute_tool(
         let tool = tool_call.get("tool").and_then(|t| t.as_str()).context("Missing tool name")?;
         let input = tool_call.get("input").context("Missing input")?;
 
+        tracing::info!("[WHT-TOOL001] parsed tool call: tool={}", tool);
+
         if verbose {
             eprintln!("Executing tool: {}", tool);
             eprintln!("Input: {}", serde_json::to_string_pretty(input)?);
+        }
+
+        if forbidden.iter().any(|f| f == tool) {
+            tracing::warn!("[WHT-TOOL002] tool '{}' blocked by forbidden list", tool);
+            return Ok(Some(format!("Error: tool '{}' is forbidden", tool)));
+        }
+        if let Some(ref a) = allowed {
+            if !a.iter().any(|x| x == tool) {
+                tracing::warn!("[WHT-TOOL003] tool '{}' not in allowed list", tool);
+                return Ok(Some(format!("Error: tool '{}' is not in allowed list", tool)));
+            }
         }
 
         let result = match tool {
@@ -897,6 +1074,18 @@ async fn parse_and_execute_tool(
             }
             "file_read" => {
                 let path = input.get("path").and_then(|p| p.as_str()).context("Missing 'path' in input")?;
+                tracing::info!("[WHT-TOOL004] file_read, path={}", path);
+                if let Some(ref cfg) = sandbox {
+                    let sbox = whitt_execution_engine::agent::sandbox::ToolSandbox::new(cfg.clone());
+                    match sbox.is_path_allowed(std::path::Path::new(path)) {
+                        Ok(false) => {
+                            tracing::warn!("[WHT-TOOL005] path '{}' blocked by sandbox", path);
+                            return Ok(Some(format!("Error: path '{}' is not allowed", path)));
+                        }
+                        Err(e) => return Ok(Some(format!("Error validating path: {}", e))),
+                        Ok(true) => {}
+                    }
+                }
                 std::fs::read_to_string(path).context("Failed to read file")?
             }
             "final_answer" => {
@@ -1047,5 +1236,20 @@ async fn workflow_command(workflow_file: &Path, show_config: bool) -> Result<()>
 
     println!("\n✓ Workflow configuration loaded and validated successfully");
     Ok(())
+}
+
+fn copy_to_clipboard(text: &str) {
+    #[cfg(feature = "clipboard")]
+    {
+        match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(text.to_string())) {
+            Ok(()) => eprintln!("Copied to clipboard"),
+            Err(e) => eprintln!("Clipboard error: {} (SSH/headless?)", e),
+        }
+    }
+    #[cfg(not(feature = "clipboard"))]
+    {
+        eprintln!("Clipboard not available (build with --features clipboard to enable)");
+        let _ = text;
+    }
 }
 

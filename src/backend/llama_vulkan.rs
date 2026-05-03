@@ -8,8 +8,10 @@ use crate::backend::llm_backend::{
     BackendCapabilities, ChatMessage, ChatResponse, HealthStatus, LlmBackend, LlmError, ModelInfo,
 };
 use crate::config::provider::LlamaCppVulkanProvider;
+#[cfg(feature = "client")]
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "client")]
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -240,6 +242,7 @@ impl LlmBackend for LlamaCppVulkanBackend {
         }
     }
 
+    #[cfg(feature = "client")]
     async fn chat_stream(
         &self,
         messages: Vec<ChatMessage>,

@@ -31,13 +31,27 @@ pub trait Tool: Send + Sync {
 
 pub struct ToolRegistry {
     tools: HashMap<String, Box<dyn Tool>>,
+    allowed_tools: Option<Vec<String>>,
+    forbidden_tools: Vec<String>,
 }
 
 impl ToolRegistry {
     pub fn new() -> Self {
         Self {
             tools: HashMap::new(),
+            allowed_tools: None,
+            forbidden_tools: Vec::new(),
         }
+    }
+
+    pub fn with_allowed_tools(mut self, tools: Vec<String>) -> Self {
+        self.allowed_tools = if tools.is_empty() { None } else { Some(tools) };
+        self
+    }
+
+    pub fn with_forbidden_tools(mut self, tools: Vec<String>) -> Self {
+        self.forbidden_tools = tools;
+        self
     }
 
     pub fn register(&mut self, tool: Box<dyn Tool>) {
@@ -53,16 +67,32 @@ impl ToolRegistry {
     pub fn list(&self) -> Vec<(&str, &str)> {
         self.tools
             .iter()
+            .filter(|(name, _)| self.is_tool_allowed(name))
             .map(|(name, tool)| (name.as_str(), tool.description()))
             .collect()
     }
 
     pub async fn execute(&self, call: ToolCall) -> Result<ToolResult, anyhow::Error> {
         debug!("Executing tool: {} with arguments: {:?}", call.name, call.arguments);
+
+        if !self.is_tool_allowed(&call.name) {
+            anyhow::bail!("Tool '{}' is not allowed", call.name);
+        }
+
         match self.get(&call.name) {
             Some(tool) => tool.execute(call.arguments).await,
             None => anyhow::bail!("Tool not found: {}", call.name),
         }
+    }
+
+    fn is_tool_allowed(&self, name: &str) -> bool {
+        if self.forbidden_tools.iter().any(|f| f == name) {
+            return false;
+        }
+        if let Some(allowed) = &self.allowed_tools {
+            return allowed.iter().any(|a| a == name);
+        }
+        true
     }
 }
 
@@ -545,5 +575,214 @@ impl ToolExecutor {
         }
 
         tool.execute(args).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct MockTool {
+        name: String,
+        description: String,
+        fixed_output: String,
+    }
+
+    impl MockTool {
+        fn new(name: &str, description: &str, fixed_output: &str) -> Self {
+            Self {
+                name: name.to_string(),
+                description: description.to_string(),
+                fixed_output: fixed_output.to_string(),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Tool for MockTool {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn description(&self) -> &str {
+            &self.description
+        }
+
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            })
+        }
+
+        async fn execute(&self, _arguments: HashMap<String, serde_json::Value>) -> Result<ToolResult, anyhow::Error> {
+            Ok(ToolResult {
+                tool_name: self.name.clone(),
+                output: self.fixed_output.clone(),
+                success: true,
+                metadata: HashMap::new(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_registry_no_filtering_allows_all() -> anyhow::Result<()> {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(MockTool::new("tool_a", "Tool A", "A output")));
+        registry.register(Box::new(MockTool::new("tool_b", "Tool B", "B output")));
+
+        // Both tools should execute
+        let result_a = registry
+            .execute(ToolCall {
+                name: "tool_a".to_string(),
+                arguments: HashMap::new(),
+            })
+            .await?;
+        assert_eq!(result_a.tool_name, "tool_a");
+
+        let result_b = registry
+            .execute(ToolCall {
+                name: "tool_b".to_string(),
+                arguments: HashMap::new(),
+            })
+            .await?;
+        assert_eq!(result_b.tool_name, "tool_b");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_registry_allowed_tools_filters_execution() -> anyhow::Result<()> {
+        let mut registry = ToolRegistry::new()
+            .with_allowed_tools(vec!["tool_a".to_string()]);
+        registry.register(Box::new(MockTool::new("tool_a", "Tool A", "A output")));
+        registry.register(Box::new(MockTool::new("tool_b", "Tool B", "B output")));
+
+        // tool_a should execute
+        let result_a = registry
+            .execute(ToolCall {
+                name: "tool_a".to_string(),
+                arguments: HashMap::new(),
+            })
+            .await?;
+        assert_eq!(result_a.tool_name, "tool_a");
+
+        // tool_b should be denied
+        let result_b = registry
+            .execute(ToolCall {
+                name: "tool_b".to_string(),
+                arguments: HashMap::new(),
+            })
+            .await;
+        assert!(result_b.is_err());
+        assert!(result_b.unwrap_err().to_string().contains("not allowed"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_registry_forbidden_tools_takes_precedence() -> anyhow::Result<()> {
+        let mut registry = ToolRegistry::new()
+            .with_allowed_tools(vec!["tool_a".to_string(), "tool_b".to_string()])
+            .with_forbidden_tools(vec!["tool_a".to_string()]);
+        registry.register(Box::new(MockTool::new("tool_a", "Tool A", "A output")));
+        registry.register(Box::new(MockTool::new("tool_b", "Tool B", "B output")));
+
+        // tool_a should be denied (forbidden wins over allowed)
+        let result_a = registry
+            .execute(ToolCall {
+                name: "tool_a".to_string(),
+                arguments: HashMap::new(),
+            })
+            .await;
+        assert!(result_a.is_err());
+        assert!(result_a.unwrap_err().to_string().contains("not allowed"));
+
+        // tool_b should execute
+        let result_b = registry
+            .execute(ToolCall {
+                name: "tool_b".to_string(),
+                arguments: HashMap::new(),
+            })
+            .await?;
+        assert_eq!(result_b.tool_name, "tool_b");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_registry_list_filters_by_allowed() {
+        let registry = ToolRegistry::new()
+            .with_allowed_tools(vec!["tool_a".to_string()]);
+        let mut registry = registry;
+        registry.register(Box::new(MockTool::new("tool_a", "Tool A", "A output")));
+        registry.register(Box::new(MockTool::new("tool_b", "Tool B", "B output")));
+
+        let list = registry.list();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].0, "tool_a");
+    }
+
+    #[tokio::test]
+    async fn test_registry_list_excludes_forbidden() {
+        let registry = ToolRegistry::new()
+            .with_forbidden_tools(vec!["tool_b".to_string()]);
+        let mut registry = registry;
+        registry.register(Box::new(MockTool::new("tool_a", "Tool A", "A output")));
+        registry.register(Box::new(MockTool::new("tool_b", "Tool B", "B output")));
+
+        let list = registry.list();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].0, "tool_a");
+    }
+
+    #[tokio::test]
+    async fn test_registry_allowed_empty_means_all() -> anyhow::Result<()> {
+        // Empty vec should map to None (allow all)
+        let mut registry = ToolRegistry::new()
+            .with_allowed_tools(vec![]);
+        registry.register(Box::new(MockTool::new("tool_a", "Tool A", "A output")));
+        registry.register(Box::new(MockTool::new("tool_b", "Tool B", "B output")));
+
+        // Both tools should execute
+        let result_a = registry
+            .execute(ToolCall {
+                name: "tool_a".to_string(),
+                arguments: HashMap::new(),
+            })
+            .await?;
+        assert_eq!(result_a.tool_name, "tool_a");
+
+        let result_b = registry
+            .execute(ToolCall {
+                name: "tool_b".to_string(),
+                arguments: HashMap::new(),
+            })
+            .await?;
+        assert_eq!(result_b.tool_name, "tool_b");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_registry_execute_blocked_returns_error() -> anyhow::Result<()> {
+        let mut registry = ToolRegistry::new()
+            .with_forbidden_tools(vec!["tool_a".to_string()]);
+        registry.register(Box::new(MockTool::new("tool_a", "Tool A", "A output")));
+
+        let result = registry
+            .execute(ToolCall {
+                name: "tool_a".to_string(),
+                arguments: HashMap::new(),
+            })
+            .await;
+
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("not allowed"));
+        assert!(error_msg.contains("tool_a"));
+
+        Ok(())
     }
 }

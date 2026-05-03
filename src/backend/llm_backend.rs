@@ -6,6 +6,8 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+#[cfg(feature = "client")]
 use std::pin::Pin;
 
 // ---------------------------------------------------------------------------
@@ -119,6 +121,8 @@ pub trait LlmBackend: Send + Sync {
     /// Send a chat completion request (streaming).
     ///
     /// Returns a stream of text chunks as they are generated.
+    /// Only available when the "client" feature is enabled.
+    #[cfg(feature = "client")]
     async fn chat_stream(
         &self,
         messages: Vec<ChatMessage>,

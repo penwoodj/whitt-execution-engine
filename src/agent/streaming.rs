@@ -1,7 +1,10 @@
-use futures::stream::{unfold, Stream};
 use serde::{Deserialize, Serialize};
-use std::pin::Pin;
 use tracing::debug;
+
+#[cfg(feature = "client")]
+use futures::stream::Stream;
+#[cfg(feature = "client")]
+use std::pin::Pin;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamingResponse {
@@ -10,6 +13,7 @@ pub struct StreamingResponse {
     is_complete: bool,
 }
 
+#[cfg(feature = "client")]
 pub type SSEStream = Pin<Box<dyn Stream<Item = Result<StreamEvent, anyhow::Error>> + Send>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,7 +158,7 @@ pub fn parse_sse_line(line: &str) -> Option<StreamEvent> {
 #[cfg(feature = "client")]
 pub mod client_streaming {
     use super::*;
-
+    use futures::stream::unfold;
     use tokio::io::AsyncBufReadExt;
 
     /// Create an SSE stream from a tokio reader
