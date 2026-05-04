@@ -53,7 +53,10 @@ impl BenchmarkRunner {
     fn log_step_start(&self, model_id: &str, index: usize, total: usize, gpu_mode: &str) -> Result<()> {
         if let Some(ref output_dir) = self.config.output_dir {
             let log_path = Path::new(output_dir).join("logs/benchmark.log");
-            let timestamp = format!("{:?}", std::time::SystemTime::now());
+            let timestamp = {
+                let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                format!("unix_epoch_{}s", d.as_secs())
+            };
             let line = format!(
                 "{} [START] Model [{}/{}]: {} (mode: {})\n",
                 timestamp, index + 1, total, model_id, gpu_mode
@@ -115,7 +118,10 @@ impl BenchmarkRunner {
     fn log_step_error(&self, model_id: &str, error: &str) -> Result<()> {
         if let Some(ref output_dir) = self.config.output_dir {
             let error_log_path = Path::new(output_dir).join("logs/benchmark-errors.log");
-            let timestamp = format!("{:?}", std::time::SystemTime::now());
+            let timestamp = {
+                let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                format!("unix_epoch_{}s", d.as_secs())
+            };
             let line = format!("{} [ERROR] Model: {} - {}\n", timestamp, model_id, error);
 
             let mut file = fs::OpenOptions::new()
@@ -141,6 +147,77 @@ impl BenchmarkRunner {
                 .with_context(|| format!("Failed to write benchmark report: {}", report_path.display()))?;
 
             info!("[benchmark] final report written to {}", report_path.display());
+        }
+        Ok(())
+    }
+
+    /// Write exhaustive per-model report file.
+    ///
+    /// Creates a file named after the model (sanitized for filesystem) in the
+    /// output directory. Contains every detail from the benchmark run.
+    fn write_per_model_report(&self, result: &ModelBenchmarkResult, suite_metadata: &str) -> Result<()> {
+        if let Some(ref output_dir) = self.config.output_dir {
+            let safe_name = result.model_id
+                .replace(['/', '\\'], "_")
+                .replace(".gguf", "")
+                .replace('.', "_");
+            let file_path = Path::new(output_dir).join(format!("{}.log", safe_name));
+
+            let mut content = String::new();
+
+            content.push_str(&format!("{}\n", "=".repeat(80)));
+            content.push_str(&format!("BENCHMARK REPORT: {}\n", result.model_id));
+            content.push_str(&format!("{}\n\n", "=".repeat(80)));
+
+            content.push_str(&format!("{}\n", suite_metadata));
+
+            content.push_str(&format!("\n--- Model Identity ---\n"));
+            content.push_str(&format!("model_id: {}\n", result.model_id));
+            content.push_str(&format!("model_path: {}\n", result.model_path));
+            content.push_str(&format!("file_size_bytes: {}\n", result.file_size_bytes));
+            content.push_str(&format!("file_size_mb: {:.2}\n", result.file_size_bytes as f64 / (1024.0 * 1024.0)));
+            content.push_str(&format!("gpu_mode: {}\n", result.gpu_mode));
+
+            content.push_str(&format!("\n--- Timing ---\n"));
+            content.push_str(&format!("load_duration: {}ms ({:.3}s)\n", result.load_duration.as_millis(), result.load_duration.as_secs_f64()));
+            content.push_str(&format!("unload_duration: {}ms ({:.3}s)\n", result.unload_duration.as_millis(), result.unload_duration.as_secs_f64()));
+            content.push_str(&format!("total_duration: {}ms ({:.3}s)\n", result.total_duration.as_millis(), result.total_duration.as_secs_f64()));
+
+            content.push_str(&format!("\n--- Performance Summary ---\n"));
+            content.push_str(&format!("tokens_per_second: {:.2}\n", result.tokens_per_second));
+            content.push_str(&format!("avg_latency_ms: {:.2}\n", result.avg_latency_ms));
+            content.push_str(&format!("p50_latency_ms: {:.2}\n", result.p50_latency_ms));
+            content.push_str(&format!("p95_latency_ms: {:.2}\n", result.p95_latency_ms));
+            content.push_str(&format!("p99_latency_ms: {:.2}\n", result.p99_latency_ms));
+            if let Some(speedup) = result.speedup_factor {
+                content.push_str(&format!("speedup_factor: {:.2}x\n", speedup));
+            }
+
+            content.push_str(&format!("\n--- Inference Results ({}) ---\n", result.inference_results.len()));
+            for (i, inf) in result.inference_results.iter().enumerate() {
+                content.push_str(&format!("\n  Inference [{}]:\n", i + 1));
+                content.push_str(&format!("    prompt: {:?}\n", inf.prompt));
+                content.push_str(&format!("    prompt_tokens: {}\n", inf.prompt_tokens));
+                content.push_str(&format!("    completion_tokens: {}\n", inf.completion_tokens));
+                content.push_str(&format!("    total_tokens: {}\n", inf.total_tokens));
+                content.push_str(&format!("    duration: {}ms ({:.3}s)\n", inf.duration.as_millis(), inf.duration.as_secs_f64()));
+                content.push_str(&format!("    tokens_per_second: {:.2}\n", inf.tokens_per_second));
+                content.push_str(&format!("    response_text: {:?}\n", inf.response_text));
+            }
+
+            if let Some(ref err) = result.error {
+                content.push_str(&format!("\n--- Error ---\n"));
+                content.push_str(&format!("error: {}\n", err));
+            }
+
+            let status = if result.error.is_none() { "SUCCESS" } else { "FAILED" };
+            content.push_str(&format!("\n--- Status: {} ---\n", status));
+            content.push_str(&format!("{}\n", "=".repeat(80)));
+
+            fs::write(&file_path, content)
+                .with_context(|| format!("Failed to write per-model report: {}", file_path.display()))?;
+
+            info!("[benchmark] per-model report written to {}", file_path.display());
         }
         Ok(())
     }
@@ -192,7 +269,7 @@ impl BenchmarkRunner {
         anyhow::bail!("Server did not become ready after 30 seconds");
     }
 
-    fn discover_models(&self) -> Result<Vec<String>> {
+    fn discover_models(&self) -> Result<Vec<(String, String)>> {
         let mut models = Vec::new();
 
         if let Some(ref models_dir) = self.config.models_dir {
@@ -225,7 +302,7 @@ impl BenchmarkRunner {
                             }
                         }
 
-                        models.push(model_id);
+                        models.push((model_id, path.display().to_string()));
                     }
                 }
             }
@@ -270,7 +347,7 @@ impl BenchmarkRunner {
                     }
                 }
 
-                models.push(model_id);
+                models.push((model_id, line.to_string()));
             }
         }
 
@@ -294,16 +371,26 @@ impl BenchmarkRunner {
         info!("[benchmark] GPU/CPU comparison mode: {}", self.config.compare_gpu_cpu);
 
         let mut results = Vec::new();
+        let run_timestamp = {
+            let dur = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            format!("unix_epoch_{}s", dur.as_secs())
+        };
+        let suite_metadata = format!(
+            "run_timestamp: {}\nserver_url: {}\ntotal_models: {}\ncompare_gpu_cpu: {}",
+            run_timestamp, self.config.server_url, models.len(), self.config.compare_gpu_cpu
+        );
 
         if self.config.compare_gpu_cpu {
             info!("[benchmark] Running in GPU/CPU comparison mode");
 
-            for (i, model_id) in models.iter().enumerate() {
+            for (i, (model_id, model_path)) in models.iter().enumerate() {
                 self.log_step_start(model_id, i, models.len(), "gpu")?;
 
                 info!("[benchmark] [{}/{}] loading {} (GPU mode)", i+1, models.len(), model_id);
 
-                let gpu_result = self.benchmark_single_model(&client, model_id, "gpu").await;
+                let gpu_result = self.benchmark_single_model(&client, model_id, model_path, "gpu").await;
 
                 if let Some(ref err) = gpu_result.error {
                     self.log_step_error(model_id, err)?;
@@ -318,7 +405,7 @@ impl BenchmarkRunner {
                     self.restart_docker_with_gpu_layers(0).await
                         .context("Failed to restart Docker in CPU mode")?;
 
-                    let cpu_result = self.benchmark_single_model(&client, model_id, "cpu").await;
+                    let cpu_result = self.benchmark_single_model(&client, model_id, model_path, "cpu").await;
 
                     if let Some(ref err) = cpu_result.error {
                         self.log_step_error(model_id, err)?;
@@ -331,12 +418,16 @@ impl BenchmarkRunner {
 
                         let mut gpu_result_with_speedup = gpu_result.clone();
                         gpu_result_with_speedup.speedup_factor = Some(speedup);
+                        self.write_per_model_report(&gpu_result_with_speedup, &suite_metadata)?;
                         results.push(gpu_result_with_speedup);
 
                         let mut cpu_result_with_speedup = cpu_result.clone();
                         cpu_result_with_speedup.speedup_factor = Some(speedup);
+                        self.write_per_model_report(&cpu_result_with_speedup, &suite_metadata)?;
                         results.push(cpu_result_with_speedup);
                     } else {
+                        self.write_per_model_report(&gpu_result, &suite_metadata)?;
+                        self.write_per_model_report(&cpu_result, &suite_metadata)?;
                         results.push(gpu_result);
                         results.push(cpu_result);
                     }
@@ -344,6 +435,7 @@ impl BenchmarkRunner {
                     self.restart_docker_with_gpu_layers(999).await
                         .context("Failed to restart Docker in GPU mode")?;
                 } else {
+                    self.write_per_model_report(&gpu_result, &suite_metadata)?;
                     results.push(gpu_result);
                 }
 
@@ -352,17 +444,18 @@ impl BenchmarkRunner {
                 }
             }
         } else {
-            for (i, model_id) in models.iter().enumerate() {
+            for (i, (model_id, model_path)) in models.iter().enumerate() {
                 self.log_step_start(model_id, i, models.len(), "gpu")?;
 
                 info!("[benchmark] [{}/{}] loading {}", i+1, models.len(), model_id);
 
-                let model_result = self.benchmark_single_model(&client, model_id, "gpu").await;
+                let model_result = self.benchmark_single_model(&client, model_id, model_path, "gpu").await;
 
                 if let Some(ref err) = model_result.error {
                     self.log_step_error(model_id, err)?;
                 }
                 self.log_step_result(&model_result)?;
+                self.write_per_model_report(&model_result, &suite_metadata)?;
 
                 results.push(model_result);
 
@@ -374,7 +467,10 @@ impl BenchmarkRunner {
 
         let successful = results.iter().filter(|r| r.error.is_none()).count();
         let failed = results.len() - successful;
-        let timestamp = format!("{:?}", std::time::SystemTime::now());
+        let timestamp = {
+                let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                format!("unix_epoch_{}s", d.as_secs())
+            };
 
         let suite_result = BenchmarkSuiteResult {
             timestamp,
@@ -390,9 +486,27 @@ impl BenchmarkRunner {
         Ok(suite_result)
     }
 
-    async fn benchmark_single_model(&self, client: &LlamaHttpClient, model_id: &str, gpu_mode: &str) -> ModelBenchmarkResult {
+    async fn benchmark_single_model(&self, client: &LlamaHttpClient, model_id: &str, model_source_path: &str, gpu_mode: &str) -> ModelBenchmarkResult {
         let server_model_id = model_id.strip_suffix(".gguf").unwrap_or(model_id);
         let start = Instant::now();
+
+        let (resolved_path, file_size) = if let Some(ref models_dir) = self.config.models_dir {
+            let full_path = Path::new(models_dir).join(model_id);
+            if full_path.exists() {
+                let size = std::fs::metadata(&full_path).map(|m| m.len()).unwrap_or(0);
+                (full_path.display().to_string(), size)
+            } else {
+                (model_source_path.to_string(), 0)
+            }
+        } else {
+            let path = Path::new(model_source_path);
+            if path.exists() {
+                let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                (model_source_path.to_string(), size)
+            } else {
+                (model_source_path.to_string(), 0)
+            }
+        };
 
         if let Ok(models) = client.list_models().await {
             for m in models {
@@ -409,8 +523,8 @@ impl BenchmarkRunner {
         if let Err(e) = load_result {
             return ModelBenchmarkResult {
                 model_id: model_id.to_string(),
-                model_path: String::new(),
-                file_size_bytes: 0,
+                model_path: resolved_path,
+                file_size_bytes: file_size,
                 load_duration,
                 inference_results: Vec::new(),
                 unload_duration: Duration::ZERO,
@@ -446,6 +560,10 @@ impl BenchmarkRunner {
                     } else {
                         0.0
                     };
+                    let response_text = resp.choices
+                        .first()
+                        .map(|c| c.message.content.clone())
+                        .unwrap_or_default();
                     inference_results.push(InferenceResult {
                         prompt: prompt.clone(),
                         prompt_tokens: resp.usage.prompt_tokens,
@@ -453,6 +571,7 @@ impl BenchmarkRunner {
                         total_tokens: resp.usage.total_tokens,
                         duration,
                         tokens_per_second: tps,
+                        response_text,
                     });
                 }
                 Err(e) => {
@@ -495,8 +614,8 @@ impl BenchmarkRunner {
 
         ModelBenchmarkResult {
             model_id: model_id.to_string(),
-            model_path: String::new(),
-            file_size_bytes: 0,
+            model_path: resolved_path,
+            file_size_bytes: file_size,
             load_duration,
             inference_results,
             unload_duration,

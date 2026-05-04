@@ -20,6 +20,7 @@ pub struct InferenceResult {
     pub total_tokens: usize,
     pub duration: Duration,
     pub tokens_per_second: f64,
+    pub response_text: String,
 }
 
 /// Benchmark result for a single model.
