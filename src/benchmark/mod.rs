@@ -211,7 +211,7 @@ pub fn generate_suite_files(
 
         let selected = ModelSelector::select_n_models(candidates, n);
         let prompt_refs: Vec<&str> = prompts.iter().map(|s| s.as_ref()).collect();
-        let yaml = BenchmarkYamlGenerator::generate_benchmark_yaml_with_models(
+        let yaml = BenchmarkYamlGenerator::generate_benchmark_yaml_gpu_cpu_compare(
             &format!("benchmark-{}-models", n),
             &selected,
             &prompt_refs,
@@ -229,3 +229,255 @@ pub fn generate_suite_files(
     Ok(generated_files)
 }
 
+/// Generate benchmark YAML files with GPU/CPU comparison mode.
+///
+/// Creates 4 files:
+/// - benchmark-3-models.yml (with specific model paths)
+/// - benchmark-5-models.yml (with placeholder model_list)
+/// - benchmark-15-models.yml (with placeholder model_list)
+/// - benchmark-50-models.yml (with placeholder model_list)
+#[allow(dead_code)]
+pub fn generate_gpu_cpu_compare_benchmarks(output_dir: &Path) -> Result<()> {
+    use crate::benchmark::yaml_generator::BenchmarkYamlGenerator;
+    use std::path::PathBuf;
+
+    let prompts = [
+        "Explain concept of recursion in programming, with a practical example.",
+        "Write a Rust function that finds the longest increasing subsequence in a vector.",
+        "Analyze tradeoffs between microservices and monolithic architectures.",
+    ];
+    let max_tokens = 128;
+
+    // Generate benchmark-3-models.yml with specific paths
+    let models_3 = vec![
+        ModelCandidate {
+            path: PathBuf::from("/run/media/jon/data/models/lmstudio-community/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"),
+            model_id: "Qwen3-4B-Instruct-2507-Q4_K_M".to_string(),
+            file_size_bytes: 0,
+            estimated_vram_bytes: 0,
+            fits_in_vram: true,
+            author: "lmstudio-community".to_string(),
+        },
+        ModelCandidate {
+            path: PathBuf::from("/run/media/jon/data/models/lmstudio-community/Phi-4-mini-reasoning-GGUF/Phi-4-mini-reasoning-Q4_K_M.gguf"),
+            model_id: "Phi-4-mini-reasoning-Q4_K_M".to_string(),
+            file_size_bytes: 0,
+            estimated_vram_bytes: 0,
+            fits_in_vram: true,
+            author: "lmstudio-community".to_string(),
+        },
+        ModelCandidate {
+            path: PathBuf::from("/run/media/jon/data/models/hugging-quants/Llama-3.2-1B-Instruct-Q8_0-GGUF/llama-3.2-1b-instruct-q8_0.gguf"),
+            model_id: "Llama-3.2-1B-Instruct-Q8_0".to_string(),
+            file_size_bytes: 0,
+            estimated_vram_bytes: 0,
+            fits_in_vram: true,
+            author: "hugging-quants".to_string(),
+        },
+    ];
+
+    let yaml_3 = BenchmarkYamlGenerator::generate_benchmark_yaml_gpu_cpu_compare(
+        "benchmark-3-models",
+        &models_3,
+        &prompts,
+        max_tokens,
+    )?;
+
+    let yaml_3_with_list = format!("{}\n\nmodel_list:\n  - {}\n  - {}\n  - {}",
+        yaml_3.trim(),
+        models_3[0].path.display(),
+        models_3[1].path.display(),
+        models_3[2].path.display(),
+    );
+
+    let file_3 = output_dir.join("benchmark-3-models.yml");
+    std::fs::write(&file_3, yaml_3_with_list)
+        .with_context(|| format!("Failed to write {}", file_3.display()))?;
+    info!("[generate_gpu_cpu] generated {}", file_3.display());
+
+    // Generate benchmark-5-models.yml with placeholder list
+    let models_5_placeholder: Vec<ModelCandidate> = (0..5).map(|i| ModelCandidate {
+        path: PathBuf::from(format!("/path/to/model_{}.gguf", i + 1)),
+        model_id: format!("model_{}", i + 1),
+        file_size_bytes: 0,
+        estimated_vram_bytes: 0,
+        fits_in_vram: true,
+        author: "placeholder".to_string(),
+    }).collect();
+
+    let yaml_5 = BenchmarkYamlGenerator::generate_benchmark_yaml_gpu_cpu_compare(
+        "benchmark-5-models",
+        &models_5_placeholder,
+        &prompts,
+        max_tokens,
+    )?;
+
+    let mut yaml_5_with_list = yaml_5.trim().to_string();
+    yaml_5_with_list.push_str("\n\nmodel_list:");
+    for i in 0..5 {
+        yaml_5_with_list.push_str(&format!("\n  - /path/to/model_{}.gguf", i + 1));
+    }
+
+    let file_5 = output_dir.join("benchmark-5-models.yml");
+    std::fs::write(&file_5, yaml_5_with_list)
+        .with_context(|| format!("Failed to write {}", file_5.display()))?;
+    info!("[generate_gpu_cpu] generated {}", file_5.display());
+
+    // Generate benchmark-15-models.yml with placeholder list
+    let models_15_placeholder: Vec<ModelCandidate> = (0..15).map(|i| ModelCandidate {
+        path: PathBuf::from(format!("/path/to/model_{}.gguf", i + 1)),
+        model_id: format!("model_{}", i + 1),
+        file_size_bytes: 0,
+        estimated_vram_bytes: 0,
+        fits_in_vram: true,
+        author: "placeholder".to_string(),
+    }).collect();
+
+    let yaml_15 = BenchmarkYamlGenerator::generate_benchmark_yaml_gpu_cpu_compare(
+        "benchmark-15-models",
+        &models_15_placeholder,
+        &prompts,
+        max_tokens,
+    )?;
+
+    let mut yaml_15_with_list = yaml_15.trim().to_string();
+    yaml_15_with_list.push_str("\n\nmodel_list:");
+    for i in 0..15 {
+        yaml_15_with_list.push_str(&format!("\n  - /path/to/model_{}.gguf", i + 1));
+    }
+
+    let file_15 = output_dir.join("benchmark-15-models.yml");
+    std::fs::write(&file_15, yaml_15_with_list)
+        .with_context(|| format!("Failed to write {}", file_15.display()))?;
+    info!("[generate_gpu_cpu] generated {}", file_15.display());
+
+    // Generate benchmark-50-models.yml with placeholder list
+    let models_50_placeholder: Vec<ModelCandidate> = (0..50).map(|i| ModelCandidate {
+        path: PathBuf::from(format!("/path/to/model_{}.gguf", i + 1)),
+        model_id: format!("model_{}", i + 1),
+        file_size_bytes: 0,
+        estimated_vram_bytes: 0,
+        fits_in_vram: true,
+        author: "placeholder".to_string(),
+    }).collect();
+
+    let yaml_50 = BenchmarkYamlGenerator::generate_benchmark_yaml_gpu_cpu_compare(
+        "benchmark-50-models",
+        &models_50_placeholder,
+        &prompts,
+        max_tokens,
+    )?;
+
+    let mut yaml_50_with_list = yaml_50.trim().to_string();
+    yaml_50_with_list.push_str("\n\nmodel_list:");
+    for i in 0..50 {
+        yaml_50_with_list.push_str(&format!("\n  - /path/to/model_{}.gguf", i + 1));
+    }
+
+    let file_50 = output_dir.join("benchmark-50-models.yml");
+    std::fs::write(&file_50, yaml_50_with_list)
+        .with_context(|| format!("Failed to write {}", file_50.display()))?;
+    info!("[generate_gpu_cpu] generated {}", file_50.display());
+
+    Ok(())
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_benchmark_result_to_csv() {
+        let result = ModelBenchmarkResult {
+            model_id: "test-model".to_string(),
+            model_path: "/path/to/model.gguf".to_string(),
+            file_size_bytes: 1_000_000_000,
+            load_duration: Duration::from_secs(5),
+            inference_results: vec![],
+            unload_duration: Duration::from_secs(2),
+            total_duration: Duration::from_secs(10),
+            tokens_per_second: 25.5,
+            avg_latency_ms: 100.0,
+            p50_latency_ms: 95.0,
+            p95_latency_ms: 150.0,
+            p99_latency_ms: 200.0,
+            error: None,
+            gpu_mode: "gpu".to_string(),
+            speedup_factor: Some(2.5),
+        };
+
+        let suite = BenchmarkSuiteResult {
+            timestamp: "2024-01-01T00:00:00Z".to_string(),
+            server_url: "http://localhost:8080".to_string(),
+            total_models: 1,
+            successful: 1,
+            failed: 0,
+            results: vec![result],
+        };
+
+        let csv = suite.to_csv();
+        assert!(csv.contains("test-model"));
+        assert!(csv.contains("1000000000")); // 1GB in bytes
+        assert!(csv.contains("2.50"));
+    }
+
+    #[test]
+    fn test_generate_gpu_cpu_compare_benchmarks() {
+        let output_dir = std::path::PathBuf::from("/tmp/test-benchmarks");
+        std::fs::create_dir_all(&output_dir).unwrap();
+
+        let result = generate_gpu_cpu_compare_benchmarks(&output_dir);
+        assert!(result.is_ok(), "Failed to generate benchmarks: {:?}", result.err());
+
+        // Verify all 4 files exist
+        let file_3 = output_dir.join("benchmark-3-models.yml");
+        let file_5 = output_dir.join("benchmark-5-models.yml");
+        let file_15 = output_dir.join("benchmark-15-models.yml");
+        let file_50 = output_dir.join("benchmark-50-models.yml");
+
+        assert!(file_3.exists(), "benchmark-3-models.yml not found");
+        assert!(file_5.exists(), "benchmark-5-models.yml not found");
+        assert!(file_15.exists(), "benchmark-15-models.yml not found");
+        assert!(file_50.exists(), "benchmark-50-models.yml not found");
+
+        // Verify GPU/CPU comparison elements in 3-model file
+        let yaml_3 = std::fs::read_to_string(&file_3).unwrap();
+        assert!(yaml_3.contains("compare_modes: true"), "Missing compare_modes");
+        assert!(yaml_3.contains("modes: [gpu, cpu]"), "Missing modes");
+        assert!(yaml_3.contains("gpu_config:"), "Missing gpu_config");
+        assert!(yaml_3.contains("cpu_config:"), "Missing cpu_config");
+        assert!(yaml_3.contains("n_gpu_layers: 999"), "Missing GPU layers config");
+        assert!(yaml_3.contains("n_gpu_layers: 0"), "Missing CPU layers config");
+        assert!(yaml_3.contains("type: oscillate_abstraction"), "Missing oscillate_abstraction");
+        assert!(yaml_3.contains("generate_speedup_report"), "Missing speedup report step");
+        assert!(yaml_3.contains("comparison_mode: gpu_vs_cpu"), "Missing GPU vs CPU comparison mode");
+
+        // Verify model_list at bottom
+        assert!(yaml_3.contains("model_list:"), "Missing model_list section");
+        assert!(yaml_3.contains("/run/media/jon/data/models/lmstudio-community/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"),
+            "Missing model 1 path");
+        assert!(yaml_3.contains("/run/media/jon/data/models/lmstudio-community/Phi-4-mini-reasoning-GGUF/Phi-4-mini-reasoning-Q4_K_M.gguf"),
+            "Missing model 2 path");
+        assert!(yaml_3.contains("/run/media/jon/data/models/hugging-quants/Llama-3.2-1B-Instruct-Q8_0-GGUF/llama-3.2-1b-instruct-q8_0.gguf"),
+            "Missing model 3 path");
+
+        // Verify 5-model file has placeholder entries
+        let yaml_5 = std::fs::read_to_string(&file_5).unwrap();
+        assert!(yaml_5.contains("/path/to/model_1.gguf"));
+        assert!(yaml_5.contains("/path/to/model_5.gguf"));
+
+        // Verify 15-model file has placeholder entries
+        let yaml_15 = std::fs::read_to_string(&file_15).unwrap();
+        assert!(yaml_15.contains("/path/to/model_1.gguf"));
+        assert!(yaml_15.contains("/path/to/model_15.gguf"));
+
+        // Verify 50-model file has placeholder entries
+        let yaml_50 = std::fs::read_to_string(&file_50).unwrap();
+        assert!(yaml_50.contains("/path/to/model_1.gguf"));
+        assert!(yaml_50.contains("/path/to/model_50.gguf"));
+
+        // Cleanup
+        std::fs::remove_dir_all(&output_dir).unwrap();
+    }
+}

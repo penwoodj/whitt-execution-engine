@@ -3,6 +3,8 @@ use crate::client::types::{ChatCompletionRequest, ChatMessage};
 use super::{BenchmarkSuiteResult, ModelBenchmarkResult, InferenceResult};
 use anyhow::{Context, Result};
 use regex::Regex;
+use std::fs;
+use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, Instant};
 use std::process::Command;
@@ -19,6 +21,7 @@ pub struct BenchmarkConfig {
     pub filter_name: Option<String>,
     pub delay_between_swaps: Duration,
     pub compare_gpu_cpu: bool,
+    pub output_dir: Option<String>,
 }
 
 pub struct BenchmarkRunner {
@@ -28,6 +31,118 @@ pub struct BenchmarkRunner {
 impl BenchmarkRunner {
     pub fn new(config: BenchmarkConfig) -> Self {
         Self { config }
+    }
+
+    /// Ensure output directories exist.
+    fn ensure_output_dirs(&self) -> Result<()> {
+        if let Some(ref output_dir) = self.config.output_dir {
+            let logs_dir = Path::new(output_dir).join("logs");
+            let output_file_dir = Path::new(output_dir).join("output");
+
+            fs::create_dir_all(&logs_dir)
+                .with_context(|| format!("Failed to create logs directory: {}", logs_dir.display()))?;
+            fs::create_dir_all(&output_file_dir)
+                .with_context(|| format!("Failed to create output directory: {}", output_file_dir.display()))?;
+
+            info!("[benchmark] output directories ready: {}", output_dir);
+        }
+        Ok(())
+    }
+
+    /// Log step start to benchmark.log.
+    fn log_step_start(&self, model_id: &str, index: usize, total: usize, gpu_mode: &str) -> Result<()> {
+        if let Some(ref output_dir) = self.config.output_dir {
+            let log_path = Path::new(output_dir).join("logs/benchmark.log");
+            let timestamp = format!("{:?}", std::time::SystemTime::now());
+            let line = format!(
+                "{} [START] Model [{}/{}]: {} (mode: {})\n",
+                timestamp, index + 1, total, model_id, gpu_mode
+            );
+
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)
+                .with_context(|| format!("Failed to open log file: {}", log_path.display()))?;
+
+            file.write_all(line.as_bytes())
+                .context("Failed to write to benchmark.log")?;
+        }
+        Ok(())
+    }
+
+    /// Log step result to benchmark_results.yaml.
+    fn log_step_result(&self, result: &ModelBenchmarkResult) -> Result<()> {
+        if let Some(ref output_dir) = self.config.output_dir {
+            let yaml_path = Path::new(output_dir).join("output/benchmark_results.yaml");
+
+            let yaml_fragment = format!(
+                "- model_id: \"{}\"\n  tokens_per_second: {}\n  avg_latency_ms: {}\n  gpu_mode: \"{}\"\n  load_duration_ms: {}\n  total_duration_ms: {}\n  inference_count: {}\n",
+                result.model_id,
+                result.tokens_per_second,
+                result.avg_latency_ms,
+                result.gpu_mode,
+                result.load_duration.as_millis(),
+                result.total_duration.as_millis(),
+                result.inference_results.len(),
+            );
+
+            if let Some(ref err) = result.error {
+                let yaml_with_error = format!("{}  error: \"{}\"\n", yaml_fragment, err);
+                let mut file = fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&yaml_path)
+                    .with_context(|| format!("Failed to open YAML file: {}", yaml_path.display()))?;
+
+                file.write_all(yaml_with_error.as_bytes())
+                    .context("Failed to write to benchmark_results.yaml")?;
+            } else {
+                let mut file = fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&yaml_path)
+                    .with_context(|| format!("Failed to open YAML file: {}", yaml_path.display()))?;
+
+                file.write_all(yaml_fragment.as_bytes())
+                    .context("Failed to write to benchmark_results.yaml")?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Log step error to benchmark-errors.log.
+    fn log_step_error(&self, model_id: &str, error: &str) -> Result<()> {
+        if let Some(ref output_dir) = self.config.output_dir {
+            let error_log_path = Path::new(output_dir).join("logs/benchmark-errors.log");
+            let timestamp = format!("{:?}", std::time::SystemTime::now());
+            let line = format!("{} [ERROR] Model: {} - {}\n", timestamp, model_id, error);
+
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&error_log_path)
+                .with_context(|| format!("Failed to open error log: {}", error_log_path.display()))?;
+
+            file.write_all(line.as_bytes())
+                .context("Failed to write to benchmark-errors.log")?;
+        }
+        Ok(())
+    }
+
+    /// Write final JSON report to benchmark_report.json.
+    fn write_final_report(&self, suite_result: &BenchmarkSuiteResult) -> Result<()> {
+        if let Some(ref output_dir) = self.config.output_dir {
+            let report_path = Path::new(output_dir).join("output/benchmark_report.json");
+            let json_output = serde_json::to_string_pretty(suite_result)
+                .context("Failed to serialize suite result to JSON")?;
+
+            fs::write(&report_path, json_output)
+                .with_context(|| format!("Failed to write benchmark report: {}", report_path.display()))?;
+
+            info!("[benchmark] final report written to {}", report_path.display());
+        }
+        Ok(())
     }
 
     /// Restart Docker container with specific GPU layers setting.
@@ -163,6 +278,9 @@ impl BenchmarkRunner {
     }
 
     pub async fn run(&self) -> Result<BenchmarkSuiteResult> {
+        self.ensure_output_dirs()
+            .context("Failed to ensure output directories")?;
+
         let client = LlamaHttpClient::new(&self.config.server_url)
             .context("Failed to create HTTP client")?;
         let models = self.discover_models()
@@ -181,17 +299,31 @@ impl BenchmarkRunner {
             info!("[benchmark] Running in GPU/CPU comparison mode");
 
             for (i, model_id) in models.iter().enumerate() {
+                self.log_step_start(model_id, i, models.len(), "gpu")?;
+
                 info!("[benchmark] [{}/{}] loading {} (GPU mode)", i+1, models.len(), model_id);
 
                 let gpu_result = self.benchmark_single_model(&client, model_id, "gpu").await;
 
+                if let Some(ref err) = gpu_result.error {
+                    self.log_step_error(model_id, err)?;
+                }
+                self.log_step_result(&gpu_result)?;
+
                 if gpu_result.error.is_none() {
+                    self.log_step_start(model_id, i, models.len(), "cpu")?;
+
                     info!("[benchmark] [{}/{}] loading {} (CPU mode)", i+1, models.len(), model_id);
 
                     self.restart_docker_with_gpu_layers(0).await
                         .context("Failed to restart Docker in CPU mode")?;
 
                     let cpu_result = self.benchmark_single_model(&client, model_id, "cpu").await;
+
+                    if let Some(ref err) = cpu_result.error {
+                        self.log_step_error(model_id, err)?;
+                    }
+                    self.log_step_result(&cpu_result)?;
 
                     if cpu_result.error.is_none() {
                         let speedup = cpu_result.tokens_per_second / gpu_result.tokens_per_second;
@@ -221,9 +353,17 @@ impl BenchmarkRunner {
             }
         } else {
             for (i, model_id) in models.iter().enumerate() {
+                self.log_step_start(model_id, i, models.len(), "gpu")?;
+
                 info!("[benchmark] [{}/{}] loading {}", i+1, models.len(), model_id);
 
                 let model_result = self.benchmark_single_model(&client, model_id, "gpu").await;
+
+                if let Some(ref err) = model_result.error {
+                    self.log_step_error(model_id, err)?;
+                }
+                self.log_step_result(&model_result)?;
+
                 results.push(model_result);
 
                 if i < models.len() - 1 {
@@ -236,29 +376,34 @@ impl BenchmarkRunner {
         let failed = results.len() - successful;
         let timestamp = format!("{:?}", std::time::SystemTime::now());
 
-        Ok(BenchmarkSuiteResult {
+        let suite_result = BenchmarkSuiteResult {
             timestamp,
             server_url: self.config.server_url.clone(),
             total_models: results.len(),
             successful,
             failed,
             results,
-        })
+        };
+
+        self.write_final_report(&suite_result)?;
+
+        Ok(suite_result)
     }
 
     async fn benchmark_single_model(&self, client: &LlamaHttpClient, model_id: &str, gpu_mode: &str) -> ModelBenchmarkResult {
+        let server_model_id = model_id.strip_suffix(".gguf").unwrap_or(model_id);
         let start = Instant::now();
 
         if let Ok(models) = client.list_models().await {
             for m in models {
-                if m.status.value == "loaded" && m.id != model_id {
+                if m.status.value == "loaded" && m.id != server_model_id {
                     let _ = client.unload_model(&m.id).await;
                 }
             }
         }
 
         let load_start = Instant::now();
-        let load_result = client.load_model(model_id).await;
+        let load_result = client.load_model(server_model_id).await;
         let load_duration = load_start.elapsed();
 
         if let Err(e) = load_result {
@@ -285,7 +430,7 @@ impl BenchmarkRunner {
 
         for prompt in &self.config.prompts {
             let request = ChatCompletionRequest {
-                model: model_id.to_string(),
+                model: server_model_id.to_string(),
                 messages: vec![ChatMessage::user(prompt)],
                 max_tokens: Some(self.config.max_tokens),
                 stream: false,
@@ -317,7 +462,7 @@ impl BenchmarkRunner {
         }
 
         let unload_start = Instant::now();
-        let _ = client.unload_model(model_id).await;
+        let _ = client.unload_model(server_model_id).await;
         let unload_duration = unload_start.elapsed();
 
         let total_duration = start.elapsed();
@@ -393,6 +538,7 @@ mod tests {
             filter_name: None,
             delay_between_swaps: Duration::from_secs(2),
             compare_gpu_cpu: true,
+            output_dir: None,
         };
 
         assert!(config.compare_gpu_cpu, "compare_gpu_cpu should be true");

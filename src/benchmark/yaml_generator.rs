@@ -136,6 +136,43 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, "      save_to: benchmark_results")?;
         writeln!(yaml)?;
 
+        // Agentic document refinement step
+        writeln!(yaml, "  - step: refine_document")?;
+        writeln!(yaml, "    id: doc_refine")?;
+        writeln!(yaml, "    type: oscillate_abstraction")?;
+        writeln!(yaml, "    generative_entity: \"${{models.primary}}\"")?;
+        writeln!(yaml, "    requires: [bench_loop]")?;
+        writeln!(yaml, "    loop:")?;
+        writeln!(yaml, "      count:")?;
+        writeln!(yaml, "        max_iterations: {}", n)?;
+        writeln!(yaml, "        iteration_variable: current_model")?;
+        writeln!(yaml, "    input:")?;
+        writeln!(yaml, "      file_path: \"./docs/plans/multi-model-benchmark/01-IMPLEMENTATION-PLAN.md\"")?;
+        writeln!(yaml, "      chunk_size: 4000")?;
+        writeln!(yaml, "      oscillations: 3")?;
+        writeln!(yaml, "      overlap: 200")?;
+        writeln!(yaml, "    prompts:")?;
+        writeln!(yaml, "      summarize: |")?;
+        writeln!(yaml, "        Summarize the following text, extracting key technical points.")?;
+        writeln!(yaml, "        Keep: numbers, paths, function names, struct fields, error messages.")?;
+        writeln!(yaml, "        Drop: filler, hedging, repetition, transitions.")?;
+        writeln!(yaml, "        Target: 2000 chars max.")?;
+        writeln!(yaml)?;
+        writeln!(yaml, "        Text:")?;
+        writeln!(yaml, "        {{{{loop.previous_output}}}}")?;
+        writeln!(yaml, "      expand: |")?;
+        writeln!(yaml, "        Expand on this summary by adding implementation detail, edge cases,")?;
+        writeln!(yaml, "        and performance considerations a senior engineer would expect.")?;
+        writeln!(yaml, "        Keep all existing technical facts. Target: 3000 chars max.")?;
+        writeln!(yaml)?;
+        writeln!(yaml, "        Summary:")?;
+        writeln!(yaml, "        {{{{loop.previous_output}}}}")?;
+        writeln!(yaml, "    output:")?;
+        writeln!(yaml, "      save_to: refined_plans")?;
+        writeln!(yaml, "      format: text")?;
+        writeln!(yaml, "      path: \"./workspace/output/refined_plan_{{{{loop.current_model}}}}.md\"")?;
+        writeln!(yaml)?;
+
         // Generate report step
         writeln!(yaml, "  - step: generate_report")?;
         writeln!(yaml, "    id: report")?;
@@ -222,6 +259,231 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, "      save_to: benchmark_results")?;
         writeln!(yaml)?;
 
+        // Agentic document refinement step
+        writeln!(yaml, "  - step: refine_document")?;
+        writeln!(yaml, "    id: doc_refine")?;
+        writeln!(yaml, "    type: oscillate_abstraction")?;
+        writeln!(yaml, "    generative_entity: \"${{models.primary}}\"")?;
+        writeln!(yaml, "    requires: [bench_loop]")?;
+        writeln!(yaml, "    loop:")?;
+        writeln!(yaml, "      count:")?;
+        writeln!(yaml, "        max_iterations: {}", n)?;
+        writeln!(yaml, "        iteration_variable: current_model")?;
+        writeln!(yaml, "    input:")?;
+        writeln!(yaml, "      file_path: \"./docs/plans/multi-model-benchmark/01-IMPLEMENTATION-PLAN.md\"")?;
+        writeln!(yaml, "      chunk_size: 4000")?;
+        writeln!(yaml, "      oscillations: 3")?;
+        writeln!(yaml, "      overlap: 200")?;
+        writeln!(yaml, "    prompts:")?;
+        writeln!(yaml, "      summarize: |")?;
+        writeln!(yaml, "        Summarize the following text, extracting key technical points.")?;
+        writeln!(yaml, "        Keep: numbers, paths, function names, struct fields, error messages.")?;
+        writeln!(yaml, "        Drop: filler, hedging, repetition, transitions.")?;
+        writeln!(yaml, "        Target: 2000 chars max.")?;
+        writeln!(yaml)?;
+        writeln!(yaml, "        Text:")?;
+        writeln!(yaml, "        {{{{loop.previous_output}}}}")?;
+        writeln!(yaml, "      expand: |")?;
+        writeln!(yaml, "        Expand on this summary by adding implementation detail, edge cases,")?;
+        writeln!(yaml, "        and performance considerations a senior engineer would expect.")?;
+        writeln!(yaml, "        Keep all existing technical facts. Target: 3000 chars max.")?;
+        writeln!(yaml)?;
+        writeln!(yaml, "        Summary:")?;
+        writeln!(yaml, "        {{{{loop.previous_output}}}}")?;
+        writeln!(yaml, "    output:")?;
+        writeln!(yaml, "      save_to: refined_plans")?;
+        writeln!(yaml, "      format: text")?;
+        writeln!(yaml, "      path: \"./workspace/output/refined_plan_{{{{loop.current_model}}}}.md\"")?;
+        writeln!(yaml)?;
+
+        Ok(yaml)
+    }
+
+    /// Generate benchmark YAML with GPU/CPU comparison mode.
+    ///
+    /// Output includes:
+    /// - Header section (workflow_id, name, description, min_schema_version)
+    /// - Models section with placeholder for current model
+    /// - Execution config (serial mode, memory settings)
+    /// - Logging config (global and performance_metrics)
+    /// - Benchmark config (prompts, max_tokens, temperature, top_p, compare_modes)
+    /// - Agentic workflow with 4 steps:
+    ///   1. benchmark_performance (nested model+mode loops for GPU/CPU)
+    ///   2. refine_document (oscillate_abstraction per model)
+    ///   3. generate_speedup_report (GPU vs CPU comparison)
+    ///   4. generate_report (combined results)
+    ///
+    /// YAML is valid YAML syntax. Does not validate against UnifiedConfig.
+    pub fn generate_benchmark_yaml_gpu_cpu_compare(
+        _name: &str,
+        models: &[ModelCandidate],
+        prompts: &[&str],
+        max_tokens: usize,
+    ) -> Result<String> {
+        let n = models.len();
+        info!("[yaml_generator] generating GPU/CPU compare benchmark YAML for {} models", n);
+
+        let mut yaml = String::new();
+
+        // Header
+        writeln!(yaml, "workflow_id: benchmark_{}_models", n)?;
+        writeln!(yaml, r#"name: "{}-Model GPU/CPU Benchmark Suite""#, n)?;
+        writeln!(
+            yaml,
+            r#"description: "GPU vs CPU performance benchmark of {} diverse models""#,
+            n
+        )?;
+        writeln!(yaml, "min_schema_version: \"2.0.0\"")?;
+        writeln!(yaml)?;
+
+        // Models section
+        writeln!(yaml, "models:")?;
+        writeln!(yaml, "  primary:")?;
+        writeln!(yaml, "    provider: lmstudio")?;
+        writeln!(yaml, "    model: \"${{benchmark.current_model}}\"")?;
+        writeln!(yaml)?;
+
+        // Execution section
+        writeln!(yaml, "execution:")?;
+        writeln!(yaml, "  mode: serial")?;
+        writeln!(yaml, "  memory:")?;
+        writeln!(yaml, "    max_allocated_memory_mb: 8192")?;
+        writeln!(yaml, "    model_memory_mb: 6144")?;
+        writeln!(yaml, "    unload_unused: true")?;
+        writeln!(yaml)?;
+
+        // Logging section
+        writeln!(yaml, "logging:")?;
+        writeln!(yaml, "  global:")?;
+        writeln!(yaml, "    level: info")?;
+        writeln!(yaml, "    detail: medium")?;
+        writeln!(yaml, "    output_type: chat")?;
+        writeln!(yaml, "    format: json")?;
+        writeln!(yaml, "    console: true")?;
+        writeln!(yaml, "  performance_metrics:")?;
+        writeln!(yaml, "    level: debug")?;
+        writeln!(yaml, "    detail: very_high")?;
+        writeln!(yaml)?;
+
+        // Benchmark config section with GPU/CPU comparison
+        writeln!(yaml, "benchmark:")?;
+        writeln!(yaml, "  compare_modes: true")?;
+        writeln!(yaml, "  modes: [gpu, cpu]")?;
+        writeln!(yaml, "  gpu_config:")?;
+        writeln!(yaml, "    n_gpu_layers: 999")?;
+        writeln!(yaml, "  cpu_config:")?;
+        writeln!(yaml, "    n_gpu_layers: 0")?;
+        writeln!(yaml, "  prompts:")?;
+        for prompt in prompts {
+            let prompt_escaped = prompt.replace('\n', "\\n").replace('"', r#"\"#);
+            writeln!(yaml, r#"    - "{}""#, prompt_escaped)?;
+        }
+        writeln!(yaml, "  max_tokens: {}", max_tokens)?;
+        writeln!(yaml, "  temperature: 0.7")?;
+        writeln!(yaml, "  top_p: 0.9")?;
+        writeln!(yaml)?;
+
+        // Agentic workflow section
+        writeln!(yaml, "agentic_workflow:")?;
+
+        // Step 1: Benchmark performance with nested model+mode loops
+        writeln!(yaml, "  # Step 1: Benchmark each model in GPU then CPU mode")?;
+        writeln!(yaml, "  - step: benchmark_performance")?;
+        writeln!(yaml, "    id: perf_bench")?;
+        writeln!(yaml, "    loop:")?;
+        writeln!(yaml, "      count:")?;
+        writeln!(yaml, "        max_iterations: {}", n)?;
+        writeln!(yaml, "        iteration_variable: current_model")?;
+        writeln!(yaml, "      modes: [gpu, cpu]")?;
+        writeln!(yaml, "      mode_variable: gpu_mode")?;
+        writeln!(yaml, "    input:")?;
+        writeln!(yaml, r#"      prompts: "${{benchmark.prompts}}""#)?;
+        writeln!(yaml, r#"      max_tokens: "${{benchmark.max_tokens}}""#)?;
+        writeln!(yaml, r#"      gpu_mode: "{{{{loop.gpu_mode}}}}""#)?;
+        writeln!(yaml, r#"      n_gpu_layers: "{{{{loop.gpu_mode == 'gpu' ? 999 : 0}}}}""#)?;
+        writeln!(yaml, "    when:")?;
+        writeln!(yaml, "      before_step_starts:")?;
+        writeln!(yaml, "        action: configure_server")?;
+        writeln!(yaml, r#"        gpu_mode: "{{{{loop.gpu_mode}}}}""#)?;
+        writeln!(yaml, "      after_step_succeeds:")?;
+        writeln!(yaml, "        append_to:")?;
+        writeln!(yaml, "          - \"./workspace/output/benchmark_results.yaml\"")?;
+        writeln!(yaml, "          - benchmark_collection")?;
+        writeln!(yaml, "      after_loop_iteration_fails:")?;
+        writeln!(yaml, "        log:")?;
+        writeln!(yaml, "          to_file_path: \"./workspace/logs/benchmark-errors.log\"")?;
+        writeln!(yaml, "          event_fields: [iteration, current_model, gpu_mode, error_message]")?;
+        writeln!(yaml, "    output:")?;
+        writeln!(yaml, "      save_to: benchmark_results")?;
+        writeln!(yaml)?;
+
+        // Step 2: Agentic document refinement per model
+        writeln!(yaml, "  # Step 2: Agentic document refinement per model (oscillate_abstraction)")?;
+        writeln!(yaml, "  - step: refine_document")?;
+        writeln!(yaml, "    id: doc_refine")?;
+        writeln!(yaml, "    type: oscillate_abstraction")?;
+        writeln!(yaml, "    generative_entity: \"${{models.primary}}\"")?;
+        writeln!(yaml, "    requires: [perf_bench]")?;
+        writeln!(yaml, "    loop:")?;
+        writeln!(yaml, "      count:")?;
+        writeln!(yaml, "        max_iterations: {}", n)?;
+        writeln!(yaml, "        iteration_variable: current_model")?;
+        writeln!(yaml, "    input:")?;
+        writeln!(yaml, "      file_path: \"./docs/plans/multi-model-benchmark/01-IMPLEMENTATION-PLAN.md\"")?;
+        writeln!(yaml, "      chunk_size: 4000")?;
+        writeln!(yaml, "      oscillations: 3")?;
+        writeln!(yaml, "      overlap: 200")?;
+        writeln!(yaml, "    prompts:")?;
+        writeln!(yaml, "      summarize: |")?;
+        writeln!(yaml, "        Summarize the following text, extracting key technical points.")?;
+        writeln!(yaml, "        Keep: numbers, paths, function names, struct fields, error messages.")?;
+        writeln!(yaml, "        Drop: filler, hedging, repetition, transitions.")?;
+        writeln!(yaml, "        Target: 2000 chars max.")?;
+        writeln!(yaml)?;
+        writeln!(yaml, "        Text:")?;
+        writeln!(yaml, "        {{{{loop.previous_output}}}}")?;
+        writeln!(yaml, "      expand: |")?;
+        writeln!(yaml, "        Expand on this summary by adding implementation detail, edge cases,")?;
+        writeln!(yaml, "        and performance considerations a senior engineer would expect.")?;
+        writeln!(yaml, "        Keep all existing technical facts. Target: 3000 chars max.")?;
+        writeln!(yaml)?;
+        writeln!(yaml, "        Summary:")?;
+        writeln!(yaml, "        {{{{loop.previous_output}}}}")?;
+        writeln!(yaml, "    output:")?;
+        writeln!(yaml, "      save_to: refined_plans")?;
+        writeln!(yaml, "      format: text")?;
+        writeln!(yaml, "      path: \"./workspace/output/refined_plan_{{{{loop.current_model}}}}.md\"")?;
+        writeln!(yaml)?;
+
+        // Step 3: Generate speedup comparison report
+        writeln!(yaml, "  # Step 3: Generate speedup comparison report")?;
+        writeln!(yaml, "  - step: generate_speedup_report")?;
+        writeln!(yaml, "    id: speedup_report")?;
+        writeln!(yaml, "    requires: [perf_bench]")?;
+        writeln!(yaml, "    input:")?;
+        writeln!(yaml, r#"      benchmark_results: "{{{{step.perf_bench.output}}}}""#)?;
+        writeln!(yaml, "      comparison_mode: gpu_vs_cpu")?;
+        writeln!(yaml, "    output:")?;
+        writeln!(yaml, "      save_to:")?;
+        writeln!(yaml, "        - speedup_report")?;
+        writeln!(yaml, "        - \"./workspace/output/speedup_report.json\"")?;
+        writeln!(yaml)?;
+
+        // Step 4: Generate combined report
+        writeln!(yaml, "  # Step 4: Generate combined report")?;
+        writeln!(yaml, "  - step: generate_report")?;
+        writeln!(yaml, "    id: report")?;
+        writeln!(yaml, "    requires: [perf_bench, doc_refine, speedup_report]")?;
+        writeln!(yaml, "    input:")?;
+        writeln!(yaml, r#"      benchmark_results: "{{{{step.perf_bench.output}}}}""#)?;
+        writeln!(yaml, r#"      refined_plans: "{{{{step.doc_refine.output}}}}""#)?;
+        writeln!(yaml, r#"      speedup_data: "{{{{step.speedup_report.output}}}}""#)?;
+        writeln!(yaml, "    output:")?;
+        writeln!(yaml, "      save_to:")?;
+        writeln!(yaml, "        - final_report")?;
+        writeln!(yaml, "        - \"./workspace/output/benchmark_report.json\"")?;
+
+        info!("[yaml_generator] generated {} bytes of GPU/CPU compare YAML", yaml.len());
         Ok(yaml)
     }
 }

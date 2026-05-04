@@ -174,6 +174,10 @@ enum Commands {
         /// Compare GPU vs CPU performance (each model runs twice)
         #[arg(long)]
         compare_gpu_cpu: bool,
+
+        /// Output directory for benchmark files (default: ./workspace)
+        #[arg(long)]
+        output_dir: Option<String>,
     },
 
     /// Load and validate unified YAML workflow configuration
@@ -297,7 +301,7 @@ async fn main() -> Result<()> {
             agent_command(&cli.url, cli.model, task, max_steps, cli.verbose, AgentOpts { allowed_tools, forbidden_tools, allowed_paths, forbidden_paths }).await
         }
 
-        Commands::Benchmark { prompt, max_tokens, models_dir, model_list, prompts, output, filter_size_max, filter_name, compare_gpu_cpu } => {
+        Commands::Benchmark { prompt, max_tokens, models_dir, model_list, prompts, output, filter_size_max, filter_name, compare_gpu_cpu, output_dir } => {
             tracing::info!("[WHT-BEN001] benchmark command, max_tokens={}, prompts={}", max_tokens, prompts);
 
             if models_dir.is_some() || model_list.is_some() {
@@ -313,6 +317,7 @@ async fn main() -> Result<()> {
                     filter_name,
                     delay_between_swaps: std::time::Duration::from_secs(2),
                     compare_gpu_cpu,
+                    output_dir,
                 };
 
                 let runner = BenchmarkRunner::new(config);

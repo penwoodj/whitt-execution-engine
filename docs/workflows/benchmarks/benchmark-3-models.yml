@@ -1,6 +1,6 @@
 workflow_id: benchmark_3_models
-name: "3-Model Quick Validation Benchmark"
-description: "Quick benchmark of 3 diverse models for validation (15-30 min)"
+name: "3-Model GPU/CPU Benchmark Suite"
+description: "GPU vs CPU performance benchmark of 3 diverse models"
 min_schema_version: "2.0.0"
 
 models:
@@ -27,35 +27,56 @@ logging:
     detail: very_high
 
 benchmark:
+  compare_modes: true
+  modes: [gpu, cpu]
+  gpu_config:
+    n_gpu_layers: 999
+  cpu_config:
+    n_gpu_layers: 0
   prompts:
-    - "Explain the concept of recursion in programming, with a practical example."
+    - "Explain concept of recursion in programming, with a practical example."
     - "Write a Rust function that finds the longest increasing subsequence in a vector."
-    - "Analyze the tradeoffs between microservices and monolithic architectures."
+    - "Analyze tradeoffs between microservices and monolithic architectures."
   max_tokens: 128
   temperature: 0.7
   top_p: 0.9
 
 agentic_workflow:
-  # Step 1: Benchmark performance
+  # Step 1: Benchmark each model in GPU then CPU mode
   - step: benchmark_performance
     id: perf_bench
     loop:
       count:
         max_iterations: 3
         iteration_variable: current_model
+      modes: [gpu, cpu]
+      mode_variable: gpu_mode
     input:
-      prompts:
-        - "Explain the concept of recursion in programming, with a practical example."
-        - "Write a Rust function that finds the longest increasing subsequence in a vector."
-        - "Analyze the tradeoffs between microservices and monolithic architectures."
-      max_tokens: 128
+      prompts: "${benchmark.prompts}"
+      max_tokens: "${benchmark.max_tokens}"
+      gpu_mode: "{{loop.gpu_mode}}"
+      n_gpu_layers: "{{loop.gpu_mode == 'gpu' ? 999 : 0}}"
+    when:
+      before_step_starts:
+        action: configure_server
+        gpu_mode: "{{loop.gpu_mode}}"
+      after_step_succeeds:
+        append_to:
+          - "./workspace/output/benchmark_results.yaml"
+          - benchmark_collection
+      after_loop_iteration_fails:
+        log:
+          to_file_path: "./workspace/logs/benchmark-errors.log"
+          event_fields: [iteration, current_model, gpu_mode, error_message]
     output:
       save_to: benchmark_results
 
-  # Step 2: Agentic document refinement per model
+  # Step 2: Agentic document refinement per model (oscillate_abstraction)
   - step: refine_document
     id: doc_refine
     type: oscillate_abstraction
+    generative_entity: "${models.primary}"
+    requires: [perf_bench]
     loop:
       count:
         max_iterations: 3
@@ -86,13 +107,26 @@ agentic_workflow:
       format: text
       path: "./workspace/output/refined_plan_{{loop.current_model}}.md"
 
-  # Step 3: Generate combined report
+  # Step 3: Generate speedup comparison report
+  - step: generate_speedup_report
+    id: speedup_report
+    requires: [perf_bench]
+    input:
+      benchmark_results: "{{step.perf_bench.output}}"
+      comparison_mode: gpu_vs_cpu
+    output:
+      save_to:
+        - speedup_report
+        - "./workspace/output/speedup_report.json"
+
+  # Step 4: Generate combined report
   - step: generate_report
     id: report
-    requires: [perf_bench, doc_refine]
+    requires: [perf_bench, doc_refine, speedup_report]
     input:
       benchmark_results: "{{step.perf_bench.output}}"
       refined_plans: "{{step.doc_refine.output}}"
+      speedup_data: "{{step.speedup_report.output}}"
     output:
       save_to:
         - final_report
