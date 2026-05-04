@@ -202,7 +202,10 @@ impl BenchmarkRunner {
                 content.push_str(&format!("    total_tokens: {}\n", inf.total_tokens));
                 content.push_str(&format!("    duration: {}ms ({:.3}s)\n", inf.duration.as_millis(), inf.duration.as_secs_f64()));
                 content.push_str(&format!("    tokens_per_second: {:.2}\n", inf.tokens_per_second));
-                content.push_str(&format!("    response_text: {:?}\n", inf.response_text));
+                content.push_str(&format!("    response_text:\n"));
+                for line in inf.response_text.lines() {
+                    content.push_str(&format!("      {}\n", line));
+                }
             }
 
             if let Some(ref err) = result.error {
@@ -218,6 +221,84 @@ impl BenchmarkRunner {
                 .with_context(|| format!("Failed to write per-model report: {}", file_path.display()))?;
 
             info!("[benchmark] per-model report written to {}", file_path.display());
+        }
+        Ok(())
+    }
+
+    /// Append model result to markdown chat log with timestamps.
+    fn append_chat_log_markdown(&self, result: &ModelBenchmarkResult, run_timestamp: &str) -> Result<()> {
+        if let Some(ref output_dir) = self.config.output_dir {
+            let chat_path = Path::new(output_dir).join("chat-log.md");
+
+            let mut md = String::new();
+
+            if !chat_path.exists() {
+                md.push_str(&format!("# Benchmark Chat Log\n\n"));
+                md.push_str(&format!("Run: {}  \n", run_timestamp));
+                md.push_str(&format!("Server: {}  \n", self.config.server_url));
+                md.push_str(&format!("Models: {}  \n\n", result.model_id));
+                md.push_str(&format!("---\n\n"));
+            }
+
+            md.push_str(&format!("## {} ({})\n\n", result.model_id, result.gpu_mode.to_uppercase()));
+
+            if result.error.is_some() {
+                md.push_str(&format!("> **ERROR**: {}\n\n", result.error.as_deref().unwrap_or("unknown")));
+                md.push_str(&format!("---\n\n"));
+            } else {
+                md.push_str(&format!("| Metric | Value |\n|---|---|\n"));
+                md.push_str(&format!("| Load | {}ms |\n", result.load_duration.as_millis()));
+                md.push_str(&format!("| Unload | {}ms |\n", result.unload_duration.as_millis()));
+                md.push_str(&format!("| Total | {}ms |\n", result.total_duration.as_millis()));
+                md.push_str(&format!("| Tokens/s | {:.2} |\n", result.tokens_per_second));
+                md.push_str(&format!("| Avg Latency | {:.2}ms |\n\n", result.avg_latency_ms));
+
+                for (i, inf) in result.inference_results.iter().enumerate() {
+                    let ts = {
+                        let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                        format!("unix_epoch_{}s", d.as_secs())
+                    };
+                    md.push_str(&format!("### Prompt {} ({})\n\n", i + 1, ts));
+                    md.push_str(&format!("**User**: {}\n\n", inf.prompt));
+                    md.push_str(&format!("**Model**: ({} prompt tokens, {} completion tokens, {}ms, {:.2} tok/s)\n\n",
+                        inf.prompt_tokens, inf.completion_tokens, inf.duration.as_millis(), inf.tokens_per_second));
+                    md.push_str(&format!("**Response**:\n\n{}\n\n", inf.response_text));
+                }
+
+                md.push_str(&format!("---\n\n"));
+            }
+
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&chat_path)
+                .with_context(|| format!("Failed to open chat log: {}", chat_path.display()))?;
+
+            file.write_all(md.as_bytes())
+                .context("Failed to write chat-log.md")?;
+
+            info!("[benchmark] chat log appended to {}", chat_path.display());
+        }
+        Ok(())
+    }
+
+    /// Copy the YAML workflow file into the output directory if available.
+    fn copy_workflow_yaml(&self) -> Result<()> {
+        if let Some(ref output_dir) = self.config.output_dir {
+            let workflow_candidates = vec![
+                "docs/workflows/benchmarks/benchmark-3-models.yml",
+                "docs/workflows/benchmarks/benchmark-5-models.yml",
+                "docs/workflows/benchmarks/benchmark-15-models.yml",
+                "docs/workflows/benchmarks/benchmark-50-models.yml",
+            ];
+
+            for wf in &workflow_candidates {
+                let src = Path::new(wf);
+                if src.exists() {
+                    let dest = Path::new(output_dir).join(src.file_name().unwrap());
+                    let _ = fs::copy(src, dest);
+                }
+            }
         }
         Ok(())
     }
@@ -357,6 +438,7 @@ impl BenchmarkRunner {
     pub async fn run(&self) -> Result<BenchmarkSuiteResult> {
         self.ensure_output_dirs()
             .context("Failed to ensure output directories")?;
+        let _ = self.copy_workflow_yaml();
 
         let client = LlamaHttpClient::new(&self.config.server_url)
             .context("Failed to create HTTP client")?;
@@ -419,15 +501,19 @@ impl BenchmarkRunner {
                         let mut gpu_result_with_speedup = gpu_result.clone();
                         gpu_result_with_speedup.speedup_factor = Some(speedup);
                         self.write_per_model_report(&gpu_result_with_speedup, &suite_metadata)?;
+                        self.append_chat_log_markdown(&gpu_result_with_speedup, &run_timestamp)?;
                         results.push(gpu_result_with_speedup);
 
                         let mut cpu_result_with_speedup = cpu_result.clone();
                         cpu_result_with_speedup.speedup_factor = Some(speedup);
                         self.write_per_model_report(&cpu_result_with_speedup, &suite_metadata)?;
+                        self.append_chat_log_markdown(&cpu_result_with_speedup, &run_timestamp)?;
                         results.push(cpu_result_with_speedup);
                     } else {
                         self.write_per_model_report(&gpu_result, &suite_metadata)?;
+                        self.append_chat_log_markdown(&gpu_result, &run_timestamp)?;
                         self.write_per_model_report(&cpu_result, &suite_metadata)?;
+                        self.append_chat_log_markdown(&cpu_result, &run_timestamp)?;
                         results.push(gpu_result);
                         results.push(cpu_result);
                     }
@@ -436,6 +522,7 @@ impl BenchmarkRunner {
                         .context("Failed to restart Docker in GPU mode")?;
                 } else {
                     self.write_per_model_report(&gpu_result, &suite_metadata)?;
+                    self.append_chat_log_markdown(&gpu_result, &run_timestamp)?;
                     results.push(gpu_result);
                 }
 
@@ -456,6 +543,7 @@ impl BenchmarkRunner {
                 }
                 self.log_step_result(&model_result)?;
                 self.write_per_model_report(&model_result, &suite_metadata)?;
+                self.append_chat_log_markdown(&model_result, &run_timestamp)?;
 
                 results.push(model_result);
 
