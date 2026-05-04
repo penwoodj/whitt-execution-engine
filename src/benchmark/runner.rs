@@ -3,6 +3,7 @@ use crate::client::types::{ChatCompletionRequest, ChatMessage};
 use super::{BenchmarkSuiteResult, ModelBenchmarkResult, InferenceResult};
 use anyhow::{Context, Result};
 use regex::Regex;
+use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -22,15 +23,90 @@ pub struct BenchmarkConfig {
     pub delay_between_swaps: Duration,
     pub compare_gpu_cpu: bool,
     pub output_dir: Option<String>,
+    pub workflow_file: Option<String>,
 }
 
 pub struct BenchmarkRunner {
     config: BenchmarkConfig,
 }
 
+struct WorkflowContext {
+    workflow_id: String,
+    workflow_name: String,
+    step_name: String,
+    step_id: String,
+    compare_modes: bool,
+    prompts: Vec<String>,
+    max_tokens: usize,
+    model_list: Vec<String>,
+}
+
 impl BenchmarkRunner {
     pub fn new(config: BenchmarkConfig) -> Self {
         Self { config }
+    }
+
+    fn parse_workflow_context(&self) -> Option<WorkflowContext> {
+        let wf_path = self.config.workflow_file.as_ref()?;
+        let content = fs::read_to_string(wf_path).ok()?;
+
+        let mut workflow_id = String::new();
+        let mut workflow_name = String::new();
+        let mut step_name = String::new();
+        let mut step_id = String::new();
+        let mut compare_modes = false;
+        let mut prompts: Vec<String> = Vec::new();
+        let mut max_tokens = 128;
+        let mut model_list: Vec<String> = Vec::new();
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("workflow_id:") {
+                workflow_id = trimmed.trim_start_matches("workflow_id:").trim().trim_matches('"').to_string();
+            } else if trimmed.starts_with("name:") && workflow_name.is_empty() {
+                workflow_name = trimmed.trim_start_matches("name:").trim().trim_matches('"').to_string();
+            } else if trimmed.starts_with("- step:") && step_name.is_empty() {
+                step_name = trimmed.trim_start_matches("- step:").trim().to_string();
+            } else if trimmed.starts_with("id:") && step_id.is_empty() {
+                step_id = trimmed.trim_start_matches("id:").trim().to_string();
+            } else if trimmed.starts_with("compare_modes:") {
+                compare_modes = trimmed.contains("true");
+            } else if trimmed.starts_with("max_tokens:") {
+                max_tokens = trimmed.trim_start_matches("max_tokens:").trim().parse().unwrap_or(128);
+            } else if trimmed.starts_with("- \"") && prompts.is_empty() {
+
+            } else if trimmed.starts_with("- /") && (trimmed.contains(".gguf") || trimmed.contains("models")) {
+                model_list.push(trimmed.trim_start_matches("- ").trim().to_string());
+            }
+        }
+
+        let mut in_prompts = false;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed == "prompts:" {
+                in_prompts = true;
+                continue;
+            }
+            if in_prompts {
+                if trimmed.starts_with('-') && (trimmed.contains('"') || trimmed.starts_with("- \"")) {
+                    let p = trimmed.trim_start_matches("- ").trim().trim_matches('"').to_string();
+                    prompts.push(p);
+                } else if !trimmed.starts_with('-') && !trimmed.is_empty() {
+                    in_prompts = false;
+                }
+            }
+        }
+
+        Some(WorkflowContext {
+            workflow_id,
+            workflow_name,
+            step_name,
+            step_id,
+            compare_modes,
+            prompts,
+            max_tokens,
+            model_list,
+        })
     }
 
     /// Ensure output directories exist.
@@ -155,7 +231,7 @@ impl BenchmarkRunner {
     ///
     /// Creates a file named after the model (sanitized for filesystem) in the
     /// output directory. Contains every detail from the benchmark run.
-    fn write_per_model_report(&self, result: &ModelBenchmarkResult, suite_metadata: &str) -> Result<()> {
+    fn write_per_model_report(&self, result: &ModelBenchmarkResult, suite_metadata: &str, wf_ctx: Option<&WorkflowContext>) -> Result<()> {
         if let Some(ref output_dir) = self.config.output_dir {
             let safe_name = result.model_id
                 .replace(['/', '\\'], "_")
@@ -170,6 +246,20 @@ impl BenchmarkRunner {
             content.push_str(&format!("{}\n\n", "=".repeat(80)));
 
             content.push_str(&format!("{}\n", suite_metadata));
+
+            if let Some(ctx) = wf_ctx {
+                content.push_str(&format!("\n--- Workflow Context ---\n"));
+                content.push_str(&format!("workflow_file: {}\n", self.config.workflow_file.as_deref().unwrap_or("")));
+                content.push_str(&format!("workflow_id: {}\n", ctx.workflow_id));
+                content.push_str(&format!("workflow_name: {}\n", ctx.workflow_name));
+                content.push_str(&format!("agentic_step: {} (id: {})\n", ctx.step_name, ctx.step_id));
+                content.push_str(&format!("compare_modes: {}\n", ctx.compare_modes));
+                content.push_str(&format!("workflow_max_tokens: {}\n", ctx.max_tokens));
+                content.push_str(&format!("workflow_prompts:\n"));
+                for (pi, p) in ctx.prompts.iter().enumerate() {
+                    content.push_str(&format!("  [{}]: {}\n", pi + 1, p));
+                }
+            }
 
             content.push_str(&format!("\n--- Model Identity ---\n"));
             content.push_str(&format!("model_id: {}\n", result.model_id));
@@ -464,6 +554,13 @@ impl BenchmarkRunner {
             run_timestamp, self.config.server_url, models.len(), self.config.compare_gpu_cpu
         );
 
+        let wf_ctx = self.parse_workflow_context();
+
+        if let Some(ref ctx) = wf_ctx {
+            info!("[benchmark] workflow: {} ({})", ctx.workflow_name, ctx.workflow_id);
+            info!("[benchmark] agentic step: {} (id: {})", ctx.step_name, ctx.step_id);
+        }
+
         if self.config.compare_gpu_cpu {
             info!("[benchmark] Running in GPU/CPU comparison mode");
 
@@ -500,19 +597,19 @@ impl BenchmarkRunner {
 
                         let mut gpu_result_with_speedup = gpu_result.clone();
                         gpu_result_with_speedup.speedup_factor = Some(speedup);
-                        self.write_per_model_report(&gpu_result_with_speedup, &suite_metadata)?;
+                        self.write_per_model_report(&gpu_result_with_speedup, &suite_metadata, wf_ctx.as_ref())?;
                         self.append_chat_log_markdown(&gpu_result_with_speedup, &run_timestamp)?;
                         results.push(gpu_result_with_speedup);
 
                         let mut cpu_result_with_speedup = cpu_result.clone();
                         cpu_result_with_speedup.speedup_factor = Some(speedup);
-                        self.write_per_model_report(&cpu_result_with_speedup, &suite_metadata)?;
+                        self.write_per_model_report(&cpu_result_with_speedup, &suite_metadata, wf_ctx.as_ref())?;
                         self.append_chat_log_markdown(&cpu_result_with_speedup, &run_timestamp)?;
                         results.push(cpu_result_with_speedup);
                     } else {
-                        self.write_per_model_report(&gpu_result, &suite_metadata)?;
+                        self.write_per_model_report(&gpu_result, &suite_metadata, wf_ctx.as_ref())?;
                         self.append_chat_log_markdown(&gpu_result, &run_timestamp)?;
-                        self.write_per_model_report(&cpu_result, &suite_metadata)?;
+                        self.write_per_model_report(&cpu_result, &suite_metadata, wf_ctx.as_ref())?;
                         self.append_chat_log_markdown(&cpu_result, &run_timestamp)?;
                         results.push(gpu_result);
                         results.push(cpu_result);
@@ -521,7 +618,7 @@ impl BenchmarkRunner {
                     self.restart_docker_with_gpu_layers(999).await
                         .context("Failed to restart Docker in GPU mode")?;
                 } else {
-                    self.write_per_model_report(&gpu_result, &suite_metadata)?;
+                    self.write_per_model_report(&gpu_result, &suite_metadata, wf_ctx.as_ref())?;
                     self.append_chat_log_markdown(&gpu_result, &run_timestamp)?;
                     results.push(gpu_result);
                 }
@@ -542,7 +639,7 @@ impl BenchmarkRunner {
                     self.log_step_error(model_id, err)?;
                 }
                 self.log_step_result(&model_result)?;
-                self.write_per_model_report(&model_result, &suite_metadata)?;
+                self.write_per_model_report(&model_result, &suite_metadata, wf_ctx.as_ref())?;
                 self.append_chat_log_markdown(&model_result, &run_timestamp)?;
 
                 results.push(model_result);
@@ -746,6 +843,7 @@ mod tests {
             delay_between_swaps: Duration::from_secs(2),
             compare_gpu_cpu: true,
             output_dir: None,
+            workflow_file: None,
         };
 
         assert!(config.compare_gpu_cpu, "compare_gpu_cpu should be true");
