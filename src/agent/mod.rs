@@ -4,6 +4,10 @@ pub mod executor;
 pub mod streaming;
 pub mod persistence;
 pub mod sandbox;
+pub mod chunker;
+pub mod oscillation;
+pub mod loop_executor;
+pub mod loop_hooks;
 
 pub use tools::{Tool, ToolCall, ToolResult, ToolRegistry, ToolExecutor};
 pub use react::ReactAgent;
@@ -11,3 +15,7 @@ pub use executor::StepExecutor;
 pub use streaming::StreamingResponse;
 pub use persistence::WorkflowPersistence;
 pub use sandbox::ToolSandbox;
+pub use chunker::FileChunker;
+pub use oscillation::OscillationExecutor;
+pub use loop_executor::{LoopExecutor, LoopResult, LoopContext};
+pub use loop_hooks::{LoopHook, HookAction, HookContext};

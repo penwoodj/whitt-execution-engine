@@ -11,4 +11,7 @@ pub mod model;
 pub mod quality;
 
 #[cfg(feature = "client")]
+pub mod benchmark;
+
+#[cfg(feature = "client")]
 pub mod client;

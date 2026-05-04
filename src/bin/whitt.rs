@@ -13,6 +13,7 @@ use whitt_execution_engine::client::model_download::download_model_from_hf;
 use whitt_execution_engine::client::types::{
     ChatCompletionRequest, ChatMessage,
 };
+use whitt_execution_engine::benchmark::runner::{BenchmarkRunner, BenchmarkConfig};
 
 #[derive(Parser, Debug)]
 #[command(name = "whitt")]
@@ -138,7 +139,7 @@ enum Commands {
 
     /// Benchmark model performance
     Benchmark {
-        /// Prompt text
+        /// Prompt text (can be specified multiple times)
         #[arg(long, default_value = "The quick brown fox jumps over the lazy dog.")]
         prompt: Option<String>,
 
@@ -146,9 +147,29 @@ enum Commands {
         #[arg(long, default_value = "100")]
         max_tokens: usize,
 
-        /// Number of concurrent requests
-        #[arg(short = 'c', long, default_value = "1")]
-        concurrent: usize,
+        /// Directory to scan for GGUF models (multi-model benchmark)
+        #[arg(long)]
+        models_dir: Option<String>,
+
+        /// File containing model paths, one per line
+        #[arg(long)]
+        model_list: Option<String>,
+
+        /// Number of prompts to run per model
+        #[arg(long, default_value = "3")]
+        prompts: usize,
+
+        /// Output format: table, json, csv
+        #[arg(long, default_value = "table")]
+        output: String,
+
+        /// Skip models larger than this (bytes)
+        #[arg(long)]
+        filter_size_max: Option<u64>,
+
+        /// Regex filter on model name
+        #[arg(long)]
+        filter_name: Option<String>,
     },
 
     /// Load and validate unified YAML workflow configuration
@@ -272,9 +293,36 @@ async fn main() -> Result<()> {
             agent_command(&cli.url, cli.model, task, max_steps, cli.verbose, AgentOpts { allowed_tools, forbidden_tools, allowed_paths, forbidden_paths }).await
         }
 
-        Commands::Benchmark { prompt, max_tokens, concurrent } => {
-            tracing::info!("[WHT-BEN001] benchmark command, max_tokens={}, concurrent={}", max_tokens, concurrent);
-            benchmark_command(&cli.url, prompt, max_tokens, concurrent).await
+        Commands::Benchmark { prompt, max_tokens, models_dir, model_list, prompts, output, filter_size_max, filter_name } => {
+            tracing::info!("[WHT-BEN001] benchmark command, max_tokens={}, prompts={}", max_tokens, prompts);
+
+            if models_dir.is_some() || model_list.is_some() {
+                let prompts_vec = (0..prompts).map(|i| format!("{} (iteration {})", prompt.clone().unwrap_or_else(|| "The quick brown fox jumps over the lazy dog.".to_string()), i + 1)).collect();
+
+                let config = BenchmarkConfig {
+                    server_url: cli.url.clone(),
+                    models_dir,
+                    model_list_file: model_list,
+                    prompts: prompts_vec,
+                    max_tokens,
+                    filter_size_max,
+                    filter_name,
+                    delay_between_swaps: std::time::Duration::from_secs(2),
+                };
+
+                let runner = BenchmarkRunner::new(config);
+                let result = runner.run().await.context("Benchmark run failed")?;
+
+                match output.as_str() {
+                    "json" => println!("{}", serde_json::to_string_pretty(&result)?),
+                    "csv" => println!("{}", result.to_csv()),
+                    _ => println!("{}", result.to_table()),
+                }
+
+                Ok(())
+            } else {
+                benchmark_command(&cli.url, prompt, max_tokens).await
+            }
         }
 
         Commands::Download { repo, file, output } => {
@@ -1101,7 +1149,7 @@ async fn parse_and_execute_tool(
     Ok(None)
 }
 
-async fn benchmark_command(url: &str, prompt: Option<String>, max_tokens: usize, concurrent: usize) -> Result<()> {
+async fn benchmark_command(url: &str, prompt: Option<String>, max_tokens: usize) -> Result<()> {
     let client = LlamaHttpClient::new(url)?;
 
     let models = client.list_models().await?;
@@ -1122,7 +1170,6 @@ async fn benchmark_command(url: &str, prompt: Option<String>, max_tokens: usize,
     println!("Server: {}", url);
     println!("Prompt: {}", prompt_text);
     println!("Max tokens: {}", max_tokens);
-    println!("Concurrent: {}", concurrent);
     println!();
 
     let request = ChatCompletionRequest {

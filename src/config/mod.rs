@@ -13,6 +13,7 @@
 //!
 //! All defaults match llama.cpp upstream defaults where applicable.
 
+pub mod loop_config;
 pub mod provider;
 pub mod unified;
 
