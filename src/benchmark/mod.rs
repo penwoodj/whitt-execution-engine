@@ -38,6 +38,8 @@ pub struct ModelBenchmarkResult {
     pub p95_latency_ms: f64,
     pub p99_latency_ms: f64,
     pub error: Option<String>,
+    pub gpu_mode: String,
+    pub speedup_factor: Option<f64>,
 }
 
 /// Aggregate benchmark result across all models.
@@ -56,11 +58,13 @@ impl BenchmarkSuiteResult {
         let mut csv = String::new();
         csv.push_str("model_id,model_path,file_size_bytes,load_duration_ms,inference_count,");
         csv.push_str("unload_duration_ms,total_duration_ms,tokens_per_second,");
-        csv.push_str("avg_latency_ms,p50_latency_ms,p95_latency_ms,p99_latency_ms,error\n");
+        csv.push_str("avg_latency_ms,p50_latency_ms,p95_latency_ms,p99_latency_ms,");
+        csv.push_str("gpu_mode,speedup_factor,error\n");
 
         for result in &self.results {
+            let speedup = result.speedup_factor.map(|f| format!("{:.2}", f)).unwrap_or_else(|| "-".to_string());
             csv.push_str(&format!(
-                "{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+                "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
                 result.model_id,
                 result.model_path,
                 result.file_size_bytes,
@@ -73,6 +77,8 @@ impl BenchmarkSuiteResult {
                 result.p50_latency_ms,
                 result.p95_latency_ms,
                 result.p99_latency_ms,
+                result.gpu_mode,
+                speedup,
                 result.error.as_deref().unwrap_or("")
             ));
         }
@@ -93,22 +99,26 @@ impl BenchmarkSuiteResult {
         table.push_str(&format!("Failed: {}\n", self.failed));
         table.push('\n');
 
-        table.push_str(&format!("{:<60} {:>10} {:>12} {:>10}\n", "Model", "Size (MB)", "Tokens/s", "Avg (ms)"));
-        table.push_str(&"-".repeat(96));
+        table.push_str(&format!("{:<60} {:>10} {:>12} {:>10} {:>8} {:>10}\n", "Model", "Size (MB)", "Tokens/s", "Avg (ms)", "GPU", "Speedup"));
+        table.push_str(&"-".repeat(116));
         table.push('\n');
 
         for result in &self.results {
             let size_mb = result.file_size_bytes as f64 / (1024.0 * 1024.0);
             let tps = if result.error.is_some() { "-" } else { &format!("{:.2}", result.tokens_per_second) };
             let avg_ms = if result.error.is_some() { "-" } else { &format!("{:.2}", result.avg_latency_ms) };
+            let gpu_mode = if result.error.is_some() { "-" } else { &result.gpu_mode };
+            let speedup = result.speedup_factor.map(|f| format!("{:.2}x", f)).unwrap_or_else(|| "-".to_string());
             let error_marker = if result.error.is_some() { " [FAILED]" } else { "" };
 
             table.push_str(&format!(
-                "{:<60}{:>10.1} {:>12} {:>10}{}\n",
+                "{:<60}{:>10.1} {:>12} {:>10} {:>8} {:>10}{}\n",
                 format!("{}{}", result.model_id, error_marker),
                 size_mb,
                 tps,
                 avg_ms,
+                gpu_mode,
+                speedup,
                 ""
             ));
         }
@@ -125,10 +135,14 @@ impl BenchmarkSuiteResult {
             table.push_str(&"-".repeat(80));
             table.push('\n');
             table.push_str(&format!("File Size: {:.2} MB\n", result.file_size_bytes as f64 / (1024.0 * 1024.0)));
+            table.push_str(&format!("GPU Mode: {}\n", result.gpu_mode));
             table.push_str(&format!("Load Duration: {:.2}s\n", result.load_duration.as_secs_f64()));
             table.push_str(&format!("Unload Duration: {:.2}s\n", result.unload_duration.as_secs_f64()));
             table.push_str(&format!("Total Duration: {:.2}s\n", result.total_duration.as_secs_f64()));
             table.push_str(&format!("Tokens/Second: {:.2}\n", result.tokens_per_second));
+            if let Some(speedup) = result.speedup_factor {
+                table.push_str(&format!("Speedup Factor: {:.2}x\n", speedup));
+            }
             table.push_str(&format!("Avg Latency: {:.2}ms\n", result.avg_latency_ms));
             table.push_str(&format!("P50 Latency: {:.2}ms\n", result.p50_latency_ms));
             table.push_str(&format!("P95 Latency: {:.2}ms\n", result.p95_latency_ms));

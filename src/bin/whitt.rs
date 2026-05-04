@@ -170,6 +170,10 @@ enum Commands {
         /// Regex filter on model name
         #[arg(long)]
         filter_name: Option<String>,
+
+        /// Compare GPU vs CPU performance (each model runs twice)
+        #[arg(long)]
+        compare_gpu_cpu: bool,
     },
 
     /// Load and validate unified YAML workflow configuration
@@ -293,7 +297,7 @@ async fn main() -> Result<()> {
             agent_command(&cli.url, cli.model, task, max_steps, cli.verbose, AgentOpts { allowed_tools, forbidden_tools, allowed_paths, forbidden_paths }).await
         }
 
-        Commands::Benchmark { prompt, max_tokens, models_dir, model_list, prompts, output, filter_size_max, filter_name } => {
+        Commands::Benchmark { prompt, max_tokens, models_dir, model_list, prompts, output, filter_size_max, filter_name, compare_gpu_cpu } => {
             tracing::info!("[WHT-BEN001] benchmark command, max_tokens={}, prompts={}", max_tokens, prompts);
 
             if models_dir.is_some() || model_list.is_some() {
@@ -308,6 +312,7 @@ async fn main() -> Result<()> {
                     filter_size_max,
                     filter_name,
                     delay_between_swaps: std::time::Duration::from_secs(2),
+                    compare_gpu_cpu,
                 };
 
                 let runner = BenchmarkRunner::new(config);

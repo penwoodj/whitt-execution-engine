@@ -5,6 +5,8 @@ use anyhow::{Context, Result};
 use regex::Regex;
 use std::path::Path;
 use std::time::{Duration, Instant};
+use std::process::Command;
+use tokio::time::sleep;
 use tracing::{info, warn};
 
 pub struct BenchmarkConfig {
@@ -16,6 +18,7 @@ pub struct BenchmarkConfig {
     pub filter_size_max: Option<u64>,
     pub filter_name: Option<String>,
     pub delay_between_swaps: Duration,
+    pub compare_gpu_cpu: bool,
 }
 
 pub struct BenchmarkRunner {
@@ -25,6 +28,53 @@ pub struct BenchmarkRunner {
 impl BenchmarkRunner {
     pub fn new(config: BenchmarkConfig) -> Self {
         Self { config }
+    }
+
+    /// Restart Docker container with specific GPU layers setting.
+    ///
+    /// `n_gpu_layers`: 0 for CPU-only, high value (e.g., 999) for GPU mode
+    async fn restart_docker_with_gpu_layers(&self, n_gpu_layers: u32) -> Result<()> {
+        info!("[benchmark] restarting Docker with n-gpu-layers={}", n_gpu_layers);
+
+        // Stop the container
+        let stop_status = Command::new("docker")
+            .args(["compose", "down"])
+            .output()
+            .context("Failed to stop Docker container")?;
+
+        if !stop_status.status.success() {
+            let stderr = String::from_utf8_lossy(&stop_status.stderr);
+            anyhow::bail!("docker compose down failed: {}", stderr);
+        }
+
+        // Wait for container to stop
+        sleep(Duration::from_secs(2)).await;
+
+        // Start with GPU layers override
+        let start_status = Command::new("docker")
+            .args(["compose", "up", "-d"])
+            .env("LLAMA_ARG_N_GPU_LAYERS", n_gpu_layers.to_string())
+            .output()
+            .context("Failed to start Docker container")?;
+
+        if !start_status.status.success() {
+            let stderr = String::from_utf8_lossy(&start_status.stderr);
+            anyhow::bail!("docker compose up failed: {}", stderr);
+        }
+
+        // Wait for server to be ready
+        info!("[benchmark] waiting for server to be ready...");
+        let mut retries = 30;
+        while retries > 0 {
+            if reqwest::get(format!("{}/health", self.config.server_url)).await.is_ok() {
+                info!("[benchmark] server is ready");
+                return Ok(());
+            }
+            sleep(Duration::from_secs(1)).await;
+            retries -= 1;
+        }
+
+        anyhow::bail!("Server did not become ready after 30 seconds");
     }
 
     fn discover_models(&self) -> Result<Vec<String>> {
@@ -123,17 +173,62 @@ impl BenchmarkRunner {
         }
 
         info!("[benchmark] found {} models to benchmark", models.len());
+        info!("[benchmark] GPU/CPU comparison mode: {}", self.config.compare_gpu_cpu);
 
         let mut results = Vec::new();
 
-        for (i, model_id) in models.iter().enumerate() {
-            info!("[benchmark] [{}/{}] loading {}", i+1, models.len(), model_id);
+        if self.config.compare_gpu_cpu {
+            info!("[benchmark] Running in GPU/CPU comparison mode");
 
-            let model_result = self.benchmark_single_model(&client, model_id).await;
-            results.push(model_result);
+            for (i, model_id) in models.iter().enumerate() {
+                info!("[benchmark] [{}/{}] loading {} (GPU mode)", i+1, models.len(), model_id);
 
-            if i < models.len() - 1 {
-                tokio::time::sleep(self.config.delay_between_swaps).await;
+                let gpu_result = self.benchmark_single_model(&client, model_id, "gpu").await;
+
+                if gpu_result.error.is_none() {
+                    info!("[benchmark] [{}/{}] loading {} (CPU mode)", i+1, models.len(), model_id);
+
+                    self.restart_docker_with_gpu_layers(0).await
+                        .context("Failed to restart Docker in CPU mode")?;
+
+                    let cpu_result = self.benchmark_single_model(&client, model_id, "cpu").await;
+
+                    if cpu_result.error.is_none() {
+                        let speedup = cpu_result.tokens_per_second / gpu_result.tokens_per_second;
+                        info!("[benchmark] {} speedup factor: {:.2}x", model_id, speedup);
+
+                        let mut gpu_result_with_speedup = gpu_result.clone();
+                        gpu_result_with_speedup.speedup_factor = Some(speedup);
+                        results.push(gpu_result_with_speedup);
+
+                        let mut cpu_result_with_speedup = cpu_result.clone();
+                        cpu_result_with_speedup.speedup_factor = Some(speedup);
+                        results.push(cpu_result_with_speedup);
+                    } else {
+                        results.push(gpu_result);
+                        results.push(cpu_result);
+                    }
+
+                    self.restart_docker_with_gpu_layers(999).await
+                        .context("Failed to restart Docker in GPU mode")?;
+                } else {
+                    results.push(gpu_result);
+                }
+
+                if i < models.len() - 1 {
+                    tokio::time::sleep(self.config.delay_between_swaps).await;
+                }
+            }
+        } else {
+            for (i, model_id) in models.iter().enumerate() {
+                info!("[benchmark] [{}/{}] loading {}", i+1, models.len(), model_id);
+
+                let model_result = self.benchmark_single_model(&client, model_id, "gpu").await;
+                results.push(model_result);
+
+                if i < models.len() - 1 {
+                    tokio::time::sleep(self.config.delay_between_swaps).await;
+                }
             }
         }
 
@@ -151,7 +246,7 @@ impl BenchmarkRunner {
         })
     }
 
-    async fn benchmark_single_model(&self, client: &LlamaHttpClient, model_id: &str) -> ModelBenchmarkResult {
+    async fn benchmark_single_model(&self, client: &LlamaHttpClient, model_id: &str, gpu_mode: &str) -> ModelBenchmarkResult {
         let start = Instant::now();
 
         if let Ok(models) = client.list_models().await {
@@ -181,6 +276,8 @@ impl BenchmarkRunner {
                 p95_latency_ms: 0.0,
                 p99_latency_ms: 0.0,
                 error: Some(format!("Load failed: {}", e)),
+                gpu_mode: gpu_mode.to_string(),
+                speedup_factor: None,
             };
         }
 
@@ -265,6 +362,8 @@ impl BenchmarkRunner {
             p95_latency_ms: p95,
             p99_latency_ms: p99,
             error: None,
+            gpu_mode: gpu_mode.to_string(),
+            speedup_factor: None,
         }
     }
 }
@@ -275,4 +374,124 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
     }
     let idx = ((sorted.len() as f64) * p).min(sorted.len() as f64 - 1.0) as usize;
     sorted[idx]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn test_benchmark_config_with_compare_gpu_cpu() {
+        let config = BenchmarkConfig {
+            server_url: "http://localhost:8080".to_string(),
+            models_dir: Some("/models".to_string()),
+            model_list_file: None,
+            prompts: vec!["test prompt".to_string()],
+            max_tokens: 100,
+            filter_size_max: None,
+            filter_name: None,
+            delay_between_swaps: Duration::from_secs(2),
+            compare_gpu_cpu: true,
+        };
+
+        assert!(config.compare_gpu_cpu, "compare_gpu_cpu should be true");
+    }
+
+    #[test]
+    fn test_model_benchmark_result_with_gpu_mode_fields() {
+        let result = ModelBenchmarkResult {
+            model_id: "test-model.gguf".to_string(),
+            model_path: "/models/test-model.gguf".to_string(),
+            file_size_bytes: 1_000_000_000,
+            load_duration: Duration::from_secs(5),
+            inference_results: vec![],
+            unload_duration: Duration::from_secs(1),
+            total_duration: Duration::from_secs(6),
+            tokens_per_second: 100.0,
+            avg_latency_ms: 500.0,
+            p50_latency_ms: 450.0,
+            p95_latency_ms: 550.0,
+            p99_latency_ms: 600.0,
+            error: None,
+            gpu_mode: "gpu".to_string(),
+            speedup_factor: Some(2.5),
+        };
+
+        assert_eq!(result.gpu_mode, "gpu", "gpu_mode should be 'gpu'");
+        assert_eq!(result.speedup_factor, Some(2.5), "speedup_factor should be Some(2.5)");
+    }
+
+    #[test]
+    fn test_csv_output_includes_gpu_mode_and_speedup() {
+        let gpu_result = ModelBenchmarkResult {
+            model_id: "test-model.gguf".to_string(),
+            model_path: "/models/test-model.gguf".to_string(),
+            file_size_bytes: 1_000_000_000,
+            load_duration: Duration::from_secs(5),
+            inference_results: vec![],
+            unload_duration: Duration::from_secs(1),
+            total_duration: Duration::from_secs(6),
+            tokens_per_second: 100.0,
+            avg_latency_ms: 500.0,
+            p50_latency_ms: 450.0,
+            p95_latency_ms: 550.0,
+            p99_latency_ms: 600.0,
+            error: None,
+            gpu_mode: "gpu".to_string(),
+            speedup_factor: Some(2.5),
+        };
+
+        let suite_result = BenchmarkSuiteResult {
+            timestamp: "2024-01-01T00:00:00Z".to_string(),
+            server_url: "http://localhost:8080".to_string(),
+            total_models: 1,
+            successful: 1,
+            failed: 0,
+            results: vec![gpu_result],
+        };
+
+        let csv = suite_result.to_csv();
+        assert!(csv.contains("gpu_mode"), "CSV should contain 'gpu_mode' column");
+        assert!(csv.contains("speedup_factor"), "CSV should contain 'speedup_factor' column");
+        assert!(csv.contains("gpu"), "CSV should contain 'gpu' value");
+        assert!(csv.contains("2.50"), "CSV should contain '2.50' speedup value");
+    }
+
+    #[test]
+    fn test_table_output_includes_gpu_mode_and_speedup() {
+        let gpu_result = ModelBenchmarkResult {
+            model_id: "test-model.gguf".to_string(),
+            model_path: "/models/test-model.gguf".to_string(),
+            file_size_bytes: 1_000_000_000,
+            load_duration: Duration::from_secs(5),
+            inference_results: vec![],
+            unload_duration: Duration::from_secs(1),
+            total_duration: Duration::from_secs(6),
+            tokens_per_second: 100.0,
+            avg_latency_ms: 500.0,
+            p50_latency_ms: 450.0,
+            p95_latency_ms: 550.0,
+            p99_latency_ms: 600.0,
+            error: None,
+            gpu_mode: "gpu".to_string(),
+            speedup_factor: Some(2.5),
+        };
+
+        let suite_result = BenchmarkSuiteResult {
+            timestamp: "2024-01-01T00:00:00Z".to_string(),
+            server_url: "http://localhost:8080".to_string(),
+            total_models: 1,
+            successful: 1,
+            failed: 0,
+            results: vec![gpu_result],
+        };
+
+        let table = suite_result.to_table();
+        assert!(table.contains("GPU"), "Table should contain 'GPU' column header");
+        assert!(table.contains("Speedup"), "Table should contain 'Speedup' column header");
+        assert!(table.contains("GPU Mode:"), "Table should contain 'GPU Mode:' label");
+        assert!(table.contains("Speedup Factor:"), "Table should contain 'Speedup Factor:' label");
+        assert!(table.contains("2.50x"), "Table should contain '2.50x' speedup value");
+    }
 }
