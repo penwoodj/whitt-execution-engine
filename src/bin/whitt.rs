@@ -323,6 +323,8 @@ async fn main() -> Result<()> {
                     compare_gpu_cpu,
                     output_dir,
                     workflow_file: workflow,
+                    temperature: None,
+                    top_p: None,
                 };
 
                 let runner = BenchmarkRunner::new(config);
