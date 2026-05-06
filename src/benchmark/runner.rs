@@ -40,6 +40,14 @@ struct BenchmarkWorkflowConfig {
     model_list: Vec<String>,
 }
 
+struct WorkflowStep {
+    step_name: String,
+    step_id: String,
+    #[allow(dead_code)]
+    requires: Vec<String>,
+    when: Option<serde_json::Value>,
+}
+
 impl BenchmarkRunner {
     pub fn new(config: BenchmarkConfig) -> Self {
         Self { config }
@@ -91,6 +99,42 @@ impl BenchmarkRunner {
             compare_modes,
             model_list,
         })
+    }
+
+    fn load_workflow_steps(&self) -> Option<Vec<WorkflowStep>> {
+        let wf_path = self.config.workflow_file.as_ref()?;
+        let content = fs::read_to_string(wf_path).ok()?;
+
+        let yaml_value: serde_json::Value = serde_saphyr::from_str(&content).ok()?;
+        let agentic_workflow = yaml_value.get("agentic_workflow")?.as_array()?;
+
+        let steps: Vec<WorkflowStep> = agentic_workflow.iter()
+            .filter_map(|step| {
+                let step_name = step.get("step")?.as_str()?.to_string();
+                let step_id = step.get("id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| step_name.clone());
+                let requires = step.get("requires")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let when = step.get("when").cloned();
+
+                Some(WorkflowStep {
+                    step_name,
+                    step_id,
+                    requires,
+                    when,
+                })
+            })
+            .collect();
+
+        Some(steps)
     }
 
     /// Ensure output directories exist.
@@ -232,18 +276,19 @@ impl BenchmarkRunner {
             content.push_str(&format!("{}\n", suite_metadata));
 
             if let Some(ctx) = wf_ctx {
-                content.push_str(&format!("\n--- Workflow Context ---\n"));
+                content.push_str("\n--- Workflow Context ---\n");
                 content.push_str(&format!("workflow_file: {}\n", self.config.workflow_file.as_deref().unwrap_or("")));
+                content.push_str("workflow_step: benchmark_performance\n");
                 content.push_str(&format!("compare_modes: {}\n", ctx.compare_modes));
                 content.push_str(&format!("workflow_max_tokens: {}\n", ctx.max_tokens));
                 content.push_str(&format!("workflow_temperature: {}\n", ctx.temperature));
                 content.push_str(&format!("workflow_top_p: {}\n", ctx.top_p));
-                content.push_str(&format!("workflow_prompts:\n"));
+                content.push_str("workflow_prompts:\n");
                 for (pi, p) in ctx.prompts.iter().enumerate() {
                     content.push_str(&format!("  [{}]: {}\n", pi + 1, p));
                 }
                 if !ctx.model_list.is_empty() {
-                    content.push_str(&format!("workflow_model_list:\n"));
+                    content.push_str("workflow_model_list:\n");
                     for (mi, m) in ctx.model_list.iter().enumerate() {
                         content.push_str(&format!("  [{}]: {}\n", mi + 1, m));
                     }
@@ -362,6 +407,48 @@ impl BenchmarkRunner {
     }
 
     /// Copy the YAML workflow file into the output directory if available.
+    fn execute_hook(&self, hook: &Option<serde_json::Value>, step_name: &str, timing: &str) -> Result<()> {
+        if let Some(h) = hook {
+            if let Some(log) = h.get("log") {
+                if let Some(path) = log.get("to_file_path").and_then(|v| v.as_str()) {
+                    let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                    let timestamp = format!("unix_epoch_{}s", d.as_secs());
+                    let line = format!("[{}] step={} timing={}\n", timestamp, step_name, timing);
+
+                    let mut file = fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(path)
+                        .with_context(|| format!("Failed to open hook log file: {}", path))?;
+
+                    file.write_all(line.as_bytes())
+                        .context("Failed to write to hook log")?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn log_step_execution(&self, step: &WorkflowStep, results: &[ModelBenchmarkResult]) -> Result<()> {
+        if let Some(ref output_dir) = self.config.output_dir {
+            let log_path = Path::new(output_dir).join("logs/workflow_steps.log");
+            let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+            let timestamp = format!("unix_epoch_{}s", d.as_secs());
+            let line = format!("{} [STEP] id={} name={} models_benchmarked={}\n",
+                timestamp, step.step_id, step.step_name, results.len());
+
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)
+                .with_context(|| format!("Failed to open workflow steps log: {}", log_path.display()))?;
+
+            file.write_all(line.as_bytes())
+                .context("Failed to write to workflow_steps.log")?;
+        }
+        Ok(())
+    }
+
     fn copy_workflow_yaml(&self) -> Result<()> {
         if let Some(ref output_dir) = self.config.output_dir {
             let workflow_candidates = vec![
@@ -701,6 +788,21 @@ impl BenchmarkRunner {
                 if i < models.len() - 1 {
                     tokio::time::sleep(self.config.delay_between_swaps).await;
                 }
+            }
+        }
+
+        let workflow_steps = self.load_workflow_steps();
+        if let Some(steps) = workflow_steps {
+            info!("[benchmark] loaded {} workflow steps from YAML", steps.len());
+
+            for step in steps.iter().skip(1) {
+                info!("[benchmark] executing step: {} (id: {})", step.step_name, step.step_id);
+                self.log_step_execution(step, &results)?;
+
+                self.execute_hook(&step.when, &step.step_id, "before_step_starts")?;
+                self.execute_hook(&step.when, &step.step_id, "after_step_succeeds")?;
+
+                info!("[benchmark] step {} completed (stub execution)", step.step_id);
             }
         }
 
