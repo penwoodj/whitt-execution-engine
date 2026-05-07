@@ -42,48 +42,38 @@ impl BenchmarkYamlGenerator {
             r#"description: "Sequential benchmark of {} diverse models from external drive""#,
             n
         )?;
+        writeln!(yaml, "version: \"1.0.0\"")?;
+        writeln!(yaml, "author: \"Whitt Execution Engine\"")?;
+        writeln!(yaml, "tags: [benchmark]")?;
         writeln!(yaml, "min_schema_version: \"2.0.0\"")?;
+        writeln!(yaml, "schema_version: \"2.0.0\"")?;
         writeln!(yaml)?;
 
-        // Models section
+        // Providers section (schema line 27-31)
+        writeln!(yaml, "providers:")?;
+        writeln!(yaml, "  llama_cpp_with_vulkan:")?;
+        writeln!(yaml, "    config:")?;
+        writeln!(yaml, "      host: localhost")?;
+        writeln!(yaml, "      port: 8080")?;
+        writeln!(yaml)?;
+
+        // Models section (schema line 64-71)
         writeln!(yaml, "models:")?;
         writeln!(yaml, "  primary:")?;
-        writeln!(yaml, "    provider: lmstudio")?;
-        writeln!(yaml, "    model: \"${{benchmark.current_model}}\"")?;
+        writeln!(yaml, "    host:")?;
+        writeln!(yaml, "      type: llama_cpp_with_vulkan")?;
         writeln!(yaml)?;
 
-        // Execution section
-        writeln!(yaml, "execution:")?;
-        writeln!(yaml, "  mode: serial")?;
+        // Workflow execution strategy (schema line 503-526)
+        writeln!(yaml, "workflow_execution_strategy:")?;
+        writeln!(yaml, "  load_unload: one_at_a_time")?;
         writeln!(yaml, "  memory:")?;
-        writeln!(yaml, "    max_allocated_memory_mb: 8192")?;
-        writeln!(yaml, "    model_memory_mb: 6144")?;
-        writeln!(yaml, "    unload_unused: true")?;
-        writeln!(yaml)?;
-
-        // Logging section
-        writeln!(yaml, "logging:")?;
-        writeln!(yaml, "  global:")?;
-        writeln!(yaml, "    level: info")?;
-        writeln!(yaml, "    detail: medium")?;
-        writeln!(yaml, "    output_type: chat")?;
-        writeln!(yaml, "    format: json")?;
-        writeln!(yaml, "    console: true")?;
-        writeln!(yaml, "  performance_metrics:")?;
-        writeln!(yaml, "    level: debug")?;
-        writeln!(yaml, "    detail: very_high")?;
-        writeln!(yaml)?;
-
-        // Benchmark config section
-        writeln!(yaml, "benchmark:")?;
-        writeln!(yaml, "  prompts:")?;
-        for prompt in prompts {
-            let prompt_escaped = prompt.replace('\n', "\\n").replace('"', r#"\"#);
-            writeln!(yaml, r#"    - "{}""#, prompt_escaped)?;
-        }
-        writeln!(yaml, "  max_tokens: {}", max_tokens)?;
-        writeln!(yaml, "  temperature: 0.7")?;
-        writeln!(yaml, "  top_p: 0.9")?;
+        writeln!(yaml, "    model_lifecycle:")?;
+        writeln!(yaml, "      unload_unused: true")?;
+        writeln!(yaml, "    ram_allocation:")?;
+        writeln!(yaml, "      strategy: dynamic")?;
+        writeln!(yaml, "      max_allowed:")?;
+        writeln!(yaml, "        ram: 8192MB")?;
         writeln!(yaml)?;
 
         // Agentic workflow section
@@ -111,8 +101,6 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, "        iteration_variable: current_model")?;
         writeln!(yaml, "    input:")?;
         writeln!(yaml, r#"      model_path: "{{{{loop.current_model}}}}""#)?;
-        writeln!(yaml, r#"      prompts: "${{benchmark.prompts}}""#)?;
-        writeln!(yaml, r#"      max_tokens: "${{benchmark.max_tokens}}""#)?;
         writeln!(yaml, "    when:")?;
         writeln!(yaml, "      before_step_starts:")?;
         writeln!(yaml, "        log:")?;
@@ -207,40 +195,38 @@ impl BenchmarkYamlGenerator {
             r#"description: "Sequential benchmark of {} diverse models""#,
             n
         )?;
+        writeln!(yaml, "version: \"1.0.0\"")?;
+        writeln!(yaml, "author: \"Whitt Execution Engine\"")?;
+        writeln!(yaml, "tags: [benchmark]")?;
         writeln!(yaml, "min_schema_version: \"2.0.0\"")?;
+        writeln!(yaml, "schema_version: \"2.0.0\"")?;
         writeln!(yaml)?;
 
-        // Models section - embed model paths
-        writeln!(yaml, "benchmark:")?;
-        writeln!(yaml, "  models:")?;
-        for model in models {
-            writeln!(
-                yaml,
-                r#"    - path: "{}""#,
-                model.path.display()
-            )?;
-            writeln!(yaml, r#"      model_id: "{}""#, model.model_id)?;
-            writeln!(yaml, "      file_size_bytes: {}", model.file_size_bytes)?;
-        }
+        // Providers section (schema line 27-31)
+        writeln!(yaml, "providers:")?;
+        writeln!(yaml, "  llama_cpp_with_vulkan:")?;
+        writeln!(yaml, "    config:")?;
+        writeln!(yaml, "      host: localhost")?;
+        writeln!(yaml, "      port: 8080")?;
         writeln!(yaml)?;
 
-        // Prompts
-        writeln!(yaml, "  prompts:")?;
-        for prompt in prompts {
-            writeln!(yaml, "    - {}", prompt)?;
-        }
-        writeln!(yaml, "  max_tokens: {}", max_tokens)?;
-        writeln!(yaml, "  temperature: 0.7")?;
-        writeln!(yaml, "  top_p: 0.9")?;
+        // Models section (schema line 64-71)
+        writeln!(yaml, "models:")?;
+        writeln!(yaml, "  primary:")?;
+        writeln!(yaml, "    host:")?;
+        writeln!(yaml, "      type: llama_cpp_with_vulkan")?;
         writeln!(yaml)?;
 
-        // Execution config
-        writeln!(yaml, "execution:")?;
-        writeln!(yaml, "  mode: serial")?;
+        // Workflow execution strategy (schema line 503-526)
+        writeln!(yaml, "workflow_execution_strategy:")?;
+        writeln!(yaml, "  load_unload: one_at_a_time")?;
         writeln!(yaml, "  memory:")?;
-        writeln!(yaml, "    max_allocated_memory_mb: 8192")?;
-        writeln!(yaml, "    model_memory_mb: 6144")?;
-        writeln!(yaml, "    unload_unused: true")?;
+        writeln!(yaml, "    model_lifecycle:")?;
+        writeln!(yaml, "      unload_unused: true")?;
+        writeln!(yaml, "    ram_allocation:")?;
+        writeln!(yaml, "      strategy: dynamic")?;
+        writeln!(yaml, "      max_allowed:")?;
+        writeln!(yaml, "        ram: 8192MB")?;
         writeln!(yaml)?;
 
         // Agentic workflow with loop
@@ -252,9 +238,6 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, "        max_iterations: {}", n)?;
         writeln!(yaml, "        iteration_variable: current_model")?;
         writeln!(yaml, "    input:")?;
-        writeln!(yaml, r#"      model: "${{benchmark.models}}""#)?;
-        writeln!(yaml, r#"      prompts: "${{benchmark.prompts}}""#)?;
-        writeln!(yaml, r#"      max_tokens: "${{benchmark.max_tokens}}""#)?;
         writeln!(yaml, "    output:")?;
         writeln!(yaml, "      save_to: benchmark_results")?;
         writeln!(yaml)?;
@@ -333,74 +316,52 @@ impl BenchmarkYamlGenerator {
             r#"description: "GPU vs CPU performance benchmark of {} diverse models""#,
             n
         )?;
+        writeln!(yaml, "version: \"1.0.0\"")?;
+        writeln!(yaml, "author: \"Whitt Execution Engine\"")?;
+        writeln!(yaml, "tags: [benchmark]")?;
         writeln!(yaml, "min_schema_version: \"2.0.0\"")?;
+        writeln!(yaml, "schema_version: \"2.0.0\"")?;
         writeln!(yaml)?;
 
-        // Models section
+        // Providers section (schema line 27-31)
+        writeln!(yaml, "providers:")?;
+        writeln!(yaml, "  llama_cpp_with_vulkan:")?;
+        writeln!(yaml, "    config:")?;
+        writeln!(yaml, "      host: localhost")?;
+        writeln!(yaml, "      port: 8080")?;
+        writeln!(yaml)?;
+
+        // Models section (schema line 64-71)
         writeln!(yaml, "models:")?;
         writeln!(yaml, "  primary:")?;
-        writeln!(yaml, "    provider: lmstudio")?;
-        writeln!(yaml, "    model: \"${{benchmark.current_model}}\"")?;
+        writeln!(yaml, "    host:")?;
+        writeln!(yaml, "      type: llama_cpp_with_vulkan")?;
         writeln!(yaml)?;
 
-        // Execution section
-        writeln!(yaml, "execution:")?;
-        writeln!(yaml, "  mode: serial")?;
+        // Workflow execution strategy (schema line 503-526)
+        writeln!(yaml, "workflow_execution_strategy:")?;
+        writeln!(yaml, "  load_unload: one_at_a_time")?;
         writeln!(yaml, "  memory:")?;
-        writeln!(yaml, "    max_allocated_memory_mb: 8192")?;
-        writeln!(yaml, "    model_memory_mb: 6144")?;
-        writeln!(yaml, "    unload_unused: true")?;
-        writeln!(yaml)?;
-
-        // Logging section
-        writeln!(yaml, "logging:")?;
-        writeln!(yaml, "  global:")?;
-        writeln!(yaml, "    level: info")?;
-        writeln!(yaml, "    detail: medium")?;
-        writeln!(yaml, "    output_type: chat")?;
-        writeln!(yaml, "    format: json")?;
-        writeln!(yaml, "    console: true")?;
-        writeln!(yaml, "  performance_metrics:")?;
-        writeln!(yaml, "    level: debug")?;
-        writeln!(yaml, "    detail: very_high")?;
-        writeln!(yaml)?;
-
-        // Benchmark config section with GPU/CPU comparison
-        writeln!(yaml, "benchmark:")?;
-        writeln!(yaml, "  compare_modes: true")?;
-        writeln!(yaml, "  modes: [gpu, cpu]")?;
-        writeln!(yaml, "  gpu_config:")?;
-        writeln!(yaml, "    n_gpu_layers: 999")?;
-        writeln!(yaml, "  cpu_config:")?;
-        writeln!(yaml, "    n_gpu_layers: 0")?;
-        writeln!(yaml, "  prompts:")?;
-        for prompt in prompts {
-            let prompt_escaped = prompt.replace('\n', "\\n").replace('"', r#"\"#);
-            writeln!(yaml, r#"    - "{}""#, prompt_escaped)?;
-        }
-        writeln!(yaml, "  max_tokens: {}", max_tokens)?;
-        writeln!(yaml, "  temperature: 0.7")?;
-        writeln!(yaml, "  top_p: 0.9")?;
+        writeln!(yaml, "    model_lifecycle:")?;
+        writeln!(yaml, "      unload_unused: true")?;
+        writeln!(yaml, "    ram_allocation:")?;
+        writeln!(yaml, "      strategy: dynamic")?;
+        writeln!(yaml, "      max_allowed:")?;
+        writeln!(yaml, "        ram: 8192MB")?;
         writeln!(yaml)?;
 
         // Agentic workflow section
         writeln!(yaml, "agentic_workflow:")?;
 
-        // Step 1: Benchmark performance with nested model+mode loops
-        writeln!(yaml, "  # Step 1: Benchmark each model in GPU then CPU mode")?;
-        writeln!(yaml, "  - step: benchmark_performance")?;
-        writeln!(yaml, "    id: perf_bench")?;
+        // Step 1: Benchmark performance with model loop
+        writeln!(yaml, "  benchmark_performance:")?;
         writeln!(yaml, "    loop:")?;
         writeln!(yaml, "      count:")?;
         writeln!(yaml, "        max_iterations: {}", n)?;
         writeln!(yaml, "        iteration_variable: current_model")?;
-        writeln!(yaml, "      modes: [gpu, cpu]")?;
-        writeln!(yaml, "      mode_variable: gpu_mode")?;
         writeln!(yaml, "    input:")?;
-        writeln!(yaml, r#"      prompts: "${{benchmark.prompts}}""#)?;
-        writeln!(yaml, r#"      max_tokens: "${{benchmark.max_tokens}}""#)?;
-        writeln!(yaml, r#"      gpu_mode: "{{{{loop.gpu_mode}}}}""#)?;
-        writeln!(yaml, r#"      n_gpu_layers: "{{{{loop.gpu_mode == 'gpu' ? 999 : 0}}}}""#)?;
+        writeln!(yaml, r#"      gpu_mode: "gpu""#)?;
+        writeln!(yaml, "      n_gpu_layers: 999")?;
         writeln!(yaml, "    when:")?;
         writeln!(yaml, "      before_step_starts:")?;
         writeln!(yaml, "        action: configure_server")?;
@@ -418,12 +379,9 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml)?;
 
         // Step 2: Agentic document refinement per model
-        writeln!(yaml, "  # Step 2: Agentic document refinement per model (oscillate_abstraction)")?;
-        writeln!(yaml, "  - step: refine_document")?;
-        writeln!(yaml, "    id: doc_refine")?;
-        writeln!(yaml, "    type: oscillate_abstraction")?;
+        writeln!(yaml, "  refine_document:")?;
         writeln!(yaml, "    generative_entity: \"${{models.primary}}\"")?;
-        writeln!(yaml, "    requires: [perf_bench]")?;
+        writeln!(yaml, "    requires: [benchmark_performance]")?;
         writeln!(yaml, "    loop:")?;
         writeln!(yaml, "      count:")?;
         writeln!(yaml, "        max_iterations: {}", n)?;
@@ -456,12 +414,10 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml)?;
 
         // Step 3: Generate speedup comparison report
-        writeln!(yaml, "  # Step 3: Generate speedup comparison report")?;
-        writeln!(yaml, "  - step: generate_speedup_report")?;
-        writeln!(yaml, "    id: speedup_report")?;
-        writeln!(yaml, "    requires: [perf_bench]")?;
+        writeln!(yaml, "  generate_speedup_report:")?;
+        writeln!(yaml, "    requires: [benchmark_performance]")?;
         writeln!(yaml, "    input:")?;
-        writeln!(yaml, r#"      benchmark_results: "{{{{step.perf_bench.output}}}}""#)?;
+        writeln!(yaml, r#"      benchmark_results: "{{{{step.benchmark_performance.output}}}}""#)?;
         writeln!(yaml, "      comparison_mode: gpu_vs_cpu")?;
         writeln!(yaml, "    output:")?;
         writeln!(yaml, "      save_to:")?;
@@ -470,14 +426,12 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml)?;
 
         // Step 4: Generate combined report
-        writeln!(yaml, "  # Step 4: Generate combined report")?;
-        writeln!(yaml, "  - step: generate_report")?;
-        writeln!(yaml, "    id: report")?;
-        writeln!(yaml, "    requires: [perf_bench, doc_refine, speedup_report]")?;
+        writeln!(yaml, "  generate_report:")?;
+        writeln!(yaml, "    requires: [benchmark_performance, refine_document, generate_speedup_report]")?;
         writeln!(yaml, "    input:")?;
-        writeln!(yaml, r#"      benchmark_results: "{{{{step.perf_bench.output}}}}""#)?;
-        writeln!(yaml, r#"      refined_plans: "{{{{step.doc_refine.output}}}}""#)?;
-        writeln!(yaml, r#"      speedup_data: "{{{{step.speedup_report.output}}}}""#)?;
+        writeln!(yaml, r#"      benchmark_results: "{{{{step.benchmark_performance.output}}}}""#)?;
+        writeln!(yaml, r#"      refined_plans: "{{{{step.refine_document.output}}}}""#)?;
+        writeln!(yaml, r#"      speedup_data: "{{{{step.generate_speedup_report.output}}}}""#)?;
         writeln!(yaml, "    output:")?;
         writeln!(yaml, "      save_to:")?;
         writeln!(yaml, "        - final_report")?;
@@ -532,13 +486,17 @@ mod tests {
         // Check YAML structure (not validation against schema)
         assert!(yaml.contains("workflow_id:"));
         assert!(yaml.contains("name:"));
+        assert!(yaml.contains("providers:"));
+        assert!(yaml.contains("llama_cpp_with_vulkan:"));
         assert!(yaml.contains("models:"));
-        assert!(yaml.contains("execution:"));
-        assert!(yaml.contains("benchmark:"));
+        assert!(yaml.contains("workflow_execution_strategy:"));
         assert!(yaml.contains("agentic_workflow:"));
         assert!(yaml.contains("discover_models"));
         assert!(yaml.contains("benchmark_loop"));
         assert!(yaml.contains("max_iterations: 3"));
+        assert!(!yaml.contains("benchmark:"), "must not contain non-schema 'benchmark:' key");
+        assert!(!yaml.contains("connection_settings:"), "must not contain redundant connection_settings");
+        assert!(!yaml.contains("load_unload_strategy:"), "must not contain redundant load_unload_strategy");
     }
 
     #[test]
@@ -582,9 +540,10 @@ mod tests {
         )
         .expect("Failed to generate YAML");
 
-        assert!(yaml.contains("Simple prompt"));
-        assert!(yaml.contains("Prompt with"));
-        assert!(yaml.contains("quotes"));
+        assert!(yaml.contains("workflow_id:"), "must have workflow_id");
+        assert!(yaml.contains("agentic_workflow:"), "must have agentic_workflow");
+        assert!(!yaml.contains("benchmark:"), "must not contain non-schema 'benchmark:' key");
+        assert!(!yaml.contains("connection_settings:"), "must not contain redundant connection_settings");
     }
 
     #[test]
@@ -603,11 +562,11 @@ mod tests {
         )
         .expect("Failed to generate YAML");
 
-        // Verify YAML structure without parsing
         assert!(yaml.contains("workflow_id:"));
         assert!(yaml.contains("name:"));
         assert!(yaml.contains("agentic_workflow:"));
         assert!(yaml.contains("max_iterations: 1"));
+        assert!(!yaml.contains("benchmark:"), "must not contain non-schema 'benchmark:' key");
     }
 
     #[test]
@@ -627,10 +586,8 @@ mod tests {
         )
         .expect("Failed to generate YAML");
 
-        assert!(yaml.contains("benchmark:"));
-        assert!(yaml.contains("  models:"));
-        assert!(yaml.contains("path: \"/models/model1.gguf\""));
-        assert!(yaml.contains("path: \"/models/model2.gguf\""));
+        assert!(!yaml.contains("benchmark:"), "must not contain non-schema 'benchmark:' key");
         assert!(yaml.contains("max_iterations: 2"));
+        assert!(!yaml.contains("connection_settings:"), "must not contain redundant connection_settings");
     }
 }

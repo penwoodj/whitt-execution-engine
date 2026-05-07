@@ -284,15 +284,8 @@ pub fn generate_gpu_cpu_compare_benchmarks(output_dir: &Path) -> Result<()> {
         max_tokens,
     )?;
 
-    let yaml_3_with_list = format!("{}\n\nmodel_list:\n  - {}\n  - {}\n  - {}",
-        yaml_3.trim(),
-        models_3[0].path.display(),
-        models_3[1].path.display(),
-        models_3[2].path.display(),
-    );
-
     let file_3 = output_dir.join("benchmark-3-models.yml");
-    std::fs::write(&file_3, yaml_3_with_list)
+    std::fs::write(&file_3, yaml_3)
         .with_context(|| format!("Failed to write {}", file_3.display()))?;
     info!("[generate_gpu_cpu] generated {}", file_3.display());
 
@@ -313,14 +306,8 @@ pub fn generate_gpu_cpu_compare_benchmarks(output_dir: &Path) -> Result<()> {
         max_tokens,
     )?;
 
-    let mut yaml_5_with_list = yaml_5.trim().to_string();
-    yaml_5_with_list.push_str("\n\nmodel_list:");
-    for i in 0..5 {
-        yaml_5_with_list.push_str(&format!("\n  - /path/to/model_{}.gguf", i + 1));
-    }
-
     let file_5 = output_dir.join("benchmark-5-models.yml");
-    std::fs::write(&file_5, yaml_5_with_list)
+    std::fs::write(&file_5, yaml_5)
         .with_context(|| format!("Failed to write {}", file_5.display()))?;
     info!("[generate_gpu_cpu] generated {}", file_5.display());
 
@@ -341,14 +328,8 @@ pub fn generate_gpu_cpu_compare_benchmarks(output_dir: &Path) -> Result<()> {
         max_tokens,
     )?;
 
-    let mut yaml_15_with_list = yaml_15.trim().to_string();
-    yaml_15_with_list.push_str("\n\nmodel_list:");
-    for i in 0..15 {
-        yaml_15_with_list.push_str(&format!("\n  - /path/to/model_{}.gguf", i + 1));
-    }
-
     let file_15 = output_dir.join("benchmark-15-models.yml");
-    std::fs::write(&file_15, yaml_15_with_list)
+    std::fs::write(&file_15, yaml_15)
         .with_context(|| format!("Failed to write {}", file_15.display()))?;
     info!("[generate_gpu_cpu] generated {}", file_15.display());
 
@@ -369,14 +350,8 @@ pub fn generate_gpu_cpu_compare_benchmarks(output_dir: &Path) -> Result<()> {
         max_tokens,
     )?;
 
-    let mut yaml_50_with_list = yaml_50.trim().to_string();
-    yaml_50_with_list.push_str("\n\nmodel_list:");
-    for i in 0..50 {
-        yaml_50_with_list.push_str(&format!("\n  - /path/to/model_{}.gguf", i + 1));
-    }
-
     let file_50 = output_dir.join("benchmark-50-models.yml");
-    std::fs::write(&file_50, yaml_50_with_list)
+    std::fs::write(&file_50, yaml_50)
         .with_context(|| format!("Failed to write {}", file_50.display()))?;
     info!("[generate_gpu_cpu] generated {}", file_50.display());
 
@@ -442,41 +417,31 @@ mod tests {
         assert!(file_15.exists(), "benchmark-15-models.yml not found");
         assert!(file_50.exists(), "benchmark-50-models.yml not found");
 
-        // Verify GPU/CPU comparison elements in 3-model file
         let yaml_3 = std::fs::read_to_string(&file_3).unwrap();
-        assert!(yaml_3.contains("compare_modes: true"), "Missing compare_modes");
-        assert!(yaml_3.contains("modes: [gpu, cpu]"), "Missing modes");
-        assert!(yaml_3.contains("gpu_config:"), "Missing gpu_config");
-        assert!(yaml_3.contains("cpu_config:"), "Missing cpu_config");
+        assert!(yaml_3.contains("workflow_id:"), "Missing workflow_id");
+        assert!(yaml_3.contains("providers:"), "Missing providers");
+        assert!(yaml_3.contains("llama_cpp_with_vulkan:"), "Missing llama_cpp_with_vulkan provider");
         assert!(yaml_3.contains("n_gpu_layers: 999"), "Missing GPU layers config");
-        assert!(yaml_3.contains("n_gpu_layers: 0"), "Missing CPU layers config");
-        assert!(yaml_3.contains("type: oscillate_abstraction"), "Missing oscillate_abstraction");
+        assert!(yaml_3.contains("benchmark_performance"), "Missing benchmark_performance step");
         assert!(yaml_3.contains("generate_speedup_report"), "Missing speedup report step");
         assert!(yaml_3.contains("comparison_mode: gpu_vs_cpu"), "Missing GPU vs CPU comparison mode");
+        assert!(yaml_3.contains("refine_document"), "Missing refine_document step");
+        assert!(yaml_3.contains("generate_report"), "Missing generate_report step");
+        assert!(!yaml_3.contains("benchmark:"), "Must not contain non-schema 'benchmark:' key");
+        assert!(!yaml_3.contains("model_list:"), "Must not contain non-schema 'model_list:' key");
+        assert!(!yaml_3.contains("connection_settings:"), "Must not contain redundant connection_settings");
 
-        // Verify model_list at bottom
-        assert!(yaml_3.contains("model_list:"), "Missing model_list section");
-        assert!(yaml_3.contains("/run/media/jon/data/models/lmstudio-community/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"),
-            "Missing model 1 path");
-        assert!(yaml_3.contains("/run/media/jon/data/models/lmstudio-community/Phi-4-mini-reasoning-GGUF/Phi-4-mini-reasoning-Q4_K_M.gguf"),
-            "Missing model 2 path");
-        assert!(yaml_3.contains("/run/media/jon/data/models/hugging-quants/Llama-3.2-1B-Instruct-Q8_0-GGUF/llama-3.2-1b-instruct-q8_0.gguf"),
-            "Missing model 3 path");
-
-        // Verify 5-model file has placeholder entries
         let yaml_5 = std::fs::read_to_string(&file_5).unwrap();
-        assert!(yaml_5.contains("/path/to/model_1.gguf"));
-        assert!(yaml_5.contains("/path/to/model_5.gguf"));
+        assert!(yaml_5.contains("max_iterations: 5"), "5-model should have max_iterations: 5");
+        assert!(!yaml_5.contains("benchmark:"), "Must not contain non-schema 'benchmark:' key");
 
-        // Verify 15-model file has placeholder entries
         let yaml_15 = std::fs::read_to_string(&file_15).unwrap();
-        assert!(yaml_15.contains("/path/to/model_1.gguf"));
-        assert!(yaml_15.contains("/path/to/model_15.gguf"));
+        assert!(yaml_15.contains("max_iterations: 15"), "15-model should have max_iterations: 15");
+        assert!(!yaml_15.contains("model_list:"), "Must not contain non-schema 'model_list:' key");
 
-        // Verify 50-model file has placeholder entries
         let yaml_50 = std::fs::read_to_string(&file_50).unwrap();
-        assert!(yaml_50.contains("/path/to/model_1.gguf"));
-        assert!(yaml_50.contains("/path/to/model_50.gguf"));
+        assert!(yaml_50.contains("max_iterations: 50"), "50-model should have max_iterations: 50");
+        assert!(!yaml_50.contains("model_list:"), "Must not contain non-schema 'model_list:' key");
 
         // Cleanup
         std::fs::remove_dir_all(&output_dir).unwrap();
