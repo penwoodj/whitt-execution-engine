@@ -82,7 +82,6 @@ impl BenchmarkYamlGenerator {
         // Model discovery step
         writeln!(yaml, "  - step: discover_models")?;
         writeln!(yaml, "    id: discover")?;
-        writeln!(yaml, "    type: model_discovery")?;
         writeln!(yaml, "    input:")?;
         writeln!(yaml, "      models_dir: \"/run/media/jon/data/models\"")?;
         writeln!(yaml, "      filter:")?;
@@ -127,7 +126,6 @@ impl BenchmarkYamlGenerator {
         // Agentic document refinement step
         writeln!(yaml, "  - step: refine_document")?;
         writeln!(yaml, "    id: doc_refine")?;
-        writeln!(yaml, "    type: oscillate_abstraction")?;
         writeln!(yaml, "    generative_entity: \"${{models.primary}}\"")?;
         writeln!(yaml, "    requires: [bench_loop]")?;
         writeln!(yaml, "    loop:")?;
@@ -245,7 +243,6 @@ impl BenchmarkYamlGenerator {
         // Agentic document refinement step
         writeln!(yaml, "  - step: refine_document")?;
         writeln!(yaml, "    id: doc_refine")?;
-        writeln!(yaml, "    type: oscillate_abstraction")?;
         writeln!(yaml, "    generative_entity: \"${{models.primary}}\"")?;
         writeln!(yaml, "    requires: [bench_loop]")?;
         writeln!(yaml, "    loop:")?;
