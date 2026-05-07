@@ -205,6 +205,31 @@ docs/qa/
 - All implementations must reference specific schema line numbers
 - Schema version minimum: 2.0.0
 
+### Provider Configuration (CRITICAL)
+- This project uses **llama.cpp with Vulkan** in Docker — NOT LM Studio, NOT Ollama
+- Provider key MUST be `llama_cpp_with_vulkan` (schema line 28)
+- Provider config MUST use `config:` wrapper with `host:` and `port:` (schema line 29-31)
+- Model host.type MUST be `llama_cpp_with_vulkan` (schema line 71)
+- NEVER use `lmstudio` or `ollama` in any workflow YAML or generated output
+- Validation MUST reject any provider other than `llama_cpp_with_vulkan` in current POC scope
+- When adding future provider support: update validation FIRST, then add provider config
+
+### Strict Schema Validation Rules
+- **ONLY keys defined in `docs/schema/unified-workflow-schema.yml` are allowed** in workflow YAMLs
+- Non-schema extensions (benchmark:, model_list:, logging:, execution:) are FORBIDDEN
+- Redundant config is FORBIDDEN: if providers already defines host/port, models must NOT duplicate with connection_settings
+- If `workflow_execution_strategy.load_unload` is set, `model_lifecycle.load_unload_strategy` must NOT duplicate it
+- `WorkflowFile::validate()` MUST reject unknown top-level keys not in the schema
+- Every new key added to YAMLs MUST have a schema line reference comment
+- When deferring schema features: add `# 🔵 DEFERRED: <explanation>` comment in the YAML
+
+### QA Discipline Rules
+- **ALWAYS QA from schema source of truth** — compare YAML output line-by-line against `docs/schema/unified-workflow-schema.yml`
+- **NEVER assume** a provider or config structure — read the schema first
+- **Track deferred features** explicitly: mark schema sections not yet implemented with `🔵 DEFERRED` and a comment explaining what future work is needed
+- **Validate before claiming done** — run `WorkflowFile::validate()` on all YAMLs before marking QA PASS
+- **Redundancy check**: before writing config, check if the same value is already set at a higher scope
+
 ---
 
 ## Upstream Factor Review Template
