@@ -1,61 +1,43 @@
 workflow_id: benchmark_5_models
 name: "5-Model GPU/CPU Benchmark Suite"
 description: "GPU vs CPU performance benchmark of 5 diverse models"
+version: "1.0.0"
+author: "Whitt Execution Engine"
+tags: [benchmark]
 min_schema_version: "2.0.0"
+schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
 
 models:
   primary:
-    provider: lmstudio
-    model: "${benchmark.current_model}"
+    host:
+      type: llama_cpp_with_vulkan
 
-execution:
-  mode: serial
+workflow_execution_strategy:
+  load_unload: one_at_a_time
   memory:
-    max_allocated_memory_mb: 8192
-    model_memory_mb: 6144
-    unload_unused: true
-
-logging:
-  global:
-    level: info
-    detail: medium
-    output_type: chat
-    format: json
-    console: true
-  performance_metrics:
-    level: debug
-    detail: very_high
-
-benchmark:
-  compare_modes: true
-  modes: [gpu, cpu]
-  gpu_config:
-    n_gpu_layers: 999
-  cpu_config:
-    n_gpu_layers: 0
-  prompts:
-    - "Explain concept of recursion in programming, with a practical example."
-    - "Write a Rust function that finds the longest increasing subsequence in a vector."
-    - "Analyze tradeoffs between microservices and monolithic architectures."
-  max_tokens: 128
-  temperature: 0.7
-  top_p: 0.9
+    model_lifecycle:
+      unload_unused: true
+    ram_allocation:
+      strategy: dynamic
+      max_allowed:
+        ram: 8192MB
 
 agentic_workflow:
-  # Step 1: Benchmark each model in GPU then CPU mode
-  - step: benchmark_performance
-    id: perf_bench
+
+  benchmark_performance:
     loop:
       count:
         max_iterations: 5
         iteration_variable: current_model
-      modes: [gpu, cpu]
-      mode_variable: gpu_mode
     input:
-      prompts: "${benchmark.prompts}"
-      max_tokens: "${benchmark.max_tokens}"
-      gpu_mode: "{{loop.gpu_mode}}"
-      n_gpu_layers: "{{loop.gpu_mode == 'gpu' ? 999 : 0}}"
+      gpu_mode: "gpu"
+      n_gpu_layers: 999
     when:
       before_step_starts:
         action: configure_server
@@ -71,12 +53,9 @@ agentic_workflow:
     output:
       save_to: benchmark_results
 
-  # Step 2: Agentic document refinement per model (oscillate_abstraction)
-  - step: refine_document
-    id: doc_refine
-    type: oscillate_abstraction
+  refine_document:
     generative_entity: "${models.primary}"
-    requires: [perf_bench]
+    requires: [benchmark_performance]
     loop:
       count:
         max_iterations: 5
@@ -88,7 +67,7 @@ agentic_workflow:
       overlap: 200
     prompts:
       summarize: |
-        Summarize the following text, extracting key technical points.
+        Summarize following text, extracting key technical points.
         Keep: numbers, paths, function names, struct fields, error messages.
         Drop: filler, hedging, repetition, transitions.
         Target: 2000 chars max.
@@ -107,34 +86,23 @@ agentic_workflow:
       format: text
       path: "./workspace/output/refined_plan_{{loop.current_model}}.md"
 
-  # Step 3: Generate speedup comparison report
-  - step: generate_speedup_report
-    id: speedup_report
-    requires: [perf_bench]
+  generate_speedup_report:
+    requires: [benchmark_performance]
     input:
-      benchmark_results: "{{step.perf_bench.output}}"
+      benchmark_results: "{{step.benchmark_performance.output}}"
       comparison_mode: gpu_vs_cpu
     output:
       save_to:
         - speedup_report
         - "./workspace/output/speedup_report.json"
 
-  # Step 4: Generate combined report
-  - step: generate_report
-    id: report
-    requires: [perf_bench, doc_refine, speedup_report]
+  generate_report:
+    requires: [benchmark_performance, refine_document, generate_speedup_report]
     input:
-      benchmark_results: "{{step.perf_bench.output}}"
-      refined_plans: "{{step.doc_refine.output}}"
-      speedup_data: "{{step.speedup_report.output}}"
+      benchmark_results: "{{step.benchmark_performance.output}}"
+      refined_plans: "{{step.refine_document.output}}"
+      speedup_data: "{{step.generate_speedup_report.output}}"
     output:
       save_to:
         - final_report
         - "./workspace/output/benchmark_report.json"
-
-model_list:
-  - /path/to/model_1.gguf
-  - /path/to/model_2.gguf
-  - /path/to/model_3.gguf
-  - /path/to/model_4.gguf
-  - /path/to/model_5.gguf
