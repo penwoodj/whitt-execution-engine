@@ -66,6 +66,7 @@ pub type ProviderConfig = LlamaCppVulkanProvider;
 
 /// Complete configuration for llama.cpp server with Vulkan backend.
 #[derive(Debug, Clone, Serialize, Deserialize, garde::Validate)]
+#[serde(deny_unknown_fields)]
 pub struct LlamaCppVulkanProvider {
     /// Connection settings (host, port, timeouts).
     #[serde(default)]
@@ -85,6 +86,7 @@ pub struct LlamaCppVulkanProvider {
 
 /// Llama.cpp connection configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, garde::Validate)]
+#[serde(deny_unknown_fields)]
 pub struct LlamaCppConfig {
     /// Server host address.
     #[serde(default = "default_host")]
@@ -114,6 +116,7 @@ impl Default for LlamaCppConfig {
 
 /// Hosting configuration for model management and resource allocation.
 #[derive(Debug, Clone, Serialize, Deserialize, garde::Validate)]
+#[serde(deny_unknown_fields)]
 pub struct HostingConfig {
     /// Maximum number of models loaded concurrently.
     #[serde(default = "default_max_concurrent_models")]
@@ -149,6 +152,7 @@ impl Default for HostingConfig {
 
 /// GPU allocation strategy and limits.
 #[derive(Debug, Clone, Serialize, Deserialize, garde::Validate)]
+#[serde(deny_unknown_fields)]
 pub struct GpuAllocation {
     /// Allocation strategy: priority, round_robin, fixed.
     #[serde(default = "default_gpu_strategy")]
@@ -184,6 +188,7 @@ impl Default for GpuAllocation {
 
 /// CPU fallback settings when GPU is unavailable or overloaded.
 #[derive(Debug, Clone, Serialize, Deserialize, garde::Validate)]
+#[serde(deny_unknown_fields)]
 pub struct CpuFallback {
     /// Enable CPU fallback.
     #[serde(default = "default_cpu_fallback_enabled")]
@@ -213,6 +218,7 @@ impl Default for CpuFallback {
 
 /// Request handling configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, garde::Validate)]
+#[serde(deny_unknown_fields)]
 pub struct RequestsConfig {
     /// Maximum concurrent requests.
     #[serde(default = "default_max_concurrent_requests")]
@@ -256,6 +262,7 @@ impl Default for RequestsConfig {
 ///
 /// Flattened structure matching schema: retry has flat keys, not nested backoff object.
 #[derive(Debug, Clone, Serialize, Deserialize, garde::Validate)]
+#[serde(deny_unknown_fields)]
 pub struct RetryPolicyConfig {
     /// Maximum number of retry attempts.
     #[serde(default = "default_max_retries")]

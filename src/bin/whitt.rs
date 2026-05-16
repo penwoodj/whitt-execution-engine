@@ -167,6 +167,10 @@ enum Commands {
         #[arg(long)]
         filter_size_max: Option<u64>,
 
+        /// Skip models smaller than this (bytes)
+        #[arg(long)]
+        filter_size_min: Option<u64>,
+
         /// Regex filter on model name
         #[arg(long)]
         filter_name: Option<String>,
@@ -305,11 +309,12 @@ async fn main() -> Result<()> {
             agent_command(&cli.url, cli.model, task, max_steps, cli.verbose, AgentOpts { allowed_tools, forbidden_tools, allowed_paths, forbidden_paths }).await
         }
 
-        Commands::Benchmark { prompt, max_tokens, models_dir, model_list, prompts, output, filter_size_max, filter_name, compare_gpu_cpu, output_dir, workflow } => {
+        Commands::Benchmark { prompt, max_tokens, models_dir, model_list, prompts, output, filter_size_max, filter_size_min, filter_name, compare_gpu_cpu, output_dir, workflow } => {
             tracing::info!("[WHT-BEN001] benchmark command, max_tokens={}, prompts={}", max_tokens, prompts);
 
-            if models_dir.is_some() || model_list.is_some() {
-                let prompts_vec = (0..prompts).map(|i| format!("{} (iteration {})", prompt.clone().unwrap_or_else(|| "The quick brown fox jumps over the lazy dog.".to_string()), i + 1)).collect();
+            if models_dir.is_some() || model_list.is_some() || workflow.is_some() {
+                let base_prompt = prompt.clone().unwrap_or_else(|| "The quick brown fox jumps over the lazy dog.".to_string());
+                let prompts_vec = (0..prompts).map(|_| base_prompt.clone()).collect();
 
                 let config = BenchmarkConfig {
                     server_url: cli.url.clone(),
@@ -318,6 +323,7 @@ async fn main() -> Result<()> {
                     prompts: prompts_vec,
                     max_tokens,
                     filter_size_max,
+                    filter_size_min,
                     filter_name,
                     delay_between_swaps: std::time::Duration::from_secs(2),
                     compare_gpu_cpu,

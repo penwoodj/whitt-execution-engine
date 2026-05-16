@@ -35,6 +35,7 @@ fn default_router() -> String {
 
 /// Complete model specification.
 #[derive(Debug, Clone, Serialize, Deserialize, garde::Validate, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ModelSpec {
     /// Human-readable model name.
     #[serde(default)]
@@ -93,6 +94,7 @@ pub struct ModelSpec {
 
 /// Host type and connection settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ModelHost {
     /// Host provider type.
     #[serde(default = "default_host_type")]
@@ -122,6 +124,7 @@ fn default_host_type() -> String {
 
 /// RAM allocation strategy.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RamAllocation {
     /// Allocation strategy (static | dynamic | priority).
     #[serde(default = "default_ram_strategy")]
@@ -146,6 +149,7 @@ fn default_ram_strategy() -> String {
 
 /// Maximum resource limits for model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MaxAllowed {
     /// Maximum RAM (percentage like "80%" or absolute like "4GB").
     #[serde(default)]
@@ -207,6 +211,7 @@ fn default_concurrent_requests() -> u32 {
 
 /// Minimum resource requirements for model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MinAllowed {
     /// Minimum RAM (percentage like "20%" or absolute like "2GB").
     #[serde(default)]
@@ -339,6 +344,7 @@ impl ResourceLimit {
 
 /// Model memory and cache configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ModelMemory {
     /// Cache size (e.g., "2GB", "min", "max", "medium").
     #[serde(default = "default_cache_size")]
@@ -413,6 +419,7 @@ fn default_attention_context() -> AttentionContext {
 
 /// Model execution configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, garde::Validate)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionConfig {
     /// Timeout configuration.
     #[serde(default)]
@@ -448,6 +455,7 @@ impl Default for ExecutionConfig {
 
 /// Timeout configuration for execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TimeoutConfig {
     /// Time to load model into memory (e.g., "30s", "1m").
     #[serde(default = "default_load_into_memory_timeout")]
@@ -531,6 +539,7 @@ pub fn parse_duration_string(s: &str) -> anyhow::Result<u64> {
 
 /// Thinking mode configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ThinkingConfig {
     /// Budget tokens for thinking mode.
     #[serde(default)]
@@ -569,6 +578,7 @@ fn default_capture_in_events() -> bool {
 
 /// Tools configuration for model.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ToolsConfig {
     /// Default permissions for tools.
     #[serde(default)]
@@ -589,6 +599,7 @@ pub struct ToolsConfig {
 
 /// Default permissions for tools.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DefaultPermissions {
     /// Web access permission.
     #[serde(default = "default_web_access")]
@@ -636,6 +647,7 @@ fn default_shell_exec() -> bool {
 
 /// Custom tool definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CustomTool {
     /// Tool name.
     pub name: String,
@@ -654,6 +666,7 @@ pub struct CustomTool {
 
 /// Guardrails and safety configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct GuardrailsConfig {
     /// Enforcement policy (block | warn | allow).
     #[serde(default = "default_enforcement_policy")]
@@ -674,6 +687,7 @@ fn default_enforcement_policy() -> String {
 
 /// Input guardrails configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct InputGuardrails {
     /// List of enabled input guards.
     #[serde(default)]
@@ -694,6 +708,7 @@ pub struct InputGuardrails {
 
 /// Output guardrails configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct OutputGuardrails {
     /// List of enabled output guards.
     #[serde(default)]
@@ -710,6 +725,7 @@ pub struct OutputGuardrails {
 
 /// Prompt injection guard configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PromptInjectionConfig {
     /// Sensitivity level (low | medium | high).
     #[serde(default = "default_sensitivity")]
@@ -739,6 +755,7 @@ fn default_on_match_block() -> String {
 
 /// PII redaction guard configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PiiRedactionConfig {
     /// Patterns to detect ([] = built-in, or custom regex strings).
     #[serde(default)]
@@ -773,6 +790,7 @@ fn default_on_match_sanitize() -> String {
 
 /// Maximum length guard configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MaxLengthConfig {
     /// Maximum number of tokens allowed.
     #[serde(default = "default_max_length_tokens")]
@@ -802,6 +820,7 @@ fn default_max_length_action() -> String {
 
 /// Toxicity filter guard configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ToxicityFilterConfig {
     /// Token patterns that trigger the filter.
     #[serde(default)]
@@ -823,6 +842,7 @@ impl Default for ToxicityFilterConfig {
 
 /// Format validation guard configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FormatValidationConfig {
     /// Expected format (json | xml | markdown).
     #[serde(default = "default_format")]

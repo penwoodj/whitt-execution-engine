@@ -33,6 +33,7 @@ const ALLOWED_TOP_LEVEL_KEYS: &[&str] = &[
 
 /// Top-level workflow file structure.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WorkflowFile {
     pub workflow_id: String,
     pub name: String,
@@ -101,12 +102,78 @@ impl WorkflowFile {
 
     pub fn from_yaml(yaml: &str) -> Result<Self> {
         Self::validate_raw_keys(yaml)?;
-        serde_saphyr::from_str(yaml).map_err(Error::YamlParse)
+        let workflow: WorkflowFile = serde_saphyr::from_str(yaml).map_err(Error::YamlParse)?;
+        workflow.validate_nested_keys(yaml)?;
+        workflow.validate()?;
+        Ok(workflow)
     }
 
     pub fn from_file(path: &Path) -> Result<Self> {
         let contents = std::fs::read_to_string(path).map_err(Error::Io)?;
         Self::from_yaml(&contents)
+    }
+
+    /// Validate nested YAML keys and redundant config patterns.
+    ///
+    /// This must run *after* deserialization to access the deserialized struct
+    /// (to compare values for redundancy).
+    fn validate_nested_keys(&self, _yaml: &str) -> Result<()> {
+        // Check 1: Redundant connection_settings when it duplicates provider config
+        if let (Some(ref providers), Some(ref models)) = (&self.providers, &self.models) {
+            // Build a map of provider configs: provider_name -> (host, port as string)
+            let mut provider_configs: std::collections::HashMap<&str, (&str, String)> = std::collections::HashMap::new();
+            for (provider_name, provider_config) in &providers.providers {
+                if let Some(ref config) = provider_config.config {
+                    provider_configs.insert(provider_name, (&config.host, config.port.to_string()));
+                }
+            }
+
+            // Check each model's connection_settings for redundancy
+            for (model_name, model_spec) in &models.models {
+                // Get provider config for this model's host.type
+                let host_type = &model_spec.host.r#type;
+                if let Some((provider_host, provider_port)) = provider_configs.get(host_type.as_str()) {
+                    // Check if connection_settings duplicates provider config
+                    let settings_host = model_spec.host.connection_settings.get("host");
+                    let settings_port = model_spec.host.connection_settings.get("port");
+
+                    let host_duplicates = match settings_host {
+                        Some(h) => h == provider_host,
+                        None => false,
+                    };
+
+                    let port_duplicates = match settings_port {
+                        Some(p) => p == provider_port,
+                        None => false,
+                    };
+
+                    if host_duplicates && port_duplicates {
+                        return Err(Error::Validation {
+                            message: format!(
+                                "Model '{}' host.connection_settings duplicates provider config — remove redundant override",
+                                model_name
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Check 2: Redundant load_unload_strategy when it duplicates load_unload
+        if let Some(ref execution_strategy) = self.workflow_execution_strategy {
+            if let (Some(ref load_unload), Some(ref memory)) = (&execution_strategy.load_unload, &execution_strategy.memory) {
+                if let Some(ref model_lifecycle) = memory.model_lifecycle {
+                    // Compare LoadUnloadStrategy values
+                    if load_unload == &model_lifecycle.load_unload_strategy {
+                        return Err(Error::Validation {
+                            message: "model_lifecycle.load_unload_strategy duplicates load_unload — remove redundant key".into(),
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -168,6 +235,7 @@ pub struct ProvidersConfig {
 
 /// Provider configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderConfig {
     #[serde(default)]
     pub config: Option<ProviderConnectionConfig>,
@@ -181,6 +249,7 @@ pub struct ProviderConfig {
 
 /// Provider connection configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderConnectionConfig {
     #[serde(default = "default_host")]
     pub host: String,
@@ -192,6 +261,7 @@ pub struct ProviderConnectionConfig {
 
 /// Provider hosting configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderHostingConfig {
     #[serde(default)]
     pub max_concurrent_models: Option<u32>,
@@ -205,6 +275,7 @@ pub struct ProviderHostingConfig {
 
 /// GPU allocation configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct GpuAllocationConfig {
     #[serde(default)]
     pub vram_per_model_mb: Option<u64>,
@@ -212,6 +283,7 @@ pub struct GpuAllocationConfig {
 
 /// CPU fallback configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct CpuFallbackConfig {
     #[serde(default)]
     pub cpu_cores_per_model: Option<u32>,
@@ -219,6 +291,7 @@ pub struct CpuFallbackConfig {
 
 /// Provider requests configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderRequestsConfig {
     #[serde(default)]
     pub max_concurrent_requests: Option<u32>,
@@ -234,6 +307,7 @@ pub struct ProviderRequestsConfig {
 
 /// Provider retry configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderRetryConfig {
     #[serde(default)]
     pub max_retries: Option<u32>,
@@ -264,6 +338,7 @@ impl Default for ProviderRetryConfig {
 
 /// Memory configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct MemoryConfig {
     #[serde(default)]
     pub rag: Option<RagConfig>,
@@ -271,6 +346,7 @@ pub struct MemoryConfig {
 
 /// RAG configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct RagConfig {
     #[serde(default)]
     pub knowledge_base: Option<KnowledgeBaseConfig>,
@@ -282,6 +358,7 @@ pub struct RagConfig {
 
 /// Knowledge base configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct KnowledgeBaseConfig {
     #[serde(default)]
     pub path: Option<String>,
@@ -295,6 +372,7 @@ pub struct KnowledgeBaseConfig {
 
 /// Embedding model configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct EmbeddingModelConfig {
     #[serde(default)]
     pub model_ref: Option<String>,
@@ -306,6 +384,7 @@ pub struct EmbeddingModelConfig {
 
 /// Retrieval configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct RetrievalConfig {
     #[serde(default)]
     pub max_results: Option<u32>,
@@ -317,6 +396,7 @@ pub struct RetrievalConfig {
 
 /// Workspace configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct WorkspaceConfig {
     #[serde(default)]
     pub root_path: Option<String>,
@@ -328,6 +408,7 @@ pub struct WorkspaceConfig {
 
 /// Workspace directories.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct WorkspaceDirectories {
     #[serde(default)]
     pub output: Option<String>,
@@ -347,6 +428,7 @@ pub struct WorkspaceDirectories {
 
 /// Workspace permissions.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct WorkspacePermissions {
     #[serde(default = "default_permission_mode")]
     pub default_mode: PermissionMode,
@@ -731,3 +813,4 @@ fn default_rag_format() -> RagFormat {
 fn default_permission_mode() -> PermissionMode {
     PermissionMode::OwnerFullGroupReadExecOtherReadExec
 }
+

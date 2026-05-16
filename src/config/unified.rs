@@ -16,6 +16,7 @@ use tracing::debug;
 
 /// Complete unified configuration from unified YAML schema.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UnifiedConfig {
     /// Workflow ID (unique identifier).
     pub workflow_id: Option<String>,

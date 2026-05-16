@@ -57,11 +57,11 @@ workflow_execution_strategy:
 workflow_id: test-workflow
 name: "Test Workflow"
 agentic_workflow:
-  steps: {{}}
   when:
     after_step_fails:
       - log:
           level: {}
+          event_fields: [step_name]
 "#, level);
             let workflow: WorkflowFile = serde_saphyr::from_str(&yaml).expect(&format!("parse {}", level));
             assert!(workflow.agentic_workflow.is_some());
@@ -96,14 +96,13 @@ agentic_workflow:
 workflow_id: test-workflow
 name: "Test Workflow"
 agentic_workflow:
-  steps:
-    test-step:
-      loop:
-        validation:
-          exact_criteria:
-            - metric: quality
-              operator: "{}"
-              target: 0.9
+  test-step:
+    loop:
+      validation:
+        exact_criteria:
+          - metric: quality
+            operator: "{}"
+            target: 0.9
 "#, op);
             let workflow: WorkflowFile = serde_saphyr::from_str(&yaml).expect(&format!("parse {}", op));
             assert!(workflow.agentic_workflow.is_some());
@@ -140,17 +139,15 @@ tool_permissions:
 workflow_id: test-workflow
 name: "Test Workflow"
 agentic_workflow:
-  steps:
-    test-step:
-      when:
-        after_step_succeeds:
-          - log:
-              to_file_path: "./test.log"
-              event_fields: [step_name]
-          - save_to: output_var
-          - bookmark: true
-          - notify:
-              message: "Step completed"
+  when:
+    after_step_succeeds:
+      - log:
+          to_file_path: "./test.log"
+          event_fields: [step_name]
+      - save_to: output_var
+      - bookmark: true
+      - notify:
+          message: "Step completed"
 "#;
         let workflow: WorkflowFile = serde_saphyr::from_str(yaml).expect("parse");
         assert!(workflow.agentic_workflow.is_some());
@@ -165,7 +162,7 @@ agentic_workflow:
   retry:
     max_attempts_per_step: 10
     max_attempts_per_workflow: 100
-    backoff_strategy:
+    backoff:
       backoff: exponential
       initial_delay: "1s"
       max_delay: "30s"
@@ -357,15 +354,13 @@ sub_workflows:
 workflow_id: test-workflow
 name: "Test Workflow"
 agentic_workflow:
-  steps:
-    test-step:
-      when:
-        after_step_succeeds:
-          gwt:
-            - given: "result.success == true"
-              then: { route_to: success_step }
-            - given: "result.success == false"
-              then: { route_to: fail_step }
+  when:
+    after_step_succeeds:
+      - gwt:
+          - given: "result.success == true"
+            then: success_step
+          - given: "result.success == false"
+            then: fail_step
 "#;
         let workflow: WorkflowFile = serde_saphyr::from_str(yaml).expect("parse");
         assert!(workflow.agentic_workflow.is_some());
@@ -393,19 +388,18 @@ agentic_workflow:
 workflow_id: test-workflow
 name: "Test Workflow"
 agentic_workflow:
-  steps:
-    test-step:
-      loop:
-        count:
-          max_iterations: 10
-          iteration_variable: current_item
-        validation:
-          tolerance: 0.05
-          max_iterations: 5
-          exact_criteria:
-            - metric: quality
-              operator: ">="
-              target: 0.9
+  test-step:
+    loop:
+      count:
+        max_iterations: 10
+        iteration_variable: current_item
+      validation:
+        tolerance: 0.05
+        max_iterations: 5
+        exact_criteria:
+          - metric: quality
+            operator: ">="
+            target: 0.9
 "#;
         let workflow: WorkflowFile = serde_saphyr::from_str(yaml).expect("parse");
         assert!(workflow.agentic_workflow.is_some());
@@ -417,13 +411,12 @@ agentic_workflow:
 workflow_id: test-workflow
 name: "Test Workflow"
 agentic_workflow:
-  steps:
-    test-step:
-      requires:
-        - step: previous-step
-          condition: "result.success == true"
-        - step: another-step
-          condition: "result.value > 100"
+  test-step:
+    requires:
+      - step: previous-step
+        condition: "result.success == true"
+      - step: another-step
+        condition: "result.value > 100"
 "#;
         let workflow: WorkflowFile = serde_saphyr::from_str(yaml).expect("parse");
         assert!(workflow.agentic_workflow.is_some());
@@ -435,13 +428,12 @@ agentic_workflow:
 workflow_id: test-workflow
 name: "Test Workflow"
 agentic_workflow:
-  steps:
-    test-step:
-      model_overrides:
-        max_turns: 20
-        temperature: 0.7
-        top_p: 0.9
-        top_k: 50
+  test-step:
+    model_overrides:
+      max_turns: 20
+      temperature: 0.7
+      top_p: 0.9
+      top_k: 50
 "#;
         let workflow: WorkflowFile = serde_saphyr::from_str(yaml).expect("parse");
         assert!(workflow.agentic_workflow.is_some());
@@ -489,7 +481,12 @@ workflow_id: test-workflow
 name: "Test Workflow"
 agentic_workflow:
   retry:
-    backoff: {}
+    backoff:
+      backoff: {}
+      initial_delay: "1s"
+      max_delay: "30s"
+      multiplier: 2.0
+      jitter: true
 "#, strategy);
             let workflow: WorkflowFile = serde_saphyr::from_str(&yaml).expect(&format!("parse {}", strategy));
             assert!(workflow.agentic_workflow.is_some());
@@ -733,5 +730,481 @@ benchmark:
         let err_msg = format!("{}", result.unwrap_err());
         assert!(err_msg.contains("benchmark"), "error should mention benchmark, got: {}", err_msg);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn validate_nested_rejects_redundant_connection_settings() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test Workflow"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+      connection_settings:
+        host: localhost
+        port: "8080"
+"#;
+        let result = WorkflowFile::from_yaml(yaml);
+        assert!(result.is_err(), "should reject redundant connection_settings");
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("connection_settings duplicates provider config"),
+            "error should mention redundant config, got: {}", err_msg
+        );
+    }
+
+    #[test]
+    fn validate_nested_rejects_redundant_load_unload_strategy() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test Workflow"
+workflow_execution_strategy:
+  load_unload: one_at_a_time
+  memory:
+    model_lifecycle:
+      load_unload_strategy: one_at_a_time
+"#;
+        let result = WorkflowFile::from_yaml(yaml);
+        assert!(result.is_err(), "should reject redundant load_unload_strategy");
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("load_unload_strategy duplicates load_unload"),
+            "error should mention redundant key, got: {}", err_msg
+        );
+    }
+
+    #[test]
+    fn validate_nested_accepts_valid_yaml_no_false_positives() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test Workflow"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+      connection_settings:
+        host: different-host
+        port: "9090"
+workflow_execution_strategy:
+  load_unload: one_at_a_time
+  memory:
+    model_lifecycle:
+      load_unload_strategy: lazy
+"#;
+        let result = WorkflowFile::from_yaml(yaml);
+        assert!(result.is_ok(), "should accept valid YAML with no redundancies");
+    }
+
+    #[test]
+    fn validate_workspace_benchmark_3_models() {
+        use std::path::Path;
+        let path = Path::new("workspace/benchmark-3-models.yml");
+        let result = WorkflowFile::from_file(path);
+        assert!(result.is_ok(), "benchmark-3-models.yml should be schema-compliant: {:?}", result.err());
+    }
+
+    #[test]
+    fn validate_workspace_benchmark_5_models() {
+        use std::path::Path;
+        let path = Path::new("workspace/benchmark-5-models.yml");
+        let result = WorkflowFile::from_file(path);
+        assert!(result.is_ok(), "benchmark-5-models.yml should be schema-compliant: {:?}", result.err());
+    }
+
+    #[test]
+    fn validate_workspace_benchmark_15_models() {
+        use std::path::Path;
+        let path = Path::new("workspace/benchmark-15-models.yml");
+        let result = WorkflowFile::from_file(path);
+        assert!(result.is_ok(), "benchmark-15-models.yml should be schema-compliant: {:?}", result.err());
+    }
+
+    #[test]
+    fn validate_workspace_benchmark_50_models() {
+        use std::path::Path;
+        let path = Path::new("workspace/benchmark-50-models.yml");
+        let result = WorkflowFile::from_file(path);
+        assert!(result.is_ok(), "benchmark-50-models.yml should be schema-compliant: {:?}", result.err());
+    }
+
+    // ── Exhaustive validation tests for WorkflowFile::from_yaml ──────────────
+
+    #[test]
+    fn require_condition_string_shorthand() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test Workflow"
+agentic_workflow:
+  step_b:
+    requires: [step_a]
+    prompt: "do something"
+"#;
+        let workflow = WorkflowFile::from_yaml(yaml).expect("shorthand requires should parse");
+        assert!(workflow.agentic_workflow.is_some());
+    }
+
+    #[test]
+    fn require_condition_mixed_shorthand_and_object() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test Workflow"
+agentic_workflow:
+  step_c:
+    requires:
+      - step_a
+      - step: step_b
+        condition: "result.success == true"
+    prompt: "do something"
+"#;
+        let workflow = WorkflowFile::from_yaml(yaml).expect("mixed requires should parse");
+        assert!(workflow.agentic_workflow.is_some());
+    }
+
+    #[test]
+    fn hook_action_append_to_string() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test Workflow"
+agentic_workflow:
+  when:
+    after_step_succeeds:
+      - append_to: "./workspace/output/results.yaml"
+"#;
+        let workflow = WorkflowFile::from_yaml(yaml).expect("append_to string should parse");
+        assert!(workflow.agentic_workflow.is_some());
+    }
+
+    #[test]
+    fn hook_action_append_to_list() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test Workflow"
+agentic_workflow:
+  when:
+    after_step_succeeds:
+      - append_to:
+          - "./workspace/output/results.yaml"
+          - result_collection
+"#;
+        let workflow = WorkflowFile::from_yaml(yaml).expect("append_to list should parse");
+        assert!(workflow.agentic_workflow.is_some());
+    }
+
+    #[test]
+    fn hook_action_route_to() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test Workflow"
+agentic_workflow:
+  when:
+    after_step_succeeds:
+      - gwt:
+          - given: "quality_score >= 0.9"
+            then: success_step
+          - given: "true"
+            then: { route_to: [fail_step, cleanup_step] }
+"#;
+        let workflow = WorkflowFile::from_yaml(yaml).expect("route_to list should parse");
+        assert!(workflow.agentic_workflow.is_some());
+    }
+
+    #[test]
+    fn hook_action_fail_and_skip() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test Workflow"
+agentic_workflow:
+  when:
+    after_step_fails:
+      - fail:
+          message: "Critical error occurred"
+      - skip_step: true
+    after_all_retries_exhausted:
+      - skip_remaining: true
+"#;
+        let workflow = WorkflowFile::from_yaml(yaml).expect("fail/skip actions should parse");
+        assert!(workflow.agentic_workflow.is_some());
+    }
+
+    #[test]
+    fn step_with_on_requires_failed() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test Workflow"
+agentic_workflow:
+  step_b:
+    requires: [step_a]
+    on_requires_failed:
+      log_failure:
+        - log:
+            to_file_path: "./workspace/logs/dep_fail.log"
+            event_fields: [failed_step, reason]
+    prompt: "do something"
+"#;
+        let workflow = WorkflowFile::from_yaml(yaml).expect("on_requires_failed should parse");
+        assert!(workflow.agentic_workflow.is_some());
+    }
+
+    #[test]
+    fn step_retry_config() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test Workflow"
+agentic_workflow:
+  test_step:
+    prompt: "do something"
+    retry:
+      max_attempts: 5
+      backoff: exponential
+      initial_delay: "1s"
+      max_delay: "30s"
+      multiplier: 2.0
+      jitter: true
+      level: step_restart
+      adjustment_strategy: loosen_tolerance
+      tolerance_adjustment: 0.05
+      checkpoint_after_retry: true
+"#;
+        let workflow = WorkflowFile::from_yaml(yaml).expect("step retry config should parse");
+        assert!(workflow.agentic_workflow.is_some());
+    }
+
+    #[test]
+    fn full_workflow_pipeline_validation() {
+        let yaml = r#"
+workflow_id: full-pipeline-test
+name: "Full Pipeline Test"
+description: "Tests complete validation pipeline"
+version: "1.0.0"
+author: "Test Author"
+tags: [test, validation]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+workflow_execution_strategy:
+  load_unload: one_at_a_time
+  memory:
+    ram_allocation:
+      strategy: dynamic
+agentic_workflow:
+  when:
+    after_step_fails:
+      - log:
+          to_file_path: "./logs/errors.log"
+          event_fields: [step_name, error_message]
+          level: error
+  step_one:
+    generative_entity: "${models.primary}"
+    prompt: "Analyze this code"
+    model_overrides:
+      max_turns: 10
+      temperature: 0.7
+    when:
+      before_step_starts:
+        - log:
+            to_file_path: "./logs/steps.log"
+            event_fields: [step_name]
+      after_step_succeeds:
+        - append_to: "./output/analysis.yaml"
+  step_two:
+    requires: [step_one]
+    tool: file_read
+    input:
+      file_path: "./config.yml"
+    when:
+      after_step_succeeds:
+        - save_to: config_data
+  step_three:
+    requires:
+      - step_one
+      - step: step_two
+        condition: "result.success == true"
+    prompt: "Generate report from {{step.step_two.output}}"
+    loop:
+      validation:
+        tolerance: 0.05
+        max_iterations: 5
+        exact_criteria:
+          - metric: quality
+            operator: ">="
+            target: 0.9
+"#;
+        let result = WorkflowFile::from_yaml(yaml);
+        assert!(result.is_ok(), "full pipeline should validate: {:?}", result.err());
+        let workflow = result.unwrap();
+        assert_eq!(workflow.workflow_id, "full-pipeline-test");
+        assert!(workflow.providers.is_some());
+        assert!(workflow.models.is_some());
+        assert!(workflow.agentic_workflow.is_some());
+    }
+
+    #[test]
+    fn deny_unknown_fields_on_workflow_step() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test Workflow"
+agentic_workflow:
+  test_step:
+    prompt: "do something"
+    unknown_field: "should fail"
+"#;
+        let result = WorkflowFile::from_yaml(yaml);
+        assert!(result.is_err(), "should reject unknown field on WorkflowStep");
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("unknown_field"),
+            "error should mention unknown field, got: {}", err_msg
+        );
+    }
+
+    #[test]
+    fn deny_unknown_fields_on_model_overrides() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test Workflow"
+agentic_workflow:
+  test_step:
+    model_overrides:
+      max_turns: 10
+      unknown_param: 42
+"#;
+        let result = WorkflowFile::from_yaml(yaml);
+        assert!(result.is_err(), "should reject unknown field on ModelOverrides");
+    }
+
+    #[test]
+    fn deny_unknown_fields_on_loop_config() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test Workflow"
+agentic_workflow:
+  test_step:
+    loop:
+      unknown_loop_field: true
+"#;
+        let result = WorkflowFile::from_yaml(yaml);
+        assert!(result.is_err(), "should reject unknown field on LoopConfig");
+    }
+
+    #[test]
+    fn deny_unknown_fields_on_count_loop_config() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test Workflow"
+agentic_workflow:
+  test_step:
+    loop:
+      count:
+        max_iterations: 10
+        unknown_count_field: true
+"#;
+        let result = WorkflowFile::from_yaml(yaml);
+        assert!(result.is_err(), "should reject unknown field on CountLoopConfig");
+    }
+
+    #[test]
+    fn deny_unknown_fields_on_step_retry_config() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test Workflow"
+agentic_workflow:
+  test_step:
+    retry:
+      max_attempts: 3
+      unknown_retry_field: true
+"#;
+        let result = WorkflowFile::from_yaml(yaml);
+        assert!(result.is_err(), "should reject unknown field on StepRetryConfig");
+    }
+
+    #[test]
+    fn deny_unknown_fields_on_exact_criteria() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test Workflow"
+agentic_workflow:
+  test_step:
+    loop:
+      validation:
+        exact_criteria:
+          - metric: quality
+            operator: ">="
+            target: 0.9
+            unknown_criteria: true
+"#;
+        let result = WorkflowFile::from_yaml(yaml);
+        assert!(result.is_err(), "should reject unknown field on ExactCriteria");
+    }
+
+    #[test]
+    fn from_yaml_rejects_unknown_top_level_and_validates_nested() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test"
+benchmark:
+  mode: gpu
+logging:
+  level: debug
+"#;
+        let result = WorkflowFile::from_yaml(yaml);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("benchmark") && err_msg.contains("logging"),
+            "should report both unknown keys, got: {}", err_msg
+        );
+    }
+
+    #[test]
+    fn tool_step_with_input_json() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test"
+agentic_workflow:
+  run_tests:
+    tool: shell_exec
+    input:
+      command: "cargo test"
+      timeout_seconds: 120
+      env:
+        RUST_BACKTRACE: "1"
+"#;
+        let workflow = WorkflowFile::from_yaml(yaml).expect("tool step with input should parse");
+        assert!(workflow.agentic_workflow.is_some());
+    }
+
+    #[test]
+    fn user_input_prompt_step() {
+        let yaml = r#"
+workflow_id: test-workflow
+name: "Test"
+agentic_workflow:
+  confirm_step:
+    user_input:
+      type: confirm
+      message: "Proceed with deployment?"
+      default: true
+"#;
+        let workflow = WorkflowFile::from_yaml(yaml).expect("user_input prompt should parse");
+        assert!(workflow.agentic_workflow.is_some());
     }
 }

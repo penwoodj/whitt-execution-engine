@@ -9,6 +9,7 @@ pub mod config;
 pub mod error;
 pub mod model;
 pub mod quality;
+pub mod workflow;
 
 #[cfg(feature = "client")]
 pub mod benchmark;

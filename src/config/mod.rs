@@ -28,6 +28,7 @@ use std::path::PathBuf;
 
 /// Complete llama.cpp configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LlamaConfig {
     pub model: ModelConfig,
     #[serde(default)]
@@ -233,6 +234,7 @@ impl LlamaConfig {
 
 /// Model configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ModelConfig {
     /// Local path to GGUF model file.
     pub path: PathBuf,
@@ -249,6 +251,7 @@ pub struct ModelConfig {
 
 /// HuggingFace download configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HuggingFaceConfig {
     /// HuggingFace repository (org/model).
     pub repo: String,
@@ -268,6 +271,7 @@ pub struct HuggingFaceConfig {
 
 /// Context window configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, garde::Validate)]
+#[serde(deny_unknown_fields)]
 pub struct ContextConfig {
     #[serde(default = "default_ctx_size")]
     #[garde(range(min = 1))]
@@ -300,6 +304,7 @@ impl Default for ContextConfig {
 
 /// Hardware configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HardwareConfig {
     /// CPU threads (0 = auto-detect).
     #[serde(default = "default_threads")]
@@ -332,6 +337,7 @@ impl Default for HardwareConfig {
 
 /// Sampling parameters.
 #[derive(Debug, Clone, Serialize, Deserialize, garde::Validate)]
+#[serde(deny_unknown_fields)]
 pub struct SamplingConfig {
     #[serde(default = "default_temperature")]
     #[garde(range(min = 0.0, max = 2.0))]
@@ -388,6 +394,7 @@ impl Default for SamplingConfig {
 
 /// Server configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ServerConfig {
     #[serde(default = "default_host")]
     pub host: String,
@@ -430,6 +437,7 @@ impl Default for ServerConfig {
 
 /// KV cache configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CacheConfig {
     #[serde(default = "default_cache_type")]
     pub cache_type_k: CacheType,
@@ -472,6 +480,7 @@ pub enum LogLevel {
 
 /// Retry configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RetryConfig {
     #[serde(default = "default_timeout_seconds")]
     pub timeout_seconds: u64,
@@ -493,6 +502,7 @@ impl Default for RetryConfig {
 
 /// Docker resource limits.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DockerConfig {
     #[serde(default)]
     pub memory_limit: Option<usize>,
@@ -514,6 +524,7 @@ impl Default for DockerConfig {
 
 /// Feature flags.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FeaturesConfig {
     #[serde(default = "default_log_level")]
     pub log_level: LogLevel,
@@ -545,6 +556,7 @@ impl Default for FeaturesConfig {
 
 /// Vulkan-specific configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct VulkanConfig {
     #[serde(default = "default_visible_devices")]
     pub visible_devices: String,

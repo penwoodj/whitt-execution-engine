@@ -18,6 +18,7 @@ pub struct BenchmarkConfig {
     pub prompts: Vec<String>,
     pub max_tokens: usize,
     pub filter_size_max: Option<u64>,
+    pub filter_size_min: Option<u64>,
     pub filter_name: Option<String>,
     pub delay_between_swaps: Duration,
     pub compare_gpu_cpu: bool,
@@ -53,28 +54,137 @@ impl BenchmarkRunner {
         Self { config }
     }
 
+    fn clean_response_text(text: &str) -> String {
+        let mut cleaned = text.trim().to_string();
+
+        cleaned = cleaned.replace("<|im_start|>", "").replace("<|im_end|>", "").trim().to_string();
+
+        // Extract content from markdown code fences (opening ``` anywhere in text)
+        if let Some(first_fence) = cleaned.find("```") {
+            let after_fence = &cleaned[first_fence..];
+            let first_newline = after_fence.find('\n');
+            let opening_end = first_fence + first_newline.unwrap_or(3);
+            if opening_end < cleaned.len() {
+                if let Some(last_fence) = cleaned[opening_end..].rfind("```") {
+                    let end_pos = opening_end + last_fence;
+                    if opening_end + 1 < end_pos {
+                        cleaned = cleaned[opening_end + 1..end_pos].trim().to_string();
+                    }
+                }
+            }
+        }
+
+        if cleaned.starts_with('{') || cleaned.starts_with('[') {
+            if serde_json::from_str::<serde_json::Value>(&cleaned).is_ok() {
+                return cleaned;
+            }
+
+            let last_brace = cleaned.rfind('}');
+            let last_bracket = cleaned.rfind(']');
+
+            for closing_pos in [last_brace, last_bracket].into_iter().flatten() {
+                let truncated = &cleaned[..=closing_pos];
+                if serde_json::from_str::<serde_json::Value>(truncated).is_ok() {
+                    return truncated.to_string();
+                }
+            }
+
+            let mut chars: Vec<char> = cleaned.chars().collect();
+            for i in (1..chars.len()).rev() {
+                if (chars[i] == '}' || chars[i] == ']') && i > 0 && chars[i - 1] == ',' {
+                    chars.remove(i - 1);
+                }
+            }
+
+            let without_trailing_commas: String = chars.into_iter().collect();
+            if serde_json::from_str::<serde_json::Value>(&without_trailing_commas).is_ok() {
+                return without_trailing_commas;
+            }
+        }
+
+        cleaned
+    }
+
     fn load_workflow_config(&self) -> Option<BenchmarkWorkflowConfig> {
         let wf_path = self.config.workflow_file.as_ref()?;
         let content = fs::read_to_string(wf_path).ok()?;
 
-        let yaml_value: serde_json::Value = serde_saphyr::from_str(&content).ok()?;
+        // Validate the YAML against the schema before reading any config from it.
+        // This rejects non-schema keys (benchmark:, model_list:, etc.).
+        if let Err(e) = crate::workflow::WorkflowFile::from_yaml(&content) {
+            warn!("[benchmark] workflow YAML validation failed: {}", e);
+            return None;
+        }
 
-        let benchmark = yaml_value.get("benchmark")?;
-        let compare_modes = benchmark.get("compare_modes")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let max_tokens = benchmark.get("max_tokens")
+        let yaml_value: serde_json::Value = match serde_saphyr::from_str(&content) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("[benchmark] failed to parse workflow YAML for config extraction: {}", e);
+                return None;
+            }
+        };
+
+        let agentic_workflow = match yaml_value.get("agentic_workflow") {
+            Some(aw) => aw,
+            None => {
+                warn!("[benchmark] no agentic_workflow section in YAML");
+                return None;
+            }
+        };
+
+        // Steps can be map (named) or array (ordered) format
+        let first_step = if let Some(steps_map) = agentic_workflow.as_object() {
+            steps_map.values().next()
+        } else if let Some(steps_arr) = agentic_workflow.as_array() {
+            steps_arr.first()
+        } else {
+            None
+        };
+
+        let first_step = match first_step {
+            Some(s) => s,
+            None => {
+                warn!("[benchmark] no steps found in agentic_workflow");
+                return None;
+            }
+        };
+
+        let prompts = if let Some(prompt) = first_step.get("prompt").and_then(|v| v.as_str()) {
+            vec![prompt.to_string()]
+        } else {
+            // Fallback: check input.prompt when top-level prompt absent
+            let input_prompt = first_step
+                .get("input")
+                .and_then(|i| i.get("prompt"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            if input_prompt.is_empty() {
+                return None;
+            }
+            vec![input_prompt]
+        };
+
+        // max_tokens from input.max_tokens, default 4096
+        let max_tokens = first_step
+            .get("input")
+            .and_then(|i| i.get("max_tokens"))
             .and_then(|v| v.as_u64())
-            .unwrap_or(128) as usize;
-        let temperature = benchmark.get("temperature")
+            .unwrap_or(4096) as usize;
+
+        let temperature = first_step
+            .get("temperature")
             .and_then(|v| v.as_f64())
             .unwrap_or(0.7);
-        let top_p = benchmark.get("top_p")
+        let top_p = first_step
+            .get("top_p")
             .and_then(|v| v.as_f64())
-            .unwrap_or(0.9);
+            .unwrap_or(0.95);
 
-        let prompts: Vec<String> = benchmark.get("prompts")
-            .and_then(|v| v.as_array())
+        let model_list: Vec<String> = first_step
+            .get("loop")
+            .and_then(|l| l.get("models"))
+            .and_then(|m| m.as_array())
             .map(|arr| {
                 arr.iter()
                     .filter_map(|v| v.as_str().map(|s| s.to_string()))
@@ -82,21 +192,15 @@ impl BenchmarkRunner {
             })
             .unwrap_or_default();
 
-        let model_list: Vec<String> = yaml_value.get("model_list")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default();
+        info!("[benchmark] extracted workflow config: prompts={}, max_tokens={}, temperature={}, top_p={}, model_list={}",
+            prompts.len(), max_tokens, temperature, top_p, model_list.len());
 
         Some(BenchmarkWorkflowConfig {
             prompts,
             max_tokens,
             temperature,
             top_p,
-            compare_modes,
+            compare_modes: false,
             model_list,
         })
     }
@@ -106,33 +210,63 @@ impl BenchmarkRunner {
         let content = fs::read_to_string(wf_path).ok()?;
 
         let yaml_value: serde_json::Value = serde_saphyr::from_str(&content).ok()?;
-        let agentic_workflow = yaml_value.get("agentic_workflow")?.as_array()?;
+        let agentic_workflow = yaml_value.get("agentic_workflow")?;
 
-        let steps: Vec<WorkflowStep> = agentic_workflow.iter()
-            .filter_map(|step| {
-                let step_name = step.get("step")?.as_str()?.to_string();
-                let step_id = step.get("id")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| step_name.clone());
-                let requires = step.get("requires")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect()
+        let steps: Vec<WorkflowStep> = if let Some(steps_array) = agentic_workflow.as_array() {
+            steps_array.iter()
+                .filter_map(|step| {
+                    let step_name = step.get("step")?.as_str()?.to_string();
+                    let step_id = step.get("id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| step_name.clone());
+                    let requires = step.get("requires")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let when = step.get("when").cloned();
+
+                    Some(WorkflowStep {
+                        step_name,
+                        step_id,
+                        requires,
+                        when,
                     })
-                    .unwrap_or_default();
-                let when = step.get("when").cloned();
-
-                Some(WorkflowStep {
-                    step_name,
-                    step_id,
-                    requires,
-                    when,
                 })
-            })
-            .collect();
+                .collect()
+        } else if let Some(steps_map) = agentic_workflow.as_object() {
+            steps_map.iter()
+                .map(|(step_name_key, step_value)| {
+                    let step_name = step_name_key.clone();
+                    let step_id = step_value.get("id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| step_name.clone());
+                    let requires = step_value.get("requires")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let when = step_value.get("when").cloned();
+
+                    WorkflowStep {
+                        step_name,
+                        step_id,
+                        requires,
+                        when,
+                    }
+                })
+                .collect()
+        } else {
+            return None;
+        };
 
         Some(steps)
     }
@@ -251,6 +385,51 @@ impl BenchmarkRunner {
                 .with_context(|| format!("Failed to write benchmark report: {}", report_path.display()))?;
 
             info!("[benchmark] final report written to {}", report_path.display());
+        }
+        Ok(())
+    }
+
+    fn write_per_model_json(&self, result: &ModelBenchmarkResult) -> Result<()> {
+        if let Some(ref output_dir) = self.config.output_dir {
+            if result.inference_results.is_empty() {
+                return Ok(());
+            }
+            let safe_name = result.model_id
+                .replace(['/', '\\'], "_")
+                .replace(".gguf", "")
+                .replace('.', "_");
+            let file_path = Path::new(output_dir).join(format!("output/{}.json", safe_name));
+
+            let response_data: Vec<serde_json::Value> = result.inference_results.iter()
+                .map(|inf| {
+                    serde_json::json!({
+                        "model_id": result.model_id,
+                        "prompt": inf.prompt,
+                        "response_text": inf.response_text,
+                        "prompt_tokens": inf.prompt_tokens,
+                        "completion_tokens": inf.completion_tokens,
+                        "total_tokens": inf.total_tokens,
+                        "duration_ms": inf.duration.as_millis(),
+                        "tokens_per_second": inf.tokens_per_second,
+                    })
+                })
+                .collect();
+
+            let output = serde_json::json!({
+                "model_id": result.model_id,
+                "file_size_bytes": result.file_size_bytes,
+                "gpu_mode": result.gpu_mode,
+                "tokens_per_second": result.tokens_per_second,
+                "total_duration_ms": result.total_duration.as_millis(),
+                "inferences": response_data,
+            });
+
+            let json_str = serde_json::to_string_pretty(&output)
+                .context("Failed to serialize model result to JSON")?;
+            fs::write(&file_path, json_str)
+                .with_context(|| format!("Failed to write model JSON: {}", file_path.display()))?;
+
+            info!("[benchmark] per-model JSON written to {}", file_path.display());
         }
         Ok(())
     }
@@ -539,6 +718,16 @@ impl BenchmarkRunner {
                             }
                         }
 
+                        if let Some(min_size) = self.config.filter_size_min {
+                            if let Ok(metadata) = std::fs::metadata(path) {
+                                if metadata.len() < min_size {
+                                    info!("[benchmark] skipping {} (size {} < {})",
+                                        model_id, metadata.len(), min_size);
+                                    continue;
+                                }
+                            }
+                        }
+
                         if let Some(ref pattern) = self.config.filter_name {
                             if let Ok(re) = Regex::new(pattern) {
                                 if !re.is_match(&model_id) {
@@ -584,6 +773,18 @@ impl BenchmarkRunner {
                     }
                 }
 
+                if let Some(min_size) = self.config.filter_size_min {
+                    if path.exists() {
+                        if let Ok(metadata) = std::fs::metadata(path) {
+                            if metadata.len() < min_size {
+                                info!("[benchmark] skipping {} (size {} < {})",
+                                    model_id, metadata.len(), min_size);
+                                continue;
+                            }
+                        }
+                    }
+                }
+
                 if let Some(ref pattern) = self.config.filter_name {
                     if let Ok(re) = Regex::new(pattern) {
                         if !re.is_match(&model_id) {
@@ -617,6 +818,18 @@ impl BenchmarkRunner {
                     }
                 }
 
+                if let Some(min_size) = self.config.filter_size_min {
+                    if path.exists() {
+                        if let Ok(metadata) = std::fs::metadata(path) {
+                            if metadata.len() < min_size {
+                                info!("[benchmark] skipping {} (size {} < {})",
+                                    model_id, metadata.len(), min_size);
+                                continue;
+                            }
+                        }
+                    }
+                }
+
                 if let Some(ref pattern) = self.config.filter_name {
                     if let Ok(re) = Regex::new(pattern) {
                         if !re.is_match(&model_id) {
@@ -644,9 +857,9 @@ impl BenchmarkRunner {
 
         let wf_ctx = self.load_workflow_config();
 
-        let (_prompts, _max_tokens, compare_gpu_cpu, temperature, top_p) = if let Some(ref ctx) = wf_ctx {
+        let (prompts, max_tokens, compare_gpu_cpu, temperature, top_p) = if let Some(ref ctx) = wf_ctx {
             let _default_prompt = "The quick brown fox jumps over the lazy dog.";
-            let is_default_prompt = self.config.prompts.len() == 1 && self.config.prompts[0].contains("The quick brown fox");
+            let is_default_prompt = self.config.prompts.iter().any(|p| p.contains("The quick brown fox"));
             let is_default_max_tokens = self.config.max_tokens == 100;
             let is_default_compare_gpu_cpu = !self.config.compare_gpu_cpu;
 
@@ -690,6 +903,11 @@ impl BenchmarkRunner {
         info!("[benchmark] found {} models to benchmark", models.len());
         info!("[benchmark] GPU/CPU comparison mode: {}", compare_gpu_cpu);
 
+        let workflow_steps = self.load_workflow_steps();
+        if let Some(steps) = &workflow_steps {
+            info!("[benchmark] loaded {} workflow steps from YAML", steps.len());
+        }
+
         let mut results = Vec::new();
         let run_timestamp = {
             let dur = std::time::SystemTime::now()
@@ -710,7 +928,7 @@ impl BenchmarkRunner {
 
                 info!("[benchmark] [{}/{}] loading {} (GPU mode)", i+1, models.len(), model_id);
 
-                let gpu_result = self.benchmark_single_model(&client, model_id, model_path, "gpu", temperature, top_p).await;
+                let gpu_result = self.benchmark_single_model(&client, model_id, model_path, "gpu", &prompts, max_tokens, temperature, top_p).await;
 
                 if let Some(ref err) = gpu_result.error {
                     self.log_step_error(model_id, err)?;
@@ -725,7 +943,7 @@ impl BenchmarkRunner {
                     self.restart_docker_with_gpu_layers(0).await
                         .context("Failed to restart Docker in CPU mode")?;
 
-                    let cpu_result = self.benchmark_single_model(&client, model_id, model_path, "cpu", temperature, top_p).await;
+                    let cpu_result = self.benchmark_single_model(&client, model_id, model_path, "cpu", &prompts, max_tokens, temperature, top_p).await;
 
                     if let Some(ref err) = cpu_result.error {
                         self.log_step_error(model_id, err)?;
@@ -739,18 +957,22 @@ impl BenchmarkRunner {
                         let mut gpu_result_with_speedup = gpu_result.clone();
                         gpu_result_with_speedup.speedup_factor = Some(speedup);
                         self.write_per_model_report(&gpu_result_with_speedup, &suite_metadata, wf_ctx.as_ref())?;
+                        self.write_per_model_json(&gpu_result_with_speedup)?;
                         self.append_chat_log_markdown(&gpu_result_with_speedup, &run_timestamp)?;
                         results.push(gpu_result_with_speedup);
 
                         let mut cpu_result_with_speedup = cpu_result.clone();
                         cpu_result_with_speedup.speedup_factor = Some(speedup);
                         self.write_per_model_report(&cpu_result_with_speedup, &suite_metadata, wf_ctx.as_ref())?;
+                        self.write_per_model_json(&cpu_result_with_speedup)?;
                         self.append_chat_log_markdown(&cpu_result_with_speedup, &run_timestamp)?;
                         results.push(cpu_result_with_speedup);
                     } else {
                         self.write_per_model_report(&gpu_result, &suite_metadata, wf_ctx.as_ref())?;
+                        self.write_per_model_json(&gpu_result)?;
                         self.append_chat_log_markdown(&gpu_result, &run_timestamp)?;
                         self.write_per_model_report(&cpu_result, &suite_metadata, wf_ctx.as_ref())?;
+                        self.write_per_model_json(&cpu_result)?;
                         self.append_chat_log_markdown(&cpu_result, &run_timestamp)?;
                         results.push(gpu_result);
                         results.push(cpu_result);
@@ -760,6 +982,7 @@ impl BenchmarkRunner {
                         .context("Failed to restart Docker in GPU mode")?;
                 } else {
                     self.write_per_model_report(&gpu_result, &suite_metadata, wf_ctx.as_ref())?;
+                    self.write_per_model_json(&gpu_result)?;
                     self.append_chat_log_markdown(&gpu_result, &run_timestamp)?;
                     results.push(gpu_result);
                 }
@@ -774,13 +997,14 @@ impl BenchmarkRunner {
 
                 info!("[benchmark] [{}/{}] loading {}", i+1, models.len(), model_id);
 
-                let model_result = self.benchmark_single_model(&client, model_id, model_path, "gpu", temperature, top_p).await;
+                let model_result = self.benchmark_single_model(&client, model_id, model_path, "gpu", &prompts, max_tokens, temperature, top_p).await;
 
                 if let Some(ref err) = model_result.error {
                     self.log_step_error(model_id, err)?;
                 }
                 self.log_step_result(&model_result)?;
                 self.write_per_model_report(&model_result, &suite_metadata, wf_ctx.as_ref())?;
+                self.write_per_model_json(&model_result)?;
                 self.append_chat_log_markdown(&model_result, &run_timestamp)?;
 
                 results.push(model_result);
@@ -791,10 +1015,7 @@ impl BenchmarkRunner {
             }
         }
 
-        let workflow_steps = self.load_workflow_steps();
         if let Some(steps) = workflow_steps {
-            info!("[benchmark] loaded {} workflow steps from YAML", steps.len());
-
             for step in steps.iter().skip(1) {
                 info!("[benchmark] executing step: {} (id: {})", step.step_name, step.step_id);
                 self.log_step_execution(step, &results)?;
@@ -827,7 +1048,7 @@ impl BenchmarkRunner {
         Ok(suite_result)
     }
 
-    async fn benchmark_single_model(&self, client: &LlamaHttpClient, model_id: &str, model_source_path: &str, gpu_mode: &str, temperature: f64, top_p: f64) -> ModelBenchmarkResult {
+    async fn benchmark_single_model(&self, client: &LlamaHttpClient, model_id: &str, model_source_path: &str, gpu_mode: &str, prompts: &[String], max_tokens: usize, temperature: f64, top_p: f64) -> ModelBenchmarkResult {
         let server_model_id = model_id.strip_suffix(".gguf").unwrap_or(model_id);
         let start = Instant::now();
 
@@ -883,43 +1104,80 @@ impl BenchmarkRunner {
 
         let mut inference_results = Vec::new();
 
-        for prompt in &self.config.prompts {
-            let request = ChatCompletionRequest {
-                model: server_model_id.to_string(),
-                messages: vec![ChatMessage::user(prompt)],
-                max_tokens: Some(self.config.max_tokens),
-                temperature: Some(temperature as f32),
-                top_p: Some(top_p as f32),
-                stream: false,
-                ..Default::default()
-            };
+        for prompt in prompts {
+            const MAX_RETRIES: u32 = 3;
+            let mut last_error = None;
 
-            let inf_start = Instant::now();
-            match client.chat_completion(request).await {
-                Ok(resp) => {
-                    let duration = inf_start.elapsed();
-                    let tps = if duration.as_secs_f64() > 0.0 {
-                        resp.usage.completion_tokens as f64 / duration.as_secs_f64()
-                    } else {
-                        0.0
-                    };
-                    let response_text = resp.choices
-                        .first()
-                        .map(|c| c.message.content.clone())
-                        .unwrap_or_default();
-                    inference_results.push(InferenceResult {
-                        prompt: prompt.clone(),
-                        prompt_tokens: resp.usage.prompt_tokens,
-                        completion_tokens: resp.usage.completion_tokens,
-                        total_tokens: resp.usage.total_tokens,
-                        duration,
-                        tokens_per_second: tps,
-                        response_text,
-                    });
+            for attempt in 0..MAX_RETRIES {
+                let request = ChatCompletionRequest {
+                    model: server_model_id.to_string(),
+                    messages: vec![ChatMessage::user(prompt)],
+                    max_tokens: Some(max_tokens),
+                    temperature: Some(temperature as f32),
+                    top_p: Some(top_p as f32),
+                    stream: false,
+                    ..Default::default()
+                };
+
+                let inf_start = Instant::now();
+                match client.chat_completion(request).await {
+                    Ok(resp) => {
+                        let raw_response = resp.choices.first()
+                            .map(|c| c.message.content.clone())
+                            .unwrap_or_default();
+                        let cleaned_text = Self::clean_response_text(&raw_response);
+
+                        if cleaned_text != raw_response {
+                            info!("[benchmark] response post-processed for {} (attempt {}, {} chars → {} chars)",
+                                model_id, attempt + 1, raw_response.len(), cleaned_text.len());
+                        }
+
+                        if resp.usage.completion_tokens >= max_tokens {
+                            warn!("[benchmark] {} output truncated at {} tokens (hit max_tokens limit)",
+                                model_id, max_tokens);
+                        }
+
+                        let duration = inf_start.elapsed();
+                        let tps = if duration.as_secs_f64() > 0.0 {
+                            resp.usage.completion_tokens as f64 / duration.as_secs_f64()
+                        } else {
+                            0.0
+                        };
+
+                        inference_results.push(InferenceResult {
+                            prompt: prompt.clone(),
+                            prompt_tokens: resp.usage.prompt_tokens,
+                            completion_tokens: resp.usage.completion_tokens,
+                            total_tokens: resp.usage.total_tokens,
+                            duration,
+                            tokens_per_second: tps,
+                            response_text: cleaned_text,
+                        });
+                        last_error = None;
+                        break;
+                    }
+                    Err(e) => {
+                        last_error = Some(e.to_string());
+                        warn!("[benchmark] inference attempt {}/{} failed for {}: {}",
+                            attempt + 1, MAX_RETRIES, model_id, e);
+                        if attempt + 1 < MAX_RETRIES {
+                            sleep(Duration::from_secs(2u64.pow(attempt))).await;
+                        }
+                    }
                 }
-                Err(e) => {
-                    warn!("[benchmark] inference failed for {}: {}", model_id, e);
-                }
+            }
+
+            if let Some(err) = last_error {
+                warn!("[benchmark] all {} inference attempts failed for {}: {}", MAX_RETRIES, model_id, err);
+                inference_results.push(InferenceResult {
+                    prompt: prompt.clone(),
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0,
+                    duration: Duration::ZERO,
+                    tokens_per_second: 0.0,
+                    response_text: format!("ERROR: All {} attempts failed: {}", MAX_RETRIES, err),
+                });
             }
         }
 
@@ -997,6 +1255,7 @@ mod tests {
             prompts: vec!["test prompt".to_string()],
             max_tokens: 100,
             filter_size_max: None,
+            filter_size_min: None,
             filter_name: None,
             delay_between_swaps: Duration::from_secs(2),
             compare_gpu_cpu: true,

@@ -30,6 +30,7 @@ impl ComparisonOperator {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ValidationCriterion {
     pub metric: String,
     pub operator: ComparisonOperator,
@@ -37,6 +38,7 @@ pub struct ValidationCriterion {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct CountLoop {
     pub max_iterations: usize,
     #[serde(default)]
@@ -44,6 +46,7 @@ pub struct CountLoop {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ValidationLoop {
     #[serde(default)]
     pub tolerance: f64,
@@ -53,6 +56,7 @@ pub struct ValidationLoop {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ForEachLoop {
     pub items: Vec<serde_json::Value>,
     pub iteration_variable: String,
