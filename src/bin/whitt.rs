@@ -186,6 +186,22 @@ enum Commands {
         /// Path to YAML workflow file for context in output reports
         #[arg(long)]
         workflow: Option<String>,
+
+        /// Run pre-flight system checks and exit
+        #[arg(long)]
+        preflight: bool,
+
+        /// Seconds to wait after unloading a model before loading the next
+        #[arg(long, default_value = "3")]
+        cooldown: u64,
+
+        /// Maximum seconds to wait for model load before aborting
+        #[arg(long, default_value = "300")]
+        load_timeout: u64,
+
+        /// Minimum free /tmp space in MB required
+        #[arg(long, default_value = "1024")]
+        min_tmp_space: u64,
     },
 
     /// Load and validate unified YAML workflow configuration
@@ -309,7 +325,7 @@ async fn main() -> Result<()> {
             agent_command(&cli.url, cli.model, task, max_steps, cli.verbose, AgentOpts { allowed_tools, forbidden_tools, allowed_paths, forbidden_paths }).await
         }
 
-        Commands::Benchmark { prompt, max_tokens, models_dir, model_list, prompts, output, filter_size_max, filter_size_min, filter_name, compare_gpu_cpu, output_dir, workflow } => {
+        Commands::Benchmark { prompt, max_tokens, models_dir, model_list, prompts, output, filter_size_max, filter_size_min, filter_name, compare_gpu_cpu, output_dir, workflow, preflight, cooldown, load_timeout, min_tmp_space } => {
             tracing::info!("[WHT-BEN001] benchmark command, max_tokens={}, prompts={}", max_tokens, prompts);
 
             if models_dir.is_some() || model_list.is_some() || workflow.is_some() {
@@ -331,6 +347,10 @@ async fn main() -> Result<()> {
                     workflow_file: workflow,
                     temperature: None,
                     top_p: None,
+                    cooldown_after_unload: std::time::Duration::from_secs(cooldown),
+                    preflight_only: preflight,
+                    model_load_timeout: std::time::Duration::from_secs(load_timeout),
+                    min_tmp_space_mb: min_tmp_space,
                 };
 
                 let runner = BenchmarkRunner::new(config);
@@ -842,12 +862,12 @@ async fn server_start_command() -> Result<()> {
     let status = match gpu_type.as_str() {
         "nvidia" => {
             tokio::process::Command::new("docker")
-                .args(["compose", "-f", "docker-compose.yml", "-f", "docker-compose.nvidia.yml", "up", "-d"])
+                .args(["compose", "-f", "docker/docker-compose.yml", "-f", "docker/docker-compose.nvidia.yml", "up", "-d"])
                 .status().await?
         }
         "amd" => {
             tokio::process::Command::new("docker")
-                .args(["compose", "-f", "docker-compose.yml", "-f", "docker-compose.amd.yml", "up", "-d"])
+                .args(["compose", "-f", "docker/docker-compose.yml", "-f", "docker/docker-compose.amd.yml", "up", "-d"])
                 .status().await?
         }
         _ => {
@@ -881,8 +901,8 @@ async fn server_gpu_command() -> Result<()> {
     let gpu_type = detect_gpu_type();
     println!("\nGPU type: {}", gpu_type);
     match gpu_type.as_str() {
-        "nvidia" => println!("Recommended: docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d"),
-        "amd" => println!("Recommended: docker compose -f docker-compose.yml -f docker-compose.amd.yml up -d"),
+        "nvidia" => println!("Recommended: docker compose -f docker/docker-compose.yml -f docker/docker-compose.nvidia.yml up -d"),
+        "amd" => println!("Recommended: docker compose -f docker/docker-compose.yml -f docker/docker-compose.amd.yml up -d"),
         _ => println!("Recommended: docker compose up -d"),
     }
     Ok(())

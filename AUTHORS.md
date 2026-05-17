@@ -4,11 +4,9 @@ This project is maintained by:
 
 ## Lead Maintainer
 
-**[Your Name](https://github.com/YOUR_USERNAME)**
+**[Jon Penwood](https://github.com/penwoodj)**
 - Project founder and lead developer
-- Email: your.email@example.com
-- Location: [City, Country]
-- GitHub: https://github.com/YOUR_USERNAME
+- GitHub: https://github.com/penwoodj
 
 ## Contributors
 

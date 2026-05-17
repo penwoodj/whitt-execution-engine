@@ -22,6 +22,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 ENV PYTHONUNBUFFERED=1
 ENV HF_HUB_DISABLE_TELEMETRY=1
+ENV AMD_VULKAN_ICD=RADV
 
 # AMD Polaris GPU workarounds (RX 570/580/590)
 # IMPORTANT: Use RADV driver, NOT AMDVLK (2GB allocation limit, llama.cpp issue #15054)
@@ -30,10 +31,11 @@ ENV GGML_VK_FORCE_MAX_ALLOCATION_SIZE=2147483646
 # Issue #20465: Flash attention may cause garbled output on Polaris
 # Set in entrypoint: --flash-attn 0
 
-# Install runtime dependencies
+# Install runtime dependencies — self-contained Vulkan (RADV) driver
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libvulkan1 \
     mesa-vulkan-drivers \
+    vulkan-tools \
     libglvnd0 \
     libgl1 \
     libglx0 \
@@ -45,6 +47,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tini \
     ca-certificates \
     libgomp1 \
+    pciutils \
     && rm -rf /var/lib/apt/lists/*
 
 # Install huggingface-hub CLI
@@ -65,9 +68,11 @@ RUN mkdir -p /models \
     /var/log/llama-server \
     /var/run/llama-server
 
-# CRITICAL: Ensure Vulkan ICD directory exists for host mount
-RUN mkdir -p /usr/share/vulkan/icd.d && \
-    ln -sf /usr/lib/x86_64-linux-gnu/libvulkan_radeon.so /usr/lib/libvulkan_radeon.so
+# Verify self-contained Vulkan ICD exists (from mesa-vulkan-drivers package)
+# Ubuntu 26.04 names it radeon_icd.json (not radeon_icd.x86_64.json)
+RUN ls -la /usr/share/vulkan/icd.d/ && \
+    test -f /usr/share/vulkan/icd.d/radeon_icd.json || \
+    (echo "ERROR: RADV ICD not found — Vulkan will not work" && exit 1)
 
 # Set working directory
 WORKDIR /app

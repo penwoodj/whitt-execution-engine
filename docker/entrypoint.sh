@@ -395,23 +395,64 @@ translate_config() {
 
 # Function to validate Vulkan GPU
 validate_vulkan() {
-    log_info "Validating Vulkan GPU..."
+    log_info "Validating AMD GPU + Vulkan..."
 
     if [ -z "$GGML_VK_VISIBLE_DEVICES" ]; then
         export GGML_VK_VISIBLE_DEVICES="0"
     fi
 
-    # Try to run llama-cli to check Vulkan
-    if command -v llama-cli &> /dev/null; then
-        if ! llama-cli --help 2>&1 | grep -q "vulkan"; then
-            log_warn "Vulkan support not found in llama-cli. Running in CPU-only mode."
-            export LLAMA_ARG_N_GPU_LAYERS="0"
-        else
-            log_info "Vulkan support detected. GPU: $GGML_VK_VISIBLE_DEVICES"
-        fi
-    else
-        log_warn "llama-cli not found. Skipping Vulkan validation."
+    if [ ! -d /dev/dri ]; then
+        log_error "/dev/dri not found — no GPU device passthrough. Add 'devices: /dev/dri:/dev/rw' to docker-compose."
+        log_error "Falling back to CPU-only mode."
+        export LLAMA_ARG_N_GPU_LAYERS="0"
+        return 0
     fi
+
+    local render_devices=$(ls /dev/dri/renderD* 2>/dev/null | wc -l)
+    if [ "$render_devices" -eq 0 ]; then
+        log_error "No render nodes in /dev/dri — GPU not accessible."
+        log_error "Falling back to CPU-only mode."
+        export LLAMA_ARG_N_GPU_LAYERS="0"
+        return 0
+    fi
+
+    log_info "Found $render_devices render node(s): $(ls /dev/dri/renderD* 2>/dev/null | tr '\n' ' ')"
+
+    if command -v lspci &> /dev/null; then
+        local gpu_info=$(lspci | grep -iE 'vga|display|amd|radeon' | head -1)
+        if [ -n "$gpu_info" ]; then
+            log_info "GPU: $gpu_info"
+        fi
+    fi
+
+    local icd_file="/usr/share/vulkan/icd.d/radeon_icd.json"
+    if [ ! -f "$icd_file" ]; then
+        # Try alternate name (some distros use .x86_64 suffix)
+        icd_file="/usr/share/vulkan/icd.d/radeon_icd.x86_64.json"
+    fi
+    if [ ! -f "$icd_file" ]; then
+        log_error "RADV ICD not found at $icd_file — container Vulkan driver missing."
+        log_error "Falling back to CPU-only mode."
+        export LLAMA_ARG_N_GPU_LAYERS="0"
+        return 0
+    fi
+    log_info "Vulkan ICD: $icd_file"
+
+    if command -v vulkaninfo &> /dev/null; then
+        local vk_output=$(vulkaninfo --summary 2>&1 | head -30)
+        if echo "$vk_output" | grep -qi "AMD\|radeon"; then
+            log_info "Vulkan GPU detected via vulkaninfo"
+            echo "$vk_output" | grep -E "deviceName|apiVersion" | head -4
+        elif echo "$vk_output" | grep -qi "error\|failed\|cannot"; then
+            log_warn "vulkaninfo reported errors — GPU may not be fully accessible."
+            log_warn "Continuing with GPU layers. If inference fails, set LLAMA_ARG_N_GPU_LAYERS=0."
+        else
+            log_info "Vulkan info:"
+            echo "$vk_output" | grep -E "deviceName|apiVersion" | head -4
+        fi
+    fi
+
+    log_info "AMD GPU + Vulkan ready. Device: $GGML_VK_VISIBLE_DEVICES"
 }
 
 # Function to start llama-server
@@ -583,8 +624,17 @@ shutdown_handler() {
     exit 0
 }
 
-# Register signal handlers
-trap shutdown_handler SIGTERM SIGINT
+crash_handler() {
+    local sig=$1
+    log_error "Process received signal $sig — possible GPU driver issue."
+    log_error "Check: dmesg | grep -i 'gpu\|amdgpu\|vulkan' on the host."
+    log_error "If persistent: set LLAMA_ARG_N_GPU_LAYERS=0 to use CPU-only mode."
+    exit 2
+}
+
+trap 'shutdown_handler' SIGTERM SIGINT
+trap 'crash_handler SIGABRT' SIGABRT
+trap 'crash_handler SIGSEGV' SIGSEGV
 
 # Main entry point
 main() {

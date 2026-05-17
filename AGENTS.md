@@ -196,7 +196,7 @@ docs/qa/
 - `--flash-attn on` is safe and recommended
 
 ### Docker
-- Use base `docker-compose.yml` (not AMD or NVIDIA variants) for AMD GPU
+- Use base `docker/docker-compose.yml` (not AMD or NVIDIA variants) for AMD GPU
 - Mount entrypoint.sh at `/entrypoint.sh:ro` (not `/app/entrypoint.sh`)
 - Server entrypoint is `['tini', '--', '/entrypoint.sh']`
 

@@ -1,5 +1,6 @@
 use crate::client::http_client::LlamaHttpClient;
 use crate::client::types::{ChatCompletionRequest, ChatMessage};
+use crate::client::disk_monitor;
 use super::{BenchmarkSuiteResult, ModelBenchmarkResult, InferenceResult};
 use anyhow::{Context, Result};
 use regex::Regex;
@@ -8,7 +9,8 @@ use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, Instant};
 use std::process::Command;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
+use tokio::process::Command as TokioCommand;
 use tracing::{info, warn};
 
 pub struct BenchmarkConfig {
@@ -26,6 +28,25 @@ pub struct BenchmarkConfig {
     pub workflow_file: Option<String>,
     pub temperature: Option<f64>,
     pub top_p: Option<f64>,
+    pub cooldown_after_unload: Duration,
+    pub preflight_only: bool,
+    pub model_load_timeout: Duration,
+    pub min_tmp_space_mb: u64,
+}
+
+#[allow(dead_code)]
+fn default_cooldown_after_unload() -> Duration {
+    Duration::from_secs(3)
+}
+
+#[allow(dead_code)]
+fn default_model_load_timeout() -> Duration {
+    Duration::from_secs(300)
+}
+
+#[allow(dead_code)]
+fn default_min_tmp_space_mb() -> u64 {
+    1024
 }
 
 pub struct BenchmarkRunner {
@@ -52,6 +73,115 @@ struct WorkflowStep {
 impl BenchmarkRunner {
     pub fn new(config: BenchmarkConfig) -> Self {
         Self { config }
+    }
+
+    /// Pre-flight checks: verify system health before starting benchmark.
+    pub async fn preflight_check(&self) -> Result<()> {
+        info!("[benchmark] starting preflight checks...");
+
+        let client = LlamaHttpClient::new(&self.config.server_url)
+            .context("Failed to create HTTP client for preflight check")?;
+        match client.health().await {
+            Ok(health) => {
+                info!("[benchmark] ✓ Docker health check passed: status={}, idle_slots={}, processing_slots={}",
+                    health.status, health.slots_idle, health.slots_processing);
+            }
+            Err(e) => {
+                let msg = format!("Docker health check failed: {}", e);
+                info!("[benchmark] ✗ {}", msg);
+                anyhow::bail!(crate::error::Error::benchmark(msg));
+            }
+        }
+
+        let min_bytes = self.config.min_tmp_space_mb * 1024 * 1024;
+        match disk_monitor::ensure_min_free_space(Path::new("/tmp"), min_bytes) {
+            Ok(info) => {
+                let available_mb = info.available_bytes / (1024 * 1024);
+                info!("[benchmark] ✓ /tmp space check passed: {} MB available (min: {} MB required)",
+                    available_mb, self.config.min_tmp_space_mb);
+            }
+            Err(e) => {
+                let msg = format!("/tmp space check failed: {}", e);
+                info!("[benchmark] ✗ {}", msg);
+                anyhow::bail!(crate::error::Error::benchmark(msg));
+            }
+        }
+
+        match TokioCommand::new("pgrep")
+            .args(["-c", "llama-server"])
+            .output()
+            .await
+        {
+            Ok(output) => {
+                let count_str = String::from_utf8_lossy(&output.stdout);
+                let count: i32 = count_str.trim().parse().unwrap_or(0);
+                if count <= 1 {
+                    info!("[benchmark] ✓ Zombie process check passed: {} llama-server process(es) found", count);
+                } else {
+                    let msg = format!("Found {} zombie llama-server processes (expected 0-1)", count);
+                    info!("[benchmark] ✗ {}", msg);
+                    anyhow::bail!(crate::error::Error::benchmark(msg));
+                }
+            }
+            Err(e) => {
+                let msg = format!("Zombie process check failed to execute pgrep: {}", e);
+                info!("[benchmark] ✗ {}", msg);
+                anyhow::bail!(crate::error::Error::benchmark(msg));
+            }
+        }
+
+        info!("[benchmark] all preflight checks passed");
+        Ok(())
+    }
+
+    /// Runtime system health check: verify resources are adequate before operations.
+    pub async fn check_system_health(&self) -> Result<()> {
+        let min_bytes = self.config.min_tmp_space_mb * 1024 * 1024;
+        match disk_monitor::check_disk_space(Path::new("/tmp")) {
+            Ok(info) => {
+                let available_mb = info.available_bytes / (1024 * 1024);
+                info!("[benchmark] /tmp space: {} MB available (min: {} MB required)",
+                    available_mb, self.config.min_tmp_space_mb);
+                if info.available_bytes < min_bytes {
+                    let msg = format!("Insufficient /tmp space: {} MB available, {} MB required",
+                        available_mb, self.config.min_tmp_space_mb);
+                    anyhow::bail!(crate::error::Error::benchmark(msg));
+                }
+            }
+            Err(e) => {
+                let msg = format!("Failed to check /tmp space: {}", e);
+                anyhow::bail!(crate::error::Error::benchmark(msg));
+            }
+        }
+
+        let client = LlamaHttpClient::new(&self.config.server_url)
+            .context("Failed to create HTTP client for health check")?;
+        match client.health().await {
+            Ok(health) => {
+                info!("[benchmark] Docker health: status={}, idle_slots={}, processing_slots={}",
+                    health.status, health.slots_idle, health.slots_processing);
+            }
+            Err(e) => {
+                let msg = format!("Docker health check failed: {}", e);
+                anyhow::bail!(crate::error::Error::benchmark(msg));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn log_resource_state(&self, phase: &str, model_id: &str) {
+        if let Ok(info) = disk_monitor::check_disk_space(Path::new("/tmp")) {
+            let available_mb = info.available_bytes / (1024 * 1024);
+            info!("[benchmark] [{}] resource state {}: /tmp available={} MB", model_id, phase, available_mb);
+        }
+
+        if let Ok(output) = Command::new("free").args(["-m"]).output() {
+            let mem_info = String::from_utf8_lossy(&output.stdout);
+            for line in mem_info.lines().take(3) {
+                info!("[benchmark] [{}] resource state {}: {}", model_id, phase, line);
+            }
+        }
     }
 
     fn clean_response_text(text: &str) -> String {
@@ -848,6 +978,23 @@ impl BenchmarkRunner {
     }
 
     pub async fn run(&self) -> Result<BenchmarkSuiteResult> {
+        self.preflight_check().await.context("Preflight checks failed")?;
+
+        if self.config.preflight_only {
+            info!("[benchmark] Preflight checks passed. Exiting (--preflight mode).");
+            return Ok(BenchmarkSuiteResult {
+                timestamp: {
+                    let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                    format!("unix_epoch_{}s", d.as_secs())
+                },
+                server_url: self.config.server_url.clone(),
+                total_models: 0,
+                successful: 0,
+                failed: 0,
+                results: vec![],
+            });
+        }
+
         self.ensure_output_dirs()
             .context("Failed to ensure output directories")?;
         let _ = self.copy_workflow_yaml();
@@ -928,6 +1075,31 @@ impl BenchmarkRunner {
 
                 info!("[benchmark] [{}/{}] loading {} (GPU mode)", i+1, models.len(), model_id);
 
+                if let Err(e) = self.check_system_health().await {
+                    warn!("[benchmark] Skipping {} due to health check failure: {}", model_id, e);
+                    let failed_result = ModelBenchmarkResult {
+                        model_id: model_id.clone(),
+                        model_path: model_path.clone(),
+                        file_size_bytes: 0,
+                        load_duration: Duration::ZERO,
+                        inference_results: vec![],
+                        unload_duration: Duration::ZERO,
+                        total_duration: Duration::ZERO,
+                        tokens_per_second: 0.0,
+                        avg_latency_ms: 0.0,
+                        p50_latency_ms: 0.0,
+                        p95_latency_ms: 0.0,
+                        p99_latency_ms: 0.0,
+                        error: Some(format!("Health check failed: {}", e)),
+                        gpu_mode: "gpu".to_string(),
+                        speedup_factor: None,
+                    };
+                    self.log_step_result(&failed_result)?;
+                    self.log_step_error(model_id, failed_result.error.as_ref().unwrap())?;
+                    results.push(failed_result);
+                    continue;
+                }
+
                 let gpu_result = self.benchmark_single_model(&client, model_id, model_path, "gpu", &prompts, max_tokens, temperature, top_p).await;
 
                 if let Some(ref err) = gpu_result.error {
@@ -942,6 +1114,34 @@ impl BenchmarkRunner {
 
                     self.restart_docker_with_gpu_layers(0).await
                         .context("Failed to restart Docker in CPU mode")?;
+
+                    if let Err(e) = self.check_system_health().await {
+                        warn!("[benchmark] Skipping {} CPU mode due to health check failure: {}", model_id, e);
+                        let cpu_result = ModelBenchmarkResult {
+                            model_id: model_id.clone(),
+                            model_path: model_path.clone(),
+                            file_size_bytes: 0,
+                            load_duration: Duration::ZERO,
+                            inference_results: vec![],
+                            unload_duration: Duration::ZERO,
+                            total_duration: Duration::ZERO,
+                            tokens_per_second: 0.0,
+                            avg_latency_ms: 0.0,
+                            p50_latency_ms: 0.0,
+                            p95_latency_ms: 0.0,
+                            p99_latency_ms: 0.0,
+                            error: Some(format!("Health check failed: {}", e)),
+                            gpu_mode: "cpu".to_string(),
+                            speedup_factor: None,
+                        };
+                        self.log_step_result(&cpu_result)?;
+                        self.log_step_error(model_id, cpu_result.error.as_ref().unwrap())?;
+                        results.push(gpu_result);
+                        results.push(cpu_result);
+                        self.restart_docker_with_gpu_layers(999).await
+                            .context("Failed to restart Docker in GPU mode")?;
+                        continue;
+                    }
 
                     let cpu_result = self.benchmark_single_model(&client, model_id, model_path, "cpu", &prompts, max_tokens, temperature, top_p).await;
 
@@ -997,6 +1197,31 @@ impl BenchmarkRunner {
 
                 info!("[benchmark] [{}/{}] loading {}", i+1, models.len(), model_id);
 
+                if let Err(e) = self.check_system_health().await {
+                    warn!("[benchmark] Skipping {} due to health check failure: {}", model_id, e);
+                    let failed_result = ModelBenchmarkResult {
+                        model_id: model_id.clone(),
+                        model_path: model_path.clone(),
+                        file_size_bytes: 0,
+                        load_duration: Duration::ZERO,
+                        inference_results: vec![],
+                        unload_duration: Duration::ZERO,
+                        total_duration: Duration::ZERO,
+                        tokens_per_second: 0.0,
+                        avg_latency_ms: 0.0,
+                        p50_latency_ms: 0.0,
+                        p95_latency_ms: 0.0,
+                        p99_latency_ms: 0.0,
+                        error: Some(format!("Health check failed: {}", e)),
+                        gpu_mode: "gpu".to_string(),
+                        speedup_factor: None,
+                    };
+                    self.log_step_result(&failed_result)?;
+                    self.log_step_error(model_id, failed_result.error.as_ref().unwrap())?;
+                    results.push(failed_result);
+                    continue;
+                }
+
                 let model_result = self.benchmark_single_model(&client, model_id, model_path, "gpu", &prompts, max_tokens, temperature, top_p).await;
 
                 if let Some(ref err) = model_result.error {
@@ -1048,6 +1273,7 @@ impl BenchmarkRunner {
         Ok(suite_result)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn benchmark_single_model(&self, client: &LlamaHttpClient, model_id: &str, model_source_path: &str, gpu_mode: &str, prompts: &[String], max_tokens: usize, temperature: f64, top_p: f64) -> ModelBenchmarkResult {
         let server_model_id = model_id.strip_suffix(".gguf").unwrap_or(model_id);
         let start = Instant::now();
@@ -1078,9 +1304,61 @@ impl BenchmarkRunner {
             }
         }
 
+        if let Err(e) = self.check_system_health().await {
+            warn!("[benchmark] Health check before load failed for {}: {}", model_id, e);
+            return ModelBenchmarkResult {
+                model_id: model_id.to_string(),
+                model_path: resolved_path,
+                file_size_bytes: file_size,
+                load_duration: Duration::ZERO,
+                inference_results: Vec::new(),
+                unload_duration: Duration::ZERO,
+                total_duration: start.elapsed(),
+                tokens_per_second: 0.0,
+                avg_latency_ms: 0.0,
+                p50_latency_ms: 0.0,
+                p95_latency_ms: 0.0,
+                p99_latency_ms: 0.0,
+                error: Some(format!("Health check before load failed: {}", e)),
+                gpu_mode: gpu_mode.to_string(),
+                speedup_factor: None,
+            };
+        }
+
+        self.log_resource_state("before-load", model_id);
+
         let load_start = Instant::now();
-        let load_result = client.load_model(server_model_id).await;
+        let load_result = timeout(self.config.model_load_timeout, client.load_model(server_model_id)).await;
         let load_duration = load_start.elapsed();
+
+        let load_result = match load_result {
+            Ok(inner) => inner,
+            Err(_) => {
+                let msg = format!(
+                    "Model load timed out after {}s (limit: {}s). Possible GPU driver issue — aborting to prevent system crash.",
+                    load_duration.as_secs(),
+                    self.config.model_load_timeout.as_secs()
+                );
+                warn!("[benchmark] [{}] {}", model_id, msg);
+                return ModelBenchmarkResult {
+                    model_id: model_id.to_string(),
+                    model_path: resolved_path,
+                    file_size_bytes: file_size,
+                    load_duration,
+                    inference_results: Vec::new(),
+                    unload_duration: Duration::ZERO,
+                    total_duration: start.elapsed(),
+                    tokens_per_second: 0.0,
+                    avg_latency_ms: 0.0,
+                    p50_latency_ms: 0.0,
+                    p95_latency_ms: 0.0,
+                    p99_latency_ms: 0.0,
+                    error: Some(msg),
+                    gpu_mode: gpu_mode.to_string(),
+                    speedup_factor: None,
+                };
+            }
+        };
 
         if let Err(e) = load_result {
             return ModelBenchmarkResult {
@@ -1185,6 +1463,12 @@ impl BenchmarkRunner {
         let _ = client.unload_model(server_model_id).await;
         let unload_duration = unload_start.elapsed();
 
+        self.log_resource_state("after-unload", model_id);
+
+        info!("[benchmark] [{}] cooldown after unload: sleeping {}s", model_id, self.config.cooldown_after_unload.as_secs());
+        sleep(self.config.cooldown_after_unload).await;
+        info!("[benchmark] [{}] cooldown complete", model_id);
+
         let total_duration = start.elapsed();
         let completion_tokens_sum: usize = inference_results.iter()
             .map(|r| r.completion_tokens)
@@ -1263,6 +1547,10 @@ mod tests {
             workflow_file: None,
             temperature: None,
             top_p: None,
+            cooldown_after_unload: Duration::from_secs(3),
+            preflight_only: false,
+            model_load_timeout: Duration::from_secs(300),
+            min_tmp_space_mb: 1024,
         };
 
         assert!(config.compare_gpu_cpu, "compare_gpu_cpu should be true");
