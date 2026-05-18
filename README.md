@@ -92,7 +92,7 @@ description: "Analyze, refactor, and validate code"
 
 models:
   primary:
-    provider: lmstudio
+    provider: llama_cpp_with_vulkan
     model: "llama-3.2-3b-instruct"
     backend: vulkan
 
@@ -314,6 +314,90 @@ Both execution modes enable a powerful workflow improvement cycle:
 
 ---
 
+## Getting Started
+
+**Prerequisites**:
+- Docker + Docker Compose
+- Vulkan-capable GPU (AMD or NVIDIA) with drivers installed
+- Rust toolchain
+
+**Build**:
+```bash
+cargo build --release --all-features
+```
+
+The binary is at `target/release/whitt`. Optionally install it:
+```bash
+cp target/release/whitt ~/.local/bin/
+```
+
+**Start the Docker Server**:
+```bash
+whitt server start
+```
+
+This launches a llama.cpp server in Docker with Vulkan GPU offloading. On first run, it pulls the Docker image (~2GB). Verify it's running:
+```bash
+whitt server status
+```
+
+You should see:
+```
+Server: http://localhost:8080
+Health: ok
+```
+
+**Download a Model**:
+```bash
+whitt download Qwen/Qwen2.5-0.5B-Instruct-GGUF --file qwen2.5-0.5b-instruct-q4_k_m.gguf
+```
+
+This downloads a small (~400MB) model to `./models/`. For a larger model:
+```bash
+whitt download Qwen/Qwen2.5-7B-Instruct-GGUF --file qwen2.5-7b-instruct-q4_k_m.gguf
+```
+
+**Load a Model**:
+```bash
+whitt model load Qwen2.5-0.5B-Instruct-Q4_K_M
+```
+
+List available models:
+```bash
+whitt model list
+```
+
+**Chat**:
+One-shot:
+```bash
+whitt chat "Explain Rust ownership in 3 sentences"
+```
+
+Interactive REPL (no prompt argument):
+```bash
+whitt chat
+```
+
+With options:
+```bash
+whitt chat "Write a haiku about debugging" --temperature 0.9 --max-tokens 100
+```
+
+**Agent Mode**:
+The ReAct agent autonomously uses tools (model list, model load, chat) to complete tasks:
+```bash
+whitt agent "What models are available and which ones are loaded?"
+```
+
+With more steps:
+```bash
+whitt agent "Load the smallest model and ask it to explain quantum computing" --max-steps 15
+```
+
+**Full Reference**: See [docs/TUTORIAL.md](docs/TUTORIAL.md) for complete command reference, configuration details, and troubleshooting.
+
+---
+
 ## Key Features
 
 ### 1. Declarative Workflow Definition
@@ -342,11 +426,11 @@ Works with local LLM providers:
 ```yaml
 models:
   analyzer:
-    provider: lmstudio
+    provider: llama_cpp_with_vulkan
     model: "llama-3.2-3b-instruct"
 
   validator:
-    provider: ollama
+    provider: llama_cpp_with_vulkan
     model: "llama3.2"
 
   embedder:
@@ -355,9 +439,7 @@ models:
 ```
 
 **Providers**:
-- **LM Studio**: GUI-based local server
-- **Ollama**: CLI-based local server
-- **llama.cpp**: Direct GGUF model loading
+- **llama.cpp with Vulkan**: Docker-based local server with GPU offloading
 - **Jina AI**: High-performance embeddings
 - **OpenAI**: Cloud fallback (optional)
 
@@ -365,7 +447,7 @@ models:
 - Auto-routing: Select model based on task
 - Fallback: Escalate to alternative on failure
 - Parameters: Temperature, top-p, max tokens
-- Backend: Vulkan, CUDA, CPU, Metal
+- Backend: Vulkan (AMD/NVIDIA GPU), CPU
 
 ### 3. Flexible Execution Modes
 
@@ -637,7 +719,7 @@ workflow_id: simple_pipeline
 name: "Simple Analysis Pipeline"
 models:
   primary:
-    provider: lmstudio
+    provider: llama_cpp_with_vulkan
     model: "llama-3.2-3b-instruct"
 execution:
   mode: serial
@@ -660,7 +742,7 @@ workflow_id: parallel_validation
 name: "Parallel Validation Workflow"
 models:
   primary:
-    provider: ollama
+    provider: llama_cpp_with_vulkan
     model: "llama3.2"
 execution:
   mode: parallel
@@ -766,7 +848,7 @@ The framework includes **53 example workflows across 19 categories** demonstrati
 **All workflows validated**: 14 review cycles completed
 **Schema quality score**: 0.94/1.0 (Excellent)
 **Coverage**: 100% of all requirements
-**Full examples**: `opencode/docs/reports/requirements/example-workflows/requirements-oriented-auto/`
+**Full examples**: `docs/workflows/examples/`
 
 ---
 
@@ -838,6 +920,10 @@ docs/
 
 🚧 **In Development - Extended POC Complete**
 
+**Legend**:
+- ✅ **DONE**: Implemented and verified
+- ⏳ **PLANNED**: Scheduled for future phases
+
 **Current Implementation Status** (April 2026):
 - ✅ Error handling module (`src/error.rs`)
 - ✅ YAML config parsing with serde-saphyr (providers, models, unified config)
@@ -879,6 +965,8 @@ docs/
 
 ## Quick Start
 
+⚠️ **The workflow execution commands below are under development. For current CLI usage, see [Getting Started](#getting-started) above.**
+
 ### 1. Define Your First Workflow
 
 Create `my_workflow.yml`:
@@ -890,7 +978,7 @@ description: "A simple workflow to get started"
 
 models:
   primary:
-    provider: lmstudio
+    provider: llama_cpp_with_vulkan
     model: "llama-3.2-3b-instruct"
 
 execution:
@@ -939,9 +1027,10 @@ cargo build --release
 
 ## Documentation
 
-- **Schema Requirements**: `opencode/docs/reports/requirements/schema-consolidated-report.md`
-- **Example Workflows**: `opencode/docs/reports/requirements/example-workflows/`
-- **Architecture Decisions**: `opencode/docs/reports/roadmap/`
+- **Schema Requirements**: `docs/schema/unified-workflow-schema.yml`
+- **Tutorial**: `docs/TUTORIAL.md` (full CLI reference)
+- **Example Workflows**: `docs/workflows/examples/`
+- **Architecture Decisions**: `docs/roadmap/`
 
 ---
 

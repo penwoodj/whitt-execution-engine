@@ -133,7 +133,7 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, "        max_iterations: {}", n)?;
         writeln!(yaml, "        iteration_variable: current_model")?;
         writeln!(yaml, "    input:")?;
-        writeln!(yaml, "      file_path: \"./docs/plans/multi-model-benchmark/01-IMPLEMENTATION-PLAN.md\"")?;
+        writeln!(yaml, "      file_path: \"./docs/benchmarks/plans/01-IMPLEMENTATION-PLAN.md\"")?;
         writeln!(yaml, "      chunk_size: 4000")?;
         writeln!(yaml, "      oscillations: 3")?;
         writeln!(yaml, "      overlap: 200")?;
@@ -250,7 +250,7 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, "        max_iterations: {}", n)?;
         writeln!(yaml, "        iteration_variable: current_model")?;
         writeln!(yaml, "    input:")?;
-        writeln!(yaml, "      file_path: \"./docs/plans/multi-model-benchmark/01-IMPLEMENTATION-PLAN.md\"")?;
+        writeln!(yaml, "      file_path: \"./docs/benchmarks/plans/01-IMPLEMENTATION-PLAN.md\"")?;
         writeln!(yaml, "      chunk_size: 4000")?;
         writeln!(yaml, "      oscillations: 3")?;
         writeln!(yaml, "      overlap: 200")?;
@@ -384,7 +384,7 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, "        max_iterations: {}", n)?;
         writeln!(yaml, "        iteration_variable: current_model")?;
         writeln!(yaml, "    input:")?;
-        writeln!(yaml, "      file_path: \"./docs/plans/multi-model-benchmark/01-IMPLEMENTATION-PLAN.md\"")?;
+        writeln!(yaml, "      file_path: \"./docs/benchmarks/plans/01-IMPLEMENTATION-PLAN.md\"")?;
         writeln!(yaml, "      chunk_size: 4000")?;
         writeln!(yaml, "      oscillations: 3")?;
         writeln!(yaml, "      overlap: 200")?;

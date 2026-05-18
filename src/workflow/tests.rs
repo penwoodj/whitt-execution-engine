@@ -809,7 +809,7 @@ workflow_execution_strategy:
     #[test]
     fn validate_workspace_benchmark_3_models() {
         use std::path::Path;
-        let path = Path::new("docs/workflows/benchmarks/benchmark-3-models.yml");
+        let path = Path::new("docs/benchmarks/workflows/benchmark-3-models.yml");
         let result = WorkflowFile::from_file(path);
         assert!(result.is_ok(), "benchmark-3-models.yml should be schema-compliant: {:?}", result.err());
     }
@@ -817,7 +817,7 @@ workflow_execution_strategy:
     #[test]
     fn validate_workspace_benchmark_5_models() {
         use std::path::Path;
-        let path = Path::new("docs/workflows/benchmarks/benchmark-5-models.yml");
+        let path = Path::new("docs/benchmarks/workflows/benchmark-5-models.yml");
         let result = WorkflowFile::from_file(path);
         assert!(result.is_ok(), "benchmark-5-models.yml should be schema-compliant: {:?}", result.err());
     }
@@ -825,7 +825,7 @@ workflow_execution_strategy:
     #[test]
     fn validate_workspace_benchmark_15_models() {
         use std::path::Path;
-        let path = Path::new("docs/workflows/benchmarks/benchmark-15-models.yml");
+        let path = Path::new("docs/benchmarks/workflows/benchmark-15-models.yml");
         let result = WorkflowFile::from_file(path);
         assert!(result.is_ok(), "benchmark-15-models.yml should be schema-compliant: {:?}", result.err());
     }
@@ -833,7 +833,7 @@ workflow_execution_strategy:
     #[test]
     fn validate_workspace_benchmark_50_models() {
         use std::path::Path;
-        let path = Path::new("docs/workflows/benchmarks/benchmark-50-models.yml");
+        let path = Path::new("docs/benchmarks/workflows/benchmark-50-models.yml");
         let result = WorkflowFile::from_file(path);
         assert!(result.is_ok(), "benchmark-50-models.yml should be schema-compliant: {:?}", result.err());
     }

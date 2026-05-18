@@ -2,19 +2,25 @@
 
 Complete documentation for Whitt Execution Engine, organized by purpose.
 
+## New User Path
+
+1. **[Main README](../README.md)** — Project overview, Getting Started, features, status
+2. **[TUTORIAL.md](./TUTORIAL.md)** — Step-by-step guide: build, start server, chat, agents, benchmarks
+3. **[Schema](./schema/)** — Unified workflow schema (source of truth for YAML definitions)
+4. **[Examples](./workflows/examples/)** — 53 example workflows across 19 categories
+
 ## Directories
 
-- [_metadata/](./_metadata/) - Review cycles, schema process, plans process, reports
-- [guides/](./guides/) - Contributing, developer-guide, environment-variables, install, testing-guide
-- [plans/](./plans/) - 00-foundation through 07-final-validation, deep-research, traceability, transpiler, validation-criteria, testing-strategy.md, ARCHITECTURE.md
-- [requirements/](./requirements/) - Benchmark userflows, index.md, critical-evaluation.md
-- [research/](./research/) - infinite-context/, next-steps/, upstream-success-factors.md
-- [roadmap/](./roadmap/) - ADR-0000 through ADR-0007, research plans, research/ subfolder
-- [schema/](./schema/) - unified-workflow-schema.yml, hooks-semantics.md, hooks-integration-plan.md
-- [workflows/](./workflows/) - examples/ with chatgpt/, manual/, requirements-oriented-auto/
-
-## Quick Start
-
-For an overview of the project, see the [main README](../README.md).
-
-For schema reference and workflow examples, see the [schema directory](./schema/).
+- **[benchmarks/](./benchmarks/)** — Benchmark workflows, userflows, and plans
+- **[examples/](./examples/)** — Top-level example files
+- **[guides/](./guides/)** — Contributing, developer guide, environment variables, install, testing
+- **[plans/](./plans/)** — 8-phase implementation plans (00–07), architecture, testing strategy
+- **[poc/](./poc/)** — Proof of concept documentation (extended POC + local LLM Docker)
+- **[qa/](./qa/)** — QA suites per phase, CLI QOL, archived phases 00–06
+- **[reports/](./reports/)** — Analysis and audit reports
+- **[requirements/](./requirements/)** — Requirements and critical evaluations
+- **[research/](./research/)** — Upstream research, infinite context, next steps
+- **[roadmap/](./roadmap/)** — Architecture Decision Records (ADR-0000 through ADR-0007)
+- **[schema/](./schema/)** — Unified workflow schema (source of truth), hooks semantics
+- **[_metadata/](./_metadata/)** — Research archive, requirements backlog (SoT)
+- **[workflows/](./workflows/)** — Example workflows organized by category

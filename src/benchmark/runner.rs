@@ -761,10 +761,10 @@ impl BenchmarkRunner {
     fn copy_workflow_yaml(&self) -> Result<()> {
         if let Some(ref output_dir) = self.config.output_dir {
             let workflow_candidates = vec![
-                "docs/workflows/benchmarks/benchmark-3-models.yml",
-                "docs/workflows/benchmarks/benchmark-5-models.yml",
-                "docs/workflows/benchmarks/benchmark-15-models.yml",
-                "docs/workflows/benchmarks/benchmark-50-models.yml",
+                "docs/benchmarks/workflows/benchmark-3-models.yml",
+                "docs/benchmarks/workflows/benchmark-5-models.yml",
+                "docs/benchmarks/workflows/benchmark-15-models.yml",
+                "docs/benchmarks/workflows/benchmark-50-models.yml",
             ];
 
             for wf in &workflow_candidates {
