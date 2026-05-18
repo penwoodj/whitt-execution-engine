@@ -725,11 +725,15 @@ main() {
         fi
     fi
 
-    # Check if model exists
-    if [ ! -f "$LLAMA_ARG_MODEL_PATH" ]; then
-        log_error "Model not found: $LLAMA_ARG_MODEL_PATH"
-        log_error "Please provide a valid model path or configure HuggingFace download."
-        exit 1
+    # Check if model exists (only in single-model mode)
+    if [ -z "$LLAMA_ARG_MODELS_DIR" ]; then
+        if [ ! -f "$LLAMA_ARG_MODEL_PATH" ]; then
+            log_error "Model not found: $LLAMA_ARG_MODEL_PATH"
+            log_error "Please provide a valid model path or configure HuggingFace download."
+            exit 1
+        fi
+    else
+        log_info "Router mode: skipping model file check (--models-dir $LLAMA_ARG_MODELS_DIR)"
     fi
 
     # Validate Vulkan GPU
