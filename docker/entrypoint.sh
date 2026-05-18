@@ -38,7 +38,11 @@ get_yaml_value() {
 
     if command -v yq &> /dev/null; then
         value=$(yq eval "$path" "$config_path" 2>/dev/null || echo "$default")
-        echo "$value"
+        if [ "$value" = "null" ] || [ -z "$value" ]; then
+            echo "$default"
+        else
+            echo "$value"
+        fi
     else
         echo "$default"
     fi
