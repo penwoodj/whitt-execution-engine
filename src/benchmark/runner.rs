@@ -1,6 +1,7 @@
 use crate::client::http_client::LlamaHttpClient;
 use crate::client::types::{ChatCompletionRequest, ChatMessage};
 use crate::client::disk_monitor;
+use crate::agent::loop_hooks::HookContext;
 use super::{BenchmarkSuiteResult, ModelBenchmarkResult, InferenceResult};
 use anyhow::{Context, Result};
 use regex::Regex;
@@ -68,6 +69,9 @@ struct WorkflowStep {
     #[allow(dead_code)]
     requires: Vec<String>,
     when: Option<serde_json::Value>,
+    prompt: Option<String>,
+    input: Option<serde_json::Value>,
+    r#loop: Option<serde_json::Value>,
 }
 
 impl BenchmarkRunner {
@@ -359,12 +363,18 @@ impl BenchmarkRunner {
                         })
                         .unwrap_or_default();
                     let when = step.get("when").cloned();
+                    let prompt = step.get("prompt").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let input = step.get("input").cloned();
+                    let loop_config = step.get("loop").cloned();
 
                     Some(WorkflowStep {
                         step_name,
                         step_id,
                         requires,
                         when,
+                        prompt,
+                        input,
+                        r#loop: loop_config,
                     })
                 })
                 .collect()
@@ -385,12 +395,18 @@ impl BenchmarkRunner {
                         })
                         .unwrap_or_default();
                     let when = step_value.get("when").cloned();
+                    let prompt = step_value.get("prompt").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let input = step_value.get("input").cloned();
+                    let loop_config = step_value.get("loop").cloned();
 
                     WorkflowStep {
                         step_name,
                         step_id,
                         requires,
                         when,
+                        prompt,
+                        input,
+                        r#loop: loop_config,
                     }
                 })
                 .collect()
@@ -604,19 +620,19 @@ impl BenchmarkRunner {
                 }
             }
 
-            content.push_str(&format!("\n--- Model Identity ---\n"));
+            content.push_str("\n--- Model Identity ---\n");
             content.push_str(&format!("model_id: {}\n", result.model_id));
             content.push_str(&format!("model_path: {}\n", result.model_path));
             content.push_str(&format!("file_size_bytes: {}\n", result.file_size_bytes));
             content.push_str(&format!("file_size_mb: {:.2}\n", result.file_size_bytes as f64 / (1024.0 * 1024.0)));
             content.push_str(&format!("gpu_mode: {}\n", result.gpu_mode));
 
-            content.push_str(&format!("\n--- Timing ---\n"));
+            content.push_str("\n--- Timing ---\n");
             content.push_str(&format!("load_duration: {}ms ({:.3}s)\n", result.load_duration.as_millis(), result.load_duration.as_secs_f64()));
             content.push_str(&format!("unload_duration: {}ms ({:.3}s)\n", result.unload_duration.as_millis(), result.unload_duration.as_secs_f64()));
             content.push_str(&format!("total_duration: {}ms ({:.3}s)\n", result.total_duration.as_millis(), result.total_duration.as_secs_f64()));
 
-            content.push_str(&format!("\n--- Performance Summary ---\n"));
+            content.push_str("\n--- Performance Summary ---\n");
             content.push_str(&format!("tokens_per_second: {:.2}\n", result.tokens_per_second));
             content.push_str(&format!("avg_latency_ms: {:.2}\n", result.avg_latency_ms));
             content.push_str(&format!("p50_latency_ms: {:.2}\n", result.p50_latency_ms));
@@ -635,14 +651,14 @@ impl BenchmarkRunner {
                 content.push_str(&format!("    total_tokens: {}\n", inf.total_tokens));
                 content.push_str(&format!("    duration: {}ms ({:.3}s)\n", inf.duration.as_millis(), inf.duration.as_secs_f64()));
                 content.push_str(&format!("    tokens_per_second: {:.2}\n", inf.tokens_per_second));
-                content.push_str(&format!("    response_text:\n"));
+                content.push_str("    response_text:\n");
                 for line in inf.response_text.lines() {
                     content.push_str(&format!("      {}\n", line));
                 }
             }
 
             if let Some(ref err) = result.error {
-                content.push_str(&format!("\n--- Error ---\n"));
+                content.push_str("\n--- Error ---\n");
                 content.push_str(&format!("error: {}\n", err));
             }
 
@@ -666,20 +682,20 @@ impl BenchmarkRunner {
             let mut md = String::new();
 
             if !chat_path.exists() {
-                md.push_str(&format!("# Benchmark Chat Log\n\n"));
+                md.push_str("# Benchmark Chat Log\n\n");
                 md.push_str(&format!("Run: {}  \n", run_timestamp));
                 md.push_str(&format!("Server: {}  \n", self.config.server_url));
                 md.push_str(&format!("Models: {}  \n\n", result.model_id));
-                md.push_str(&format!("---\n\n"));
+                md.push_str("---\n\n");
             }
 
             md.push_str(&format!("## {} ({})\n\n", result.model_id, result.gpu_mode.to_uppercase()));
 
             if result.error.is_some() {
                 md.push_str(&format!("> **ERROR**: {}\n\n", result.error.as_deref().unwrap_or("unknown")));
-                md.push_str(&format!("---\n\n"));
+                md.push_str("---\n\n");
             } else {
-                md.push_str(&format!("| Metric | Value |\n|---|---|\n"));
+                md.push_str("| Metric | Value |\n|---|---|\n");
                 md.push_str(&format!("| Load | {}ms |\n", result.load_duration.as_millis()));
                 md.push_str(&format!("| Unload | {}ms |\n", result.unload_duration.as_millis()));
                 md.push_str(&format!("| Total | {}ms |\n", result.total_duration.as_millis()));
@@ -698,7 +714,7 @@ impl BenchmarkRunner {
                     md.push_str(&format!("**Response**:\n\n{}\n\n", inf.response_text));
                 }
 
-                md.push_str(&format!("---\n\n"));
+                md.push_str("---\n\n");
             }
 
             let mut file = fs::OpenOptions::new()
@@ -715,29 +731,93 @@ impl BenchmarkRunner {
         Ok(())
     }
 
-    /// Copy the YAML workflow file into the output directory if available.
-    fn execute_hook(&self, hook: &Option<serde_json::Value>, step_name: &str, timing: &str) -> Result<()> {
+    /// Execute hook actions: log, save_to, append_to, fail.
+    ///
+    /// Supports template interpolation: {{current_model}}, {{step.output}}, {{iteration}}
+    fn execute_hook(&self, hook: &Option<serde_json::Value>, step_name: &str, timing: &str, context: &HookContext) -> Result<()> {
         if let Some(h) = hook {
-            if let Some(log) = h.get("log") {
-                if let Some(path) = log.get("to_file_path").and_then(|v| v.as_str()) {
-                    let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-                    let timestamp = format!("unix_epoch_{}s", d.as_secs());
-                    let line = format!("[{}] step={} timing={}\n", timestamp, step_name, timing);
+            for action in h.as_array().unwrap_or(&vec![]) {
+                if let Some(log) = action.get("log") {
+                    if let Some(path) = log.get("to_file_path").and_then(|v| v.as_str()) {
+                        let path = self.interpolate_template(path, context);
+                        let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                        let timestamp = format!("unix_epoch_{}s", d.as_secs());
+                        let line = format!("[{}] step={} timing={}\n", timestamp, step_name, timing);
 
-                    let mut file = fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(path)
-                        .with_context(|| format!("Failed to open hook log file: {}", path))?;
+                        let mut file = fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&path)
+                            .with_context(|| format!("Failed to open hook log file: {}", path))?;
 
-                    file.write_all(line.as_bytes())
-                        .context("Failed to write to hook log")?;
+                        file.write_all(line.as_bytes())
+                            .context("Failed to write to hook log")?;
+                    }
+                }
+
+                if let Some(save_to) = action.get("save_to") {
+                    if let Some(path) = save_to.as_str() {
+                        let path = self.interpolate_template(path, context);
+                        let content = context.output.as_deref().unwrap_or("");
+
+                        // Create parent directories if they don't exist
+                        if let Some(parent) = Path::new(&path).parent() {
+                            if !parent.as_os_str().is_empty() {
+                                fs::create_dir_all(parent)
+                                    .with_context(|| format!("Failed to create directory: {}", parent.display()))?;
+                            }
+                        }
+
+                        fs::write(&path, content)
+                            .with_context(|| format!("Failed to save to: {}", path))?;
+
+                        info!("[benchmark] saved output to {}", path);
+                    }
+                }
+
+                if let Some(append_to) = action.get("append_to") {
+                    if let Some(path) = append_to.as_str() {
+                        let path = self.interpolate_template(path, context);
+                        let content = context.output.as_deref().unwrap_or("");
+
+                        let mut file = fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&path)
+                            .with_context(|| format!("Failed to open append file: {}", path))?;
+
+                        file.write_all(content.as_bytes())
+                            .context("Failed to append to file")?;
+
+                        info!("[benchmark] appended to {}", path);
+                    }
+                }
+
+                if let Some(_fail) = action.get("fail") {
+                    anyhow::bail!("Hook triggered fail: step={}, timing={}", step_name, timing);
                 }
             }
         }
         Ok(())
     }
 
+    fn interpolate_template(&self, template: &str, context: &HookContext) -> String {
+        let mut result = template.to_string();
+        result = result.replace("{{current_model}}", &context.step_name);
+        result = result.replace("{{loop.current_model}}", &context.step_name);
+
+        if let Some(ref output) = context.output {
+            result = result.replace("{{step.output}}", output);
+        }
+
+        result = result.replace("{{iteration}}", &context.iteration.to_string());
+        result = result.replace("{{loop.iteration}}", &context.iteration.to_string());
+
+        result
+    }
+}
+
+impl BenchmarkRunner {
     fn log_step_execution(&self, step: &WorkflowStep, results: &[ModelBenchmarkResult]) -> Result<()> {
         if let Some(ref output_dir) = self.config.output_dir {
             let log_path = Path::new(output_dir).join("logs/workflow_steps.log");
@@ -977,6 +1057,62 @@ impl BenchmarkRunner {
         Ok(models)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn execute_workflow_step(&self, step: &WorkflowStep, client: &LlamaHttpClient, models: &[(String, String)], max_tokens: usize, temperature: f64, top_p: f64, _run_timestamp: &str) -> Result<Vec<ModelBenchmarkResult>> {
+        let mut results = Vec::new();
+
+        let (max_iterations, iteration_variable_name) = if let Some(ref loop_config) = step.r#loop {
+            let count = loop_config.get("count");
+            let max_iter = count.and_then(|c| c.get("max_iterations")).and_then(|m| m.as_u64()).unwrap_or(1) as usize;
+            let var_name = count.and_then(|c| c.get("iteration_variable")).and_then(|v| v.as_str()).unwrap_or("iteration");
+            (max_iter, var_name.to_string())
+        } else {
+            (models.len(), "iteration".to_string())
+        };
+
+        let default_prompt = String::new();
+        let prompt = step.prompt.as_ref().unwrap_or(&default_prompt);
+        let step_max_tokens = step.input.as_ref().and_then(|inp| inp.get("max_tokens").and_then(|m| m.as_u64()).map(|m| m as usize)).unwrap_or(max_tokens);
+
+        info!("[benchmark] executing workflow step: {} (iterations: {})", step.step_id, max_iterations);
+
+        for (i, (model_id, model_path)) in models.iter().take(max_iterations).enumerate() {
+            let iteration = i + 1;
+
+            info!("[benchmark] [{}/{}] {} with model {}", iteration, max_iterations, step.step_id, model_id);
+
+            let model_result = self.benchmark_single_model(client, model_id, model_path, "gpu", std::slice::from_ref(prompt), step_max_tokens, temperature, top_p).await;
+
+            let output_text = model_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
+
+            let context = HookContext {
+                step_name: model_id.clone(),
+                iteration,
+                output: Some(output_text),
+                error_message: model_result.error.clone(),
+                loop_type: "count".to_string(),
+            };
+
+            self.execute_hook(&step.when, &step.step_id, "before_step_starts", &context)?;
+
+            if let Some(ref err) = model_result.error {
+                self.log_step_error(model_id, err)?;
+                self.execute_hook(&step.when, &step.step_id, "after_step_fails", &context)?;
+            } else {
+                self.log_step_result(&model_result)?;
+                self.execute_hook(&step.when, &step.step_id, "after_step_succeeds", &context)?;
+            }
+
+            results.push(model_result);
+
+            if i < max_iterations.saturating_sub(1) {
+                tokio::time::sleep(self.config.delay_between_swaps).await;
+            }
+        }
+
+        Ok(results)
+    }
+
     pub async fn run(&self) -> Result<BenchmarkSuiteResult> {
         self.preflight_check().await.context("Preflight checks failed")?;
 
@@ -1001,6 +1137,13 @@ impl BenchmarkRunner {
 
         let client = LlamaHttpClient::new(&self.config.server_url)
             .context("Failed to create HTTP client")?;
+
+        let run_timestamp = {
+            let dur = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            format!("unix_epoch_{}s", dur.as_secs())
+        };
 
         let wf_ctx = self.load_workflow_config();
 
@@ -1040,8 +1183,27 @@ impl BenchmarkRunner {
             (self.config.prompts.clone(), self.config.max_tokens, self.config.compare_gpu_cpu, self.config.temperature.unwrap_or(0.7), self.config.top_p.unwrap_or(0.9))
         };
 
-        let models = self.discover_models(wf_ctx.as_ref().map(|ctx| ctx.model_list.as_slice()))
+        let mut models = self.discover_models(wf_ctx.as_ref().map(|ctx| ctx.model_list.as_slice()))
             .context("Failed to discover models")?;
+
+        // Fallback: if no models found via files/list/workflow, query server's loaded model
+        if models.is_empty() {
+            info!("[benchmark] no models found locally, querying server for loaded model...");
+            match client.list_models().await {
+                Ok(server_models) => {
+                    for m in server_models {
+                        info!("[benchmark] found server model: {} ({})", m.id, m.status.value);
+                        let filename = if m.filename.is_empty() { m.id.clone() } else { m.filename.clone() };
+                        models.push((m.id.clone(), filename));
+                    }
+                }
+                Err(e) => {
+                    warn!("[benchmark] failed to query server models: {}", e);
+                    // Last resort: use a placeholder to run against whatever is loaded
+                    models.push(("loaded-model".to_string(), "loaded-model".to_string()));
+                }
+            }
+        }
 
         if models.is_empty() {
             anyhow::bail!("No models found for benchmarking");
@@ -1050,22 +1212,75 @@ impl BenchmarkRunner {
         info!("[benchmark] found {} models to benchmark", models.len());
         info!("[benchmark] GPU/CPU comparison mode: {}", compare_gpu_cpu);
 
-        let workflow_steps = self.load_workflow_steps();
-        if let Some(steps) = &workflow_steps {
-            info!("[benchmark] loaded {} workflow steps from YAML", steps.len());
-        }
-
         let mut results = Vec::new();
-        let run_timestamp = {
-            let dur = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default();
-            format!("unix_epoch_{}s", dur.as_secs())
-        };
+
         let suite_metadata = format!(
             "run_timestamp: {}\nserver_url: {}\ntotal_models: {}\ncompare_gpu_cpu: {}",
             run_timestamp, self.config.server_url, models.len(), compare_gpu_cpu
         );
+
+        let workflow_steps = self.load_workflow_steps();
+        if let Some(steps) = &workflow_steps {
+            info!("[benchmark] loaded {} workflow steps from YAML", steps.len());
+
+            if let Some(first_step) = steps.first() {
+                if first_step.prompt.is_some() && first_step.r#loop.is_some() {
+                    info!("[benchmark] executing workflow-driven benchmark with step: {}", first_step.step_id);
+
+                    let mut workflow_results = Vec::new();
+
+                    for (i, (model_id, model_path)) in models.iter().enumerate() {
+                        self.log_step_start(model_id, i, models.len(), "gpu")?;
+
+                        info!("[benchmark] [{}/{}] loading {} (workflow mode)", i+1, models.len(), model_id);
+
+                        if let Err(e) = self.check_system_health().await {
+                            warn!("[benchmark] Skipping {} due to health check failure: {}", model_id, e);
+                            let failed_result = ModelBenchmarkResult {
+                                model_id: model_id.clone(),
+                                model_path: model_path.clone(),
+                                file_size_bytes: 0,
+                                load_duration: Duration::ZERO,
+                                inference_results: vec![],
+                                unload_duration: Duration::ZERO,
+                                total_duration: Duration::ZERO,
+                                tokens_per_second: 0.0,
+                                avg_latency_ms: 0.0,
+                                p50_latency_ms: 0.0,
+                                p95_latency_ms: 0.0,
+                                p99_latency_ms: 0.0,
+                                error: Some(format!("Health check failed: {}", e)),
+                                gpu_mode: "gpu".to_string(),
+                                speedup_factor: None,
+                            };
+                            self.log_step_result(&failed_result)?;
+                            self.log_step_error(model_id, failed_result.error.as_ref().unwrap())?;
+                            workflow_results.push(failed_result);
+                            continue;
+                        }
+
+                        let step_results = self.execute_workflow_step(first_step, &client, &models[i..i+1], max_tokens, temperature, top_p, &run_timestamp).await?;
+                        workflow_results.extend(step_results);
+
+                        if i < models.len() - 1 {
+                            tokio::time::sleep(self.config.delay_between_swaps).await;
+                        }
+                    }
+
+                    results.extend(workflow_results);
+                } else {
+                    for step in steps.iter().skip(1) {
+                        info!("[benchmark] executing step: {} (id: {})", step.step_name, step.step_id);
+                        self.log_step_execution(step, &results)?;
+
+                        self.execute_hook(&step.when, &step.step_id, "before_step_starts", &HookContext { step_name: String::new(), iteration: 0, output: None, error_message: None, loop_type: String::new() })?;
+                        self.execute_hook(&step.when, &step.step_id, "after_step_succeeds", &HookContext { step_name: String::new(), iteration: 0, output: None, error_message: None, loop_type: String::new() })?;
+
+                        info!("[benchmark] step {} completed (stub execution)", step.step_id);
+                    }
+                }
+            }
+        }
 
         if compare_gpu_cpu {
             info!("[benchmark] Running in GPU/CPU comparison mode");
@@ -1245,8 +1460,8 @@ impl BenchmarkRunner {
                 info!("[benchmark] executing step: {} (id: {})", step.step_name, step.step_id);
                 self.log_step_execution(step, &results)?;
 
-                self.execute_hook(&step.when, &step.step_id, "before_step_starts")?;
-                self.execute_hook(&step.when, &step.step_id, "after_step_succeeds")?;
+                self.execute_hook(&step.when, &step.step_id, "before_step_starts", &HookContext { step_name: String::new(), iteration: 0, output: None, error_message: None, loop_type: String::new() })?;
+                self.execute_hook(&step.when, &step.step_id, "after_step_succeeds", &HookContext { step_name: String::new(), iteration: 0, output: None, error_message: None, loop_type: String::new() })?;
 
                 info!("[benchmark] step {} completed (stub execution)", step.step_id);
             }
@@ -1543,7 +1758,7 @@ mod tests {
             filter_name: None,
             delay_between_swaps: Duration::from_secs(2),
             compare_gpu_cpu: true,
-            output_dir: None,
+            output_dir: Some("./docs/benchmarks/outputs".to_string()),
             workflow_file: None,
             temperature: None,
             top_p: None,
@@ -1651,5 +1866,766 @@ mod tests {
         assert!(table.contains("GPU Mode:"), "Table should contain 'GPU Mode:' label");
         assert!(table.contains("Speedup Factor:"), "Table should contain 'Speedup Factor:' label");
         assert!(table.contains("2.50x"), "Table should contain '2.50x' speedup value");
+    }
+
+    // --- Hook Executor Tests ---
+
+    fn make_test_config() -> BenchmarkConfig {
+        BenchmarkConfig {
+            server_url: "http://localhost:8080".to_string(),
+            models_dir: None,
+            model_list_file: None,
+            prompts: vec!["test".to_string()],
+            max_tokens: 100,
+            filter_size_max: None,
+            filter_size_min: None,
+            filter_name: None,
+            delay_between_swaps: Duration::from_secs(0),
+            compare_gpu_cpu: false,
+            output_dir: Some("./test_output_hooks".to_string()),
+            workflow_file: None,
+            temperature: None,
+            top_p: None,
+            cooldown_after_unload: Duration::from_secs(0),
+            preflight_only: false,
+            model_load_timeout: Duration::from_secs(60),
+            min_tmp_space_mb: 512,
+        }
+    }
+
+    fn make_hook_context(step_name: &str, iteration: usize, output: Option<&str>) -> HookContext {
+        HookContext {
+            step_name: step_name.to_string(),
+            iteration,
+            output: output.map(|s| s.to_string()),
+            error_message: None,
+            loop_type: "count".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_execute_hook_log_creates_file() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+        let dir = tempfile::tempdir().unwrap();
+        let log_path = dir.path().join("test.log");
+        let path_str = log_path.to_str().unwrap();
+
+        let hook = serde_json::json!([
+            {"log": {"to_file_path": path_str}}
+        ]);
+
+        let ctx = make_hook_context("model_a", 1, Some("hello"));
+        runner.execute_hook(&Some(hook), "step_1", "after_step_succeeds", &ctx).unwrap();
+
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("step=step_1"), "log should contain step name");
+        assert!(content.contains("timing=after_step_succeeds"), "log should contain timing");
+    }
+
+    #[test]
+    fn test_execute_hook_save_to_writes_file() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+        let dir = tempfile::tempdir().unwrap();
+        let save_path = dir.path().join("output.txt");
+        let path_str = save_path.to_str().unwrap();
+
+        let hook = serde_json::json!([
+            {"save_to": path_str}
+        ]);
+
+        let ctx = make_hook_context("model_a", 1, Some("saved content here"));
+        runner.execute_hook(&Some(hook), "step_1", "after_step_succeeds", &ctx).unwrap();
+
+        let content = std::fs::read_to_string(&save_path).unwrap();
+        assert_eq!(content, "saved content here", "save_to should write output content");
+    }
+
+    #[test]
+    fn test_execute_hook_append_to_appends() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+        let dir = tempfile::tempdir().unwrap();
+        let append_path = dir.path().join("results.txt");
+        let path_str = append_path.to_str().unwrap();
+
+        // Write initial content
+        std::fs::write(&append_path, "first\n").unwrap();
+
+        let hook = serde_json::json!([
+            {"append_to": path_str}
+        ]);
+
+        let ctx = make_hook_context("model_b", 2, Some("appended"));
+        runner.execute_hook(&Some(hook), "step_2", "after_step_succeeds", &ctx).unwrap();
+
+        let content = std::fs::read_to_string(&append_path).unwrap();
+        assert!(content.starts_with("first\n"), "should preserve existing content");
+        assert!(content.ends_with("appended"), "should append new content");
+    }
+
+    #[test]
+    fn test_execute_hook_fail_returns_error() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let hook = serde_json::json!([
+            {"fail": true}
+        ]);
+
+        let ctx = make_hook_context("model_a", 1, Some("output"));
+        let result = runner.execute_hook(&Some(hook), "step_1", "after_step_fails", &ctx);
+
+        assert!(result.is_err(), "fail hook should return error");
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Hook triggered fail"), "error message should mention hook fail");
+    }
+
+    #[test]
+    fn test_execute_hook_none_does_nothing() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let ctx = make_hook_context("model_a", 1, Some("output"));
+        let result = runner.execute_hook(&None, "step_1", "after_step_succeeds", &ctx);
+        assert!(result.is_ok(), "None hook should succeed");
+    }
+
+    #[test]
+    fn test_execute_hook_multiple_actions() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+        let dir = tempfile::tempdir().unwrap();
+        let save_path = dir.path().join("output.txt");
+        let log_path = dir.path().join("log.txt");
+
+        let hook = serde_json::json!([
+            {"save_to": save_path.to_str().unwrap()},
+            {"log": {"to_file_path": log_path.to_str().unwrap()}}
+        ]);
+
+        let ctx = make_hook_context("model_a", 1, Some("multi action"));
+        runner.execute_hook(&Some(hook), "step_1", "after_step_succeeds", &ctx).unwrap();
+
+        assert!(save_path.exists(), "save_to should create file");
+        assert!(log_path.exists(), "log should create file");
+        assert_eq!(std::fs::read_to_string(&save_path).unwrap(), "multi action");
+    }
+
+    // --- Template Interpolation Tests ---
+
+    #[test]
+    fn test_interpolate_template_current_model() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let ctx = make_hook_context("my_model.gguf", 1, None);
+        let result = runner.interpolate_template("output/{{current_model}}.json", &ctx);
+        assert_eq!(result, "output/my_model.gguf.json");
+    }
+
+    #[test]
+    fn test_interpolate_template_loop_current_model() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let ctx = make_hook_context("test_model.gguf", 2, None);
+        let result = runner.interpolate_template("output/{{loop.current_model}}.txt", &ctx);
+        assert_eq!(result, "output/test_model.gguf.txt");
+    }
+
+    #[test]
+    fn test_interpolate_template_step_output() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let ctx = make_hook_context("model", 1, Some("hello world"));
+        let result = runner.interpolate_template("prefix_{{step.output}}_suffix", &ctx);
+        assert_eq!(result, "prefix_hello world_suffix");
+    }
+
+    #[test]
+    fn test_interpolate_template_iteration() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let ctx = make_hook_context("model", 5, None);
+        let result = runner.interpolate_template("run_{{iteration}}.json", &ctx);
+        assert_eq!(result, "run_5.json");
+    }
+
+    #[test]
+    fn test_interpolate_template_loop_iteration() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let ctx = make_hook_context("model", 3, None);
+        let result = runner.interpolate_template("step_{{loop.iteration}}", &ctx);
+        assert_eq!(result, "step_3");
+    }
+
+    #[test]
+    fn test_interpolate_template_multiple_vars() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let ctx = make_hook_context("model_a.gguf", 2, Some("result text"));
+        let result = runner.interpolate_template(
+            "./outputs/{{current_model}}/iter_{{iteration}}/out.txt",
+            &ctx
+        );
+        assert_eq!(result, "./outputs/model_a.gguf/iter_2/out.txt");
+    }
+
+    #[test]
+    fn test_interpolate_template_no_vars() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let ctx = make_hook_context("model", 1, None);
+        let result = runner.interpolate_template("plain/path.txt", &ctx);
+        assert_eq!(result, "plain/path.txt");
+    }
+
+    // --- Workflow Step Parser Tests ---
+
+    #[test]
+    fn test_load_workflow_steps_parses_yaml() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        std::fs::write(&yaml_path, r#"
+workflow_id: test_workflow
+name: Test
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  run_benchmark:
+    id: bench_1
+    requires: []
+    prompt: "Test prompt"
+    input:
+      max_tokens: 256
+    loop:
+      count:
+        max_iterations: 3
+        iteration_variable: current_model
+    when:
+      after_step_succeeds:
+        - log:
+            to_file_path: "./test.log"
+"#).unwrap();
+
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let steps = runner.load_workflow_steps();
+
+        assert!(steps.is_some(), "should parse workflow steps");
+        let steps = steps.unwrap();
+        assert_eq!(steps.len(), 1, "should have 1 step");
+        assert_eq!(steps[0].step_name, "run_benchmark");
+        assert_eq!(steps[0].step_id, "bench_1");
+        assert!(steps[0].prompt.is_some());
+        assert!(steps[0].r#loop.is_some());
+    }
+
+    #[test]
+    fn test_load_workflow_steps_no_workflow_file() {
+        let config = make_test_config(); // workflow_file: None
+        let runner = BenchmarkRunner::new(config);
+        let steps = runner.load_workflow_steps();
+        assert!(steps.is_none(), "should return None when no workflow file");
+    }
+
+    #[test]
+    fn test_load_workflow_steps_multiple_steps() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("multi.yml");
+        std::fs::write(&yaml_path, r#"
+workflow_id: multi_step
+name: Multi
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  step_one:
+    id: s1
+    requires: []
+    prompt: "First prompt"
+  step_two:
+    id: s2
+    requires: [s1]
+    prompt: "Second prompt"
+"#).unwrap();
+
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let steps = runner.load_workflow_steps();
+
+        assert!(steps.is_some());
+        let steps = steps.unwrap();
+        assert_eq!(steps.len(), 2, "should have 2 steps");
+        assert_eq!(steps[0].step_id, "s1");
+        assert_eq!(steps[1].step_id, "s2");
+        assert_eq!(steps[1].requires, vec!["s1"]);
+    }
+
+    // --- Hook Execution Edge Case Tests ---
+
+    #[test]
+    fn test_execute_hook_log_creates_nested_dirs() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+        let dir = tempfile::tempdir().unwrap();
+        let nested_path = dir.path().join("deep/nested/path/test.log");
+
+        // Create parent directories (execute_hook doesn't do this automatically)
+        std::fs::create_dir_all(nested_path.parent().unwrap()).unwrap();
+
+        let path_str = nested_path.to_str().unwrap();
+
+        let hook = serde_json::json!([
+            {"log": {"to_file_path": path_str}}
+        ]);
+
+        let ctx = make_hook_context("model_a", 1, Some("hello"));
+        runner.execute_hook(&Some(hook), "step_1", "after_step_succeeds", &ctx).unwrap();
+
+        assert!(nested_path.exists(), "log hook should create log file in existing nested dirs");
+        let content = std::fs::read_to_string(&nested_path).unwrap();
+        assert!(content.contains("step=step_1"));
+    }
+
+    #[test]
+    fn test_execute_hook_save_to_overwrites() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+        let dir = tempfile::tempdir().unwrap();
+        let save_path = dir.path().join("output.txt");
+        let path_str = save_path.to_str().unwrap();
+
+        // Write initial content
+        std::fs::write(&save_path, "original content").unwrap();
+
+        let hook = serde_json::json!([
+            {"save_to": path_str}
+        ]);
+
+        let ctx = make_hook_context("model_a", 1, Some("new content"));
+        runner.execute_hook(&Some(hook), "step_1", "after_step_succeeds", &ctx).unwrap();
+
+        let content = std::fs::read_to_string(&save_path).unwrap();
+        assert_eq!(content, "new content", "save_to should overwrite existing file");
+    }
+
+    #[test]
+    fn test_execute_hook_append_to_creates_new_file() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+        let dir = tempfile::tempdir().unwrap();
+        let append_path = dir.path().join("results.txt");
+        let path_str = append_path.to_str().unwrap();
+
+        // Don't create the file beforehand
+
+        let hook = serde_json::json!([
+            {"append_to": path_str}
+        ]);
+
+        let ctx = make_hook_context("model_b", 1, Some("first append"));
+        runner.execute_hook(&Some(hook), "step_2", "after_step_succeeds", &ctx).unwrap();
+
+        assert!(append_path.exists(), "append_to should create file if not exists");
+        let content = std::fs::read_to_string(&append_path).unwrap();
+        assert_eq!(content, "first append");
+    }
+
+    #[test]
+    fn test_execute_hook_empty_object() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+        let dir = tempfile::tempdir().unwrap();
+        let log_path = dir.path().join("test.log");
+
+        // Empty object in hook array
+        let hook = serde_json::json!([{}]);
+
+        let ctx = make_hook_context("model_a", 1, Some("hello"));
+        runner.execute_hook(&Some(hook), "step_1", "after_step_succeeds", &ctx).unwrap();
+
+        // File should not be created since there's no valid action
+        assert!(!log_path.exists(), "empty hook object should do nothing");
+    }
+
+    // --- Template Interpolation Edge Case Tests ---
+
+    #[test]
+    fn test_interpolate_template_unknown_variable() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let ctx = make_hook_context("model", 1, Some("output"));
+        // Unknown variable should be left as-is
+        let result = runner.interpolate_template("path/{{unknown_var}}/file.txt", &ctx);
+        assert_eq!(result, "path/{{unknown_var}}/file.txt");
+    }
+
+    #[test]
+    fn test_interpolate_template_empty() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let ctx = make_hook_context("model", 1, None);
+        let result = runner.interpolate_template("", &ctx);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_interpolate_template_only_markers() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let ctx = make_hook_context("model_a", 3, Some("out"));
+        let result = runner.interpolate_template("{{current_model}}{{iteration}}{{step.output}}", &ctx);
+        assert_eq!(result, "model_a3out");
+    }
+
+    #[test]
+    fn test_interpolate_template_adjacent_vars() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let ctx = make_hook_context("model_x", 5, Some("result"));
+        let result = runner.interpolate_template("{{iteration}}{{current_model}}", &ctx);
+        assert_eq!(result, "5model_x");
+    }
+
+    #[test]
+    fn test_interpolate_template_special_chars() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let ctx = make_hook_context("model:with/special\\chars", 1, Some("output with \"quotes\""));
+        let result = runner.interpolate_template("prefix_{{step.output}}_{{current_model}}", &ctx);
+        assert_eq!(result, "prefix_output with \"quotes\"_model:with/special\\chars");
+    }
+
+    // --- Workflow Step Parsing Edge Case Tests ---
+
+    #[test]
+    fn test_load_workflow_steps_no_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        std::fs::write(&yaml_path, r#"
+workflow_id: test_workflow
+name: Test
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  run_step:
+    id: step_1
+    requires: []
+    input:
+      max_tokens: 256
+"#).unwrap();
+
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let steps = runner.load_workflow_steps();
+
+        assert!(steps.is_some());
+        let steps = steps.unwrap();
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].step_name, "run_step");
+        assert!(steps[0].prompt.is_none(), "step without prompt should have None");
+    }
+
+    #[test]
+    fn test_load_workflow_steps_empty_when() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        std::fs::write(&yaml_path, r#"
+workflow_id: test_workflow
+name: Test
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  run_step:
+    id: step_1
+    requires: []
+    prompt: "test"
+    when:
+"#).unwrap();
+
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let steps = runner.load_workflow_steps();
+
+        assert!(steps.is_some());
+        let steps = steps.unwrap();
+        assert_eq!(steps.len(), 1);
+        // Empty when clause should still parse as Some(serde_json::Value::Null)
+        assert!(steps[0].when.is_some());
+    }
+
+    #[test]
+    fn test_load_workflow_steps_no_schema_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        std::fs::write(&yaml_path, r#"
+workflow_id: test_workflow
+name: Test
+version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  run_step:
+    id: step_1
+    requires: []
+    prompt: "test"
+"#).unwrap();
+
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let steps = runner.load_workflow_steps();
+
+        // Should still parse for MVP
+        assert!(steps.is_some());
+        let steps = steps.unwrap();
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].step_name, "run_step");
+    }
+
+    #[test]
+    fn test_load_workflow_steps_loop_no_iteration_var() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        std::fs::write(&yaml_path, r#"
+workflow_id: test_workflow
+name: Test
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  run_step:
+    id: step_1
+    requires: []
+    prompt: "test"
+    loop:
+      count:
+        max_iterations: 3
+"#).unwrap();
+
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let steps = runner.load_workflow_steps();
+
+        assert!(steps.is_some());
+        let steps = steps.unwrap();
+        assert_eq!(steps.len(), 1);
+        assert!(steps[0].r#loop.is_some(), "loop without iteration_var should still parse");
+    }
+
+    // --- End-to-End Workflow Pipeline Tests ---
+
+    #[test]
+    fn test_workflow_pipeline_parse_and_hooks() {
+        let dir = tempfile::tempdir().unwrap();
+        let save_path = dir.path().join("output.txt");
+        let log_path = dir.path().join("log.txt");
+
+        let yaml_path = dir.path().join("workflow.yml");
+        std::fs::write(&yaml_path, r#"
+workflow_id: test_pipeline
+name: Test Pipeline
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  step_one:
+    id: s1
+    requires: []
+    prompt: "First prompt"
+    when:
+      after_step_succeeds:
+        - save_to: "output.txt"
+        - log:
+            to_file_path: "log.txt"
+"#).unwrap();
+
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+
+        // Parse steps
+        let steps = runner.load_workflow_steps();
+        assert!(steps.is_some());
+        let steps = steps.unwrap();
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].step_name, "step_one");
+
+        // Extract hook array from when clause (when is object with timing keys)
+        let hook = steps[0].when.as_ref().and_then(|w| w.get("after_step_succeeds")).cloned();
+        
+        // Change CWD to tempdir for relative paths
+        let original_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+        
+        let ctx = make_hook_context("model_test", 1, Some("test output"));
+        runner.execute_hook(&hook, "step_one", "after_step_succeeds", &ctx).unwrap();
+        
+        std::env::set_current_dir(original_cwd).unwrap();
+
+        // Verify output files exist
+        assert!(save_path.exists(), "save_to hook should create output file");
+        assert!(log_path.exists(), "log hook should create log file");
+
+        let save_content = std::fs::read_to_string(&save_path).unwrap();
+        assert_eq!(save_content, "test output");
+
+        let log_content = std::fs::read_to_string(&log_path).unwrap();
+        assert!(log_content.contains("step=step_one"));
+        assert!(log_content.contains("timing=after_step_succeeds"));
+
+        std::fs::remove_file(save_path).ok();
+        std::fs::remove_file(log_path).ok();
+    }
+
+    #[test]
+    fn test_workflow_pipeline_multi_step_ordering() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("multi.yml");
+        std::fs::write(&yaml_path, r#"
+workflow_id: multi_step_ordering
+name: Multi Step Ordering
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  step_first:
+    id: step_1
+    requires: []
+    prompt: "First step prompt"
+
+  step_second:
+    id: step_2
+    requires: [step_1]
+    prompt: "Second step prompt"
+
+  step_third:
+    id: step_3
+    requires: [step_2]
+    prompt: "Third step prompt"
+"#).unwrap();
+
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let steps = runner.load_workflow_steps();
+
+        assert!(steps.is_some());
+        let steps = steps.unwrap();
+        assert_eq!(steps.len(), 3);
+
+        // Verify ordering matches YAML order
+        assert_eq!(steps[0].step_id, "step_1");
+        assert_eq!(steps[0].step_name, "step_first");
+        assert_eq!(steps[0].requires.len(), 0);
+
+        assert_eq!(steps[1].step_id, "step_2");
+        assert_eq!(steps[1].step_name, "step_second");
+        assert_eq!(steps[1].requires, vec!["step_1"]);
+
+        assert_eq!(steps[2].step_id, "step_3");
+        assert_eq!(steps[2].step_name, "step_third");
+        assert_eq!(steps[2].requires, vec!["step_2"]);
     }
 }
