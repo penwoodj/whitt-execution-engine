@@ -257,6 +257,36 @@ Document findings in format:
 
 ---
 
+## Remaining Work — Live System Completion
+
+**Full gap analysis**: `.opencode-handoff.md` contains the complete remaining work plan.
+
+### Phase Summary (MUST complete in order)
+
+| Phase | Description | Status | Key Gap |
+|-------|-------------|--------|---------|
+| 1 | Fix output directory structure & JSON content | ❌ NOT STARTED | `output/json/` subfolder missing, JSON may contain metadata not model text |
+| 2 | Fix benchmark YAML files | ⚠️ MOSTLY DONE | Verify prompt text, hook configs identical across all 4 YAMLs |
+| 3 | Make all execution hook-driven | ❌ NOT STARTED | 4/11 actions implemented, 3/13 triggers executed, 9 hardcoded behaviors |
+| 4 | Implement remaining userflows | ❌ NOT STARTED | 20 userflows, ALL partial, NONE complete (UF05=95% highest) |
+| 5 | Write extensive QA documentation | ❌ NOT STARTED | Need live system test procedures, hook coverage, userflow coverage |
+| 6 | Execute QA and iterate | ❌ NOT STARTED | Run all tests on live Docker system, fix failures |
+| 7 | Final verification | ❌ NOT STARTED | Full suite: cargo test + clippy + build + live benchmark |
+
+### Critical Bugs to Fix First
+
+1. **Output path mismatch**: YAML says `outputs/json/` but files go to `outputs/output/`
+2. **JSON content unknown**: No test verifies output = model text only (no metadata)
+3. **Missing parsability log**: benchmark.log doesn't contain `json_parsable` field
+4. **Hardcoded behaviors**: 9 categories of execution logic not controllable via YAML hooks
+5. **Stub hook context**: HookContext populated with empty data, not actual execution state
+
+### Architecture Principle
+
+**ALL execution behavior MUST come from YAML hooks.** If a feature can't be expressed via schema properties + hooks, it doesn't belong in the engine. No exceptions.
+
+---
+
 ## Session Handoff Protocol
 
 When context grows large, write handoff to `.opencode-handoff.md`:

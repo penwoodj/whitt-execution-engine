@@ -179,7 +179,7 @@ enum Commands {
         #[arg(long)]
         compare_gpu_cpu: bool,
 
-        /// Output directory for benchmark files (default: ./workspace)
+        /// Output directory for benchmark files (default: ./docs/benchmarks/outputs)
         #[arg(long)]
         output_dir: Option<String>,
 
@@ -343,7 +343,7 @@ async fn main() -> Result<()> {
                     filter_name,
                     delay_between_swaps: std::time::Duration::from_secs(2),
                     compare_gpu_cpu,
-                    output_dir,
+                    output_dir: output_dir.or_else(|| Some("./docs/benchmarks/outputs".to_string())),
                     workflow_file: workflow,
                     temperature: None,
                     top_p: None,

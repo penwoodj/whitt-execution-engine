@@ -26,8 +26,8 @@ impl BenchmarkYamlGenerator {
     pub fn generate_benchmark_yaml(
         _name: &str,
         models: &[ModelCandidate],
-        prompts: &[&str],
-        max_tokens: usize,
+        _prompts: &[&str],
+        _max_tokens: usize,
     ) -> Result<String> {
         let n = models.len();
         info!("[yaml_generator] generating benchmark YAML for {} models", n);
@@ -105,18 +105,18 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, "        log:")?;
         writeln!(
             yaml,
-            "          to_file_path: \"./workspace/logs/benchmark.log\""
+            "          to_file_path: \"./docs/benchmarks/outputs/logs/benchmark.log\""
         )?;
         writeln!(yaml, "          event_fields: [step_name, loop_iteration, current_model]")?;
         writeln!(yaml, "      after_step_succeeds:")?;
         writeln!(yaml, "        append_to:")?;
-        writeln!(yaml, "          - \"./workspace/output/benchmark_results.yaml\"")?;
+        writeln!(yaml, "          - \"./docs/benchmarks/outputs/output/benchmark_results.yaml\"")?;
         writeln!(yaml, "          - benchmark_collection")?;
         writeln!(yaml, "      after_loop_iteration_fails:")?;
         writeln!(yaml, "        log:")?;
         writeln!(
             yaml,
-            "          to_file_path: \"./workspace/logs/benchmark-errors.log\""
+            "          to_file_path: \"./docs/benchmarks/outputs/logs/benchmark-errors.log\""
         )?;
         writeln!(yaml, "          event_fields: [iteration, current_model, error_message]")?;
         writeln!(yaml, "    output:")?;
@@ -156,7 +156,7 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, "    output:")?;
         writeln!(yaml, "      save_to: refined_plans")?;
         writeln!(yaml, "      format: text")?;
-        writeln!(yaml, "      path: \"./workspace/output/refined_plan_{{{{loop.current_model}}}}.md\"")?;
+        writeln!(yaml, "      path: \"./docs/benchmarks/outputs/output/refined_plan_{{{{loop.current_model}}}}.md\"")?;
         writeln!(yaml)?;
 
         // Generate report step
@@ -167,7 +167,7 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, "    output:")?;
         writeln!(yaml, "      save_to:")?;
         writeln!(yaml, "        - final_report")?;
-        writeln!(yaml, r#"        - "./workspace/output/benchmark_report.json""#)?;
+        writeln!(yaml, r#"        - "./docs/benchmarks/outputs/output/benchmark_report.json""#)?;
 
         info!("[yaml_generator] generated {} bytes of YAML", yaml.len());
         Ok(yaml)
@@ -179,8 +179,8 @@ impl BenchmarkYamlGenerator {
     pub fn generate_benchmark_yaml_with_models(
         _name: &str,
         models: &[ModelCandidate],
-        prompts: &[&str],
-        max_tokens: usize,
+        _prompts: &[&str],
+        _max_tokens: usize,
     ) -> Result<String> {
         let n = models.len();
         let mut yaml = String::new();
@@ -273,7 +273,7 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, "    output:")?;
         writeln!(yaml, "      save_to: refined_plans")?;
         writeln!(yaml, "      format: text")?;
-        writeln!(yaml, "      path: \"./workspace/output/refined_plan_{{{{loop.current_model}}}}.md\"")?;
+        writeln!(yaml, "      path: \"./docs/benchmarks/outputs/output/refined_plan_{{{{loop.current_model}}}}.md\"")?;
         writeln!(yaml)?;
 
         Ok(yaml)
@@ -297,8 +297,8 @@ impl BenchmarkYamlGenerator {
     pub fn generate_benchmark_yaml_gpu_cpu_compare(
         _name: &str,
         models: &[ModelCandidate],
-        prompts: &[&str],
-        max_tokens: usize,
+        _prompts: &[&str],
+        _max_tokens: usize,
     ) -> Result<String> {
         let n = models.len();
         info!("[yaml_generator] generating GPU/CPU compare benchmark YAML for {} models", n);
@@ -365,11 +365,11 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, r#"        gpu_mode: "{{{{loop.gpu_mode}}}}""#)?;
         writeln!(yaml, "      after_step_succeeds:")?;
         writeln!(yaml, "        append_to:")?;
-        writeln!(yaml, "          - \"./workspace/output/benchmark_results.yaml\"")?;
+        writeln!(yaml, "          - \"./docs/benchmarks/outputs/output/benchmark_results.yaml\"")?;
         writeln!(yaml, "          - benchmark_collection")?;
         writeln!(yaml, "      after_loop_iteration_fails:")?;
         writeln!(yaml, "        log:")?;
-        writeln!(yaml, "          to_file_path: \"./workspace/logs/benchmark-errors.log\"")?;
+        writeln!(yaml, "          to_file_path: \"./docs/benchmarks/outputs/logs/benchmark-errors.log\"")?;
         writeln!(yaml, "          event_fields: [iteration, current_model, gpu_mode, error_message]")?;
         writeln!(yaml, "    output:")?;
         writeln!(yaml, "      save_to: benchmark_results")?;
@@ -407,7 +407,7 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, "    output:")?;
         writeln!(yaml, "      save_to: refined_plans")?;
         writeln!(yaml, "      format: text")?;
-        writeln!(yaml, "      path: \"./workspace/output/refined_plan_{{{{loop.current_model}}}}.md\"")?;
+        writeln!(yaml, "      path: \"./docs/benchmarks/outputs/output/refined_plan_{{{{loop.current_model}}}}.md\"")?;
         writeln!(yaml)?;
 
         // Step 3: Generate speedup comparison report
@@ -419,7 +419,7 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, "    output:")?;
         writeln!(yaml, "      save_to:")?;
         writeln!(yaml, "        - speedup_report")?;
-        writeln!(yaml, "        - \"./workspace/output/speedup_report.json\"")?;
+        writeln!(yaml, "        - \"./docs/benchmarks/outputs/output/speedup_report.json\"")?;
         writeln!(yaml)?;
 
         // Step 4: Generate combined report
@@ -432,7 +432,7 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, "    output:")?;
         writeln!(yaml, "      save_to:")?;
         writeln!(yaml, "        - final_report")?;
-        writeln!(yaml, "        - \"./workspace/output/benchmark_report.json\"")?;
+        writeln!(yaml, "        - \"./docs/benchmarks/outputs/output/benchmark_report.json\"")?;
 
         info!("[yaml_generator] generated {} bytes of GPU/CPU compare YAML", yaml.len());
         Ok(yaml)

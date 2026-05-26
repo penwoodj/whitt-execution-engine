@@ -8,7 +8,7 @@ pub use super::execution::RetryConfig;
 /// Agentic workflow configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgenticWorkflow {
-    #[serde(flatten)]
+    #[serde(default)]
     pub steps: HashMap<String, WorkflowStep>,
     #[serde(default)]
     pub hardcoded_values: Option<HashMap<String, JsonValue>>,
@@ -86,6 +86,8 @@ pub struct WorkflowStep {
 pub struct ModelOverrides {
     #[serde(default)]
     pub max_turns: Option<u32>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
     #[serde(default)]
     pub temperature: Option<f32>,
     #[serde(default)]

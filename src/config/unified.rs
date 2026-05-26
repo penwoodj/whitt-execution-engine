@@ -51,6 +51,16 @@ pub struct UnifiedConfig {
 
     /// Model specifications.
     pub models: ModelsConfig,
+
+    /// Workflow execution strategy (load_unload, memory, etc.).
+    /// Parsed as raw Value for forward compatibility.
+    #[serde(default)]
+    pub workflow_execution_strategy: Option<Value>,
+
+    /// Agentic workflow steps definition.
+    /// Parsed as raw Value — step parsing happens in BenchmarkRunner.
+    #[serde(default)]
+    pub agentic_workflow: Option<Value>,
 }
 
 fn default_schema_version() -> String {

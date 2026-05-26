@@ -962,19 +962,20 @@ agentic_workflow:
 workflow_id: test-workflow
 name: "Test Workflow"
 agentic_workflow:
-  test_step:
-    prompt: "do something"
-    retry:
-      max_attempts: 5
-      backoff: exponential
-      initial_delay: "1s"
-      max_delay: "30s"
-      multiplier: 2.0
-      jitter: true
-      level: step_restart
-      adjustment_strategy: loosen_tolerance
-      tolerance_adjustment: 0.05
-      checkpoint_after_retry: true
+  steps:
+    test_step:
+      prompt: "do something"
+      retry:
+        max_attempts: 5
+        backoff: exponential
+        initial_delay: "1s"
+        max_delay: "30s"
+        multiplier: 2.0
+        jitter: true
+        level: step_restart
+        adjustment_strategy: loosen_tolerance
+        tolerance_adjustment: 0.05
+        checkpoint_after_retry: true
 "#;
         let workflow = WorkflowFile::from_yaml(yaml).expect("step retry config should parse");
         assert!(workflow.agentic_workflow.is_some());
@@ -1012,41 +1013,42 @@ agentic_workflow:
           to_file_path: "./logs/errors.log"
           event_fields: [step_name, error_message]
           level: error
-  step_one:
-    generative_entity: "${models.primary}"
-    prompt: "Analyze this code"
-    model_overrides:
-      max_turns: 10
-      temperature: 0.7
-    when:
-      before_step_starts:
-        - log:
-            to_file_path: "./logs/steps.log"
-            event_fields: [step_name]
-      after_step_succeeds:
-        - append_to: "./output/analysis.yaml"
-  step_two:
-    requires: [step_one]
-    tool: file_read
-    input:
-      file_path: "./config.yml"
-    when:
-      after_step_succeeds:
-        - save_to: config_data
-  step_three:
-    requires:
-      - step_one
-      - step: step_two
-        condition: "result.success == true"
-    prompt: "Generate report from {{step.step_two.output}}"
-    loop:
-      validation:
-        tolerance: 0.05
-        max_iterations: 5
-        exact_criteria:
-          - metric: quality
-            operator: ">="
-            target: 0.9
+  steps:
+    step_one:
+      generative_entity: "${models.primary}"
+      prompt: "Analyze this code"
+      model_overrides:
+        max_turns: 10
+        temperature: 0.7
+      when:
+        before_step_starts:
+          - log:
+              to_file_path: "./logs/steps.log"
+              event_fields: [step_name]
+        after_step_succeeds:
+          - append_to: "./output/analysis.yaml"
+    step_two:
+      requires: [step_one]
+      tool: file_read
+      input:
+        file_path: "./config.yml"
+      when:
+        after_step_succeeds:
+          - save_to: config_data
+    step_three:
+      requires:
+        - step_one
+        - step: step_two
+          condition: "result.success == true"
+      prompt: "Generate report from {{step.step_two.output}}"
+      loop:
+        validation:
+          tolerance: 0.05
+          max_iterations: 5
+          exact_criteria:
+            - metric: quality
+              operator: ">="
+              target: 0.9
 "#;
         let result = WorkflowFile::from_yaml(yaml);
         assert!(result.is_ok(), "full pipeline should validate: {:?}", result.err());
@@ -1063,9 +1065,10 @@ agentic_workflow:
 workflow_id: test-workflow
 name: "Test Workflow"
 agentic_workflow:
-  test_step:
-    prompt: "do something"
-    unknown_field: "should fail"
+  steps:
+    test_step:
+      prompt: "do something"
+      unknown_field: "should fail"
 "#;
         let result = WorkflowFile::from_yaml(yaml);
         assert!(result.is_err(), "should reject unknown field on WorkflowStep");
@@ -1082,10 +1085,11 @@ agentic_workflow:
 workflow_id: test-workflow
 name: "Test Workflow"
 agentic_workflow:
-  test_step:
-    model_overrides:
-      max_turns: 10
-      unknown_param: 42
+  steps:
+    test_step:
+      model_overrides:
+        max_turns: 10
+        unknown_param: 42
 "#;
         let result = WorkflowFile::from_yaml(yaml);
         assert!(result.is_err(), "should reject unknown field on ModelOverrides");
@@ -1097,9 +1101,10 @@ agentic_workflow:
 workflow_id: test-workflow
 name: "Test Workflow"
 agentic_workflow:
-  test_step:
-    loop:
-      unknown_loop_field: true
+  steps:
+    test_step:
+      loop:
+        unknown_loop_field: true
 "#;
         let result = WorkflowFile::from_yaml(yaml);
         assert!(result.is_err(), "should reject unknown field on LoopConfig");
@@ -1111,11 +1116,12 @@ agentic_workflow:
 workflow_id: test-workflow
 name: "Test Workflow"
 agentic_workflow:
-  test_step:
-    loop:
-      count:
-        max_iterations: 10
-        unknown_count_field: true
+  steps:
+    test_step:
+      loop:
+        count:
+          max_iterations: 10
+          unknown_count_field: true
 "#;
         let result = WorkflowFile::from_yaml(yaml);
         assert!(result.is_err(), "should reject unknown field on CountLoopConfig");
@@ -1127,10 +1133,11 @@ agentic_workflow:
 workflow_id: test-workflow
 name: "Test Workflow"
 agentic_workflow:
-  test_step:
-    retry:
-      max_attempts: 3
-      unknown_retry_field: true
+  steps:
+    test_step:
+      retry:
+        max_attempts: 3
+        unknown_retry_field: true
 "#;
         let result = WorkflowFile::from_yaml(yaml);
         assert!(result.is_err(), "should reject unknown field on StepRetryConfig");
@@ -1142,14 +1149,15 @@ agentic_workflow:
 workflow_id: test-workflow
 name: "Test Workflow"
 agentic_workflow:
-  test_step:
-    loop:
-      validation:
-        exact_criteria:
-          - metric: quality
-            operator: ">="
-            target: 0.9
-            unknown_criteria: true
+  steps:
+    test_step:
+      loop:
+        validation:
+          exact_criteria:
+            - metric: quality
+              operator: ">="
+              target: 0.9
+              unknown_criteria: true
 "#;
         let result = WorkflowFile::from_yaml(yaml);
         assert!(result.is_err(), "should reject unknown field on ExactCriteria");
