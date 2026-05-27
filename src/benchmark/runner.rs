@@ -2680,4 +2680,734 @@ agentic_workflow:
         assert_eq!(steps[2].step_name, "step_third");
         assert_eq!(steps[2].requires, vec!["step_2"]);
     }
+
+    #[test]
+    fn test_extract_iterate_values_valid() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let step = WorkflowStep {
+            step_name: "test".to_string(),
+            step_id: "test_step".to_string(),
+            requires: vec![],
+            when: Some(serde_json::json!({
+                "before_step_starts": [
+                    {
+                        "iterate_values": {
+                            "step.model_ref": ["qwen-05b", "qwen-15b", "qwen-3b"],
+                            "step.model_name": ["Qwen2.5-0.5B-Instruct-Q4_K_M", "Qwen2.5-1.5B-Instruct-Q4_K_M", "Qwen2.5-3B-Instruct-Q4_K_M"]
+                        }
+                    }
+                ]
+            })),
+            prompt: None,
+            generative_entity: None,
+            model_overrides: None,
+            r#loop: None,
+        };
+
+        let result = runner.extract_iterate_values(&step);
+        assert!(result.is_some());
+
+        let maps = result.unwrap();
+        assert_eq!(maps.len(), 3);
+
+        assert_eq!(maps[0].get("model_ref"), Some(&serde_json::json!("qwen-05b")));
+        assert_eq!(maps[0].get("model_name"), Some(&serde_json::json!("Qwen2.5-0.5B-Instruct-Q4_K_M")));
+
+        assert_eq!(maps[1].get("model_ref"), Some(&serde_json::json!("qwen-15b")));
+        assert_eq!(maps[1].get("model_name"), Some(&serde_json::json!("Qwen2.5-1.5B-Instruct-Q4_K_M")));
+
+        assert_eq!(maps[2].get("model_ref"), Some(&serde_json::json!("qwen-3b")));
+        assert_eq!(maps[2].get("model_name"), Some(&serde_json::json!("Qwen2.5-3B-Instruct-Q4_K_M")));
+    }
+
+    #[test]
+    fn test_extract_iterate_values_no_when() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let step = WorkflowStep {
+            step_name: "test".to_string(),
+            step_id: "test_step".to_string(),
+            requires: vec![],
+            when: None,
+            prompt: None,
+            generative_entity: None,
+            model_overrides: None,
+            r#loop: None,
+        };
+
+        let result = runner.extract_iterate_values(&step);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_iterate_values_no_before_step_starts() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let step = WorkflowStep {
+            step_name: "test".to_string(),
+            step_id: "test_step".to_string(),
+            requires: vec![],
+            when: Some(serde_json::json!({
+                "after_step_succeeds": [{"log": {}}]
+            })),
+            prompt: None,
+            generative_entity: None,
+            model_overrides: None,
+            r#loop: None,
+        };
+
+        let result = runner.extract_iterate_values(&step);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_iterate_values_no_iterate_values() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let step = WorkflowStep {
+            step_name: "test".to_string(),
+            step_id: "test_step".to_string(),
+            requires: vec![],
+            when: Some(serde_json::json!({
+                "before_step_starts": [
+                    {"log": {}}
+                ]
+            })),
+            prompt: None,
+            generative_entity: None,
+            model_overrides: None,
+            r#loop: None,
+        };
+
+        let result = runner.extract_iterate_values(&step);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_iterate_values_mismatched_array_lengths() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let step = WorkflowStep {
+            step_name: "test".to_string(),
+            step_id: "test_step".to_string(),
+            requires: vec![],
+            when: Some(serde_json::json!({
+                "before_step_starts": [
+                    {
+                        "iterate_values": {
+                            "step.model_ref": ["qwen-05b", "qwen-15b", "qwen-3b"],
+                            "step.model_name": ["Qwen2.5-0.5B-Instruct-Q4_K_M", "Qwen2.5-1.5B-Instruct-Q4_K_M"]
+                        }
+                    }
+                ]
+            })),
+            prompt: None,
+            generative_entity: None,
+            model_overrides: None,
+            r#loop: None,
+        };
+
+        let result = runner.extract_iterate_values(&step);
+        assert!(result.is_some());
+
+        let maps = result.unwrap();
+        assert_eq!(maps.len(), 3);
+
+        assert_eq!(maps[0].get("model_ref"), Some(&serde_json::json!("qwen-05b")));
+        assert_eq!(maps[0].get("model_name"), Some(&serde_json::json!("Qwen2.5-0.5B-Instruct-Q4_K_M")));
+
+        assert_eq!(maps[1].get("model_ref"), Some(&serde_json::json!("qwen-15b")));
+        assert_eq!(maps[1].get("model_name"), Some(&serde_json::json!("Qwen2.5-1.5B-Instruct-Q4_K_M")));
+
+        assert_eq!(maps[2].get("model_ref"), Some(&serde_json::json!("qwen-3b")));
+        assert_eq!(maps[2].get("model_name"), None);
+    }
+
+    #[test]
+    fn test_extract_iterate_values_step_prefix_stripped() {
+        let config = make_test_config();
+        let runner = BenchmarkRunner::new(config);
+
+        let step = WorkflowStep {
+            step_name: "test".to_string(),
+            step_id: "test_step".to_string(),
+            requires: vec![],
+            when: Some(serde_json::json!({
+                "before_step_starts": [
+                    {
+                        "iterate_values": {
+                            "step.model_ref": ["model-a"],
+                            "model_name": ["Model A"]
+                        }
+                    }
+                ]
+            })),
+            prompt: None,
+            generative_entity: None,
+            model_overrides: None,
+            r#loop: None,
+        };
+
+        let result = runner.extract_iterate_values(&step);
+        assert!(result.is_some());
+
+        let maps = result.unwrap();
+        assert_eq!(maps.len(), 1);
+
+        assert!(maps[0].contains_key("model_ref"));
+        assert!(maps[0].contains_key("model_name"));
+        assert!(!maps[0].contains_key("step.model_ref"));
+    }
+
+    #[test]
+    fn test_resolve_templates_single_step_var() {
+        let mut variables = serde_json::Map::new();
+        variables.insert("model_ref".to_string(), serde_json::json!("qwen-05b"));
+
+        let result = BenchmarkRunner::resolve_templates("Model: {{step.model_ref}}", &variables, 0);
+        assert_eq!(result, "Model: qwen-05b");
+    }
+
+    #[test]
+    fn test_resolve_templates_multiple_step_vars() {
+        let mut variables = serde_json::Map::new();
+        variables.insert("model_ref".to_string(), serde_json::json!("qwen-05b"));
+        variables.insert("model_name".to_string(), serde_json::json!("Qwen2.5"));
+
+        let result = BenchmarkRunner::resolve_templates(
+            "{{step.model_ref}} - {{step.model_name}}",
+            &variables,
+            0
+        );
+        assert_eq!(result, "qwen-05b - Qwen2.5");
+    }
+
+    #[test]
+    fn test_resolve_templates_iteration_var() {
+        let variables = serde_json::Map::new();
+
+        let result = BenchmarkRunner::resolve_templates("Iteration: {{iteration}}", &variables, 5);
+        assert_eq!(result, "Iteration: 5");
+    }
+
+    #[test]
+    fn test_resolve_templates_no_templates() {
+        let variables = serde_json::Map::new();
+
+        let result = BenchmarkRunner::resolve_templates("No templates here", &variables, 0);
+        assert_eq!(result, "No templates here");
+    }
+
+    #[test]
+    fn test_resolve_templates_combined_step_and_iteration() {
+        let mut variables = serde_json::Map::new();
+        variables.insert("model_ref".to_string(), serde_json::json!("qwen-05b"));
+
+        let result = BenchmarkRunner::resolve_templates(
+            "{{step.model_ref}} at iteration {{iteration}}",
+            &variables,
+            3
+        );
+        assert_eq!(result, "qwen-05b at iteration 3");
+    }
+
+    #[test]
+    fn test_iterate_values_yaml_to_extraction_full_pipeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        std::fs::write(&yaml_path, r#"
+workflow_id: test_workflow
+name: Test
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  run_benchmark:
+    id: bench_1
+    requires: []
+    prompt: "Test prompt"
+    input:
+      max_tokens: 256
+    when:
+      before_step_starts:
+        - iterate_values:
+            model_name: ["model-a", "model-b"]
+            model_path: ["/path/a.gguf", "/path/b.gguf"]
+"#).unwrap();
+
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let steps = runner.load_workflow_steps();
+
+        assert!(steps.is_some(), "Expected steps to be loaded from YAML");
+        let steps = steps.unwrap();
+        assert_eq!(steps.len(), 1, "Expected 1 step in workflow");
+
+        let step = &steps[0];
+        assert_eq!(step.step_id, "bench_1");
+
+        let iterate_values = runner.extract_iterate_values(step);
+        assert!(iterate_values.is_some(), "Expected iterate_values to be extracted");
+
+        let maps = iterate_values.unwrap();
+        assert_eq!(maps.len(), 2, "Expected 2 variable maps");
+
+        assert_eq!(
+            maps[0].get("model_name"),
+            Some(&serde_json::json!("model-a")),
+            "First map model_name should be model-a"
+        );
+        assert_eq!(
+            maps[0].get("model_path"),
+            Some(&serde_json::json!("/path/a.gguf")),
+            "First map model_path should be /path/a.gguf"
+        );
+
+        assert_eq!(
+            maps[1].get("model_name"),
+            Some(&serde_json::json!("model-b")),
+            "Second map model_name should be model-b"
+        );
+        assert_eq!(
+            maps[1].get("model_path"),
+            Some(&serde_json::json!("/path/b.gguf")),
+            "Second map model_path should be /path/b.gguf"
+        );
+    }
+
+    #[test]
+    fn test_iterate_values_with_template_resolution_pipeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        std::fs::write(&yaml_path, r#"
+workflow_id: test_workflow
+name: Test
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  run_benchmark:
+    id: bench_1
+    requires: []
+    prompt: "Testing model {{step.model_name}} at {{step.model_path}}"
+    input:
+      max_tokens: 256
+    when:
+      before_step_starts:
+        - iterate_values:
+            model_name: ["model-a", "model-b"]
+            model_path: ["/path/a.gguf", "/path/b.gguf"]
+"#).unwrap();
+
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let steps = runner.load_workflow_steps();
+
+        assert!(steps.is_some());
+        let steps = steps.unwrap();
+        let step = &steps[0];
+
+        let iterate_values = runner.extract_iterate_values(step);
+        assert!(iterate_values.is_some());
+
+        let maps = iterate_values.unwrap();
+        assert_eq!(maps.len(), 2);
+
+        let resolved_0 = BenchmarkRunner::resolve_templates(
+            step.prompt.as_ref().unwrap(),
+            &maps[0],
+            0
+        );
+        assert_eq!(
+            resolved_0,
+            "Testing model model-a at /path/a.gguf",
+            "First iteration prompt should resolve correctly"
+        );
+
+        let resolved_1 = BenchmarkRunner::resolve_templates(
+            step.prompt.as_ref().unwrap(),
+            &maps[1],
+            1
+        );
+        assert_eq!(
+            resolved_1,
+            "Testing model model-b at /path/b.gguf",
+            "Second iteration prompt should resolve correctly"
+        );
+    }
+
+    #[test]
+    fn test_iterate_values_with_three_models_pipeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        std::fs::write(&yaml_path, r#"
+workflow_id: test_workflow
+name: Test
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  run_benchmark:
+    id: bench_1
+    requires: []
+    prompt: "Testing {{step.model_name}}"
+    input:
+      max_tokens: 256
+    when:
+      before_step_starts:
+        - iterate_values:
+            model_name: ["model-a", "model-b", "model-c"]
+            model_path: ["/path/a.gguf", "/path/b.gguf", "/path/c.gguf"]
+"#).unwrap();
+
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let steps = runner.load_workflow_steps();
+
+        assert!(steps.is_some());
+        let steps = steps.unwrap();
+        let step = &steps[0];
+
+        let iterate_values = runner.extract_iterate_values(step);
+        assert!(iterate_values.is_some());
+
+        let maps = iterate_values.unwrap();
+        assert_eq!(maps.len(), 3, "Expected 3 iterations for 3 models");
+
+        assert_eq!(maps[0].get("model_name"), Some(&serde_json::json!("model-a")));
+        assert_eq!(maps[0].get("model_path"), Some(&serde_json::json!("/path/a.gguf")));
+
+        assert_eq!(maps[1].get("model_name"), Some(&serde_json::json!("model-b")));
+        assert_eq!(maps[1].get("model_path"), Some(&serde_json::json!("/path/b.gguf")));
+
+        assert_eq!(maps[2].get("model_name"), Some(&serde_json::json!("model-c")));
+        assert_eq!(maps[2].get("model_path"), Some(&serde_json::json!("/path/c.gguf")));
+    }
+
+    #[test]
+    fn test_iterate_values_with_single_model_pipeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        std::fs::write(&yaml_path, r#"
+workflow_id: test_workflow
+name: Test
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  run_benchmark:
+    id: bench_1
+    requires: []
+    prompt: "Testing {{step.model_name}}"
+    input:
+      max_tokens: 256
+    when:
+      before_step_starts:
+        - iterate_values:
+            model_name: ["model-a"]
+            model_path: ["/path/a.gguf"]
+"#).unwrap();
+
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let steps = runner.load_workflow_steps();
+
+        assert!(steps.is_some());
+        let steps = steps.unwrap();
+        let step = &steps[0];
+
+        let iterate_values = runner.extract_iterate_values(step);
+        assert!(iterate_values.is_some());
+
+        let maps = iterate_values.unwrap();
+        assert_eq!(maps.len(), 1, "Expected single iteration for single model");
+
+        assert_eq!(maps[0].get("model_name"), Some(&serde_json::json!("model-a")));
+        assert_eq!(maps[0].get("model_path"), Some(&serde_json::json!("/path/a.gguf")));
+    }
+
+    #[test]
+    fn test_iterate_values_with_mismatched_arrays_pipeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        std::fs::write(&yaml_path, r#"
+workflow_id: test_workflow
+name: Test
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  run_benchmark:
+    id: bench_1
+    requires: []
+    prompt: "Testing {{step.model_name}} at {{step.model_path}}"
+    input:
+      max_tokens: 256
+    when:
+      before_step_starts:
+        - iterate_values:
+            model_name: ["model-a", "model-b", "model-c"]
+            model_path: ["/path/a.gguf", "/path/b.gguf"]
+"#).unwrap();
+
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let steps = runner.load_workflow_steps();
+
+        assert!(steps.is_some());
+        let steps = steps.unwrap();
+        let step = &steps[0];
+
+        let iterate_values = runner.extract_iterate_values(step);
+        assert!(iterate_values.is_some());
+
+        let maps = iterate_values.unwrap();
+        assert_eq!(maps.len(), 3, "Expected 3 iterations (max array length)");
+
+        assert_eq!(maps[0].get("model_name"), Some(&serde_json::json!("model-a")));
+        assert_eq!(maps[0].get("model_path"), Some(&serde_json::json!("/path/a.gguf")));
+
+        assert_eq!(maps[1].get("model_name"), Some(&serde_json::json!("model-b")));
+        assert_eq!(maps[1].get("model_path"), Some(&serde_json::json!("/path/b.gguf")));
+
+        assert_eq!(maps[2].get("model_name"), Some(&serde_json::json!("model-c")));
+        assert_eq!(
+            maps[2].get("model_path"),
+            None,
+            "Third iteration should have no model_path (shorter array)"
+        );
+    }
+
+    #[test]
+    fn test_iterate_values_with_after_step_hooks_combined() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        std::fs::write(&yaml_path, r#"
+workflow_id: test_workflow
+name: Test
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  run_benchmark:
+    id: bench_1
+    requires: []
+    prompt: "Testing {{step.model_name}}"
+    input:
+      max_tokens: 256
+    when:
+      before_step_starts:
+        - iterate_values:
+            model_name: ["model-a", "model-b"]
+            model_path: ["/path/a.gguf", "/path/b.gguf"]
+      after_step_succeeds:
+        - log:
+            message: "Step completed"
+"#).unwrap();
+
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let steps = runner.load_workflow_steps();
+
+        assert!(steps.is_some());
+        let steps = steps.unwrap();
+        let step = &steps[0];
+
+        let iterate_values = runner.extract_iterate_values(step);
+        assert!(iterate_values.is_some());
+
+        let maps = iterate_values.unwrap();
+        assert_eq!(maps.len(), 2, "Expected 2 iterations despite after_step_succeeds hook");
+
+        assert_eq!(maps[0].get("model_name"), Some(&serde_json::json!("model-a")));
+        assert_eq!(maps[1].get("model_name"), Some(&serde_json::json!("model-b")));
+    }
+
+    #[test]
+    fn test_iterate_values_with_loop_and_iteration_variable_pipeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        std::fs::write(&yaml_path, r#"
+workflow_id: test_workflow
+name: Test
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  run_benchmark:
+    id: bench_1
+    requires: []
+    prompt: "Model {{step.model_name}} loop iteration {{iteration}}"
+    input:
+      max_tokens: 256
+    when:
+      before_step_starts:
+        - iterate_values:
+            model_name: ["model-a", "model-b"]
+    loop:
+      count: 2
+      iteration_variable: "loop_idx"
+"#).unwrap();
+
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let steps = runner.load_workflow_steps();
+
+        assert!(steps.is_some());
+        let steps = steps.unwrap();
+        let step = &steps[0];
+
+        let iterate_values = runner.extract_iterate_values(step);
+        assert!(iterate_values.is_some());
+
+        let maps = iterate_values.unwrap();
+        assert_eq!(maps.len(), 2, "Expected 2 iterate_values iterations");
+
+        assert_eq!(maps[0].get("model_name"), Some(&serde_json::json!("model-a")));
+        assert!(!maps[0].contains_key("loop_idx"), "iterate_values should not contain loop iteration variable");
+
+        let resolved = BenchmarkRunner::resolve_templates(
+            step.prompt.as_ref().unwrap(),
+            &maps[0],
+            1
+        );
+        assert_eq!(
+            resolved,
+            "Model model-a loop iteration 1",
+            "resolve_templates should handle {{iteration}} separately from iterate_values"
+        );
+    }
+
+    #[test]
+    fn test_iterate_values_empty_arrays_pipeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        std::fs::write(&yaml_path, r#"
+workflow_id: test_workflow
+name: Test
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  run_benchmark:
+    id: bench_1
+    requires: []
+    prompt: "Testing {{step.model_name}}"
+    input:
+      max_tokens: 256
+    when:
+      before_step_starts:
+        - iterate_values:
+            model_name: []
+            model_path: []
+"#).unwrap();
+
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let steps = runner.load_workflow_steps();
+
+        assert!(steps.is_some());
+        let steps = steps.unwrap();
+        let step = &steps[0];
+
+        let iterate_values = runner.extract_iterate_values(step);
+        assert!(iterate_values.is_some(), "Expected iterate_values to be extracted");
+
+        let maps = iterate_values.unwrap();
+        assert_eq!(maps.len(), 0, "Expected empty vec for empty arrays");
+    }
 }
