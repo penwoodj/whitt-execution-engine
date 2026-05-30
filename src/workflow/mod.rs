@@ -35,7 +35,7 @@ pub use step::{
     AgenticWorkflow, ExecutionMode, HookAction, LoopConfig, RequireCondition, UserInputConfig,
     UserInputPrompt, WorkflowInput, WorkflowStep,
     LogAction, GwtClause, AppendToAction, SaveToAction, RouteToAction,
-    BookmarkAction, NotifyAction, FailAction, ModelOverrides,
+    BookmarkAction, BookmarkActionDetail, NotifyAction, FailAction, ModelOverrides,
 };
 
 pub use execution::{

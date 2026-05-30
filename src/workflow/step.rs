@@ -173,7 +173,7 @@ pub struct FullRequireCondition {
 
 /// Hook action.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(rename_all = "snake_case")]
 pub enum HookAction {
     /// Log action.
     Log(LogAction),
@@ -195,10 +195,13 @@ pub enum HookAction {
     SkipStep(bool),
     /// Skip remaining action.
     SkipRemaining(bool),
+    /// Iterate values action — stores iteration mappings for step expansion.
+    IterateValues(std::collections::HashMap<String, Vec<String>>),
 }
 
 /// Log action.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct LogAction {
     #[serde(default)]
     pub to_file_path: Option<String>,
@@ -253,14 +256,33 @@ pub enum RouteToAction {
 }
 
 /// Bookmark action.
+///
+/// Accepts multiple YAML forms:
+/// - `bookmark: true` → store in engine bookmarks, no file
+/// - `bookmark: "path"` → store in engine bookmarks AND save to file
+/// - `bookmark: {path: "path"}` → same as string form
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BookmarkAction {
+    /// Boolean form: `bookmark: true`
+    Flag(bool),
+    /// String form: `bookmark: "path/to/file"`
+    Path(String),
+    /// Struct form: `bookmark: {path: "path/to/file"}`
+    Detailed(BookmarkActionDetail),
+}
+
+/// Detailed bookmark action with explicit fields.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct BookmarkAction {
+#[serde(deny_unknown_fields)]
+pub struct BookmarkActionDetail {
     #[serde(default)]
     pub path: Option<String>,
 }
 
 /// Notify action.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct NotifyAction {
     #[serde(default)]
     pub message: Option<String>,
@@ -268,6 +290,7 @@ pub struct NotifyAction {
 
 /// Fail action.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct FailAction {
     #[serde(default)]
     pub message: Option<String>,

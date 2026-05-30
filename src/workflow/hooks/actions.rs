@@ -7,7 +7,7 @@
 use super::{HookResult, HookEngine, NotifyMessage};
 use crate::workflow::step::{
     HookAction, LogAction, AppendToAction, SaveToAction, BookmarkAction,
-    NotifyAction, FailAction, RouteToAction, GwtClause
+    BookmarkActionDetail, NotifyAction, FailAction, RouteToAction, GwtClause
 };
 use crate::workflow::schema::LogLevel;
 use crate::workflow::hooks::context::WorkflowHookContext;
@@ -38,6 +38,7 @@ pub fn execute_action(
         HookAction::SkipStep(skip) => execute_skip_step(*skip, context, engine),
         HookAction::SkipRemaining(skip) => execute_skip_remaining(*skip, context, engine),
         HookAction::Gwt(clauses) => execute_gwt(clauses, context, engine),
+        HookAction::IterateValues(_) => HookResult::Continue,
     }
 }
 
@@ -184,7 +185,8 @@ fn append_to_file(path: &str, content: &str) -> std::io::Result<()> {
 ///
 /// Save context output to file path (overwrite, not append).
 /// Supports Variable/FilePath/Both variants.
-/// Stores in HookEngine bookmarks if variable name.
+/// Stores in HookEngine bookmarks if variable name, writes to file if path.
+/// Single strings: treated as file path (unless prefixed with $$ for variable).
 fn execute_save_to(
     action: &SaveToAction,
     context: &WorkflowHookContext,
@@ -197,7 +199,13 @@ fn execute_save_to(
 
     match action {
         SaveToAction::Variable(var_name) => {
-            engine.store_bookmark(var_name.clone(), json_value.clone());
+            if var_name.starts_with('$') {
+                engine.store_bookmark(var_name[1..].to_string(), json_value);
+            } else {
+                if let Err(e) = save_to_file(var_name, &output) {
+                    eprintln!("Failed to save to {}: {}", var_name, e);
+                }
+            }
         }
         SaveToAction::FilePath(path) => {
             if let Err(e) = save_to_file(path, &output) {
@@ -207,11 +215,9 @@ fn execute_save_to(
         SaveToAction::Both(targets) => {
             for target in targets {
                 if target.starts_with('$') {
-                    // Variable reference
                     let var_name = &target[1..];
                     engine.store_bookmark(var_name.to_string(), json_value.clone());
                 } else {
-                    // File path
                     if let Err(e) = save_to_file(target, &output) {
                         eprintln!("Failed to save to {}: {}", target, e);
                     }
@@ -267,11 +273,15 @@ fn execute_bookmark(
     let step_name = context.get_field("step_name").unwrap_or_else(|| "unknown".to_string());
     let formatted_json = serde_json::to_string_pretty(&json_value).unwrap_or_else(|_| output.clone());
 
-    // Store in bookmarks HashMap
     engine.store_bookmark(step_name.clone(), json_value);
 
-    // Write to file if path specified
-    if let Some(ref path) = action.path {
+    let file_path: Option<&str> = match action {
+        BookmarkAction::Flag(_) => None,
+        BookmarkAction::Path(path) => Some(path),
+        BookmarkAction::Detailed(detail) => detail.path.as_deref(),
+    };
+
+    if let Some(path) = file_path {
         if let Err(e) = save_to_file(path, &formatted_json) {
             eprintln!("Failed to write bookmark to {}: {}", path, e);
         }
@@ -524,7 +534,7 @@ mod tests {
 
     #[test]
     fn given_save_to_variable_when_execute_then_stores_in_bookmarks() {
-        let action = SaveToAction::Variable("checkpoint".to_string());
+        let action = SaveToAction::Variable("$checkpoint".to_string());
         let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
             step_name: "test_step".to_string(),
             output: "{\"status\":\"done\"}".to_string(),
@@ -598,9 +608,9 @@ mod tests {
     fn given_bookmark_with_path_when_execute_then_writes_checkpoint_file() {
         let temp_dir = TempDir::new().unwrap();
         let bookmark_path = temp_dir.path().join("checkpoint.json").to_string_lossy().to_string();
-        let action = BookmarkAction {
+        let action = BookmarkAction::Detailed(BookmarkActionDetail {
             path: Some(bookmark_path.clone()),
-        };
+        });
         let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
             step_name: "test_step".to_string(),
             output: "{\"checkpoint\":true}".to_string(),
@@ -621,7 +631,7 @@ mod tests {
 
     #[test]
     fn given_bookmark_without_path_when_execute_then_stores_in_engine() {
-        let action = BookmarkAction::default();
+        let action = BookmarkAction::Flag(true);
         let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
             step_name: "checkpoint_step".to_string(),
             output: "{\"saved\":true}".to_string(),

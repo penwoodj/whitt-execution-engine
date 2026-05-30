@@ -913,7 +913,7 @@ agentic_workflow:
           - given: "quality_score >= 0.9"
             then: success_step
           - given: "true"
-            then: { route_to: [fail_step, cleanup_step] }
+            then: [fail_step, cleanup_step]
 "#;
         let workflow = WorkflowFile::from_yaml(yaml).expect("route_to list should parse");
         assert!(workflow.agentic_workflow.is_some());

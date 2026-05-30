@@ -1,6 +1,6 @@
 use whitt_execution_engine::workflow::{
     HookAction, LogAction, GwtClause, AppendToAction, SaveToAction,
-    RouteToAction, BookmarkAction, FailAction,
+    RouteToAction, BookmarkAction, BookmarkActionDetail, FailAction,
 };
 use whitt_execution_engine::workflow::hooks::{
     HookEngine, HookResult,
@@ -76,7 +76,7 @@ fn given_append_to_action_when_executed_then_content_appended_to_file() {
 fn given_bookmark_action_when_executed_then_file_and_memory_stored() {
     let temp = tempfile::tempdir().expect("tempdir");
     let cp = temp.path().join("cp.cp").to_string_lossy().to_string();
-    let action = HookAction::Bookmark(BookmarkAction { path: Some(cp.clone()) });
+    let action = HookAction::Bookmark(BookmarkAction::Detailed(BookmarkActionDetail { path: Some(cp.clone()) }));
     let ctx = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
         step_name: "cp_step".into(), output: "data".into(), duration_ms: 200,
         quality_score: Some(0.95), token_count: 100, model_name: "m".into(),
