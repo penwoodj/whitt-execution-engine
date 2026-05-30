@@ -394,23 +394,24 @@ fn execute_gwt(
     context: &WorkflowHookContext,
     engine: &mut HookEngine,
 ) -> HookResult {
-    // TODO: Wire before_gwt_evaluates and after_gwt_evaluates triggers
-    // before_gwt_evaluates: fire before evaluating clauses with BeforeGwtEvaluatesContext
-    // after_gwt_evaluates: fire after matching clause found with AfterGwtEvaluatesContext
-    // Architectural limitation: execute_gwt lacks access to step.when config and execute_hooks_for_trigger.
-    // Requires either: (1) Pass hook_config into execute_gwt, or (2) Move trigger firing to execute_action
-    // in runner where step.when is available, or (3) Change HookResult to return trigger events.
     let json = context.to_json_value();
+    info!("[hook] before_gwt_evaluates: step={} clauses={}", 
+        context.get_field("step_name").unwrap_or_default(), clauses.len());
 
     for clause in clauses {
         if let Some(ref given) = clause.given {
             if evaluate_gwt_condition(given, &json) {
-                // Evaluate the `then` clause
+                let target = match &clause.r#then {
+                    RouteToAction::Single(t) => t.clone(),
+                    RouteToAction::Multiple(ts) => ts.join(","),
+                };
+                info!("[hook] after_gwt_evaluates: decision=routed target={}", target);
                 return execute_route_to(&clause.r#then, context, engine);
             }
         }
     }
 
+    info!("[hook] after_gwt_evaluates: decision=continue (no clause matched)");
     HookResult::Continue
 }
 

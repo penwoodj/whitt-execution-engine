@@ -4,7 +4,11 @@ use crate::client::disk_monitor;
 use crate::agent::loop_hooks::HookContext;
 use crate::workflow::hooks::{HookEngine, HookResult};
 use crate::workflow::hooks::actions::execute_action;
-use crate::workflow::hooks::context::{WorkflowHookContext, BeforeStepStartsContext, AfterStepStartsContext, AfterStepSucceedsContext, AfterStepFailsContext, StepType};
+use crate::workflow::hooks::context::{
+    WorkflowHookContext, BeforeStepStartsContext, AfterStepStartsContext,
+    AfterStepSucceedsContext, AfterStepFailsContext, AfterAllRetriesExhaustedContext,
+    AfterLoopIterationFailsContext, OnRequiresFailedContext, StepType,
+};
 use crate::workflow::HookAction;
 use super::{BenchmarkSuiteResult, ModelBenchmarkResult, InferenceResult};
 use anyhow::{Context, Result};
@@ -1360,6 +1364,24 @@ impl BenchmarkRunner {
                     warn!("[benchmark] after_step_fails hook error: {}", e);
                 }
             }
+
+            // Fire after_all_retries_exhausted if error indicates all retries failed
+            if error.contains("attempts failed") {
+                let exhausted_context = WorkflowHookContext::AfterAllRetriesExhausted(
+                    AfterAllRetriesExhaustedContext {
+                        step_name: step.step_name.clone(),
+                        total_attempts: 3, // MAX_RETRIES in benchmark_single_model
+                        last_error: error.clone(),
+                        last_error_type: "InferenceError".to_string(),
+                    }
+                );
+                match self.execute_hooks_for_trigger(&step.when, "after_all_retries_exhausted", &exhausted_context) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        warn!("[benchmark] after_all_retries_exhausted hook error: {}", e);
+                    }
+                }
+            }
         } else {
             let total_tokens: usize = model_result.inference_results.iter()
                 .map(|inf| inf.total_tokens)
@@ -1510,9 +1532,26 @@ impl BenchmarkRunner {
             info!("[benchmark] loaded {} workflow steps from YAML", steps.len());
 
             for step in steps {
-                // TODO: Wire on_requires_failed trigger here when depends_on checking is implemented
-                // Context requires: failed_step, reason, dependency_chain
-                // Check step.requires field against step_outputs map; if dependency missing, fire trigger
+                if !step.requires.is_empty() {
+                    let missing_deps: Vec<String> = step.requires.iter()
+                        .filter(|dep| !step_outputs.contains_key(*dep))
+                        .cloned()
+                        .collect();
+
+                    if !missing_deps.is_empty() {
+                        warn!("[benchmark] step {} skipped: missing dependencies {:?}", step.step_id, missing_deps);
+                        let requires_context = WorkflowHookContext::OnRequiresFailed(
+                            OnRequiresFailedContext {
+                                failed_step: step.step_id.clone(),
+                                reason: format!("Dependencies not satisfied: {:?}", missing_deps),
+                                dependency_chain: missing_deps.clone(),
+                            }
+                        );
+                        let _ = self.execute_hooks_for_trigger(&step.when, "on_requires_failed", &requires_context);
+                        continue;
+                    }
+                }
+
                 let variable_sets = self.extract_iterate_values(step);
 
                 if let Some(ref var_sets) = variable_sets {
@@ -1520,9 +1559,6 @@ impl BenchmarkRunner {
 
                     for (iter_idx, vars) in var_sets.iter().enumerate() {
                         let iteration = iter_idx + 1;
-                        // TODO: Wire after_loop_iteration_fails trigger when iteration-level error handling is added
-                        // Context requires: step_name, iteration, error_message, loop_type
-                        // Inside iteration loop, catch errors and fire trigger with iteration number
                         let resolved_ge = step.generative_entity.as_ref()
                             .map(|ge| Self::resolve_templates(ge, vars, iteration));
 
@@ -1563,6 +1599,17 @@ impl BenchmarkRunner {
                                 results.push(result);
 
                                 if let Some(ref last_result) = results.last() {
+                                    if let Some(ref err) = last_result.error {
+                                        let fail_context = WorkflowHookContext::AfterLoopIterationFails(
+                                            AfterLoopIterationFailsContext {
+                                                step_name: step.step_name.clone(),
+                                                iteration: iteration as u32,
+                                                error_message: err.clone(),
+                                                loop_type: "iterate_values".to_string(),
+                                            }
+                                        );
+                                        let _ = self.execute_hooks_for_trigger(&step.when, "after_loop_iteration_fails", &fail_context);
+                                    }
                                     let output_text = last_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
                                     step_outputs.insert(step.step_id.clone(), output_text);
                                 }
@@ -1962,10 +2009,6 @@ impl BenchmarkRunner {
                 };
 
                 let inf_start = Instant::now();
-                // TODO: Wire during_step_streaming when SSE streaming path supports chunk-level hooks
-                // The streaming response handler is in LlamaHttpClient::chat_completion but not
-                // accessible from the benchmark runner. When streaming is chunk-by-chunk, call
-                // execute_hooks_for_trigger with DuringStepStreamingContext for each chunk.
                 match client.chat_completion(request).await {
                     Ok(resp) => {
                         let raw_response = resp.choices.first()
