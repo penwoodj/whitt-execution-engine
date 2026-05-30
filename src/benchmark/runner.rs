@@ -1679,7 +1679,7 @@ impl BenchmarkRunner {
                             total_tokens: resp.usage.total_tokens,
                             duration,
                             tokens_per_second: tps,
-                            response_text: cleaned_text,
+                            response_text: raw_response,
                         });
                         last_error = None;
                         break;
