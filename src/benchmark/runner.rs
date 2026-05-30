@@ -4,7 +4,7 @@ use crate::client::disk_monitor;
 use crate::agent::loop_hooks::HookContext;
 use crate::workflow::hooks::{HookEngine, HookResult};
 use crate::workflow::hooks::actions::execute_action;
-use crate::workflow::hooks::context::{WorkflowHookContext, BeforeStepStartsContext, AfterStepSucceedsContext, AfterStepFailsContext, StepType};
+use crate::workflow::hooks::context::{WorkflowHookContext, BeforeStepStartsContext, AfterStepStartsContext, AfterStepSucceedsContext, AfterStepFailsContext, StepType};
 use crate::workflow::HookAction;
 use super::{BenchmarkSuiteResult, ModelBenchmarkResult, InferenceResult};
 use anyhow::{Context, Result};
@@ -1284,6 +1284,42 @@ impl BenchmarkRunner {
             }
         }
 
+        // Fire after_step_starts trigger: step has begun executing, model hasn't produced output yet
+        let after_starts_context = WorkflowHookContext::AfterStepStarts(AfterStepStartsContext {
+            step_name: step.step_name.clone(),
+            step_type: StepType::Generative,
+        });
+        match self.execute_hooks_for_trigger(&step.when, "after_step_starts", &after_starts_context) {
+            Ok(HookResult::Fail { reason }) => {
+                warn!("[benchmark] after_step_starts hook failed: {}", reason);
+                return Err(anyhow::anyhow!("Hook failed after step starts: {}", reason));
+            }
+            Ok(HookResult::SkipStep) => {
+                info!("[benchmark] step {} skipped by after_step_starts hook", step.step_id);
+                return Ok(ModelBenchmarkResult {
+                    model_id: model_id.to_string(),
+                    model_path: model_path.clone(),
+                    file_size_bytes: 0,
+                    load_duration: Duration::ZERO,
+                    inference_results: vec![],
+                    unload_duration: Duration::ZERO,
+                    total_duration: Duration::ZERO,
+                    tokens_per_second: 0.0,
+                    avg_latency_ms: 0.0,
+                    p50_latency_ms: 0.0,
+                    p95_latency_ms: 0.0,
+                    p99_latency_ms: 0.0,
+                    error: Some("Skipped by hook".to_string()),
+                    gpu_mode: "gpu".to_string(),
+                    speedup_factor: None,
+                });
+            }
+            Ok(_) => {}
+            Err(e) => {
+                warn!("[benchmark] after_step_starts hook error: {}, continuing", e);
+            }
+        }
+
         let system_prompt = if let Some(vars) = variables {
             let model_name = vars.get("step.model_name")
                 .and_then(|v| v.as_str())
@@ -1474,6 +1510,9 @@ impl BenchmarkRunner {
             info!("[benchmark] loaded {} workflow steps from YAML", steps.len());
 
             for step in steps {
+                // TODO: Wire on_requires_failed trigger here when depends_on checking is implemented
+                // Context requires: failed_step, reason, dependency_chain
+                // Check step.requires field against step_outputs map; if dependency missing, fire trigger
                 let variable_sets = self.extract_iterate_values(step);
 
                 if let Some(ref var_sets) = variable_sets {
@@ -1481,7 +1520,9 @@ impl BenchmarkRunner {
 
                     for (iter_idx, vars) in var_sets.iter().enumerate() {
                         let iteration = iter_idx + 1;
-
+                        // TODO: Wire after_loop_iteration_fails trigger when iteration-level error handling is added
+                        // Context requires: step_name, iteration, error_message, loop_type
+                        // Inside iteration loop, catch errors and fire trigger with iteration number
                         let resolved_ge = step.generative_entity.as_ref()
                             .map(|ge| Self::resolve_templates(ge, vars, iteration));
 
@@ -1921,6 +1962,10 @@ impl BenchmarkRunner {
                 };
 
                 let inf_start = Instant::now();
+                // TODO: Wire during_step_streaming when SSE streaming path supports chunk-level hooks
+                // The streaming response handler is in LlamaHttpClient::chat_completion but not
+                // accessible from the benchmark runner. When streaming is chunk-by-chunk, call
+                // execute_hooks_for_trigger with DuringStepStreamingContext for each chunk.
                 match client.chat_completion(request).await {
                     Ok(resp) => {
                         let raw_response = resp.choices.first()
@@ -1970,6 +2015,9 @@ impl BenchmarkRunner {
 
             if let Some(err) = last_error {
                 warn!("[benchmark] all {} inference attempts failed for {}: {}", MAX_RETRIES, model_id, err);
+                // TODO: Wire after_all_retries_exhausted trigger here with AfterAllRetriesExhaustedContext
+                // Context requires: step_name, total_attempts (MAX_RETRIES), last_error, last_error_type
+                // This is the retry loop exit point after all attempts fail.
                 inference_results.push(InferenceResult {
                     prompt: prompt.clone(),
                     prompt_tokens: 0,
