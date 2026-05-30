@@ -128,6 +128,11 @@ pub struct HostingConfig {
     #[garde(skip)]
     pub model_offload_timeout_secs: u64,
 
+    /// GPU layers to offload (0 = CPU only, 999 = all layers). Sets LLAMA_ARG_N_GPU_LAYERS env var.
+    #[serde(default = "default_gpu_layers")]
+    #[garde(range(min = 0))]
+    pub gpu_layers: usize,
+
     /// GPU allocation settings.
     #[serde(default)]
     #[garde(skip)]
@@ -144,6 +149,7 @@ impl Default for HostingConfig {
         Self {
             max_concurrent_models: default_max_concurrent_models(),
             model_offload_timeout_secs: default_model_offload_timeout(),
+            gpu_layers: default_gpu_layers(),
             gpu_allocation: None,
             cpu_fallback: None,
         }
@@ -330,6 +336,10 @@ fn default_max_concurrent_models() -> usize {
 
 fn default_model_offload_timeout() -> u64 {
     300
+}
+
+fn default_gpu_layers() -> usize {
+    999
 }
 
 fn default_gpu_strategy() -> String {

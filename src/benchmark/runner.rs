@@ -61,6 +61,7 @@ struct BenchmarkWorkflowConfig {
     top_p: f64,
     compare_modes: bool,
     model_list: Vec<String>,
+    gpu_layers: usize,
 }
 
 struct WorkflowStep {
@@ -241,6 +242,26 @@ impl BenchmarkRunner {
         cleaned
     }
 
+    fn clean_json_output(text: &str) -> String {
+        let cleaned = text.trim();
+
+        if let Some(first_fence) = cleaned.find("```") {
+            let after_fence = &cleaned[first_fence..];
+            let first_newline = after_fence.find('\n');
+            let opening_end = first_fence + first_newline.unwrap_or(3);
+            if opening_end < cleaned.len() {
+                if let Some(last_fence) = cleaned[opening_end..].rfind("```") {
+                    let end_pos = opening_end + last_fence;
+                    if opening_end + 1 < end_pos {
+                        return cleaned[opening_end + 1..end_pos].trim().to_string();
+                    }
+                }
+            }
+        }
+
+        cleaned.replace("<|im_start|>", "").replace("<|im_end|>", "").trim().to_string()
+    }
+
     fn load_workflow_config(&self) -> Option<BenchmarkWorkflowConfig> {
         let wf_path = self.config.workflow_file.as_ref()?;
         let content = fs::read_to_string(wf_path).ok()?;
@@ -291,11 +312,27 @@ impl BenchmarkRunner {
             return None;
         };
 
-        let max_tokens = first_step
+        // Read max_tokens with priority: step model_overrides > model-level > default (4096)
+        let max_tokens_from_step = first_step
             .get("model_overrides")
             .and_then(|mo| mo.get("max_tokens"))
             .and_then(|v| v.as_u64())
-            .unwrap_or(4096) as usize;
+            .map(|v| v as usize);
+
+        let max_tokens_from_model = yaml_value
+            .get("models")
+            .and_then(|models| models.as_object())
+            .and_then(|models_map| {
+                models_map.values().find_map(|model_config| {
+                    model_config.get("max_tokens")
+                        .and_then(|v| v.as_u64())
+                        .map(|v| v as usize)
+                })
+            });
+
+        let max_tokens = max_tokens_from_step
+            .or(max_tokens_from_model)
+            .unwrap_or(4096);
 
         let temperature = first_step
             .get("temperature")
@@ -306,10 +343,20 @@ impl BenchmarkRunner {
             .and_then(|v| v.as_f64())
             .unwrap_or(0.95);
 
+        // Read gpu_layers from provider hosting config
+        let gpu_layers = yaml_value
+            .get("providers")
+            .and_then(|providers| providers.as_object())
+            .and_then(|providers_map| providers_map.values().next())
+            .and_then(|provider| provider.get("hosting"))
+            .and_then(|hosting| hosting.get("gpu_layers"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(999) as usize;
+
         let model_list: Vec<String> = vec![];
 
-        info!("[benchmark] extracted workflow config: prompts={}, max_tokens={}, temperature={}, top_p={}, model_list={}",
-            prompts.len(), max_tokens, temperature, top_p, model_list.len());
+        info!("[benchmark] extracted workflow config: prompts={}, max_tokens={}, temperature={}, top_p={}, gpu_layers={}, model_list={}",
+            prompts.len(), max_tokens, temperature, top_p, gpu_layers, model_list.len());
 
         Some(BenchmarkWorkflowConfig {
             prompts,
@@ -318,6 +365,7 @@ impl BenchmarkRunner {
             top_p,
             compare_modes: false,
             model_list,
+            gpu_layers,
         })
     }
 
@@ -789,6 +837,7 @@ impl BenchmarkRunner {
                             self.interpolate_template(path, context)
                         };
                         let content = context.output.as_deref().unwrap_or("");
+                        let content = Self::clean_json_output(content);
 
                         if let Some(parent) = Path::new(&path).parent() {
                             if !parent.as_os_str().is_empty() {
@@ -1115,10 +1164,27 @@ impl BenchmarkRunner {
         let step_max_tokens = step.model_overrides.as_ref()
             .and_then(|mo| mo.get("max_tokens").and_then(|m| m.as_u64()).map(|m| m as usize))
             .unwrap_or(max_tokens);
+        let step_temperature = step.model_overrides.as_ref()
+            .and_then(|mo| mo.get("temperature").and_then(|t| t.as_f64()))
+            .unwrap_or(temperature);
 
         info!("[benchmark] executing step {} with model {}", step.step_id, model_id);
 
-        let model_result = self.benchmark_single_model(client, model_id, model_path, "gpu", std::slice::from_ref(prompt), step_max_tokens, temperature, top_p).await;
+        let system_prompt = if let Some(vars) = variables {
+            let model_name = vars.get("step.model_name")
+                .and_then(|v| v.as_str())
+                .or_else(|| vars.get("model_name").and_then(|v| v.as_str()))
+                .unwrap_or(model_id);
+            let output_path = format!("./docs/benchmarks/outputs/output/{}.json", model_name);
+            Some(format!(
+                "You are generating output that will be saved to: {}\nModel running: {}\nRespond ONLY with the requested output format.",
+                output_path, model_name
+            ))
+        } else {
+            None
+        };
+
+        let model_result = self.benchmark_single_model(client, model_id, model_path, "gpu", std::slice::from_ref(prompt), step_max_tokens, step_temperature, top_p, system_prompt).await;
 
         let output_text = model_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
 
@@ -1174,6 +1240,15 @@ impl BenchmarkRunner {
         };
 
         let wf_ctx = self.load_workflow_config();
+
+        // Apply gpu_layers from workflow config if available
+        if let Some(ref ctx) = wf_ctx {
+            if ctx.gpu_layers != 999 {
+                info!("[benchmark] workflow config specifies gpu_layers={}, restarting Docker", ctx.gpu_layers);
+                self.restart_docker_with_gpu_layers(ctx.gpu_layers as u32).await
+                    .context("Failed to restart Docker with workflow gpu_layers")?;
+            }
+        }
 
         let (prompts, max_tokens, compare_gpu_cpu, temperature, top_p) = if let Some(ref ctx) = wf_ctx {
             let _default_prompt = "The quick brown fox jumps over the lazy dog.";
@@ -1368,7 +1443,7 @@ impl BenchmarkRunner {
                     continue;
                 }
 
-                let gpu_result = self.benchmark_single_model(&client, model_id, model_path, "gpu", &prompts, max_tokens, temperature, top_p).await;
+                let gpu_result = self.benchmark_single_model(&client, model_id, model_path, "gpu", &prompts, max_tokens, temperature, top_p, None).await;
 
                 if let Some(ref err) = gpu_result.error {
                     self.log_step_error(model_id, err)?;
@@ -1411,7 +1486,7 @@ impl BenchmarkRunner {
                         continue;
                     }
 
-                    let cpu_result = self.benchmark_single_model(&client, model_id, model_path, "cpu", &prompts, max_tokens, temperature, top_p).await;
+                    let cpu_result = self.benchmark_single_model(&client, model_id, model_path, "cpu", &prompts, max_tokens, temperature, top_p, None).await;
 
                     if let Some(ref err) = cpu_result.error {
                         self.log_step_error(model_id, err)?;
@@ -1485,7 +1560,7 @@ impl BenchmarkRunner {
                     continue;
                 }
 
-                let model_result = self.benchmark_single_model(&client, model_id, model_path, "gpu", &prompts, max_tokens, temperature, top_p).await;
+                let model_result = self.benchmark_single_model(&client, model_id, model_path, "gpu", &prompts, max_tokens, temperature, top_p, None).await;
 
                 if let Some(ref err) = model_result.error {
                     self.log_step_error(model_id, err)?;
@@ -1524,7 +1599,7 @@ impl BenchmarkRunner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn benchmark_single_model(&self, client: &LlamaHttpClient, model_id: &str, model_source_path: &str, gpu_mode: &str, prompts: &[String], max_tokens: usize, temperature: f64, top_p: f64) -> ModelBenchmarkResult {
+    async fn benchmark_single_model(&self, client: &LlamaHttpClient, model_id: &str, model_source_path: &str, gpu_mode: &str, prompts: &[String], max_tokens: usize, temperature: f64, top_p: f64, system_prompt: Option<String>) -> ModelBenchmarkResult {
         let server_model_id = model_id.strip_suffix(".gguf").unwrap_or(model_id);
         let start = Instant::now();
 
@@ -1637,9 +1712,15 @@ impl BenchmarkRunner {
             let mut last_error = None;
 
             for attempt in 0..MAX_RETRIES {
+                let mut messages = Vec::with_capacity(2);
+                if let Some(ref sys) = system_prompt {
+                    messages.push(ChatMessage::system(sys.clone()));
+                }
+                messages.push(ChatMessage::user(prompt));
+
                 let request = ChatCompletionRequest {
                     model: server_model_id.to_string(),
-                    messages: vec![ChatMessage::user(prompt)],
+                    messages,
                     max_tokens: Some(max_tokens),
                     temperature: Some(temperature as f32),
                     top_p: Some(top_p as f32),

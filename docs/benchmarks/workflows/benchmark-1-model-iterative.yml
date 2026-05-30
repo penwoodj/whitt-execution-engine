@@ -1,0 +1,274 @@
+# ═══════════════════════════════════════════════════════════════════
+# ADR Generation Benchmark — 1 Model, Iterative Refinement
+# Schema-compliant per docs/schema/unified-workflow-schema.yml v2.0
+#
+# Unlike the multi-model benchmarks that test one-shot generation
+# across many models, this benchmark tests whether a single model
+# can produce a better result by iterating through broken-down tasks.
+#
+# Each step refines the previous step's output string, progressively
+# expanding the ADR JSON from skeleton → full → validated.
+#
+# Config:
+#   max_tokens: 50000 (model-level, applies to all steps)
+#   gpu_layers: 999 (full GPU offload via LLAMA_ARG_N_GPU_LAYERS)
+#   Per-step: only temperature varies (model_overrides.temperature)
+#
+# Flow:
+#   step_1_skeleton         (generative) → minimal JSON structure
+#   step_2_expand_context   (generative) → add detailed context
+#   step_3_expand_decision  (generative) → add decision + tech spec
+#   step_4_expand_consequences (generative) → add consequences + risks
+#   step_5_validate_clean   (generative) → validate + clean JSON
+#   step_6_save_final       (tool: file_write) → write to output dir
+# ═══════════════════════════════════════════════════════════════════
+
+workflow_id: adr_benchmark_1_model_iterative
+name: "ADR Generation Benchmark - 1 Model Iterative Refinement"
+description: "Generate JSON parsable ADR for vanilla JS TODO app through iterative step-by-step refinement using a single model"
+version: "2.0.0"
+author: "Whitt Execution Engine"
+tags: [benchmark, adr, iterative]
+min_schema_version: "2.0.0"
+schema_version: "2.0.0"
+
+# ── PROVIDERS ───────────────────────────────────────────────────
+providers:
+  llama_cpp_with_vulkan:                               # schema line 28
+    config:                                             # schema line 29
+      host: localhost                                   # schema line 30
+      port: 8080                                        # schema line 31
+    hosting:                                            # schema line 33
+      gpu_layers: 999                                   # schema line 35 — 999=all layers GPU offload (sets LLAMA_ARG_N_GPU_LAYERS)
+
+# ── MODEL ───────────────────────────────────────────────────────
+# TODO: Change model name to whichever wins the 50-model benchmark.
+# Default: Qwen3-4B — solid mid-range instruct model.
+models:
+  "target-model":                                       # schema line 68
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host:                                               # schema line 70
+      type: llama_cpp_with_vulkan                       # schema line 71
+    execution:                                          # schema line 96
+      max_tokens: 50000                                 # schema line 102 — applies to ALL steps unless step-level override present
+    tools:                                              # schema line 109
+      default_permissions:
+        file_read: trust                                # schema line 112
+        file_write: trust                               # schema line 113
+
+# ── WORKFLOW EXECUTION STRATEGY ────────────────────────────────
+workflow_execution_strategy:                             # schema line 503
+  memory:
+    model_lifecycle:
+      unload_unused: true                               # schema line 521
+
+# ── AGENTIC WORKFLOW ───────────────────────────────────────────
+# 5 generative steps + 1 tool step, each building on the previous.
+# Step output auto-creates {{step.step_name.output}} variable.
+# Next step reads it via {{step.prev_step.output}} template var.
+agentic_workflow:                                        # schema line 196
+
+  steps:                                                # schema line 293
+
+    # ── STEP 1: Generate minimal ADR skeleton ───────────────────
+    step_1_skeleton:
+      generative_entity: "${models.target-model}"       # schema line 297
+      prompt: |                                         # schema line 298
+        Generate a minimal JSON skeleton for an Architecture Decision Record (ADR) about building a vanilla JavaScript TODO application. No frameworks. Just HTML, JS, CSS files.
+
+        Create a JSON object with EXACTLY these top-level keys:
+        - "id": "todo-app"
+        - "title": short title
+        - "status": "accepted"
+        - "date": "2025-01-15"
+        - "context": { "problem": one sentence, "constraints": ["No frameworks", "Only HTML JS CSS"] }
+        - "decision": { "approach": one sentence, "files": ["index.html", "style.css", "app.js"] }
+        - "consequences": { "pros": ["No dependencies"], "cons": ["Manual state management"] }
+        - "technical_spec": { "data_model": {}, "functions": [], "ui_elements": [], "storage": {} }
+
+        Fill in SHORT placeholder values. Arrays should have 1-2 items. Strings should be one sentence max.
+        The "technical_spec" sub-objects can be mostly empty — they will be filled in later steps.
+
+        CRITICAL FORMAT RULES:
+        - First character: { and last character: }
+        - No backticks, no code fences, no markdown
+        - All strings in double quotes only
+        - No JavaScript code, no comments, no HTML attributes in values
+        - Output ONLY the JSON object, nothing else
+      model_overrides:                                  # schema line 303
+        temperature: 0.3
+      when:                                             # schema line 314
+        after_step_succeeds:                            # schema line 323
+          - save_to: "./docs/benchmarks/outputs/output/iterative-step1-skeleton.json"  # schema line 476
+          - log:                                        # schema line 275
+              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:                               # schema line 328
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              event_fields: [step_name, error_message]
+
+    # ── STEP 2: Expand context section ──────────────────────────
+    step_2_expand_context:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_1_skeleton]
+      prompt: |
+        You are REFINING a JSON Architecture Decision Record. You will receive a JSON string and expand ONE section, then output the complete JSON.
+
+        INPUT JSON:
+        {{step.step_1_skeleton.output}}
+
+        TASK: Keep the EXACT same JSON structure. ONLY modify the "context" section. Expand it to include:
+        - "problem": Write 2-3 detailed sentences about needing a simple, dependency-free task manager for personal productivity
+        - "constraints": Expand to 6+ items: No frameworks, Only HTML JS CSS, Must work offline, localStorage only, No build tools required, Single-page application, No server-side component, Accessible keyboard navigation
+        - "requirements": ADD this new array with 6+ functional requirements as descriptive strings
+        - "assumptions": ADD this new array with 4+ technical assumptions
+        - "stakeholders": ADD this new array with 3+ stakeholder descriptions
+
+        DO NOT modify "decision", "consequences", or "technical_spec" sections. Copy them unchanged.
+        DO NOT add any keys not listed above.
+
+        OUTPUT THE COMPLETE JSON with expanded context. No markdown. No backticks. No explanations.
+        First character: { Last character: }
+      model_overrides:
+        temperature: 0.2
+      when:
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/output/iterative-step2-context.json"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              event_fields: [step_name, error_message]
+
+    # ── STEP 3: Expand decision + technical_spec sections ───────
+    step_3_expand_decision:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_2_expand_context]
+      prompt: |
+        You are REFINING a JSON Architecture Decision Record. You will receive a JSON string and expand TWO sections, then output the complete JSON.
+
+        INPUT JSON:
+        {{step.step_2_expand_context.output}}
+
+        TASK: Keep the EXACT same JSON structure. ONLY modify "decision" and "technical_spec" sections.
+
+        Expand "decision" section:
+        - "approach": 2-3 detailed sentences about vanilla JS with localStorage approach, event-driven architecture
+        - "files": Expand to: ["index.html", "style.css", "app.js", "utils.js", "constants.js"]
+        - "rationale": ADD this string explaining why vanilla JS over frameworks for this use case
+        - "alternatives_considered": ADD this array with 3 objects, each having "name", "pros", "cons" keys
+
+        Expand "technical_spec" section:
+        - "data_model": Define as object mapping type names to field definitions. Todo item fields: id (number), text (string), done (boolean), created_at (string), priority (string), tags (array of strings)
+        - "functions": 10+ function names as strings: addTodo, deleteTodo, toggleTodo, editTodo, filterTodos, renderTodos, saveToStorage, loadFromStorage, generateId, clearCompleted
+        - "ui_elements": 10+ CSS selector strings: "input#todo-input", "button#add-btn", "ul#todo-list", "li.todo-item", "button.delete-btn", "button.toggle-btn", "div#filters", "span.todo-text", "input.edit-input", "button.clear-completed"
+        - "storage": { "key": "todos", "type": "array", "sync_strategy": "on_change", "max_items": 1000 }
+
+        DO NOT modify "context" or "consequences" sections.
+
+        OUTPUT THE COMPLETE JSON. No markdown. No backticks. No explanations.
+        First character: { Last character: }
+      model_overrides:
+        temperature: 0.2
+      when:
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/output/iterative-step3-decision.json"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              event_fields: [step_name, error_message]
+
+    # ── STEP 4: Expand consequences section ─────────────────────
+    step_4_expand_consequences:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_3_expand_decision]
+      prompt: |
+        You are REFINING a JSON Architecture Decision Record. You will receive a JSON string and expand ONE section, then output the complete JSON.
+
+        INPUT JSON:
+        {{step.step_3_expand_decision.output}}
+
+        TASK: Keep the EXACT same JSON structure. ONLY modify the "consequences" section. Expand it to include:
+        - "pros": 8+ items as plain strings. Examples: "No external dependencies", "Fast initial page load", "Simple deployment to any static host", "Full control over rendering", "Easy to debug in browser DevTools", "Small bundle size under 10KB", "Works offline without service worker", "No build step required"
+        - "cons": 8+ items as plain strings. Examples: "Manual DOM manipulation is verbose", "No type safety without TypeScript", "State synchronization complexity grows", "Limited code reuse across projects", "No hot module replacement in development", "Testing requires more manual setup", "Accessibility must be manually implemented", "No component isolation"
+        - "risks": ADD this array with 4+ objects, each having "risk" (string) and "mitigation" (string) keys
+        - "tradeoffs": ADD this array with 4+ objects, each having "choice" (string), "benefit" (string), "cost" (string) keys
+        - "future_considerations": ADD this array with 4+ strings about migration paths, scaling options, framework adoption triggers
+
+        DO NOT modify "context", "decision", or "technical_spec" sections.
+
+        OUTPUT THE COMPLETE JSON. No markdown. No backticks. No explanations.
+        First character: { Last character: }
+      model_overrides:
+        temperature: 0.2
+      when:
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/output/iterative-step4-consequences.json"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              event_fields: [step_name, error_message]
+
+    # ── STEP 5: Final validation and cleanup ────────────────────
+    step_5_validate_clean:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_4_expand_consequences]
+      prompt: |
+        You are the FINAL validator for a JSON Architecture Decision Record. You will receive a JSON string that may contain errors. Your job is to produce a CLEAN, VALID, PARSABLE version.
+
+        INPUT JSON:
+        {{step.step_4_expand_consequences.output}}
+
+        VALIDATION AND CLEANUP TASK:
+        1. Ensure valid JSON syntax — no trailing commas, proper nesting, all brackets matched
+        2. Remove ANY markdown artifacts: backticks, triple backticks, code fences, language identifiers
+        3. Ensure ALL strings use double quotes — no single quotes anywhere
+        4. Escape special characters properly in strings (backslash before inner quotes)
+        5. Remove any JavaScript code, function expressions, arrow functions, const/let/var, onclick handlers
+        6. Remove any comments: // or /* or # or <!--
+        7. Remove any HTML tags or attribute syntax from string values
+        8. Verify arrays have minimum items: constraints 6+, requirements 6+, functions 10+, ui_elements 10+, pros 8+, cons 8+
+        9. Fill any remaining empty string values with realistic content
+        10. Ensure the JSON has exactly these top-level keys: id, title, status, date, context, decision, consequences, technical_spec — no extra keys
+
+        OUTPUT ONLY the final cleaned JSON object. Nothing else before or after.
+        First character must be { and last character must be }.
+        No markdown. No backticks. No explanations. No comments.
+      model_overrides:
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/output/iterative-step5-validated.json"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              event_fields: [step_name, error_message]
+
+    # ── STEP 6: Save final output via tool ──────────────────────
+    step_6_save_final:
+      tool: file_write                                   # schema line 345 — tool step type inferred
+      input:                                             # schema line 346
+        file_path: "./docs/benchmarks/outputs/output/iterative-final.json"
+        content: "{{step.step_5_validate_clean.output}}"
+      depends_on: [step_5_validate_clean]
+      when:
+        after_step_succeeds:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              event_fields: [step_name, duration_ms, file_path]
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              event_fields: [step_name, error_message]
