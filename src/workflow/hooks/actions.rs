@@ -132,14 +132,22 @@ fn write_log_to_file(path: &str, content: &str) -> std::io::Result<()> {
 fn execute_append_to(
     action: &AppendToAction,
     context: &WorkflowHookContext,
-    _engine: &mut HookEngine,
+    engine: &mut HookEngine,
 ) -> HookResult {
     let output = extract_context_output(context);
 
     match action {
         AppendToAction::Variable(var_name) => {
-            // TODO: Store in workflow variables (requires engine ref to workflow)
-            info!("Append to variable: {} (not yet implemented)", var_name);
+            let key = var_name.strip_prefix('$').unwrap_or(var_name);
+            let existing = engine.get_bookmark(key)
+                .and_then(|v| v.as_str().map(String::from))
+                .unwrap_or_default();
+            let combined = if existing.is_empty() {
+                output.clone()
+            } else {
+                format!("{}\n{}", existing, output)
+            };
+            engine.store_bookmark(key.to_string(), serde_json::Value::String(combined));
         }
         AppendToAction::FilePath(path) => {
             if let Err(e) = append_to_file(path, &output) {
@@ -148,10 +156,17 @@ fn execute_append_to(
         }
         AppendToAction::Both(targets) => {
             for target in targets {
-                if target.starts_with('$') {
+                if let Some(var_name) = target.strip_prefix('$') {
                     // Variable reference
-                    let var_name = &target[1..];
-                    info!("Append to variable: {} (not yet implemented)", var_name);
+                    let existing = engine.get_bookmark(var_name)
+                        .and_then(|v| v.as_str().map(String::from))
+                        .unwrap_or_default();
+                    let combined = if existing.is_empty() {
+                        output.clone()
+                    } else {
+                        format!("{}\n{}", existing, output)
+                    };
+                    engine.store_bookmark(var_name.to_string(), serde_json::Value::String(combined));
                 } else {
                     // File path
                     if let Err(e) = append_to_file(target, &output) {
@@ -199,8 +214,8 @@ fn execute_save_to(
 
     match action {
         SaveToAction::Variable(var_name) => {
-            if var_name.starts_with('$') {
-                engine.store_bookmark(var_name[1..].to_string(), json_value);
+            if let Some(var_key) = var_name.strip_prefix('$') {
+                engine.store_bookmark(var_key.to_string(), json_value);
             } else {
                 if let Err(e) = save_to_file(var_name, &output) {
                     eprintln!("Failed to save to {}: {}", var_name, e);
@@ -214,8 +229,7 @@ fn execute_save_to(
         }
         SaveToAction::Both(targets) => {
             for target in targets {
-                if target.starts_with('$') {
-                    let var_name = &target[1..];
+                if let Some(var_name) = target.strip_prefix('$') {
                     engine.store_bookmark(var_name.to_string(), json_value.clone());
                 } else {
                     if let Err(e) = save_to_file(target, &output) {
@@ -314,9 +328,7 @@ fn execute_notify(
     };
 
     if let Some(ref tx) = engine.notify_tx {
-        // TODO: Handle async send properly
-        // For now, just log that we would send
-        info!("Would send notification: {:?}", notify_msg);
+        let _ = tx.try_send(notify_msg);
     } else {
         info!("No notification channel, logging: {:?}", notify_msg);
     }
@@ -382,6 +394,12 @@ fn execute_gwt(
     context: &WorkflowHookContext,
     engine: &mut HookEngine,
 ) -> HookResult {
+    // TODO: Wire before_gwt_evaluates and after_gwt_evaluates triggers
+    // before_gwt_evaluates: fire before evaluating clauses with BeforeGwtEvaluatesContext
+    // after_gwt_evaluates: fire after matching clause found with AfterGwtEvaluatesContext
+    // Architectural limitation: execute_gwt lacks access to step.when config and execute_hooks_for_trigger.
+    // Requires either: (1) Pass hook_config into execute_gwt, or (2) Move trigger firing to execute_action
+    // in runner where step.when is available, or (3) Change HookResult to return trigger events.
     let json = context.to_json_value();
 
     for clause in clauses {
@@ -493,7 +511,7 @@ mod tests {
     }
 
     #[test]
-    fn given_append_to_variable_when_execute_then_returns_continue() {
+    fn given_append_to_variable_when_execute_then_stores_in_bookmarks() {
         let action = AppendToAction::Variable("my_var".to_string());
         let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
             step_name: "test".to_string(),
@@ -508,6 +526,63 @@ mod tests {
         let result = execute_append_to(&action, &context, &mut engine);
 
         assert_eq!(result, HookResult::Continue);
+        let bookmark = engine.get_bookmark("my_var");
+        assert!(bookmark.is_some());
+        assert_eq!(bookmark.unwrap().as_str(), Some("data"));
+    }
+
+    #[test]
+    fn given_append_to_variable_with_dollar_prefix_when_execute_then_strips_dollar() {
+        let action = AppendToAction::Variable("$my_var".to_string());
+        let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+            step_name: "test".to_string(),
+            output: "data".to_string(),
+            duration_ms: 100,
+            quality_score: None,
+            token_count: 10,
+            model_name: "model".to_string(),
+        });
+        let mut engine = HookEngine::new();
+
+        let result = execute_append_to(&action, &context, &mut engine);
+
+        assert_eq!(result, HookResult::Continue);
+        let bookmark = engine.get_bookmark("my_var");
+        assert!(bookmark.is_some());
+        assert_eq!(bookmark.unwrap().as_str(), Some("data"));
+    }
+
+    #[test]
+    fn given_append_to_variable_twice_when_execute_then_concatenates_values() {
+        let action = AppendToAction::Variable("accum".to_string());
+        let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+            step_name: "test".to_string(),
+            output: "line1".to_string(),
+            duration_ms: 100,
+            quality_score: None,
+            token_count: 10,
+            model_name: "model".to_string(),
+        });
+        let mut engine = HookEngine::new();
+
+        // First append
+        execute_append_to(&action, &context, &mut engine);
+        let bookmark = engine.get_bookmark("accum");
+        assert_eq!(bookmark.unwrap().as_str(), Some("line1"));
+
+        // Second append with different output
+        let context2 = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+            step_name: "test".to_string(),
+            output: "line2".to_string(),
+            duration_ms: 100,
+            quality_score: None,
+            token_count: 10,
+            model_name: "model".to_string(),
+        });
+        execute_append_to(&action, &context2, &mut engine);
+
+        let bookmark = engine.get_bookmark("accum");
+        assert_eq!(bookmark.unwrap().as_str(), Some("line1\nline2"));
     }
 
     #[test]
@@ -668,6 +743,37 @@ mod tests {
     }
 
     #[test]
+    fn given_notify_with_channel_when_execute_then_message_sent() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<NotifyMessage>(1);
+        let engine = HookEngine::with_notify_channel(tx);
+        let action = NotifyAction {
+            message: Some("Test notification".to_string()),
+        };
+        let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+            step_name: "test_step".to_string(),
+            output: "test_output".to_string(),
+            duration_ms: 100,
+            quality_score: None,
+            token_count: 10,
+            model_name: "model".to_string(),
+        });
+
+        // Use tokio runtime for async test
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let result = execute_notify(&action, &context, &mut { engine });
+
+            assert_eq!(result, HookResult::Continue);
+
+            // Verify message received
+            let msg = rx.try_recv().unwrap();
+            assert_eq!(msg.from_step, "test_step");
+            assert_eq!(msg.message, "Test notification");
+            assert_eq!(msg.output, Some("test_output".to_string()));
+        });
+    }
+
+    #[test]
     fn given_fail_with_message_when_execute_then_returns_fail_with_reason() {
         let action = FailAction {
             message: Some("Validation failed".to_string()),
@@ -815,5 +921,345 @@ mod tests {
             }
             _ => panic!("Expected Fail result"),
         }
+    }
+
+    #[test]
+    fn given_save_to_both_when_execute_then_file_and_variable_stored() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("output.json").to_string_lossy().to_string();
+        let action = SaveToAction::Both(vec![
+            "$myvar".to_string(),
+            file_path.clone(),
+        ]);
+        let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+            step_name: "test_step".to_string(),
+            output: "{\"saved\":true}".to_string(),
+            duration_ms: 100,
+            quality_score: None,
+            token_count: 10,
+            model_name: "model".to_string(),
+        });
+        let mut engine = HookEngine::new();
+
+        let result = execute_save_to(&action, &context, &mut engine);
+
+        assert_eq!(result, HookResult::Continue);
+        let bookmark = engine.get_bookmark("myvar");
+        assert!(bookmark.is_some());
+        assert_eq!(bookmark.unwrap().get("saved").and_then(|v| v.as_bool()), Some(true));
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert!(content.contains("\"saved\""));
+    }
+
+    #[test]
+    fn given_append_to_both_when_execute_then_file_and_variable_appended() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("output.txt").to_string_lossy().to_string();
+        let action = AppendToAction::Both(vec![
+            "$accum".to_string(),
+            file_path.clone(),
+        ]);
+        let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+            step_name: "test".to_string(),
+            output: "line 2".to_string(),
+            duration_ms: 100,
+            quality_score: None,
+            token_count: 10,
+            model_name: "model".to_string(),
+        });
+        let mut engine = HookEngine::new();
+
+        let result = execute_append_to(&action, &context, &mut engine);
+
+        assert_eq!(result, HookResult::Continue);
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert!(content.contains("line 2"));
+        let bookmark = engine.get_bookmark("accum");
+        assert!(bookmark.is_some());
+        assert_eq!(bookmark.unwrap().as_str(), Some("line 2"));
+    }
+
+    #[test]
+    fn given_bookmark_path_string_when_execute_then_file_and_bookmark_stored() {
+        let temp_dir = TempDir::new().unwrap();
+        let bookmark_path = temp_dir.path().join("checkpoint.json").to_string_lossy().to_string();
+        let action = BookmarkAction::Path(bookmark_path.clone());
+        let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+            step_name: "test_step".to_string(),
+            output: "{\"bookmark\":true}".to_string(),
+            duration_ms: 100,
+            quality_score: None,
+            token_count: 10,
+            model_name: "model".to_string(),
+        });
+        let mut engine = HookEngine::new();
+
+        let result = execute_bookmark(&action, &context, &mut engine);
+
+        assert_eq!(result, HookResult::Continue);
+        let bookmark = engine.get_bookmark("test_step");
+        assert!(bookmark.is_some());
+        assert_eq!(bookmark.unwrap().get("bookmark").and_then(|v| v.as_bool()), Some(true));
+        assert!(Path::new(&bookmark_path).exists());
+    }
+
+    #[test]
+    fn given_bookmark_detailed_without_path_when_execute_then_bookmark_stored_no_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let action = BookmarkAction::Detailed(BookmarkActionDetail {
+            path: None,
+        });
+        let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+            step_name: "mem_only".to_string(),
+            output: "{\"saved\":true}".to_string(),
+            duration_ms: 100,
+            quality_score: None,
+            token_count: 10,
+            model_name: "model".to_string(),
+        });
+        let mut engine = HookEngine::new();
+
+        let result = execute_bookmark(&action, &context, &mut engine);
+
+        assert_eq!(result, HookResult::Continue);
+        let bookmark = engine.get_bookmark("mem_only");
+        assert!(bookmark.is_some());
+        assert_eq!(bookmark.unwrap().get("saved").and_then(|v| v.as_bool()), Some(true));
+    }
+
+    #[test]
+    fn given_skip_step_false_when_execute_then_returns_continue() {
+        let action = HookAction::SkipStep(false);
+        let context = WorkflowHookContext::BeforeStepStarts(BeforeStepStartsContext {
+            step_name: "test".to_string(),
+            step_type: StepType::Generative,
+            model_name: "model".to_string(),
+            prompt_preview: "prompt".to_string(),
+            workflow_variables: HashMap::new(),
+        });
+        let mut engine = HookEngine::new();
+
+        let result = execute_action(&action, &context, &mut engine);
+
+        assert_eq!(result, HookResult::Continue);
+    }
+
+    #[test]
+    fn given_skip_remaining_false_when_execute_then_returns_continue() {
+        let action = HookAction::SkipRemaining(false);
+        let context = WorkflowHookContext::BeforeStepStarts(BeforeStepStartsContext {
+            step_name: "test".to_string(),
+            step_type: StepType::Generative,
+            model_name: "model".to_string(),
+            prompt_preview: "prompt".to_string(),
+            workflow_variables: HashMap::new(),
+        });
+        let mut engine = HookEngine::new();
+
+        let result = execute_action(&action, &context, &mut engine);
+
+        assert_eq!(result, HookResult::Continue);
+    }
+
+    #[test]
+    fn given_fail_no_message_when_execute_then_returns_fail_with_default_reason() {
+        let action = FailAction {
+            message: None,
+        };
+        let context = WorkflowHookContext::BeforeStepStarts(BeforeStepStartsContext {
+            step_name: "test".to_string(),
+            step_type: StepType::Generative,
+            model_name: "model".to_string(),
+            prompt_preview: "prompt".to_string(),
+            workflow_variables: HashMap::new(),
+        });
+        let mut engine = HookEngine::new();
+
+        let result = execute_fail(&action, &context, &mut engine);
+
+        match result {
+            HookResult::Fail { reason } => {
+                assert_eq!(reason, "Hook execution failed");
+            }
+            _ => panic!("Expected Fail result"),
+        }
+    }
+
+    #[test]
+    fn given_log_with_warning_level_when_execute_then_log_contains_warn() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("warn.log").to_string_lossy().to_string();
+        let action = LogAction {
+            to_file_path: Some(log_path.clone()),
+            event_fields: None,
+            level: Some(LogLevel::Warning),
+        };
+        let context = WorkflowHookContext::BeforeStepStarts(BeforeStepStartsContext {
+            step_name: "test_step".to_string(),
+            step_type: StepType::Generative,
+            model_name: "model".to_string(),
+            prompt_preview: "prompt".to_string(),
+            workflow_variables: HashMap::new(),
+        });
+        let mut engine = HookEngine::new();
+
+        execute_log(&action, &context, &mut engine);
+
+        let content = fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("WARN"));
+    }
+
+    #[test]
+    fn given_log_with_error_level_when_execute_then_log_contains_error() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("error.log").to_string_lossy().to_string();
+        let action = LogAction {
+            to_file_path: Some(log_path.clone()),
+            event_fields: None,
+            level: Some(LogLevel::Error),
+        };
+        let context = WorkflowHookContext::BeforeStepStarts(BeforeStepStartsContext {
+            step_name: "test_step".to_string(),
+            step_type: StepType::Generative,
+            model_name: "model".to_string(),
+            prompt_preview: "prompt".to_string(),
+            workflow_variables: HashMap::new(),
+        });
+        let mut engine = HookEngine::new();
+
+        execute_log(&action, &context, &mut engine);
+
+        let content = fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("ERROR"));
+    }
+
+    #[test]
+    fn given_log_with_critical_level_when_execute_then_log_contains_critical() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("critical.log").to_string_lossy().to_string();
+        let action = LogAction {
+            to_file_path: Some(log_path.clone()),
+            event_fields: None,
+            level: Some(LogLevel::Critical),
+        };
+        let context = WorkflowHookContext::BeforeStepStarts(BeforeStepStartsContext {
+            step_name: "test_step".to_string(),
+            step_type: StepType::Generative,
+            model_name: "model".to_string(),
+            prompt_preview: "prompt".to_string(),
+            workflow_variables: HashMap::new(),
+        });
+        let mut engine = HookEngine::new();
+
+        execute_log(&action, &context, &mut engine);
+
+        let content = fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("CRITICAL"));
+    }
+
+    #[test]
+    fn given_log_with_debug_level_when_execute_then_log_contains_debug() {
+        let temp_dir = TempDir::new().unwrap();
+        let log_path = temp_dir.path().join("debug.log").to_string_lossy().to_string();
+        let action = LogAction {
+            to_file_path: Some(log_path.clone()),
+            event_fields: None,
+            level: Some(LogLevel::Debug),
+        };
+        let context = WorkflowHookContext::BeforeStepStarts(BeforeStepStartsContext {
+            step_name: "test_step".to_string(),
+            step_type: StepType::Generative,
+            model_name: "model".to_string(),
+            prompt_preview: "prompt".to_string(),
+            workflow_variables: HashMap::new(),
+        });
+        let mut engine = HookEngine::new();
+
+        execute_log(&action, &context, &mut engine);
+
+        let content = fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("DEBUG"));
+    }
+
+    #[test]
+    fn given_multi_clause_gwt_when_execute_then_routes_to_second_matching_clause() {
+        let clauses = vec![
+            GwtClause {
+                given: Some("step_name == \"other\"".to_string()),
+                r#when: None,
+                r#then: RouteToAction::Single("first_target".to_string()),
+            },
+            GwtClause {
+                given: Some("step_name == \"test\"".to_string()),
+                r#when: None,
+                r#then: RouteToAction::Single("second_target".to_string()),
+            },
+            GwtClause {
+                given: Some("step_name == \"another\"".to_string()),
+                r#when: None,
+                r#then: RouteToAction::Single("third_target".to_string()),
+            },
+        ];
+        let context = WorkflowHookContext::BeforeStepStarts(BeforeStepStartsContext {
+            step_name: "test".to_string(),
+            step_type: StepType::Generative,
+            model_name: "model".to_string(),
+            prompt_preview: "prompt".to_string(),
+            workflow_variables: HashMap::new(),
+        });
+        let mut engine = HookEngine::new();
+
+        let result = execute_gwt(&clauses, &context, &mut engine);
+
+        match result {
+            HookResult::RouteTo { targets } => {
+                assert_eq!(targets, vec!["second_target"]);
+            }
+            _ => panic!("Expected RouteTo result"),
+        }
+    }
+
+    #[test]
+    fn given_iterate_values_when_execute_then_returns_continue() {
+        let mut map = HashMap::new();
+        map.insert("key1".to_string(), vec!["value1".to_string(), "value2".to_string()]);
+        map.insert("key2".to_string(), vec!["value3".to_string()]);
+        let action = HookAction::IterateValues(map);
+        let context = WorkflowHookContext::BeforeStepStarts(BeforeStepStartsContext {
+            step_name: "test".to_string(),
+            step_type: StepType::Generative,
+            model_name: "model".to_string(),
+            prompt_preview: "prompt".to_string(),
+            workflow_variables: HashMap::new(),
+        });
+        let mut engine = HookEngine::new();
+
+        let result = execute_action(&action, &context, &mut engine);
+
+        assert_eq!(result, HookResult::Continue);
+    }
+
+    #[test]
+    fn given_save_to_variable_without_dollar_when_execute_then_treated_as_file_path() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("plain_path.txt").to_string_lossy().to_string();
+        let action = SaveToAction::Variable("plain_path.txt".to_string());
+        let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+            step_name: "test".to_string(),
+            output: "file content".to_string(),
+            duration_ms: 100,
+            quality_score: None,
+            token_count: 10,
+            model_name: "model".to_string(),
+        });
+        let mut engine = HookEngine::new();
+
+        let result = execute_save_to(&action, &context, &mut engine);
+
+        assert_eq!(result, HookResult::Continue);
+        assert!(Path::new("plain_path.txt").exists());
+        let content = fs::read_to_string("plain_path.txt").unwrap();
+        assert!(content.contains("file content"));
+        std::fs::remove_file("plain_path.txt").unwrap();
     }
 }
