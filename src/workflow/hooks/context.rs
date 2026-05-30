@@ -101,6 +101,7 @@ impl AfterStepSucceedsContext {
             "quality_score": self.quality_score,
             "token_count": self.token_count,
             "model_name": self.model_name,
+            "json_parsable": serde_json::from_str::<serde_json::Value>(&self.output).is_ok(),
         })
     }
 
@@ -112,6 +113,7 @@ impl AfterStepSucceedsContext {
             "quality_score" => self.quality_score.map(|s| s.to_string()),
             "token_count" => Some(self.token_count.to_string()),
             "model_name" => Some(self.model_name.clone()),
+            "json_parsable" => Some(serde_json::from_str::<serde_json::Value>(&self.output).is_ok().to_string()),
             _ => None,
         }
     }
@@ -596,6 +598,25 @@ mod tests {
 
         // Then: quality_score is null
         assert!(json["quality_score"].is_null());
+    }
+
+    #[test]
+    fn after_step_succeeds_json_parsable_field() {
+        let ctx_valid = AfterStepSucceedsContext {
+            step_name: "s".into(), output: r#"{"key":"value"}"#.into(),
+            duration_ms: 100, quality_score: None, token_count: 10, model_name: "m".into(),
+        };
+        assert_eq!(ctx_valid.get_field("json_parsable").unwrap(), "true");
+        let json = ctx_valid.to_json_value();
+        assert_eq!(json["json_parsable"], true);
+
+        let ctx_invalid = AfterStepSucceedsContext {
+            step_name: "s".into(), output: "not json at all".into(),
+            duration_ms: 100, quality_score: None, token_count: 10, model_name: "m".into(),
+        };
+        assert_eq!(ctx_invalid.get_field("json_parsable").unwrap(), "false");
+        let json = ctx_invalid.to_json_value();
+        assert_eq!(json["json_parsable"], false);
     }
 
     // --------------------------------------------------------------------------
