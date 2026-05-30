@@ -1,0 +1,156 @@
+# Test fixture: All 13 hook trigger types with all 10 action types
+# Schema reference: docs/schema/unified-workflow-schema.yml v2.0.0
+#
+# GIVEN a workflow with steps that define hooks at every trigger point
+# WHEN the execution engine runs this workflow
+# THEN each hook fires at the correct time with the correct context
+
+workflow_name: "Hook Integration Test — All Triggers"
+schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: "localhost"
+      port: 8080
+    hosting:
+      gpu_layers: 0  # CPU-only for testing
+
+models:
+  "test-model":
+    name: "Test Model"
+    host:
+      type: llama_cpp_with_vulkan
+      connection_settings: {}
+    execution:
+      max_tokens: 100
+      max_turns: 1
+
+steps:
+  read_config:
+    generative_entity: agent
+    prompt: "Read configuration"
+    when:
+      before_step_starts:
+        log:
+          to_file_path: "./workspace/logs/before-step.log"
+          event_fields: [step_name, timestamp]
+          level: info
+      after_step_succeeds:
+        save_to:
+          - config_result
+          - "./workspace/output/config.yaml"
+        bookmark:
+          path: "./workspace/checkpoints/read_config.cp"
+        log:
+          to_file_path: "./workspace/logs/after-success.log"
+          event_fields: [step_name, duration_ms, output_length]
+      after_step_fails:
+        - log:
+            to_file_path: "./workspace/logs/after-fail.log"
+            event_fields: [step_name, error_message]
+            level: error
+        - gwt:
+            - given: "error.is_retryable == true"
+              then: { route_to: retry_step }
+            - given: "error.is_retryable == false"
+              then: { route_to: abort_workflow }
+      after_all_retries_exhausted:
+        log:
+          to_file_path: "./workspace/logs/retries-exhausted.log"
+          event_fields: [step_name, total_attempts]
+          level: critical
+      on_requires_failed:
+        log:
+          to_file_path: "./workspace/logs/requires-failed.log"
+          event_fields: [step_name, failed_requirement]
+          level: error
+
+  analyze_code:
+    generative_entity: agent
+    prompt: "Analyze code for quality issues"
+    depends_on: [read_config]
+    when:
+      before_step_starts:
+        log:
+          to_file_path: "./workspace/logs/before-analyze.log"
+          event_fields: [step_name, timestamp]
+      during_step_streaming:
+        log:
+          to_file_path: "./workspace/logs/streaming.log"
+          event_fields: [step_name, chunk_text, tokens_so_far]
+      after_step_succeeds:
+        append_to:
+          - "./workspace/output/all_analyses.yaml"
+          - analysis_collection
+      after_step_fails:
+        - fail: "Analysis failed critically"
+
+  gwt_decision:
+    generative_entity: control_flow
+    when:
+      gwt:
+        - given: "quality_score >= 0.9"
+          when: "all validation checks passed"
+          then: { route_to: [generate_report, notify_complete] }
+        - given: "quality_score >= 0.7"
+          then: { route_to: fix_issues_loop }
+        - given: "true"
+          then: { route_to: abort_workflow }
+      before_gwt_evaluates:
+        log:
+          to_file_path: "./workspace/logs/gwt-before.log"
+          event_fields: [step_name, input_quality_score]
+      after_gwt_evaluates:
+        log:
+          to_file_path: "./workspace/logs/gwt-after.log"
+          event_fields: [decision, quality_score, route_target]
+
+  fix_issues_loop:
+    generative_entity: agent
+    prompt: "Fix identified issues"
+    when:
+      after_step_succeeds:
+        bookmark:
+          path: "./workspace/checkpoints/fix_progress.cp"
+      after_loop_iteration_fails:
+        log:
+          to_file_path: "./workspace/logs/loop-fail.log"
+          event_fields: [iteration, error_message]
+
+  generate_report:
+    generative_entity: agent
+    prompt: "Generate final report"
+    depends_on: [gwt_decision]
+    when:
+      after_step_succeeds:
+        save_to:
+          - final_report
+          - "./workspace/output/final.yaml"
+        notify:
+          message: "Report generation complete"
+
+  notify_complete:
+    generative_entity: agent
+    prompt: "Send completion notification"
+    depends_on: [gwt_decision]
+    when:
+      after_step_succeeds:
+        notify:
+          message: "Workflow completed successfully"
+
+  abort_workflow:
+    generative_entity: agent
+    prompt: "Abort workflow"
+    when:
+      after_step_starts:
+        - fail: "Quality threshold not met. Aborting workflow."
+        - skip_remaining: true
+
+  retry_step:
+    generative_entity: agent
+    prompt: "Retry failed operation"
+    retry:
+      max_attempts: 3
+      backoff: exponential
+      initial_delay: "1s"

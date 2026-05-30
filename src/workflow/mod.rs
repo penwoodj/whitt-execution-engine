@@ -16,12 +16,12 @@
 //! ```
 
 mod execution;
+pub mod hooks;
 mod permissions;
 mod schema;
 mod step;
 mod tests;
 
-// Re-export key types
 pub use schema::{
     CacheSize, CheckpointLevel, ComparisonOperator, ConflictResolution,
     DependencyFailureAction, DependencyStrategy, EventPropagation, FormatValidationFormat,
@@ -34,6 +34,8 @@ pub use schema::{
 pub use step::{
     AgenticWorkflow, ExecutionMode, HookAction, LoopConfig, RequireCondition, UserInputConfig,
     UserInputPrompt, WorkflowInput, WorkflowStep,
+    LogAction, GwtClause, AppendToAction, SaveToAction, RouteToAction,
+    BookmarkAction, NotifyAction, FailAction, ModelOverrides,
 };
 
 pub use execution::{

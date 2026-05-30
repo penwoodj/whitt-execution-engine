@@ -1,0 +1,81 @@
+# Test fixture: Bookmark and Notify actions
+# GIVEN a workflow using bookmark checkpoints and notify between steps
+# WHEN steps complete with these actions
+# THEN checkpoints are written and notifications dispatched
+
+workflow_name: "Bookmark and Notify Test"
+schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: "localhost"
+      port: 8080
+    hosting:
+      gpu_layers: 0
+
+models:
+  "test-model":
+    name: "Test Model"
+    host:
+      type: llama_cpp_with_vulkan
+    execution:
+      max_tokens: 100
+
+steps:
+  create_checkpoint:
+    generative_entity: agent
+    prompt: "Create initial checkpoint"
+    when:
+      after_step_succeeds:
+        save_to:
+          - checkpoint_data
+          - "./workspace/output/checkpoint_1.yaml"
+        bookmark:
+          path: "./workspace/checkpoints/step1.cp"
+
+  resume_from_checkpoint:
+    generative_entity: agent
+    prompt: "Resume from checkpoint"
+    depends_on: [create_checkpoint]
+    when:
+      before_step_starts:
+        log:
+          to_file_path: "./workspace/logs/resume.log"
+          event_fields: [step_name, resumed_from]
+      after_step_succeeds:
+        bookmark:
+          path: "./workspace/checkpoints/step2.cp"
+
+  dispatch_sub_workflow:
+    generative_entity: agent
+    prompt: "Dispatch sub-workflow"
+    depends_on: [resume_from_checkpoint]
+    when:
+      after_step_succeeds:
+        notify:
+          message: "Sub-workflow dispatched, awaiting completion"
+
+  await_sub_workflow:
+    generative_entity: agent
+    prompt: "Wait for sub-workflow completion"
+    depends_on: [dispatch_sub_workflow]
+    when:
+      before_step_starts:
+        log:
+          to_file_path: "./workspace/logs/await.log"
+          event_fields: [step_name, waiting_for]
+
+  final_with_notify:
+    generative_entity: agent
+    prompt: "Final step with upstream notification"
+    depends_on: [await_sub_workflow]
+    when:
+      after_step_succeeds:
+        save_to:
+          - final_result
+          - "./workspace/output/final.yaml"
+        bookmark:
+          path: "./workspace/checkpoints/final.cp"
+        notify:
+          message: "Workflow complete, parent can resume"
