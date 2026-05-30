@@ -353,7 +353,7 @@ async fn main() -> Result<()> {
                     min_tmp_space_mb: min_tmp_space,
                 };
 
-                let runner = BenchmarkRunner::new(config);
+                let mut runner = BenchmarkRunner::new(config);
                 let result = runner.run().await.context("Benchmark run failed")?;
 
                 match output.as_str() {

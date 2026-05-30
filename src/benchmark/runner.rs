@@ -2,6 +2,10 @@ use crate::client::http_client::LlamaHttpClient;
 use crate::client::types::{ChatCompletionRequest, ChatMessage};
 use crate::client::disk_monitor;
 use crate::agent::loop_hooks::HookContext;
+use crate::workflow::hooks::{HookEngine, HookResult};
+use crate::workflow::hooks::actions::execute_action;
+use crate::workflow::hooks::context::{WorkflowHookContext, BeforeStepStartsContext, AfterStepSucceedsContext, AfterStepFailsContext, StepType};
+use crate::workflow::HookAction;
 use super::{BenchmarkSuiteResult, ModelBenchmarkResult, InferenceResult};
 use anyhow::{Context, Result};
 use regex::Regex;
@@ -52,6 +56,7 @@ fn default_min_tmp_space_mb() -> u64 {
 
 pub struct BenchmarkRunner {
     config: BenchmarkConfig,
+    hook_engine: HookEngine,
 }
 
 struct BenchmarkWorkflowConfig {
@@ -79,7 +84,10 @@ struct WorkflowStep {
 
 impl BenchmarkRunner {
     pub fn new(config: BenchmarkConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            hook_engine: HookEngine::new(),
+        }
     }
 
     /// Pre-flight checks: verify system health before starting benchmark.
@@ -797,10 +805,53 @@ impl BenchmarkRunner {
         Ok(())
     }
 
+    /// Execute hooks for a specific trigger timing.
+    ///
+    /// Takes the hook config JSON, extracts actions for the given trigger timing,
+    /// deserializes each action as `HookAction`, calls `execute_action()` for each,
+    /// and merges the results using `HookResult::merge()`.
+    fn execute_hooks_for_trigger(
+        &mut self,
+        hook_config: &Option<serde_json::Value>,
+        trigger_name: &str,
+        context: &WorkflowHookContext,
+    ) -> Result<HookResult> {
+        let Some(hook_value) = hook_config else {
+            return Ok(HookResult::Continue);
+        };
+
+        let Some(trigger_actions) = hook_value.get(trigger_name) else {
+            return Ok(HookResult::Continue);
+        };
+
+        let actions_array = if trigger_actions.is_array() {
+            trigger_actions.as_array().unwrap()
+        } else {
+            return Ok(HookResult::Continue);
+        };
+
+        let mut merged_result = HookResult::Continue;
+
+        for action_value in actions_array {
+            let action: HookAction = serde_json::from_value(action_value.clone())
+                .with_context(|| format!("Failed to deserialize hook action: {}", action_value))?;
+
+            let result = execute_action(&action, context, &mut self.hook_engine);
+            merged_result = HookResult::merge(merged_result, result);
+
+            if merged_result.is_terminal() {
+                break;
+            }
+        }
+
+        Ok(merged_result)
+    }
+
     /// Execute hook actions: log, save_to, append_to, fail.
     ///
     /// Supports template interpolation: {{current_model}}, {{step.output}}, {{iteration}}
-    fn execute_hook(&self, hook: &Option<serde_json::Value>, step_name: &str, timing: &str, context: &HookContext, variables: Option<&serde_json::Map<String, serde_json::Value>>) -> Result<()> {
+    #[deprecated(note = "Use execute_hooks_for_trigger instead")]
+    fn execute_hook_legacy(&self, hook: &Option<serde_json::Value>, step_name: &str, timing: &str, context: &HookContext, variables: Option<&serde_json::Map<String, serde_json::Value>>) -> Result<()> {
         if let Some(h) = hook {
             let actions = match h.get(timing) {
                 Some(arr) => arr.as_array().cloned().unwrap_or_default(),
@@ -910,6 +961,22 @@ impl BenchmarkRunner {
         }
 
         result = result.replace("{{iteration}}", &iteration.to_string());
+
+        result
+    }
+
+    /// Resolve step output references: {{step.STEP_ID.output}}
+    ///
+    /// Replaces patterns like {{step.step_1.output}} with the actual output text
+    /// from previously executed steps. If a step_id is not found in the map,
+    /// the template is left unchanged.
+    fn resolve_step_output_templates(template: &str, step_outputs: &std::collections::HashMap<String, String>) -> String {
+        let mut result = template.to_string();
+
+        for (step_id, output) in step_outputs {
+            let placeholder = format!("{{{{step.{}.output}}}}", step_id);
+            result = result.replace(&placeholder, output);
+        }
 
         result
     }
@@ -1156,7 +1223,7 @@ impl BenchmarkRunner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn execute_workflow_step(&self, step: &WorkflowStep, client: &LlamaHttpClient, model: &(String, String), max_tokens: usize, temperature: f64, top_p: f64, variables: Option<&serde_json::Map<String, serde_json::Value>>) -> Result<ModelBenchmarkResult> {
+    async fn execute_workflow_step(&mut self, step: &WorkflowStep, client: &LlamaHttpClient, model: &(String, String), max_tokens: usize, temperature: f64, top_p: f64, variables: Option<&serde_json::Map<String, serde_json::Value>>) -> Result<ModelBenchmarkResult> {
         let (model_id, model_path) = model;
         let default_prompt = String::new();
         let prompt = step.prompt.as_ref().unwrap_or(&default_prompt);
@@ -1169,6 +1236,53 @@ impl BenchmarkRunner {
             .unwrap_or(temperature);
 
         info!("[benchmark] executing step {} with model {}", step.step_id, model_id);
+
+        // Build workflow variables map for hooks
+        let workflow_variables = if let Some(vars) = variables {
+            vars.iter()
+                .map(|(k, v)| (k.strip_prefix("step.").unwrap_or(k).to_string(), v.clone()))
+                .collect()
+        } else {
+            std::collections::HashMap::new()
+        };
+
+        let before_context = WorkflowHookContext::BeforeStepStarts(BeforeStepStartsContext {
+            step_name: step.step_name.clone(),
+            step_type: StepType::Generative,
+            model_name: model_id.to_string(),
+            prompt_preview: if prompt.len() > 100 { format!("{}...", &prompt[..100]) } else { prompt.clone() },
+            workflow_variables,
+        });
+
+        match self.execute_hooks_for_trigger(&step.when, "before_step_starts", &before_context) {
+            Ok(HookResult::SkipStep) => {
+                info!("[benchmark] step {} skipped by before_step_starts hook", step.step_id);
+                return Ok(ModelBenchmarkResult {
+                    model_id: model_id.to_string(),
+                    model_path: model_path.clone(),
+                    file_size_bytes: 0,
+                    load_duration: Duration::ZERO,
+                    inference_results: vec![],
+                    unload_duration: Duration::ZERO,
+                    total_duration: Duration::ZERO,
+                    tokens_per_second: 0.0,
+                    avg_latency_ms: 0.0,
+                    p50_latency_ms: 0.0,
+                    p95_latency_ms: 0.0,
+                    p99_latency_ms: 0.0,
+                    error: Some("Skipped by hook".to_string()),
+                    gpu_mode: "gpu".to_string(),
+                    speedup_factor: None,
+                });
+            }
+            Ok(HookResult::Fail { reason }) => {
+                return Err(anyhow::anyhow!("Hook failed before step: {}", reason));
+            }
+            Ok(_) => {}
+            Err(e) => {
+                warn!("[benchmark] before_step_starts hook error: {}, continuing", e);
+            }
+        }
 
         let system_prompt = if let Some(vars) = variables {
             let model_name = vars.get("step.model_name")
@@ -1188,26 +1302,56 @@ impl BenchmarkRunner {
 
         let output_text = model_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
 
-        let context = HookContext {
-            step_name: step.step_name.clone(),
-            iteration: 1,
-            output: Some(output_text),
-            error_message: model_result.error.clone(),
-            loop_type: "count".to_string(),
-        };
+        if let Some(ref error) = model_result.error {
+            let after_context = WorkflowHookContext::AfterStepFails(AfterStepFailsContext {
+                step_name: step.step_name.clone(),
+                error_type: "InferenceError".to_string(),
+                error_message: error.clone(),
+                error: crate::workflow::hooks::context::ErrorDetails {
+                    is_retryable: false,
+                    count: 1,
+                },
+                attempt_number: 1,
+                model_name: model_id.to_string(),
+            });
 
-        self.execute_hook(&step.when, &step.step_id, "before_step_starts", &context, variables)?;
-
-        if model_result.error.is_some() {
-            self.execute_hook(&step.when, &step.step_id, "after_step_fails", &context, variables)?;
+            match self.execute_hooks_for_trigger(&step.when, "after_step_fails", &after_context) {
+                Ok(HookResult::Fail { reason }) => {
+                    warn!("[benchmark] after_step_fails hook failed: {}", reason);
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    warn!("[benchmark] after_step_fails hook error: {}", e);
+                }
+            }
         } else {
-            self.execute_hook(&step.when, &step.step_id, "after_step_succeeds", &context, variables)?;
+            let total_tokens: usize = model_result.inference_results.iter()
+                .map(|inf| inf.total_tokens)
+                .sum();
+            let after_context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+                step_name: step.step_name.clone(),
+                output: output_text,
+                duration_ms: model_result.total_duration.as_millis() as u64,
+                quality_score: None,
+                token_count: total_tokens as u32,
+                model_name: model_id.to_string(),
+            });
+
+            match self.execute_hooks_for_trigger(&step.when, "after_step_succeeds", &after_context) {
+                Ok(HookResult::Fail { reason }) => {
+                    warn!("[benchmark] after_step_succeeds hook failed: {}", reason);
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    warn!("[benchmark] after_step_succeeds hook error: {}", e);
+                }
+            }
         }
 
         Ok(model_result)
     }
 
-    pub async fn run(&self) -> Result<BenchmarkSuiteResult> {
+    pub async fn run(&mut self) -> Result<BenchmarkSuiteResult> {
         self.preflight_check().await.context("Preflight checks failed")?;
 
         if self.config.preflight_only {
@@ -1316,6 +1460,7 @@ impl BenchmarkRunner {
         info!("[benchmark] GPU/CPU comparison mode: {}", compare_gpu_cpu);
 
         let mut results = Vec::new();
+        let mut step_outputs: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
         let suite_metadata = format!(
             "run_timestamp: {}\nserver_url: {}\ntotal_models: {}\ncompare_gpu_cpu: {}",
@@ -1341,7 +1486,10 @@ impl BenchmarkRunner {
                             .map(|ge| Self::resolve_templates(ge, vars, iteration));
 
                         let resolved_prompt = step.prompt.as_ref()
-                            .map(|p| Self::resolve_templates(p, vars, iteration));
+                            .map(|p| {
+                                let after_resolve = Self::resolve_templates(p, vars, iteration);
+                                Self::resolve_step_output_templates(&after_resolve, &step_outputs)
+                            });
 
                         if let Some(ref ge) = resolved_ge {
                             let model_key = ge.strip_prefix("${models.")
@@ -1364,7 +1512,7 @@ impl BenchmarkRunner {
                                     step_id: step.step_id.clone(),
                                     requires: step.requires.clone(),
                                     when: step.when.clone(),
-                                    prompt: resolved_prompt,
+                                    prompt: resolved_prompt.clone(),
                                     generative_entity: resolved_ge,
                                     model_overrides: step.model_overrides.clone(),
                                     r#loop: step.r#loop.clone(),
@@ -1372,6 +1520,11 @@ impl BenchmarkRunner {
 
                                 let result = self.execute_workflow_step(&resolved_step, &client, &model, max_tokens, temperature, top_p, Some(vars)).await?;
                                 results.push(result);
+
+                                if let Some(ref last_result) = results.last() {
+                                    let output_text = last_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
+                                    step_outputs.insert(step.step_id.clone(), output_text);
+                                }
                             } else {
                                 warn!("[benchmark] iteration {}: could not resolve model for step {}: {}",
                                     iteration, step.step_id, model_name);
@@ -1393,15 +1546,54 @@ impl BenchmarkRunner {
 
                         if let Some(model) = model_file {
                             info!("[benchmark] executing step {} with model {}", step.step_id, model.0);
-                            let result = self.execute_workflow_step(step, &client, &model, max_tokens, temperature, top_p, None).await?;
+
+                            let resolved_prompt = step.prompt.as_ref()
+                                .map(|p| Self::resolve_step_output_templates(p, &step_outputs));
+
+                            let resolved_step = WorkflowStep {
+                                step_name: step.step_name.clone(),
+                                step_id: step.step_id.clone(),
+                                requires: step.requires.clone(),
+                                when: step.when.clone(),
+                                prompt: resolved_prompt,
+                                generative_entity: step.generative_entity.clone(),
+                                model_overrides: step.model_overrides.clone(),
+                                r#loop: step.r#loop.clone(),
+                            };
+
+                            let result = self.execute_workflow_step(&resolved_step, &client, &model, max_tokens, temperature, top_p, None).await?;
                             results.push(result);
+
+                            if let Some(ref last_result) = results.last() {
+                                let output_text = last_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
+                                step_outputs.insert(step.step_id.clone(), output_text);
+                            }
                         } else {
                             warn!("[benchmark] could not resolve model for step {}: {}", step.step_id, model_name);
                         }
                     } else if step.prompt.is_some() {
                         if let Some(model) = models.first() {
-                            let result = self.execute_workflow_step(step, &client, model, max_tokens, temperature, top_p, None).await?;
+                            let resolved_prompt = step.prompt.as_ref()
+                                .map(|p| Self::resolve_step_output_templates(p, &step_outputs));
+
+                            let resolved_step = WorkflowStep {
+                                step_name: step.step_name.clone(),
+                                step_id: step.step_id.clone(),
+                                requires: step.requires.clone(),
+                                when: step.when.clone(),
+                                prompt: resolved_prompt,
+                                generative_entity: step.generative_entity.clone(),
+                                model_overrides: step.model_overrides.clone(),
+                                r#loop: step.r#loop.clone(),
+                            };
+
+                            let result = self.execute_workflow_step(&resolved_step, &client, model, max_tokens, temperature, top_p, None).await?;
                             results.push(result);
+
+                            if let Some(ref last_result) = results.last() {
+                                let output_text = last_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
+                                step_outputs.insert(step.step_id.clone(), output_text);
+                            }
                         }
                     }
                 }
@@ -2034,7 +2226,7 @@ mod tests {
         });
 
         let ctx = make_hook_context("model_a", 1, Some("hello"));
-        runner.execute_hook(&Some(hook), "step_1", "after_step_succeeds", &ctx, None).unwrap();
+        runner.execute_hook_legacy(&Some(hook), "step_1", "after_step_succeeds", &ctx, None).unwrap();
 
         let content = std::fs::read_to_string(&log_path).unwrap();
         assert!(content.contains("step=step_1"), "log should contain step name");
@@ -2056,7 +2248,7 @@ mod tests {
         });
 
         let ctx = make_hook_context("model_a", 1, Some("saved content here"));
-        runner.execute_hook(&Some(hook), "step_1", "after_step_succeeds", &ctx, None).unwrap();
+        runner.execute_hook_legacy(&Some(hook), "step_1", "after_step_succeeds", &ctx, None).unwrap();
 
         let content = std::fs::read_to_string(&save_path).unwrap();
         assert_eq!(content, "saved content here", "save_to should write output content");
@@ -2080,7 +2272,7 @@ mod tests {
         });
 
         let ctx = make_hook_context("model_b", 2, Some("appended"));
-        runner.execute_hook(&Some(hook), "step_2", "after_step_succeeds", &ctx, None).unwrap();
+        runner.execute_hook_legacy(&Some(hook), "step_2", "after_step_succeeds", &ctx, None).unwrap();
 
         let content = std::fs::read_to_string(&append_path).unwrap();
         assert!(content.starts_with("first\n"), "should preserve existing content");
@@ -2099,7 +2291,7 @@ mod tests {
         });
 
         let ctx = make_hook_context("model_a", 1, Some("output"));
-        let result = runner.execute_hook(&Some(hook), "step_1", "after_step_fails", &ctx, None);
+        let result = runner.execute_hook_legacy(&Some(hook), "step_1", "after_step_fails", &ctx, None);
 
         assert!(result.is_err(), "fail hook should return error");
         let err = result.unwrap_err().to_string();
@@ -2112,7 +2304,7 @@ mod tests {
         let runner = BenchmarkRunner::new(config);
 
         let ctx = make_hook_context("model_a", 1, Some("output"));
-        let result = runner.execute_hook(&None, "step_1", "after_step_succeeds", &ctx, None);
+        let result = runner.execute_hook_legacy(&None, "step_1", "after_step_succeeds", &ctx, None);
         assert!(result.is_ok(), "None hook should succeed");
     }
 
@@ -2132,7 +2324,7 @@ mod tests {
         });
 
         let ctx = make_hook_context("model_a", 1, Some("multi action"));
-        runner.execute_hook(&Some(hook), "step_1", "after_step_succeeds", &ctx, None).unwrap();
+        runner.execute_hook_legacy(&Some(hook), "step_1", "after_step_succeeds", &ctx, None).unwrap();
 
         assert!(save_path.exists(), "save_to should create file");
         assert!(log_path.exists(), "log should create file");
@@ -2340,7 +2532,7 @@ agentic_workflow:
         });
 
         let ctx = make_hook_context("model_a", 1, Some("hello"));
-        runner.execute_hook(&Some(hook), "step_1", "after_step_succeeds", &ctx, None).unwrap();
+        runner.execute_hook_legacy(&Some(hook), "step_1", "after_step_succeeds", &ctx, None).unwrap();
 
         assert!(nested_path.exists(), "log hook should create log file in existing nested dirs");
         let content = std::fs::read_to_string(&nested_path).unwrap();
@@ -2365,7 +2557,7 @@ agentic_workflow:
         });
 
         let ctx = make_hook_context("model_a", 1, Some("new content"));
-        runner.execute_hook(&Some(hook), "step_1", "after_step_succeeds", &ctx, None).unwrap();
+        runner.execute_hook_legacy(&Some(hook), "step_1", "after_step_succeeds", &ctx, None).unwrap();
 
         let content = std::fs::read_to_string(&save_path).unwrap();
         assert_eq!(content, "new content", "save_to should overwrite existing file");
@@ -2388,7 +2580,7 @@ agentic_workflow:
         });
 
         let ctx = make_hook_context("model_b", 1, Some("first append"));
-        runner.execute_hook(&Some(hook), "step_2", "after_step_succeeds", &ctx, None).unwrap();
+        runner.execute_hook_legacy(&Some(hook), "step_2", "after_step_succeeds", &ctx, None).unwrap();
 
         assert!(append_path.exists(), "append_to should create file if not exists");
         let content = std::fs::read_to_string(&append_path).unwrap();
@@ -2408,7 +2600,7 @@ agentic_workflow:
         });
 
         let ctx = make_hook_context("model_a", 1, Some("hello"));
-        runner.execute_hook(&Some(hook), "step_1", "after_step_succeeds", &ctx, None).unwrap();
+        runner.execute_hook_legacy(&Some(hook), "step_1", "after_step_succeeds", &ctx, None).unwrap();
 
         // File should not be created since there's no valid action
         assert!(!log_path.exists(), "empty hook object should do nothing");
@@ -2683,7 +2875,7 @@ agentic_workflow:
         std::env::set_current_dir(&dir).unwrap();
 
         let ctx = make_hook_context("model_test", 1, Some("test output"));
-        runner.execute_hook(&hook, "step_one", "after_step_succeeds", &ctx, None).unwrap();
+        runner.execute_hook_legacy(&hook, "step_one", "after_step_succeeds", &ctx, None).unwrap();
 
         std::env::set_current_dir(original_cwd).unwrap();
 
@@ -3490,5 +3682,71 @@ agentic_workflow:
 
         let maps = iterate_values.unwrap();
         assert_eq!(maps.len(), 0, "Expected empty vec for empty arrays");
+    }
+
+    #[test]
+    fn test_resolve_step_output_templates_basic() {
+        let mut step_outputs = std::collections::HashMap::new();
+        step_outputs.insert("step_1".to_string(), "output from step 1".to_string());
+
+        let template = "Previous step output: {{step.step_1.output}}";
+        let result = BenchmarkRunner::resolve_step_output_templates(template, &step_outputs);
+
+        assert_eq!(result, "Previous step output: output from step 1");
+    }
+
+    #[test]
+    fn test_resolve_step_output_templates_multiple_references() {
+        let mut step_outputs = std::collections::HashMap::new();
+        step_outputs.insert("step_a".to_string(), "result A".to_string());
+        step_outputs.insert("step_b".to_string(), "result B".to_string());
+
+        let template = "{{step.step_a.output}} and {{step.step_b.output}}";
+        let result = BenchmarkRunner::resolve_step_output_templates(template, &step_outputs);
+
+        assert_eq!(result, "result A and result B");
+    }
+
+    #[test]
+    fn test_resolve_step_output_templates_unknown_step_id() {
+        let step_outputs = std::collections::HashMap::new();
+
+        let template = "Unknown: {{step.step_999.output}}";
+        let result = BenchmarkRunner::resolve_step_output_templates(template, &step_outputs);
+
+        // Unknown step_id should leave template unchanged
+        assert_eq!(result, "Unknown: {{step.step_999.output}}");
+    }
+
+    #[test]
+    fn test_resolve_step_output_templates_no_template() {
+        let step_outputs = std::collections::HashMap::new();
+
+        let template = "Plain text without templates";
+        let result = BenchmarkRunner::resolve_step_output_templates(template, &step_outputs);
+
+        assert_eq!(result, "Plain text without templates");
+    }
+
+    #[test]
+    fn test_resolve_step_output_templates_empty_map() {
+        let step_outputs = std::collections::HashMap::new();
+
+        let template = "{{step.step_1.output}}";
+        let result = BenchmarkRunner::resolve_step_output_templates(template, &step_outputs);
+
+        // Empty map should leave template unchanged
+        assert_eq!(result, "{{step.step_1.output}}");
+    }
+
+    #[test]
+    fn test_resolve_step_output_templates_mixed_content() {
+        let mut step_outputs = std::collections::HashMap::new();
+        step_outputs.insert("generate".to_string(), "generated code".to_string());
+
+        let template = "Here is the {{step.generate.output}}:\nUse it wisely";
+        let result = BenchmarkRunner::resolve_step_output_templates(template, &step_outputs);
+
+        assert_eq!(result, "Here is the generated code:\nUse it wisely");
     }
 }
