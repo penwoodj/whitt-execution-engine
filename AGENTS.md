@@ -287,6 +287,299 @@ Document findings in format:
 
 ---
 
+## Lifecycle Hooks & Actions — Verification Gap Analysis
+
+**Last updated:** 2026-05-30
+**Commit:** `656a6bc` (fix HookAction serde deserialization)
+
+### Inventory: 10 Triggers × 11 Actions = 110 Possible Combinations
+
+#### Triggers (WorkflowHookContext variants in `src/workflow/hooks/context.rs`)
+
+| # | Trigger | Context Struct | Runner Firing Point | FIRED IN RUNNER? |
+|---|---------|---------------|---------------------|------------------|
+| 1 | `before_step_starts` | `BeforeStepStartsContext` | `runner.rs:1257` | ✅ YES |
+| 2 | `during_step_streaming` | `DuringStepStreamingContext` | — | ❌ NO — context defined, never wired |
+| 3 | `after_step_succeeds` | `AfterStepSucceedsContext` | `runner.rs:1340` | ✅ YES |
+| 4 | `after_step_fails` | `AfterStepFailsContext` | `runner.rs:1318` | ✅ YES |
+| 5 | `after_all_retries_exhausted` | `AfterAllRetriesExhaustedContext` | — | ❌ NO — context defined, never wired |
+| 6 | `after_step_starts` | `AfterStepStartsContext` | — | ❌ NO — context defined, never wired |
+| 7 | `before_gwt_evaluates` | `BeforeGwtEvaluatesContext` | — | ❌ NO — context defined, never wired |
+| 8 | `after_gwt_evaluates` | `AfterGwtEvaluatesContext` | — | ❌ NO — context defined, never wired |
+| 9 | `on_requires_failed` | `OnRequiresFailedContext` | — | ❌ NO — context defined, never wired |
+| 10 | `after_loop_iteration_fails` | `AfterLoopIterationFailsContext` | — | ❌ NO — context defined, never wired |
+
+**Runner firing gap: 7/10 triggers have context structs but are NEVER called by `execute_hooks_for_trigger()` in the benchmark runner.** Only 3/10 actually fire during execution.
+
+#### Actions (HookAction variants in `src/workflow/step.rs:176-200`)
+
+| # | Action | Execute Function | File I/O | State Mutation | Control Flow |
+|---|--------|-----------------|----------|----------------|--------------|
+| 1 | `Log(LogAction)` | `execute_log()` | ✅ file write + stdout | No | Continue |
+| 2 | `AppendTo(AppendToAction)` | `execute_append_to()` | ✅ file append | Variable: TODO stub | Continue |
+| 3 | `SaveTo(SaveToAction)` | `execute_save_to()` | ✅ file write | ✅ bookmark store | Continue |
+| 4 | `RouteTo(RouteToAction)` | `execute_route_to()` | No | No | RouteTo |
+| 5 | `Bookmark(BookmarkAction)` | `execute_bookmark()` | ✅ file write | ✅ bookmark store | Continue |
+| 6 | `Notify(NotifyAction)` | `execute_notify()` | No | notify_tx: TODO stub | Continue |
+| 7 | `Fail(FailAction)` | `execute_fail()` | No | No | Fail |
+| 8 | `SkipStep(bool)` | `execute_skip_step()` | No | No | SkipStep/Continue |
+| 9 | `SkipRemaining(bool)` | `execute_skip_remaining()` | No | No | SkipRemaining/Continue |
+| 10 | `Gwt(Vec<GwtClause>)` | `execute_gwt()` | No | No | RouteTo/Continue |
+| 11 | `IterateValues(HashMap)` | — passthrough | No | No | Continue (stub) |
+
+---
+
+### Verification Matrix: 4 Test Levels
+
+Legend: ✅ = verified, ❌ = not verified, ⚠️ = partial, — = N/A
+
+#### Level 1: Unit Tests (action isolation, `src/workflow/hooks/actions.rs` + `context.rs` + `gwt.rs` + `mod.rs`)
+
+| Action | Constructed | Executed | Result Asserted | File I/O Verified | State Verified |
+|--------|-------------|----------|-----------------|-------------------|----------------|
+| `Log` (to_file_path) | ✅ | ✅ | ✅ Continue | ✅ file exists | — |
+| `Log` (nested dirs) | ✅ | ✅ | ✅ Continue | ✅ dirs created | — |
+| `Log` (stdout only) | ⚠️ implicit | ⚠️ not tested standalone | ❌ | — | — |
+| `Log` (event_fields) | ✅ | ✅ | ✅ | — | — |
+| `Log` (level variants) | ⚠️ only Info tested | ❌ | ❌ | — | — |
+| `AppendTo::FilePath` | ✅ | ✅ | ✅ Continue | ✅ file appended | — |
+| `AppendTo::Variable` | ✅ | ✅ | ✅ Continue | — | ❌ TODO stub (no-op) |
+| `AppendTo::Both` | ⚠️ only FilePath tested | ❌ | ❌ | ❌ | ❌ |
+| `SaveTo::FilePath` | ✅ | ✅ | ✅ Continue | ✅ file content verified | — |
+| `SaveTo::Variable` ($$prefix) | ✅ | ✅ | ✅ Continue | — | ✅ bookmark stored |
+| `SaveTo::Both` | ❌ | ❌ | ❌ | ❌ | ❌ |
+| `RouteTo::Single` | ✅ | ✅ | ✅ RouteTo{1 target} | — | — |
+| `RouteTo::Multiple` | ✅ | ✅ | ✅ RouteTo{3 targets} | — | — |
+| `Bookmark::Flag(true)` | ✅ | ✅ | ✅ Continue | — | ✅ bookmark stored |
+| `Bookmark::Path("...")` | ❌ never tested | ❌ | ❌ | ❌ | ❌ |
+| `Bookmark::Detailed{path}` | ✅ | ✅ | ✅ Continue | ✅ file exists + content | ✅ bookmark stored |
+| `Bookmark::Detailed{path:None}` | ❌ | ❌ | ❌ | ❌ | ❌ |
+| `Notify` (no channel) | ✅ | ✅ | ✅ Continue | — | — |
+| `Notify` (with channel) | ❌ | ❌ | ❌ | ❌ | ❌ |
+| `Fail` (with message) | ✅ | ✅ | ✅ Fail{reason} | — | — |
+| `Fail` (no message) | ❌ | ❌ | ❌ default msg | — | — |
+| `SkipStep(true)` | ✅ | ✅ | ✅ SkipStep | — | — |
+| `SkipStep(false)` | ❌ | ❌ | ❌ Continue | — | — |
+| `SkipRemaining(true)` | ✅ | ✅ | ✅ SkipRemaining | — | — |
+| `SkipRemaining(false)` | ❌ | ❌ | ❌ Continue | — | — |
+| `Gwt` (matching clause) | ✅ | ✅ | ✅ RouteTo | — | — |
+| `Gwt` (non-matching) | ✅ | ✅ | ✅ Continue | — | — |
+| `Gwt` (invalid condition) | ✅ | ✅ | ✅ Continue (false) | — | — |
+| `Gwt` (multiple clauses) | ❌ | ❌ | ❌ first-match semantics | — | — |
+| `Gwt` (nested field access) | ✅ via gwt module | ✅ | ✅ | — | — |
+| `Gwt` (arithmetic in given) | ✅ via gwt module | ✅ | ✅ | — | — |
+| `IterateValues` | ❌ | ❌ passthrough | ❌ | ❌ | ❌ |
+
+**Unit test coverage: ~50% of action variants.** Missing: SaveTo::Both, AppendTo::Both, Bookmark::Path, Notify with channel, SkipStep(false), SkipRemaining(false), multi-clause GWT, IterateValues.
+
+#### Context struct unit tests (`src/workflow/hooks/context.rs`)
+
+| Context | to_json_value | get_field | trigger_name |
+|---------|--------------|-----------|--------------|
+| BeforeStepStarts | ✅ | ✅ | ✅ |
+| DuringStepStreaming | ✅ | ✅ | ✅ |
+| AfterStepSucceeds | ✅ (incl. quality_score None) | ✅ | ✅ |
+| AfterStepFails | ✅ | ✅ (nested error.is_retryable) | ✅ |
+| AfterAllRetriesExhausted | ✅ | ❌ | ✅ |
+| AfterStepStarts | ✅ | ❌ | ✅ |
+| BeforeGwtEvaluates | ✅ | ❌ | ✅ |
+| AfterGwtEvaluates | ✅ | ❌ | ✅ |
+| OnRequiresFailed | ✅ | ❌ | ✅ |
+| AfterLoopIterationFails | ✅ | ❌ | ✅ |
+| **All variants unique** | — | — | ✅ (10 unique) |
+
+#### HookEngine unit tests (`src/workflow/hooks/mod.rs`)
+
+| Feature | Tested |
+|---------|--------|
+| HookEngine::new() empty bookmarks | ✅ |
+| store_bookmark / get_bookmark | ✅ |
+| HookResult::merge priority | ✅ (Fail > SkipRemaining > RouteTo > SkipLoop > SkipStep > Continue) |
+| is_continue() | ✅ |
+| is_terminal() | ✅ (Fail, SkipRemaining) |
+| Default trait | ✅ |
+
+#### GWT expression evaluator (`src/workflow/hooks/gwt.rs`)
+
+| Category | Tests | Coverage |
+|----------|-------|----------|
+| Literals (true/false/null/number/string) | ✅ 7 tests | Complete |
+| Field paths (simple, nested, deep, missing) | ✅ 5 tests | Complete |
+| Comparisons (==, !=, >, <, >=, <=) | ✅ all operators for num/str/bool/null | Complete |
+| Logical (&&, \|\|, !) | ✅ 5 tests | Complete |
+| Arithmetic (+, -, *, /) | ✅ 5 tests | Complete |
+| Precedence (and vs or, comparison vs logical, arithmetic vs comparison) | ✅ 3 tests | Complete |
+| Error cases (div/0, type mismatch, syntax errors, invalid escape, unterminated string) | ✅ 6 tests | Complete |
+| Parenthesized expressions | ✅ | Complete |
+| Complex multi-field expressions | ✅ 2 tests | Complete |
+
+**GWT evaluator: ~95% unit test coverage.** Well-tested module.
+
+---
+
+#### Level 2: Integration Tests (`tests/hooks_integration.rs`)
+
+Tests use `execute_action()` directly (not via runner). Verify end-to-end action dispatch from HookAction enum through to result.
+
+| Test | Action | Context | File I/O | State |
+|------|--------|---------|----------|-------|
+| `given_all_triggers_fixture_when_read_then_contains_all_triggers` | — fixture parse | — | ✅ file read | — |
+| `given_log_action_when_executed_then_file_created_with_content` | Log{to_file_path, event_fields} | BeforeStepStarts | ✅ file + content | — |
+| `given_save_to_action_when_executed_then_file_contains_output` | SaveTo::FilePath | AfterStepSucceeds | ✅ file + content | — |
+| `given_append_to_action_when_executed_then_content_appended_to_file` | AppendTo::FilePath | AfterStepSucceeds | ✅ append verified | — |
+| `given_bookmark_action_when_executed_then_file_and_memory_stored` | Bookmark::Detailed | AfterStepSucceeds | ✅ file | ✅ bookmark |
+| `given_fail_action_when_executed_then_hook_result_is_fail` | Fail{message} | BeforeStepStarts | — | — |
+| `given_skip_step_action_when_executed_then_hook_result_is_skip_step` | SkipStep(true) | BeforeStepStarts | — | — |
+| `given_route_to_action_when_executed_then_hook_result_routes_to_target` | RouteTo::Single | BeforeStepStarts | — | — |
+| `given_gwt_matching_clause_when_executed_then_routes_to_then_target` | Gwt{1 clause} | BeforeStepStarts | — | — |
+| `given_gwt_non_matching_clause_when_executed_then_continues` | Gwt{1 clause} | BeforeStepStarts | — | — |
+| `given_gwt_comparison_expression_when_evaluated_then_correct` | GWT evaluate | — | — | — |
+| `given_gwt_logical_and_when_evaluated_then_correct` | GWT evaluate | — | — | — |
+| `given_gwt_dot_path_when_evaluated_then_navigates_nested` | GWT evaluate | — | — | — |
+| `given_hook_results_merged_then_highest_priority_wins` | HookResult::merge | — | — | — |
+| `given_invalid_gwt_expression_when_evaluated_then_error` | GWT evaluate | — | — | — |
+| `given_missing_field_gwt_when_evaluated_then_false` | GWT evaluate | — | — | — |
+
+**Integration test coverage: 10 actions via `execute_action()`, but only with 2 context types (BeforeStepStarts, AfterStepSucceeds).** No integration tests use AfterStepFails, DuringStepStreaming, or the other 6 context variants.
+
+**Missing integration tests:**
+- SaveTo::Variable and SaveTo::Both
+- AppendTo::Variable and AppendTo::Both
+- Bookmark::Flag and Bookmark::Path (only Detailed tested)
+- Notify with channel
+- SkipRemaining
+- Multi-action hook (array of actions in one trigger)
+- Hook action parsed from YAML → deserialized → executed (serde round-trip)
+- Actions with AfterStepFails context (error_message extraction)
+- Actions with DuringStepStreaming context (chunk_text extraction)
+
+---
+
+#### Level 3: End-to-End User Journeys (YAML → Runner → Execution → Output)
+
+**E2E test = full `whitt benchmark --workflow <file>` against live Docker llama.cpp server.**
+
+| Journey | YAML | Actions Verified | Status |
+|---------|------|-----------------|--------|
+| 2-step with `save_to` + `log` + template interpolation | `live-test-ministral-3b.yml` | save_to (file), log (to_file_path), log (stdout), template `{{step.*.output}}` | ✅ VERIFIED |
+| Multi-model benchmark (3, 5, 15, 50 models) | `benchmark-*-models.yml` | log (stdout from after_step_succeeds) | ⚠️ PARTIAL — only log to stdout verified, no save_to or bookmark in these YAMLs |
+
+**Missing E2E journeys:**
+- ❌ `before_step_starts` with `skip_step: true` → verify step skipped
+- ❌ `after_step_fails` with `fail` action → verify error propagation
+- ❌ `after_step_fails` with GWT routing → verify conditional retry routing
+- ❌ `append_to` accumulating results across multiple steps
+- ❌ `bookmark: true` storing state → verify retrieval by subsequent step
+- ❌ `route_to` with multiple targets → verify parallel execution
+- ❌ `notify` action → verify notification sent (or logged)
+- ❌ `during_step_streaming` → NOT EVEN WIRED IN RUNNER
+- ❌ `after_all_retries_exhausted` → NOT EVEN WIRED IN RUNNER
+- ❌ `before_gwt_evaluates` / `after_gwt_evaluates` → NOT EVEN WIRED IN RUNNER
+- ❌ `on_requires_failed` → NOT EVEN WIRED IN RUNNER
+- ❌ `after_loop_iteration_fails` → NOT EVEN WIRED IN RUNNER
+- ❌ Multi-step workflow with depends_on + hooks at each step
+- ❌ Hook action serde round-trip: YAML → serde_json → HookAction → execute_action (this was the bug we just fixed — no regression E2E test)
+
+---
+
+#### Level 4: Live System User Flow Testing (Full Docker stack)
+
+| User Flow | Steps | Hook Triggers | Status |
+|-----------|-------|---------------|--------|
+| UF-LIVE-01: Single model, save_to + log | Load → Infer → Hook(save_to, log) → Unload | after_step_succeeds | ✅ VERIFIED |
+| UF-LIVE-02: Two-step with interpolation | Step1(infer+save) → Interpolate → Step2(infer+save) | after_step_succeeds × 2 | ✅ VERIFIED |
+| UF-LIVE-03: Skip step via before_step_starts | before_step_starts(skip_step:true) → verify step skipped | before_step_starts | ❌ NOT TESTED |
+| UF-LIVE-04: Fail on error via after_step_fails | Intentional bad prompt → after_step_fails(fail) → verify error | after_step_fails | ❌ NOT TESTED |
+| UF-LIVE-05: GWT conditional routing | Step with quality_score → GWT evaluates → route_to branch | after_step_succeeds (GWT) | ❌ NOT TESTED |
+| UF-LIVE-06: Bookmark persistence | Step1(bookmark:true) → Step2 reads bookmark | after_step_succeeds (bookmark) | ❌ NOT TESTED |
+| UF-LIVE-07: Append accumulation | 3 steps each append_to same file | after_step_succeeds × 3 | ❌ NOT TESTED |
+| UF-LIVE-08: Multi-model benchmark | 3+ models, hook fires for each | after_step_succeeds × N | ⚠️ PARTIAL (log only) |
+| UF-LIVE-09: Notify coordination | Step1(notify) → parent workflow receives | after_step_succeeds (notify) | ❌ NOT TESTED (notify_tx stub) |
+| UF-LIVE-10: Streaming hooks | during_step_streaming fires per chunk | during_step_streaming | ❌ IMPOSSIBLE (not wired) |
+| UF-LIVE-11: Retry exhaustion | Step fails 3× → after_all_retries_exhausted fires | after_all_retries_exhausted | ❌ IMPOSSIBLE (not wired) |
+| UF-LIVE-12: Dependency chain failure | Step1 fails → on_requires_failed fires for Step2 | on_requires_failed | ❌ IMPOSSIBLE (not wired) |
+
+---
+
+### Summary: What Remains Unverified
+
+#### By Category
+
+| Category | Total Items | Unit ✅ | Integration ✅ | E2E ✅ | Live ✅ |
+|----------|-------------|---------|---------------|--------|---------|
+| **Actions (11 types)** | 11 | 11 (all have some test) | 10 (IterateValues missing) | 3 (Log, SaveTo, Bookmark) | 3 (Log, SaveTo, Bookmark) |
+| **Action variants (30+)** | ~30 | ~15 | ~10 | ~5 | ~5 |
+| **Triggers fired in runner** | 3 | 3 | 2 | 2 | 2 |
+| **Triggers defined but NOT wired** | 7 | 7 (context only) | 0 | 0 | 0 |
+| **Context structs** | 10 | 10 (to_json) | 2 | 2 | 2 |
+| **HookResult variants** | 6 | 6 | 4 | 2 | 2 |
+| **GWT expressions** | ~40 patterns | ~35 | 5 | 0 | 0 |
+
+#### Critical Gaps (Must Fix Before Release)
+
+1. **7/10 triggers not wired in runner** — context structs exist but `execute_hooks_for_trigger()` is never called for: `during_step_streaming`, `after_all_retries_exhausted`, `after_step_starts`, `before_gwt_evaluates`, `after_gwt_evaluates`, `on_requires_failed`, `after_loop_iteration_fails`. These triggers are dead code in production.
+
+2. **No E2E regression test for HookAction serde** — the bug we just fixed (all actions silently matching as empty LogAction) has no YAML→serde→execute E2E test. A regression would go undetected.
+
+3. **Notify action is a stub** — `execute_notify()` logs "Would send notification" but never actually sends. The `notify_tx` channel integration is TODO.
+
+4. **AppendTo::Variable is a stub** — `execute_append_to()` for Variable variant logs "not yet implemented" and does nothing.
+
+5. **IterateValues is a passthrough** — `execute_action()` returns Continue without any logic. Future feature.
+
+6. **SaveTo::Both not tested** — The multi-target variant (both file and variable) has zero unit or integration tests.
+
+7. **Bookmark::Path(string) not tested** — Only `Flag(true)` and `Detailed{path}` are tested. The string shortcut form (`bookmark: "path"`) is untested.
+
+8. **No multi-action trigger tested end-to-end** — YAML allows arrays of actions per trigger. No test verifies that `actions_array` iteration + `HookResult::merge()` works correctly when 3+ actions fire on the same trigger.
+
+9. **Template interpolation only tested via live system** — `{{step.step_1_generate.output}}` works in live test but has no unit test.
+
+#### Important Gaps (Should Fix)
+
+10. **before_step_starts → skip_step not tested in E2E** — Unit test passes, but no E2E test verifies that a step is actually skipped by the runner when the hook returns SkipStep.
+
+11. **after_step_fails → GWT conditional routing not tested in E2E** — Critical for retry logic.
+
+12. **after_step_fails → fail action not tested in E2E** — Should verify error propagation stops execution.
+
+13. **Log level variants not tested** — Only Info level tested. Warning, Error, Critical, Debug untested.
+
+14. **extract_context_output() for DuringStepStreaming untested** — Returns chunk_text, but DuringStepStreaming is never used.
+
+15. **HookResult::SkipLoop never produced** — Defined in merge priority but no action returns it.
+
+#### Nice-to-Have Gaps
+
+16. **Benchmark YAMLs have limited hook configs** — Only `after_step_succeeds` log hooks. No YAML exercises save_to, bookmark, append_to, route_to, fail, skip_step, GWT in benchmark mode.
+
+17. **No fixture for negative/invalid hook YAMLs** — `tests/fixtures/hooks/negative-invalid.yml` exists but no test reads it.
+
+18. **No performance test for hook execution** — How many microseconds per action? No benchmark.
+
+---
+
+### File Reference Map
+
+| File | Lines | What It Contains |
+|------|-------|-----------------|
+| `src/workflow/step.rs:174-200` | HookAction enum (11 variants) |
+| `src/workflow/step.rs:202-297` | Action structs (LogAction, SaveToAction, etc.) |
+| `src/workflow/hooks/context.rs` | 10 context structs + WorkflowHookContext enum |
+| `src/workflow/hooks/actions.rs` | execute_action() dispatcher + all execute_* functions + unit tests |
+| `src/workflow/hooks/mod.rs` | HookResult enum (6 variants) + HookEngine + merge logic |
+| `src/workflow/hooks/gwt.rs` | GWT expression evaluator (lexer + parser + evaluator + 35 tests) |
+| `src/benchmark/runner.rs:813-848` | execute_hooks_for_trigger() — the single firing point |
+| `src/benchmark/runner.rs:1249-1352` | Actual trigger calls (before_step_starts, after_step_fails, after_step_succeeds) |
+| `tests/hooks_integration.rs` | 22 integration tests |
+| `tests/fixtures/hooks/all-triggers.yml` | Fixture with all 13 trigger types × 10 actions |
+| `tests/fixtures/hooks/bookmark-notify.yml` | Bookmark + notify fixture |
+| `tests/fixtures/hooks/gwt-expressions.yml` | GWT expression fixture |
+| `tests/fixtures/hooks/skip-actions.yml` | Skip step/remaining fixture |
+| `tests/fixtures/hooks/negative-invalid.yml` | Invalid hook YAML fixture (unused) |
+
+---
+
 ## Session Handoff Protocol
 
 When context grows large, write handoff to `.opencode-handoff.md`:
