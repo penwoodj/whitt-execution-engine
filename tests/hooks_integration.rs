@@ -1,6 +1,6 @@
 use whitt_execution_engine::workflow::{
     HookAction, LogAction, GwtClause, AppendToAction, SaveToAction,
-    RouteToAction, BookmarkAction, BookmarkActionDetail, FailAction, NotifyAction,
+    RouteToAction, BookmarkAction, BookmarkActionDetail, FailAction, NotifyAction, ShellAction,
 };
 use whitt_execution_engine::workflow::hooks::{
     HookEngine, HookResult,
@@ -646,4 +646,24 @@ fn given_notify_with_message_when_executed_then_returns_continue() {
     });
     let mut engine = HookEngine::new();
     assert!(execute_action(&action, &ctx, &mut engine).is_continue());
+}
+
+#[test]
+fn given_shell_action_when_deserialized_from_json_then_correct() {
+    let json = serde_json::json!({
+        "shell": {
+            "command": "echo",
+            "args": ["hello"],
+            "fail_on_error": false
+        }
+    });
+    let action: HookAction = serde_json::from_value(json).expect("deserialize");
+    match action {
+        HookAction::Shell(ref shell) => {
+            assert_eq!(shell.command, "echo");
+            assert_eq!(shell.args.as_deref(), Some(&["hello".to_string()][..]));
+            assert_eq!(shell.fail_on_error, Some(false));
+        }
+        other => panic!("Expected Shell, got {:?}", other),
+    }
 }

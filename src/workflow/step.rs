@@ -191,6 +191,8 @@ pub enum HookAction {
     Notify(NotifyAction),
     /// Fail action.
     Fail(FailAction),
+    /// Shell action.
+    Shell(ShellAction),
     /// Skip step action.
     SkipStep(bool),
     /// Skip remaining action.
@@ -294,6 +296,26 @@ pub struct NotifyAction {
 pub struct FailAction {
     #[serde(default)]
     pub message: Option<String>,
+}
+
+/// Shell action — execute an external command.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ShellAction {
+    /// Command to execute (e.g., "free", "docker", "echo")
+    pub command: String,
+    /// Arguments to pass
+    #[serde(default)]
+    pub args: Option<Vec<String>>,
+    /// Working directory
+    #[serde(default)]
+    pub working_dir: Option<String>,
+    /// Environment variables
+    #[serde(default)]
+    pub env: Option<std::collections::HashMap<String, String>>,
+    /// Whether to return Fail on non-zero exit (default: true)
+    #[serde(default)]
+    pub fail_on_error: Option<bool>,
 }
 
 /// User input configuration.
