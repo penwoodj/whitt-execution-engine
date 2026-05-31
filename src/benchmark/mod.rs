@@ -3,6 +3,7 @@
 pub mod runner;
 pub mod model_selector;
 pub mod yaml_generator;
+pub mod error_types;
 
 use crate::client::model_discovery::ModelCandidate;
 use anyhow::{Context, Result};
