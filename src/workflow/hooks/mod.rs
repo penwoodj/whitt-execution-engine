@@ -7,6 +7,7 @@
 //!
 //! See execution protocol in docs/schema/unified-workflow-schema.yml lines 384-432
 
+use serde::Serialize;
 use std::collections::HashMap;
 
 pub mod context;
@@ -94,7 +95,7 @@ impl HookResult {
 }
 
 /// Notification message from sub-workflow execution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct NotifyMessage {
     /// Source step that sent the notification.
     pub from_step: String,

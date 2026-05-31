@@ -1437,11 +1437,17 @@ impl BenchmarkRunner {
             let total_tokens: usize = model_result.inference_results.iter()
                 .map(|inf| inf.total_tokens)
                 .sum();
+            let quality_score = if step_max_tokens > 0 {
+                Some((total_tokens as f32 / step_max_tokens as f32).min(1.0))
+            } else {
+                None
+            };
+
             let after_context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
                 step_name: step.step_name.clone(),
                 output: output_text,
                 duration_ms: model_result.total_duration.as_millis() as u64,
-                quality_score: None,
+                quality_score,
                 token_count: total_tokens as u32,
                 model_name: model_id.to_string(),
             });
@@ -1762,6 +1768,36 @@ impl BenchmarkRunner {
                             current_index += 1;
                         } else {
                             warn!("[benchmark] could not resolve model for step {}: {}", step.step_id, model_name);
+
+                            let fail_context = WorkflowHookContext::AfterStepFails(AfterStepFailsContext {
+                                step_name: step.step_name.clone(),
+                                error_type: "ModelResolutionError".to_string(),
+                                error_message: format!("Model '{}' not found on server", model_name),
+                                error: crate::workflow::hooks::context::ErrorDetails {
+                                    is_retryable: false,
+                                    count: 1,
+                                },
+                                attempt_number: 1,
+                                model_name: model_name.to_string(),
+                            });
+
+                            match self.execute_hooks_for_trigger(&step.when, "after_step_fails", &fail_context) {
+                                Ok(HookResult::Fail { reason }) => {
+                                    warn!("[benchmark] after_step_fails hook failed: {}", reason);
+                                }
+                                Ok(HookResult::RouteTo { targets }) => {
+                                    info!("[benchmark] step {} routed to {:?} by after_step_fails (model resolution)", step.step_id, targets);
+                                    if let Some(&target_idx) = step_index.get(&targets[0]) {
+                                        current_index = target_idx;
+                                        continue;
+                                    }
+                                }
+                                Ok(_) => {}
+                                Err(e) => {
+                                    warn!("[benchmark] after_step_fails hook error: {}", e);
+                                }
+                            }
+
                             current_index += 1;
                         }
                     } else if step.prompt.is_some() {

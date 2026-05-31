@@ -334,9 +334,19 @@ fn execute_notify(
     };
 
     if let Some(ref tx) = engine.notify_tx {
-        let _ = tx.try_send(notify_msg);
+        let _ = tx.try_send(notify_msg.clone());
     } else {
         info!("No notification channel, logging: {:?}", notify_msg);
+        if let Ok(json_line) = serde_json::to_string(&notify_msg) {
+            let log_path = std::path::Path::new("outputs/notifications.jsonl");
+            if let Some(parent) = log_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            use std::io::Write;
+            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(log_path) {
+                let _ = writeln!(file, "{}", json_line);
+            }
+        }
     }
 
     HookResult::Continue
