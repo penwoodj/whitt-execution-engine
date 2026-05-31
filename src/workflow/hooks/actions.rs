@@ -139,16 +139,21 @@ fn execute_append_to(
 
     match action {
         AppendToAction::Variable(var_name) => {
-            let key = var_name.strip_prefix('$').unwrap_or(var_name);
-            let existing = engine.get_bookmark(key)
-                .and_then(|v| v.as_str().map(String::from))
-                .unwrap_or_default();
-            let combined = if existing.is_empty() {
-                output.clone()
+            if let Some(var_key) = var_name.strip_prefix('$') {
+                let existing = engine.get_bookmark(var_key)
+                    .and_then(|v| v.as_str().map(String::from))
+                    .unwrap_or_default();
+                let combined = if existing.is_empty() {
+                    output.clone()
+                } else {
+                    format!("{}\n{}", existing, output)
+                };
+                engine.store_bookmark(var_key.to_string(), serde_json::Value::String(combined));
             } else {
-                format!("{}\n{}", existing, output)
-            };
-            engine.store_bookmark(key.to_string(), serde_json::Value::String(combined));
+                if let Err(e) = append_to_file(var_name, &output) {
+                    eprintln!("Failed to append to {}: {}", var_name, e);
+                }
+            }
         }
         AppendToAction::FilePath(path) => {
             if let Err(e) = append_to_file(path, &output) {
@@ -586,7 +591,7 @@ mod tests {
 
     #[test]
     fn given_append_to_variable_when_execute_then_stores_in_bookmarks() {
-        let action = AppendToAction::Variable("my_var".to_string());
+        let action = AppendToAction::Variable("$my_var".to_string());
         let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
             step_name: "test".to_string(),
             output: "data".to_string(),
@@ -600,6 +605,7 @@ mod tests {
         let result = execute_append_to(&action, &context, &mut engine);
 
         assert_eq!(result, HookResult::Continue);
+
         let bookmark = engine.get_bookmark("my_var");
         assert!(bookmark.is_some());
         assert_eq!(bookmark.unwrap().as_str(), Some("data"));
@@ -628,7 +634,7 @@ mod tests {
 
     #[test]
     fn given_append_to_variable_twice_when_execute_then_concatenates_values() {
-        let action = AppendToAction::Variable("accum".to_string());
+        let action = AppendToAction::Variable("$accum".to_string());
         let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
             step_name: "test".to_string(),
             output: "line1".to_string(),
