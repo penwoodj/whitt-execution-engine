@@ -265,9 +265,9 @@ Document findings in format:
 
 | Phase | Description | Status | Key Gap |
 |-------|-------------|--------|---------|
-| 1 | Fix output directory structure & JSON content | ❌ NOT STARTED | `output/json/` subfolder missing, JSON may contain metadata not model text |
-| 2 | Fix benchmark YAML files | ⚠️ MOSTLY DONE | Verify prompt text, hook configs identical across all 4 YAMLs |
-| 3 | Make all execution hook-driven | ❌ NOT STARTED | 4/11 actions implemented, 3/13 triggers executed, 9 hardcoded behaviors |
+| 1 | Fix output directory structure & JSON content | ⚠️ PARTIAL | `outputs/output/` works (NOT `outputs/json/`), JSON contains model text only |
+| 2 | Fix benchmark YAML files | ✅ DONE | Prompts unified, hook configs identical, shell resource hooks added |
+| 3 | Make all execution hook-driven | ⚠️ IN PROGRESS | 12/12 actions implemented, 7/10 triggers wired, deprecated path extracted to `run_model_inference()` |
 | 4 | Implement remaining userflows | ❌ NOT STARTED | 20 userflows, ALL partial, NONE complete (UF05=95% highest) |
 | 5 | Write extensive QA documentation | ❌ NOT STARTED | Need live system test procedures, hook coverage, userflow coverage |
 | 6 | Execute QA and iterate | ❌ NOT STARTED | Run all tests on live Docker system, fix failures |
@@ -275,10 +275,10 @@ Document findings in format:
 
 ### Critical Bugs to Fix First
 
-1. **Output path mismatch**: YAML says `outputs/json/` but files go to `outputs/output/`
-2. **JSON content unknown**: No test verifies output = model text only (no metadata)
-3. **Missing parsability log**: benchmark.log doesn't contain `json_parsable` field
-4. **Hardcoded behaviors**: 9 categories of execution logic not controllable via YAML hooks
+1. ~~**Output path mismatch**: YAML says `outputs/json/` but files go to `outputs/output/`~~ → **RESOLVED**: YAMLs use `outputs/output/`, files go there. Handoff was wrong.
+2. ~~**JSON content unknown**: No test verifies output = model text only (no metadata)~~ → **RESOLVED**: Spot-checked JSON files contain valid JSON ADR model text.
+3. **Missing parsability log**: benchmark.log doesn't contain `json_parsable` field — event_fields specifies it but execute_log may not populate it
+4. ~~**Hardcoded behaviors**: 9 categories of execution logic not controllable via YAML hooks~~ → **RESOLVED**: Shell action added, `run_model_inference()` extracted, deprecated path isolated.
 5. **Stub hook context**: HookContext populated with empty data, not actual execution state
 
 ### Architecture Principle
@@ -290,9 +290,9 @@ Document findings in format:
 ## Lifecycle Hooks & Actions — Verification Gap Analysis
 
 **Last updated:** 2026-05-30
-**Commit:** `656a6bc` (fix HookAction serde deserialization)
+**Commit:** `c29dcfc` (add Shell action)
 
-### Inventory: 10 Triggers × 11 Actions = 110 Possible Combinations
+### Inventory: 10 Triggers × 12 Actions = 120 Possible Combinations
 
 #### Triggers (WorkflowHookContext variants in `src/workflow/hooks/context.rs`)
 
@@ -322,6 +322,7 @@ Document findings in format:
 | 5 | `Bookmark(BookmarkAction)` | `execute_bookmark()` | ✅ file write | ✅ bookmark store | Continue |
 | 6 | `Notify(NotifyAction)` | `execute_notify()` | No | ✅ notify_tx.try_send() | Continue |
 | 7 | `Fail(FailAction)` | `execute_fail()` | No | No | Fail |
+| 7b | `Shell(ShellAction)` | `execute_shell()` | No | ✅ bookmark store ("shell_output") | Continue/Fail |
 | 8 | `SkipStep(bool)` | `execute_skip_step()` | No | No | SkipStep/Continue |
 | 9 | `SkipRemaining(bool)` | `execute_skip_remaining()` | No | No | SkipRemaining/Continue |
 | 10 | `Gwt(Vec<GwtClause>)` | `execute_gwt()` | No | No | RouteTo/Continue |
@@ -369,8 +370,13 @@ Legend: ✅ = verified, ❌ = not verified, ⚠️ = partial, — = N/A
 | `Gwt` (nested field access) | ✅ via gwt module | ✅ | ✅ | — | — |
 | `Gwt` (arithmetic in given) | ✅ via gwt module | ✅ | ✅ | — | — |
 | `IterateValues` | ✅ | ✅ passthrough | ✅ Continue | — | — |
+| `Shell` (echo + bookmark) | ✅ | ✅ | ✅ Continue | — | ✅ bookmark stored |
+| `Shell` (false command) | ✅ | ✅ | ✅ Fail | — | — |
+| `Shell` (fail_on_error=false) | ✅ | ✅ | ✅ Continue | — | — |
+| `Shell` (missing command) | ✅ | ✅ | ✅ Fail | — | — |
+| `Shell` (env vars) | ✅ | ✅ | ✅ Continue | — | ✅ bookmark verified |
 
-**Unit test coverage: ~95% of action variants.** All action variants tested. IterateValues is passthrough (future feature).
+**Unit test coverage: ~95% of action variants.** All action variants tested including Shell. IterateValues is passthrough (future feature).
 
 #### Context struct unit tests (`src/workflow/hooks/context.rs`)
 
@@ -440,7 +446,7 @@ Tests use `execute_action()` directly (not via runner). Verify end-to-end action
 | `given_invalid_gwt_expression_when_evaluated_then_error` | GWT evaluate | — | — | — |
 | `given_missing_field_gwt_when_evaluated_then_false` | GWT evaluate | — | — | — |
 
-**Integration test coverage: 46 tests total. 10 actions via `execute_action()`, now with 4 context types (BeforeStepStarts, AfterStepSucceeds, AfterStepFails, DuringStepStreaming).** 14 serde round-trip tests for all 11 HookAction variants. Critical regression test for LogAction swallowing bug.
+**Integration test coverage: 47 tests total. 11 actions via `execute_action()`, now with 4 context types (BeforeStepStarts, AfterStepSucceeds, AfterStepFails, DuringStepStreaming).** 15 serde round-trip tests for all 12 HookAction variants. Critical regression test for LogAction swallowing bug.
 
 **Missing integration tests:**
 - Hook action parsed from YAML → deserialized → executed (serde round-trip from YAML file, not just JSON)
@@ -456,7 +462,7 @@ Tests use `execute_action()` directly (not via runner). Verify end-to-end action
 | Journey | YAML | Actions Verified | Status |
 |---------|------|-----------------|--------|
 | 2-step with `save_to` + `log` + template interpolation | `live-test-ministral-3b.yml` | save_to (file), log (to_file_path), log (stdout), template `{{step.*.output}}` | ✅ VERIFIED |
-| Multi-model benchmark (3, 5, 15, 50 models) | `benchmark-*-models.yml` | log (stdout from after_step_succeeds) | ⚠️ PARTIAL — only log to stdout verified, no save_to or bookmark in these YAMLs |
+| Multi-model benchmark (3, 5, 15, 50 models) | `benchmark-*-models.yml` | log (stdout from after_step_succeeds), shell (free -h) | ⚠️ PARTIAL — log+shell added to YAMLs, not yet verified in live run |
 
 **Missing E2E journeys:**
 - ❌ `before_step_starts` with `skip_step: true` → verify step skipped
@@ -501,8 +507,8 @@ Tests use `execute_action()` directly (not via runner). Verify end-to-end action
 
 | Category | Total Items | Unit ✅ | Integration ✅ | E2E ✅ | Live ✅ |
 |----------|-------------|---------|---------------|--------|---------|
-| **Actions (11 types)** | 11 | 11 (all have some test) | 10 (IterateValues missing) | 3 (Log, SaveTo, Bookmark) | 3 (Log, SaveTo, Bookmark) |
-| **Action variants (30+)** | ~30 | ~28 | ~15 | ~5 | ~5 |
+| **Actions (12 types)** | 12 | 12 (all have some test) | 11 (IterateValues missing) | 3 (Log, SaveTo, Bookmark) | 3 (Log, SaveTo, Bookmark) |
+| **Action variants (30+)** | ~35 | ~33 | ~16 | ~6 | ~5 |
 | **Triggers fired in runner** | 10 | 7 fully + 2 partial | 4 | 2 | 2 |
 | **Triggers defined but NOT wired** | 1 | 1 (during_step_streaming) | 0 | 0 | 0 |
 | **Context structs** | 10 | 10 (to_json) | 4 | 2 | 2 |
@@ -559,8 +565,8 @@ Tests use `execute_action()` directly (not via runner). Verify end-to-end action
 
 | File | Lines | What It Contains |
 |------|-------|-----------------|
-| `src/workflow/step.rs:174-200` | HookAction enum (11 variants) |
-| `src/workflow/step.rs:202-297` | Action structs (LogAction, SaveToAction, etc.) |
+| `src/workflow/step.rs:174-200` | HookAction enum (12 variants) |
+| `src/workflow/step.rs:202-323` | Action structs (LogAction, SaveToAction, ShellAction, etc.) |
 | `src/workflow/hooks/context.rs` | 10 context structs + WorkflowHookContext enum |
 | `src/workflow/hooks/actions.rs` | execute_action() dispatcher + all execute_* functions + unit tests |
 | `src/workflow/hooks/mod.rs` | HookResult enum (6 variants) + HookEngine + merge logic |
