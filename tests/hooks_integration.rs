@@ -667,3 +667,85 @@ fn given_shell_action_when_deserialized_from_json_then_correct() {
         other => panic!("Expected Shell, got {:?}", other),
     }
 }
+
+// ============================================================================
+// Gap Filling Tests
+// These tests fill gaps identified in hook system verification
+// ============================================================================
+
+#[test]
+fn given_yaml_fixture_when_parsed_then_log_action_structure_verified() {
+    let content = fs::read_to_string(fixture_path("all-triggers.yml")).expect("read");
+
+    assert!(content.contains("before_step_starts:"));
+    assert!(content.contains("log:"));
+    assert!(content.contains("to_file_path:"));
+    assert!(content.contains("event_fields:"));
+    assert!(content.contains("level:"));
+    assert!(content.contains("./workspace/logs/before-step.log"));
+    assert!(content.contains("[step_name, timestamp]"));
+    assert!(content.contains("info"));
+    assert!(content.contains("after_step_succeeds:"));
+    assert!(content.contains("save_to:"));
+    assert!(content.contains("- config_result"));
+    assert!(content.contains("- \"./workspace/output/config.yaml\""));
+    assert!(content.contains("bookmark:"));
+    assert!(content.contains("path:"));
+    assert!(content.contains("gwt:"));
+    assert!(content.contains("given:"));
+    assert!(content.contains("then:"));
+}
+
+#[test]
+fn given_negative_invalid_fixture_when_parsed_then_expected_structure() {
+    let content = fs::read_to_string(fixture_path("negative-invalid.yml")).expect("read");
+
+    assert!(content.contains("empty_log"));
+    assert!(content.contains("invalid_gwt"));
+    assert!(content.contains("invalid_route"));
+    assert!(content.contains("unknown_action"));
+    assert!(content.contains("fail_no_message"));
+    assert!(content.contains(r#"to_file_path: ""#));
+    assert!(content.contains("event_fields: []"));
+    assert!(content.contains("!!! invalid syntax !!!"));
+    assert!(content.contains("this_step_does_not_exist"));
+    assert!(content.contains("completely_unknown_action"));
+    assert!(content.contains(r#"fail: ""#));
+}
+
+#[test]
+fn given_multiple_actions_with_fail_when_merged_then_fail_wins() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let log_path = temp.path().join("test.log").to_string_lossy().to_string();
+
+    let log_action = HookAction::Log(LogAction {
+        to_file_path: Some(log_path),
+        event_fields: Some(vec!["step_name".into()]),
+        level: None,
+    });
+    let fail_action = HookAction::Fail(FailAction {
+        message: Some("Critical error".into()),
+    });
+    let bookmark_action = HookAction::Bookmark(BookmarkAction::Flag(true));
+
+    let ctx = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+        step_name: "priority_test".into(),
+        output: "output".into(),
+        duration_ms: 100,
+        quality_score: None,
+        token_count: 0,
+        model_name: "model".into(),
+    });
+    let mut engine = HookEngine::new();
+
+    let log_result = execute_action(&log_action, &ctx, &mut engine);
+    let fail_result = execute_action(&fail_action, &ctx, &mut engine);
+    let bookmark_result = execute_action(&bookmark_action, &ctx, &mut engine);
+
+    assert!(log_result.is_continue());
+    assert!(matches!(fail_result, HookResult::Fail { .. }));
+    assert!(bookmark_result.is_continue());
+
+    let merged = HookResult::merge(HookResult::merge(log_result, fail_result), bookmark_result);
+    assert!(matches!(merged, HookResult::Fail { .. }));
+}
