@@ -328,6 +328,10 @@ async fn main() -> Result<()> {
         Commands::Benchmark { prompt, max_tokens, models_dir, model_list, prompts, output, filter_size_max, filter_size_min, filter_name, compare_gpu_cpu, output_dir, workflow, preflight, cooldown, load_timeout, min_tmp_space } => {
             tracing::info!("[WHT-BEN001] benchmark command, max_tokens={}, prompts={}", max_tokens, prompts);
 
+            if workflow.is_none() && (models_dir.is_some() || model_list.is_some()) {
+                tracing::warn!("[DEPRECATED] Direct benchmark mode (--models-dir/--model-list without --workflow) is deprecated. Use --workflow flag instead. See docs/benchmarks/workflows/ for YAML templates.");
+            }
+
             if models_dir.is_some() || model_list.is_some() || workflow.is_some() {
                 let base_prompt = prompt.clone().unwrap_or_else(|| "The quick brown fox jumps over the lazy dog.".to_string());
                 let prompts_vec = (0..prompts).map(|_| base_prompt.clone()).collect();

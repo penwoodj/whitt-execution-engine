@@ -154,6 +154,7 @@ impl BenchmarkRunner {
     }
 
     /// Runtime system health check: verify resources are adequate before operations.
+    #[deprecated(since = "0.4.0", note = "Use hook-driven preflight via before_workflow_starts trigger")]
     pub async fn check_system_health(&self) -> Result<()> {
         let min_bytes = self.config.min_tmp_space_mb * 1024 * 1024;
         match disk_monitor::check_disk_space(Path::new("/tmp")) {
@@ -189,6 +190,7 @@ impl BenchmarkRunner {
         Ok(())
     }
 
+    #[deprecated(since = "0.4.0", note = "Use hook-driven log action in before_step_starts")]
     fn log_resource_state(&self, phase: &str, model_id: &str) {
         if let Ok(info) = disk_monitor::check_disk_space(Path::new("/tmp")) {
             let available_mb = info.available_bytes / (1024 * 1024);
@@ -557,6 +559,7 @@ impl BenchmarkRunner {
     }
 
     /// Log step start to benchmark.log.
+    #[deprecated(since = "0.4.0", note = "Use hook-driven logging via before_step_starts trigger")]
     fn log_step_start(&self, model_id: &str, index: usize, total: usize, gpu_mode: &str) -> Result<()> {
         if let Some(ref output_dir) = self.config.output_dir {
             let log_path = Path::new(output_dir).join("logs/benchmark.log");
@@ -582,6 +585,7 @@ impl BenchmarkRunner {
     }
 
     /// Log step result to benchmark_results.yaml.
+    #[deprecated(since = "0.4.0", note = "Use hook-driven logging via after_step_succeeds trigger")]
     fn log_step_result(&self, result: &ModelBenchmarkResult) -> Result<()> {
         if let Some(ref output_dir) = self.config.output_dir {
             let yaml_path = Path::new(output_dir).join("output/benchmark_results.yaml");
@@ -622,6 +626,7 @@ impl BenchmarkRunner {
     }
 
     /// Log step error to benchmark-errors.log.
+    #[deprecated(since = "0.4.0", note = "Use hook-driven logging via after_step_fails trigger")]
     fn log_step_error(&self, model_id: &str, error: &str) -> Result<()> {
         if let Some(ref output_dir) = self.config.output_dir {
             let error_log_path = Path::new(output_dir).join("logs/benchmark-errors.log");
@@ -662,6 +667,7 @@ impl BenchmarkRunner {
     ///
     /// Creates a file named after the model (sanitized for filesystem) in the
     /// output directory. Contains every detail from the benchmark run.
+    #[deprecated(since = "0.4.0", note = "Use hook-driven save_to action")]
     fn write_per_model_report(&self, result: &ModelBenchmarkResult, suite_metadata: &str, wf_ctx: Option<&BenchmarkWorkflowConfig>) -> Result<()> {
         if let Some(ref output_dir) = self.config.output_dir {
             let safe_name = result.model_id
@@ -753,6 +759,7 @@ impl BenchmarkRunner {
     }
 
     /// Append model result to markdown chat log with timestamps.
+    #[deprecated(since = "0.4.0", note = "Use hook-driven append_to action")]
     fn append_chat_log_markdown(&self, result: &ModelBenchmarkResult, run_timestamp: &str) -> Result<()> {
         if let Some(ref output_dir) = self.config.output_dir {
             let chat_path = Path::new(output_dir).join("chat-log.md");
@@ -987,25 +994,7 @@ impl BenchmarkRunner {
 }
 
 impl BenchmarkRunner {
-    fn log_step_execution(&self, step: &WorkflowStep, results: &[ModelBenchmarkResult]) -> Result<()> {
-        if let Some(ref output_dir) = self.config.output_dir {
-            let log_path = Path::new(output_dir).join("logs/workflow_steps.log");
-            let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-            let timestamp = format!("unix_epoch_{}s", d.as_secs());
-            let line = format!("{} [STEP] id={} name={} models_benchmarked={}\n",
-                timestamp, step.step_id, step.step_name, results.len());
 
-            let mut file = fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_path)
-                .with_context(|| format!("Failed to open workflow steps log: {}", log_path.display()))?;
-
-            file.write_all(line.as_bytes())
-                .context("Failed to write to workflow_steps.log")?;
-        }
-        Ok(())
-    }
 
     fn copy_workflow_yaml(&self) -> Result<()> {
         if let Some(ref output_dir) = self.config.output_dir {
@@ -1690,6 +1679,11 @@ impl BenchmarkRunner {
 
         let workflow_ran = workflow_steps.as_ref().is_some_and(|s| !s.is_empty());
 
+        if !workflow_ran {
+            warn!("[DEPRECATED] Running benchmark without workflow YAML. Direct benchmark mode is deprecated. Use --workflow flag.");
+        }
+
+        #[allow(deprecated)]
         if !workflow_ran && compare_gpu_cpu {
             info!("[benchmark] Running in GPU/CPU comparison mode");
 
@@ -1810,6 +1804,7 @@ impl BenchmarkRunner {
                 }
             }
         } else if !workflow_ran {
+            #[allow(deprecated)]
             for (i, (model_id, model_path)) in models.iter().enumerate() {
                 self.log_step_start(model_id, i, models.len(), "gpu")?;
 
@@ -1878,6 +1873,7 @@ impl BenchmarkRunner {
         Ok(suite_result)
     }
 
+    #[deprecated(since = "0.4.0", note = "Use workflow-driven benchmark via --workflow flag")]
     #[allow(clippy::too_many_arguments)]
     async fn benchmark_single_model(&self, client: &LlamaHttpClient, model_id: &str, model_source_path: &str, gpu_mode: &str, prompts: &[String], max_tokens: usize, temperature: f64, top_p: f64, system_prompt: Option<String>) -> ModelBenchmarkResult {
         let server_model_id = model_id.strip_suffix(".gguf").unwrap_or(model_id);
