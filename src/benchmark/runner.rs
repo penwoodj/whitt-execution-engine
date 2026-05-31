@@ -1327,7 +1327,7 @@ impl BenchmarkRunner {
             None
         };
 
-        let model_result = self.benchmark_single_model(client, model_id, model_path, "gpu", std::slice::from_ref(prompt), step_max_tokens, step_temperature, top_p, system_prompt).await;
+        let model_result = self.run_model_inference(client, model_id, model_path, "gpu", std::slice::from_ref(prompt), step_max_tokens, step_temperature, top_p, system_prompt).await;
 
         let output_text = model_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
 
@@ -1871,6 +1871,233 @@ impl BenchmarkRunner {
         self.write_final_report(&suite_result)?;
 
         Ok(suite_result)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_model_inference(&self, client: &LlamaHttpClient, model_id: &str, model_source_path: &str, gpu_mode: &str, prompts: &[String], max_tokens: usize, temperature: f64, top_p: f64, system_prompt: Option<String>) -> ModelBenchmarkResult {
+        let server_model_id = model_id.strip_suffix(".gguf").unwrap_or(model_id);
+        let start = Instant::now();
+
+        let (resolved_path, file_size) = if let Some(ref models_dir) = self.config.models_dir {
+            let full_path = Path::new(models_dir).join(model_id);
+            if full_path.exists() {
+                let size = std::fs::metadata(&full_path).map(|m| m.len()).unwrap_or(0);
+                (full_path.display().to_string(), size)
+            } else {
+                (model_source_path.to_string(), 0)
+            }
+        } else {
+            let path = Path::new(model_source_path);
+            if path.exists() {
+                let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                (model_source_path.to_string(), size)
+            } else {
+                (model_source_path.to_string(), 0)
+            }
+        };
+
+        if let Ok(models) = client.list_models().await {
+            for m in models {
+                if m.status.value == "loaded" && m.id != server_model_id {
+                    let _ = client.unload_model(&m.id).await;
+                }
+            }
+        }
+
+        let load_start = Instant::now();
+        let load_result = timeout(self.config.model_load_timeout, client.load_model(server_model_id)).await;
+        let load_duration = load_start.elapsed();
+
+        let load_result = match load_result {
+            Ok(inner) => inner,
+            Err(_) => {
+                let msg = format!(
+                    "Model load timed out after {}s (limit: {}s). Possible GPU driver issue — aborting to prevent system crash.",
+                    load_duration.as_secs(),
+                    self.config.model_load_timeout.as_secs()
+                );
+                warn!("[benchmark] [{}] {}", model_id, msg);
+                return ModelBenchmarkResult {
+                    model_id: model_id.to_string(),
+                    model_path: resolved_path,
+                    file_size_bytes: file_size,
+                    load_duration,
+                    inference_results: Vec::new(),
+                    unload_duration: Duration::ZERO,
+                    total_duration: start.elapsed(),
+                    tokens_per_second: 0.0,
+                    avg_latency_ms: 0.0,
+                    p50_latency_ms: 0.0,
+                    p95_latency_ms: 0.0,
+                    p99_latency_ms: 0.0,
+                    error: Some(msg),
+                    gpu_mode: gpu_mode.to_string(),
+                    speedup_factor: None,
+                };
+            }
+        };
+
+        if let Err(e) = load_result {
+            return ModelBenchmarkResult {
+                model_id: model_id.to_string(),
+                model_path: resolved_path,
+                file_size_bytes: file_size,
+                load_duration,
+                inference_results: Vec::new(),
+                unload_duration: Duration::ZERO,
+                total_duration: start.elapsed(),
+                tokens_per_second: 0.0,
+                avg_latency_ms: 0.0,
+                p50_latency_ms: 0.0,
+                p95_latency_ms: 0.0,
+                p99_latency_ms: 0.0,
+                error: Some(format!("Load failed: {}", e)),
+                gpu_mode: gpu_mode.to_string(),
+                speedup_factor: None,
+            };
+        }
+
+        let mut inference_results = Vec::new();
+
+        for prompt in prompts {
+            const MAX_RETRIES: u32 = 3;
+            let mut last_error = None;
+
+            for attempt in 0..MAX_RETRIES {
+                let mut messages = Vec::with_capacity(2);
+                if let Some(ref sys) = system_prompt {
+                    messages.push(ChatMessage::system(sys.clone()));
+                }
+                messages.push(ChatMessage::user(prompt));
+
+                let request = ChatCompletionRequest {
+                    model: server_model_id.to_string(),
+                    messages,
+                    max_tokens: Some(max_tokens),
+                    temperature: Some(temperature as f32),
+                    top_p: Some(top_p as f32),
+                    stream: false,
+                    ..Default::default()
+                };
+
+                let inf_start = Instant::now();
+                match client.chat_completion(request).await {
+                    Ok(resp) => {
+                        let raw_response = resp.choices.first()
+                            .map(|c| c.message.content.clone())
+                            .unwrap_or_default();
+                        let cleaned_text = Self::clean_response_text(&raw_response);
+
+                        if cleaned_text != raw_response {
+                            info!("[benchmark] response post-processed for {} (attempt {}, {} chars → {} chars)",
+                                model_id, attempt + 1, raw_response.len(), cleaned_text.len());
+                        }
+
+                        if resp.usage.completion_tokens >= max_tokens {
+                            warn!("[benchmark] {} output truncated at {} tokens (hit max_tokens limit)",
+                                model_id, max_tokens);
+                        }
+
+                        let duration = inf_start.elapsed();
+                        let tps = if duration.as_secs_f64() > 0.0 {
+                            resp.usage.completion_tokens as f64 / duration.as_secs_f64()
+        } else {
+                            0.0
+        };
+
+                        inference_results.push(InferenceResult {
+                            prompt: prompt.clone(),
+                            prompt_tokens: resp.usage.prompt_tokens,
+                            completion_tokens: resp.usage.completion_tokens,
+                            total_tokens: resp.usage.total_tokens,
+                            duration,
+                            tokens_per_second: tps,
+                            response_text: raw_response,
+                        });
+                        last_error = None;
+                        break;
+                    }
+                    Err(e) => {
+                        last_error = Some(e.to_string());
+                        warn!("[benchmark] inference attempt {}/{} failed for {}: {}",
+                            attempt + 1, MAX_RETRIES, model_id, e);
+                        if attempt + 1 < MAX_RETRIES {
+                            sleep(Duration::from_secs(2u64.pow(attempt))).await;
+                        }
+                    }
+                }
+            }
+
+            if let Some(err) = last_error {
+                warn!("[benchmark] all {} inference attempts failed for {}: {}", MAX_RETRIES, model_id, err);
+                // TODO: Wire after_all_retries_exhausted trigger here with AfterAllRetriesExhaustedContext
+                // Context requires: step_name, total_attempts (MAX_RETRIES), last_error, last_error_type
+                // This is the retry loop exit point after all attempts fail.
+                inference_results.push(InferenceResult {
+                    prompt: prompt.clone(),
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0,
+                    duration: Duration::ZERO,
+                    tokens_per_second: 0.0,
+                    response_text: format!("ERROR: All {} attempts failed: {}", MAX_RETRIES, err),
+                });
+            }
+        }
+
+        let unload_start = Instant::now();
+        let _ = client.unload_model(server_model_id).await;
+        let unload_duration = unload_start.elapsed();
+
+        info!("[benchmark] [{}] cooldown after unload: sleeping {}s", model_id, self.config.cooldown_after_unload.as_secs());
+        sleep(self.config.cooldown_after_unload).await;
+        info!("[benchmark] [{}] cooldown complete", model_id);
+
+        let total_duration = start.elapsed();
+        let completion_tokens_sum: usize = inference_results.iter()
+            .map(|r| r.completion_tokens)
+            .sum();
+        let duration_sum: f64 = inference_results.iter()
+            .map(|r| r.duration.as_secs_f64())
+            .sum();
+        let tps = if duration_sum > 0.0 {
+            completion_tokens_sum as f64 / duration_sum
+        } else {
+            0.0
+        };
+
+        let mut latencies: Vec<f64> = inference_results.iter()
+            .map(|r| r.duration.as_secs_f64() * 1000.0)
+            .collect();
+        latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let avg_ms = if latencies.is_empty() {
+            0.0
+        } else {
+            latencies.iter().sum::<f64>() / latencies.len() as f64
+        };
+
+        let p50 = percentile(&latencies, 0.50);
+        let p95 = percentile(&latencies, 0.95);
+        let p99 = percentile(&latencies, 0.99);
+
+        ModelBenchmarkResult {
+            model_id: model_id.to_string(),
+            model_path: resolved_path,
+            file_size_bytes: file_size,
+            load_duration,
+            inference_results,
+            unload_duration,
+            total_duration,
+            tokens_per_second: tps,
+            avg_latency_ms: avg_ms,
+            p50_latency_ms: p50,
+            p95_latency_ms: p95,
+            p99_latency_ms: p99,
+            error: None,
+            gpu_mode: gpu_mode.to_string(),
+            speedup_factor: None,
+        }
     }
 
     #[deprecated(since = "0.4.0", note = "Use workflow-driven benchmark via --workflow flag")]
