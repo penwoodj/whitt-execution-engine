@@ -1,0 +1,66 @@
+workflow_id: gwt_routing_live_test
+name: "GWT Routing Live Test"
+description: "Live test: quality_score populated, GWT routes to step_success or step_retry"
+version: "2.0.0"
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  "test-model":
+    name: "Qwen2.5-0.5B-Instruct-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: true
+
+agentic_workflow:
+  steps:
+    step_1_generate:
+      generative_entity: "${models.test-model}"
+      prompt: "Say hello in exactly 5 words."
+      model_overrides:
+        max_tokens: 50
+        temperature: 0.3
+      when:
+        after_step_succeeds:
+          - log:
+              to_file_path: "./tmp-live-system-testing/outputs/gwt-step1.log"
+              event_fields: [step_name, quality_score, token_count]
+          - gwt:
+              - given: "quality_score >= 0.5"
+                then: step_success
+              - given: "true"
+                then: step_retry
+
+    step_retry:
+      generative_entity: "${models.test-model}"
+      prompt: "Try again. Say hello."
+      model_overrides:
+        max_tokens: 30
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - log:
+              to_file_path: "./tmp-live-system-testing/outputs/gwt-retry.log"
+              event_fields: [step_name, quality_score]
+
+    step_success:
+      generative_entity: "${models.test-model}"
+      prompt: "Confirm success in 3 words."
+      model_overrides:
+        max_tokens: 20
+      when:
+        after_step_succeeds:
+          - save_to: "./tmp-live-system-testing/outputs/gwt-success.txt"
+          - log:
+              to_file_path: "./tmp-live-system-testing/outputs/gwt-success.log"
+              event_fields: [step_name, output, quality_score]
