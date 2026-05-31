@@ -10,7 +10,7 @@ use crate::workflow::hooks::context::{
     AfterLoopIterationFailsContext, OnRequiresFailedContext, StepType,
 };
 use crate::workflow::HookAction;
-use super::{BenchmarkSuiteResult, ModelBenchmarkResult, InferenceResult};
+use super::{BenchmarkSuiteResult, ModelBenchmarkResult, InferenceResult, WorkflowStepResult};
 use anyhow::{Context, Result};
 use regex::Regex;
 use std::fs;
@@ -1216,7 +1216,7 @@ impl BenchmarkRunner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn execute_workflow_step(&mut self, step: &WorkflowStep, client: &LlamaHttpClient, model: &(String, String), max_tokens: usize, temperature: f64, top_p: f64, variables: Option<&serde_json::Map<String, serde_json::Value>>) -> Result<ModelBenchmarkResult> {
+    async fn execute_workflow_step(&mut self, step: &WorkflowStep, client: &LlamaHttpClient, model: &(String, String), max_tokens: usize, temperature: f64, top_p: f64, variables: Option<&serde_json::Map<String, serde_json::Value>>) -> Result<WorkflowStepResult> {
         let (model_id, model_path) = model;
         let default_prompt = String::new();
         let prompt = step.prompt.as_ref().unwrap_or(&default_prompt);
@@ -1229,6 +1229,8 @@ impl BenchmarkRunner {
             .unwrap_or(temperature);
 
         info!("[benchmark] executing step {} with model {}", step.step_id, model_id);
+
+        let mut route_to: Option<Vec<String>> = None;
 
         // Build workflow variables map for hooks
         let workflow_variables = if let Some(vars) = variables {
@@ -1250,22 +1252,48 @@ impl BenchmarkRunner {
         match self.execute_hooks_for_trigger(&step.when, "before_step_starts", &before_context) {
             Ok(HookResult::SkipStep) => {
                 info!("[benchmark] step {} skipped by before_step_starts hook", step.step_id);
-                return Ok(ModelBenchmarkResult {
-                    model_id: model_id.to_string(),
-                    model_path: model_path.clone(),
-                    file_size_bytes: 0,
-                    load_duration: Duration::ZERO,
-                    inference_results: vec![],
-                    unload_duration: Duration::ZERO,
-                    total_duration: Duration::ZERO,
-                    tokens_per_second: 0.0,
-                    avg_latency_ms: 0.0,
-                    p50_latency_ms: 0.0,
-                    p95_latency_ms: 0.0,
-                    p99_latency_ms: 0.0,
-                    error: Some("Skipped by hook".to_string()),
-                    gpu_mode: "gpu".to_string(),
-                    speedup_factor: None,
+                return Ok(WorkflowStepResult {
+                    benchmark_result: ModelBenchmarkResult {
+                        model_id: model_id.to_string(),
+                        model_path: model_path.clone(),
+                        file_size_bytes: 0,
+                        load_duration: Duration::ZERO,
+                        inference_results: vec![],
+                        unload_duration: Duration::ZERO,
+                        total_duration: Duration::ZERO,
+                        tokens_per_second: 0.0,
+                        avg_latency_ms: 0.0,
+                        p50_latency_ms: 0.0,
+                        p95_latency_ms: 0.0,
+                        p99_latency_ms: 0.0,
+                        error: Some("Skipped by hook".to_string()),
+                        gpu_mode: "gpu".to_string(),
+                        speedup_factor: None,
+                    },
+                    route_to: None,
+                });
+            }
+            Ok(HookResult::RouteTo { targets }) => {
+                info!("[benchmark] step {} routed to {:?} by before_step_starts hook", step.step_id, targets);
+                return Ok(WorkflowStepResult {
+                    benchmark_result: ModelBenchmarkResult {
+                        model_id: model_id.to_string(),
+                        model_path: model_path.clone(),
+                        file_size_bytes: 0,
+                        load_duration: Duration::ZERO,
+                        inference_results: vec![],
+                        unload_duration: Duration::ZERO,
+                        total_duration: Duration::ZERO,
+                        tokens_per_second: 0.0,
+                        avg_latency_ms: 0.0,
+                        p50_latency_ms: 0.0,
+                        p95_latency_ms: 0.0,
+                        p99_latency_ms: 0.0,
+                        error: Some("Routed by hook".to_string()),
+                        gpu_mode: "gpu".to_string(),
+                        speedup_factor: None,
+                    },
+                    route_to: Some(targets),
                 });
             }
             Ok(HookResult::Fail { reason }) => {
@@ -1289,22 +1317,48 @@ impl BenchmarkRunner {
             }
             Ok(HookResult::SkipStep) => {
                 info!("[benchmark] step {} skipped by after_step_starts hook", step.step_id);
-                return Ok(ModelBenchmarkResult {
-                    model_id: model_id.to_string(),
-                    model_path: model_path.clone(),
-                    file_size_bytes: 0,
-                    load_duration: Duration::ZERO,
-                    inference_results: vec![],
-                    unload_duration: Duration::ZERO,
-                    total_duration: Duration::ZERO,
-                    tokens_per_second: 0.0,
-                    avg_latency_ms: 0.0,
-                    p50_latency_ms: 0.0,
-                    p95_latency_ms: 0.0,
-                    p99_latency_ms: 0.0,
-                    error: Some("Skipped by hook".to_string()),
-                    gpu_mode: "gpu".to_string(),
-                    speedup_factor: None,
+                return Ok(WorkflowStepResult {
+                    benchmark_result: ModelBenchmarkResult {
+                        model_id: model_id.to_string(),
+                        model_path: model_path.clone(),
+                        file_size_bytes: 0,
+                        load_duration: Duration::ZERO,
+                        inference_results: vec![],
+                        unload_duration: Duration::ZERO,
+                        total_duration: Duration::ZERO,
+                        tokens_per_second: 0.0,
+                        avg_latency_ms: 0.0,
+                        p50_latency_ms: 0.0,
+                        p95_latency_ms: 0.0,
+                        p99_latency_ms: 0.0,
+                        error: Some("Skipped by hook".to_string()),
+                        gpu_mode: "gpu".to_string(),
+                        speedup_factor: None,
+                    },
+                    route_to: None,
+                });
+            }
+            Ok(HookResult::RouteTo { targets }) => {
+                info!("[benchmark] step {} routed to {:?} by after_step_starts hook", step.step_id, targets);
+                return Ok(WorkflowStepResult {
+                    benchmark_result: ModelBenchmarkResult {
+                        model_id: model_id.to_string(),
+                        model_path: model_path.clone(),
+                        file_size_bytes: 0,
+                        load_duration: Duration::ZERO,
+                        inference_results: vec![],
+                        unload_duration: Duration::ZERO,
+                        total_duration: Duration::ZERO,
+                        tokens_per_second: 0.0,
+                        avg_latency_ms: 0.0,
+                        p50_latency_ms: 0.0,
+                        p95_latency_ms: 0.0,
+                        p99_latency_ms: 0.0,
+                        error: Some("Routed by hook".to_string()),
+                        gpu_mode: "gpu".to_string(),
+                        speedup_factor: None,
+                    },
+                    route_to: Some(targets),
                 });
             }
             Ok(_) => {}
@@ -1348,6 +1402,10 @@ impl BenchmarkRunner {
                 Ok(HookResult::Fail { reason }) => {
                     warn!("[benchmark] after_step_fails hook failed: {}", reason);
                 }
+                Ok(HookResult::RouteTo { targets }) => {
+                    info!("[benchmark] step {} routed to {:?} by after_step_fails hook", step.step_id, targets);
+                    route_to = Some(targets);
+                }
                 Ok(_) => {}
                 Err(e) => {
                     warn!("[benchmark] after_step_fails hook error: {}", e);
@@ -1365,6 +1423,10 @@ impl BenchmarkRunner {
                     }
                 );
                 match self.execute_hooks_for_trigger(&step.when, "after_all_retries_exhausted", &exhausted_context) {
+                    Ok(HookResult::RouteTo { targets }) => {
+                        info!("[benchmark] step {} routed to {:?} by after_all_retries_exhausted hook", step.step_id, targets);
+                        route_to = Some(targets);
+                    }
                     Ok(_) => {}
                     Err(e) => {
                         warn!("[benchmark] after_all_retries_exhausted hook error: {}", e);
@@ -1388,6 +1450,10 @@ impl BenchmarkRunner {
                 Ok(HookResult::Fail { reason }) => {
                     warn!("[benchmark] after_step_succeeds hook failed: {}", reason);
                 }
+                Ok(HookResult::RouteTo { targets }) => {
+                    info!("[benchmark] step {} routed to {:?} by after_step_succeeds hook", step.step_id, targets);
+                    route_to = Some(targets);
+                }
                 Ok(_) => {}
                 Err(e) => {
                     warn!("[benchmark] after_step_succeeds hook error: {}", e);
@@ -1395,7 +1461,10 @@ impl BenchmarkRunner {
             }
         }
 
-        Ok(model_result)
+        Ok(WorkflowStepResult {
+            benchmark_result: model_result,
+            route_to,
+        })
     }
 
     pub async fn run(&mut self) -> Result<BenchmarkSuiteResult> {
@@ -1520,7 +1589,19 @@ impl BenchmarkRunner {
         if let Some(steps) = &workflow_steps {
             info!("[benchmark] loaded {} workflow steps from YAML", steps.len());
 
-            for step in steps {
+            let step_index: std::collections::HashMap<String, usize> = steps.iter()
+                .enumerate()
+                .map(|(i, s)| (s.step_id.clone(), i))
+                .collect();
+
+            let max_loop_iterations = 100;
+            let mut current_index: usize = 0;
+            let mut loop_count: usize = 0;
+
+            while current_index < steps.len() && loop_count < max_loop_iterations {
+                let step = &steps[current_index];
+                loop_count += 1;
+
                 if !step.requires.is_empty() {
                     let missing_deps: Vec<String> = step.requires.iter()
                         .filter(|dep| !step_outputs.contains_key(*dep))
@@ -1537,6 +1618,7 @@ impl BenchmarkRunner {
                             }
                         );
                         let _ = self.execute_hooks_for_trigger(&step.when, "on_requires_failed", &requires_context);
+                        current_index += 1;
                         continue;
                     }
                 }
@@ -1545,6 +1627,8 @@ impl BenchmarkRunner {
 
                 if let Some(ref var_sets) = variable_sets {
                     info!("[benchmark] step {} has {} iteration values", step.step_id, var_sets.len());
+
+                    let mut routed: Option<Vec<String>> = None;
 
                     for (iter_idx, vars) in var_sets.iter().enumerate() {
                         let iteration = iter_idx + 1;
@@ -1584,8 +1668,8 @@ impl BenchmarkRunner {
                                     r#loop: step.r#loop.clone(),
                                 };
 
-                                let result = self.execute_workflow_step(&resolved_step, &client, &model, max_tokens, temperature, top_p, Some(vars)).await?;
-                                results.push(result);
+                                let step_result = self.execute_workflow_step(&resolved_step, &client, &model, max_tokens, temperature, top_p, Some(vars)).await?;
+                                results.push(step_result.benchmark_result.clone());
 
                                 if let Some(ref last_result) = results.last() {
                                     if let Some(ref err) = last_result.error {
@@ -1602,12 +1686,30 @@ impl BenchmarkRunner {
                                     let output_text = last_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
                                     step_outputs.insert(step.step_id.clone(), output_text);
                                 }
+
+                                if let Some(ref targets) = step_result.route_to {
+                                    routed = Some(targets.clone());
+                                    info!("[benchmark] routing from step {} to {:?} (iteration #{})",
+                                        step.step_id, targets, loop_count);
+                                    break;
+                                }
                             } else {
                                 warn!("[benchmark] iteration {}: could not resolve model for step {}: {}",
                                     iteration, step.step_id, model_name);
                             }
                         }
                     }
+
+                    if let Some(ref targets) = routed {
+                        if let Some(&target_idx) = step_index.get(&targets[0]) {
+                            current_index = target_idx;
+                            continue;
+                        } else {
+                            warn!("[benchmark] route_to target '{}' not found", targets[0]);
+                        }
+                    }
+
+                    current_index += 1;
                 } else {
                     if let Some(ref ge) = step.generative_entity {
                         let model_key = ge.strip_prefix("${models.")
@@ -1638,15 +1740,29 @@ impl BenchmarkRunner {
                                 r#loop: step.r#loop.clone(),
                             };
 
-                            let result = self.execute_workflow_step(&resolved_step, &client, &model, max_tokens, temperature, top_p, None).await?;
-                            results.push(result);
+                            let step_result = self.execute_workflow_step(&resolved_step, &client, &model, max_tokens, temperature, top_p, None).await?;
+                            results.push(step_result.benchmark_result.clone());
 
                             if let Some(ref last_result) = results.last() {
                                 let output_text = last_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
                                 step_outputs.insert(step.step_id.clone(), output_text);
                             }
+
+                            if let Some(ref targets) = step_result.route_to {
+                                if let Some(&target_idx) = step_index.get(&targets[0]) {
+                                    info!("[benchmark] routing from step {} to {} (iteration #{})",
+                                        step.step_id, targets[0], loop_count);
+                                    current_index = target_idx;
+                                    continue;
+                                } else {
+                                    warn!("[benchmark] route_to target '{}' not found", targets[0]);
+                                }
+                            }
+
+                            current_index += 1;
                         } else {
                             warn!("[benchmark] could not resolve model for step {}: {}", step.step_id, model_name);
+                            current_index += 1;
                         }
                     } else if step.prompt.is_some() {
                         if let Some(model) = models.first() {
@@ -1664,16 +1780,37 @@ impl BenchmarkRunner {
                                 r#loop: step.r#loop.clone(),
                             };
 
-                            let result = self.execute_workflow_step(&resolved_step, &client, model, max_tokens, temperature, top_p, None).await?;
-                            results.push(result);
+                            let step_result = self.execute_workflow_step(&resolved_step, &client, model, max_tokens, temperature, top_p, None).await?;
+                            results.push(step_result.benchmark_result.clone());
 
                             if let Some(ref last_result) = results.last() {
                                 let output_text = last_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
                                 step_outputs.insert(step.step_id.clone(), output_text);
                             }
+
+                            if let Some(ref targets) = step_result.route_to {
+                                if let Some(&target_idx) = step_index.get(&targets[0]) {
+                                    info!("[benchmark] routing from step {} to {} (iteration #{})",
+                                        step.step_id, targets[0], loop_count);
+                                    current_index = target_idx;
+                                    continue;
+                                } else {
+                                    warn!("[benchmark] route_to target '{}' not found", targets[0]);
+                                }
+                            }
+
+                            current_index += 1;
+                        } else {
+                            current_index += 1;
                         }
+                    } else {
+                        current_index += 1;
                     }
                 }
+            }
+
+            if loop_count >= max_loop_iterations {
+                warn!("[benchmark] workflow loop exceeded {} iterations, stopping", max_loop_iterations);
             }
         }
 

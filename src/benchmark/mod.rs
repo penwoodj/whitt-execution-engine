@@ -55,6 +55,15 @@ pub struct BenchmarkSuiteResult {
     pub results: Vec<ModelBenchmarkResult>,
 }
 
+/// Result of executing a single workflow step, including routing information.
+#[derive(Debug, Clone)]
+pub struct WorkflowStepResult {
+    /// The benchmark result from model inference
+    pub benchmark_result: ModelBenchmarkResult,
+    /// Routing directive from hooks (step IDs to jump to next)
+    pub route_to: Option<Vec<String>>,
+}
+
 impl BenchmarkSuiteResult {
     pub fn to_csv(&self) -> String {
         let mut csv = String::new();
