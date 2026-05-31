@@ -1,0 +1,138 @@
+# ═══════════════════════════════════════════════════════════════════
+# 3-Model Validation Loop Workflow
+# Schema-compliant per docs/schema/unified-workflow-schema.yml v2.0
+# Demonstrates multi-model coordination with GWT-based routing loop
+# ═══════════════════════════════════════════════════════════════════
+
+workflow_id: three_model_validation_loop
+name: "3-Model Validation Loop"
+description: "Multi-step workflow using 3 models (ministral-3b, qwen3-4b, qwen2.5-coder-3b) with validation loop"
+version: "1.0.0"
+author: "Whitt Execution Engine"
+tags: [validation, multi-model, loop]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+# ── PROVIDERS ───────────────────────────────────────────────────
+providers:
+  llama_cpp_with_vulkan:                               # schema line 28
+    config:                                             # schema line 29
+      host: localhost                                   # schema line 30
+      port: 8080                                        # schema line 31
+
+# ── MODELS ───────────────────────────────────────────────────────
+models:
+  "ministral-3b":                                       # schema line 68
+    name: "Ministral-3-3B-Instruct-2512-Q4_K_M"
+    host:                                               # schema line 70
+      type: llama_cpp_with_vulkan                       # schema line 71
+
+  "qwen3-4b":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+
+  "qwen2.5-coder-3b":
+    name: "Qwen2.5-Coder-3B-Instruct-Q8_0"
+    host:
+      type: llama_cpp_with_vulkan
+
+# ── WORKFLOW EXECUTION STRATEGY ────────────────────────────────
+workflow_execution_strategy:                             # schema line 503
+  load_unload: one_at_a_time                             # schema line 506
+  memory:
+    model_lifecycle:
+      unload_unused: true                               # schema line 521
+
+# ── AGENTIC WORKFLOW ───────────────────────────────────────────
+agentic_workflow:                                        # schema line 196
+
+  steps:                                                # schema line 293
+    # Step 1: Analyze code with ministral-3b
+    analyze_code:
+      generative_entity: "${models.ministral-3b}"       # schema line 297
+      prompt: |
+        Analyze the following Python code for quality, bugs, and improvement opportunities:
+        {{inputs.code}}
+
+        Provide structured output with:
+        - quality_score: 0-10
+        - issues: list of problems found
+        - suggestions: list of improvement recommendations
+      when:                                               # schema line 314
+        after_step_succeeds:                            # schema line 323
+          - append_to: "./docs/benchmarks/outputs/validation-loop/analysis.log"
+          - log:                                        # schema line 275
+              to_file_path: "./docs/benchmarks/outputs/validation-loop/workflow.log"
+              event_fields: [step_name, duration_ms]
+
+    # Step 2: Enhance code with qwen3-4b (depends on step 1)
+    enhance_code:
+      generative_entity: "${models.qwen3-4b}"
+      prompt: |
+        Based on the following analysis, rewrite and enhance the Python code to fix issues and implement suggestions:
+
+        Analysis:
+        {{step.analyze_code.output}}
+
+        Original code:
+        {{inputs.code}}
+
+        Output ONLY the enhanced Python code, no explanations.
+      depends_on: [analyze_code]                         # schema line 312
+      when:
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/validation-loop/enhanced_code.py"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/validation-loop/workflow.log"
+              event_fields: [step_name, duration_ms]
+
+    # Step 3: Validate output with qwen2.5-coder-3b (depends on step 2)
+    validate_output:
+      generative_entity: "${models.qwen2.5-coder-3b}"
+      prompt: |
+        Validate the following enhanced Python code:
+
+        Enhanced code:
+        {{step.enhance_code.output}}
+
+        Rate the code quality on a scale of 0-10 based on:
+        - Correctness: does it work as intended?
+        - Readability: is it well-structured and documented?
+        - Performance: is it efficient?
+        - Best practices: does it follow Python best practices?
+
+        Output format:
+        - If score >= 7: "PASS: [score]"
+        - If score < 7: "FAIL: [score]"
+        Output ONLY one line with PASS or FAIL.
+      depends_on: [enhance_code]
+      when:
+        after_step_succeeds:
+          - gwt:                                       # schema line 329 - GWT for conditional routing
+              - given: "quality_score >= 0.7"           # quality threshold check → pass
+                then: { route_to: save_and_complete }  # schema line 771 - route to final step
+              - given: "true"                           # schema line 770 - default: loop back to analyze
+                then: { route_to: analyze_code }
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/validation-loop/workflow.log"
+              event_fields: [step_name, output, duration_ms]
+
+    # Step 4: Save final report and complete (uses ministral-3b)
+    save_and_complete:
+      generative_entity: "${models.ministral-3b}"
+      prompt: |
+        Generate a final validation report summarizing the completed workflow:
+        - Original code analysis
+        - Enhancements made
+        - Final validation result
+
+        Enhanced code:
+        {{step.enhance_code.output}}
+      when:
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/validation-loop/final_report.txt"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/validation-loop/workflow.log"
+              event_fields: [step_name, duration_ms]
+              level: info
