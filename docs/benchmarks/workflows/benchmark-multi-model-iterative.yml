@@ -1,13 +1,21 @@
 # ═══════════════════════════════════════════════════════════════════
-# ADR Generation Benchmark — 1 Model, Iterative Refinement
+# ADR Generation Benchmark — Multi-Model Iterative Refinement
 # Schema-compliant per docs/schema/unified-workflow-schema.yml v2.0
 #
-# Unlike the multi-model benchmarks that test one-shot generation
-# across many models, this benchmark tests whether a single model
-# can produce a better result by iterating through broken-down tasks.
+# Unlike the single-model benchmarks that test one-shot generation,
+# this benchmark tests whether using the BEST model for each step
+# produces better results than using one model for all steps.
 #
 # Each step refines the previous step's output string, progressively
 # expanding the ADR JSON from skeleton → full → validated.
+#
+# Model Assignment Strategy:
+#   step_1 (skeleton):    Qwen3-4B      — reliable structured output, no markdown wrapping
+#   step_2 (context):     Qwen3-4B      — same as step 1, Ministral wraps JSON in markdown fences
+#   step_3 (decision):    Qwen3-4B-Thinking — reasoning for architecture decisions (slow but thorough)
+#   step_4 (consequences): Hermes-7B    — large model for deep risk analysis
+#   step_5 (validation):  Hermes-7B     — best model for quality gate
+#   step_6 (quality):     Qwen2.5-0.5B  — tiny, just generates a score JSON
 #
 # Config:
 #   max_tokens: 50000 (per-step via model_overrides)
@@ -31,12 +39,12 @@
 #   step_6_save_final       (generative) → quality report
 # ═══════════════════════════════════════════════════════════════════
 
-workflow_id: adr_benchmark_1_model_iterative
-name: "ADR Generation Benchmark - 1 Model Iterative Refinement"
-description: "Generate JSON parsable ADR for vanilla JS TODO app through iterative step-by-step refinement using a single model"
+workflow_id: adr_benchmark_multi_model_iterative
+name: "ADR Generation Benchmark - Multi-Model Iterative (Best Model Per Step)"
+description: "Generate JSON parsable ADR for vanilla JS TODO app through iterative step-by-step refinement, using the best-suited model for each step's task"
 version: "2.0.0"
 author: "Whitt Execution Engine"
-tags: [benchmark, adr, iterative]
+tags: [benchmark, adr, iterative, multi-model]
 min_schema_version: "2.0.0"
 schema_version: "2.0.0"
 
@@ -49,11 +57,32 @@ providers:
     hosting:                                            # schema line 33
       gpu_layers: 999                                   # schema line 35 — 999=all layers GPU offload (sets LLAMA_ARG_N_GPU_LAYERS)
 
-# ── MODEL ───────────────────────────────────────────────────────
-# TODO: Change model name to whichever wins the 50-model benchmark.
-# Default: Qwen3-4B — solid mid-range instruct model.
+# ── MODELS ─────────────────────────────────────────────────────
+# Multi-model strategy: each step uses the best-suited model.
+# - Reliable skeleton generation with Qwen3-4B (no markdown wrapping)
+# - Context expansion with Qwen3-4B (Ministral unreliable for JSON)
+# - Architecture decisions with Qwen3-4B-Thinking (slow but thorough)
+# - Risk analysis + validation with Hermes-7B (best quality)
+# - Quality report with tiny Qwen2.5-0.5B
 models:
-  "target-model":                                       # schema line 68
+  "skeleton-model":                                     # schema line 68
+    name: "Ministral-3-3B-Instruct-2512-Q4_K_M"
+    host:                                               # schema line 70
+      type: llama_cpp_with_vulkan                       # schema line 71
+    execution:                                          # schema line 96
+      timeout:
+        load_into_memory: "20s"
+        time_to_first_response: "8s"
+        total_time_to_response: "60s"
+      max_turns: 3
+      stop_on_tool_failure: false
+      accumulate_tool_results: false
+    tools:                                              # schema line 109
+      default_permissions:
+        file_read: true                                 # schema line 112
+        file_write: true                                # schema line 113
+
+  "context-model":                                      # schema line 68
     name: "Qwen3-4B-Instruct-2507-Q4_K_M"
     host:                                               # schema line 70
       type: llama_cpp_with_vulkan                       # schema line 71
@@ -62,6 +91,57 @@ models:
         load_into_memory: "30s"
         time_to_first_response: "10s"
         total_time_to_response: "120s"
+      max_turns: 3
+      stop_on_tool_failure: false
+      accumulate_tool_results: false
+    tools:                                              # schema line 109
+      default_permissions:
+        file_read: true                                 # schema line 112
+        file_write: true                                # schema line 113
+
+  "reasoning-model":                                    # schema line 68
+    name: "Qwen3-4B-Thinking-2507-Q4_K_M"
+    host:                                               # schema line 70
+      type: llama_cpp_with_vulkan                       # schema line 71
+    execution:                                          # schema line 96
+      timeout:
+        load_into_memory: "30s"
+        time_to_first_response: "15s"
+        total_time_to_response: "180s"
+      max_turns: 3
+      stop_on_tool_failure: false
+      accumulate_tool_results: false
+    tools:                                              # schema line 109
+      default_permissions:
+        file_read: true                                 # schema line 112
+        file_write: true                                # schema line 113
+
+  "quality-model":                                      # schema line 68
+    name: "Hermes-2-Pro-Mistral-7B.Q4_K_M"
+    host:                                               # schema line 70
+      type: llama_cpp_with_vulkan                       # schema line 71
+    execution:                                          # schema line 96
+      timeout:
+        load_into_memory: "40s"
+        time_to_first_response: "15s"
+        total_time_to_response: "180s"
+      max_turns: 3
+      stop_on_tool_failure: false
+      accumulate_tool_results: false
+    tools:                                              # schema line 109
+      default_permissions:
+        file_read: true                                 # schema line 112
+        file_write: true                                # schema line 113
+
+  "reporter-model":                                     # schema line 68
+    name: "Qwen2.5-0.5B-Instruct-Q4_K_M"
+    host:                                               # schema line 70
+      type: llama_cpp_with_vulkan                       # schema line 71
+    execution:                                          # schema line 96
+      timeout:
+        load_into_memory: "15s"
+        time_to_first_response: "5s"
+        total_time_to_response: "30s"
       max_turns: 3
       stop_on_tool_failure: false
       accumulate_tool_results: false
@@ -96,7 +176,7 @@ agentic_workflow:                                        # schema line 196
 
     # ── STEP 1: Generate minimal ADR skeleton ───────────────────
     step_1_skeleton:
-      generative_entity: "${models.target-model}"       # schema line 297
+      generative_entity: "${models.context-model}"       # schema line 297 — Qwen3-4B for reliable JSON (no markdown wrapping)
       prompt: |                                         # schema line 298
         Generate a minimal JSON skeleton for an Architecture Decision Record (ADR) about building a vanilla JavaScript TODO application. No frameworks. Just HTML, JS, CSS files.
 
@@ -125,33 +205,33 @@ agentic_workflow:                                        # schema line 196
       when:                                             # schema line 314
         before_step_starts:                             # schema line 319
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, model_name, step_type]
         after_step_succeeds:                            # schema line 323
           - gwt:                                        # Quality gate: is output valid JSON?
               - given: "json_parsable == true"
                 then: "step_2_expand_context"           # Skip remaining, jump to next step
-          - bookmark: "./docs/benchmarks/outputs/checkpoints/step1-skeleton.json"  # Checkpoint for recovery
-          - save_to: "./docs/benchmarks/outputs/output/iterative-step1-skeleton.json"  # schema line 476
+          - bookmark: "./docs/benchmarks/outputs/checkpoints/multi-iterative-step1-skeleton.json"  # Checkpoint for recovery
+          - save_to: "./docs/benchmarks/outputs/output/multi-iterative-step1-skeleton.json"  # schema line 476
           - shell:
               command: "free"
               args: ["-h"]
               fail_on_error: false
           - log:                                        # schema line 275
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, duration_ms, json_parsable, token_count]
         after_step_fails:                               # schema line 328
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, error_type, error_message, model_name]
         after_all_retries_exhausted:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, total_attempts, last_error, last_error_type]
 
     # ── STEP 2: Expand context section ──────────────────────────
     step_2_expand_context:
-      generative_entity: "${models.target-model}"
+      generative_entity: "${models.context-model}"       # schema line 297 — Qwen3-4B (Ministral wraps JSON in markdown)
       depends_on: [step_1_skeleton]
       prompt: |
         You are REFINING a JSON Architecture Decision Record. You will receive a JSON string and expand ONE section, then output the complete JSON.
@@ -177,37 +257,37 @@ agentic_workflow:                                        # schema line 196
       when:
         before_step_starts:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, model_name, step_type]
         after_step_succeeds:
           - gwt:
               - given: "json_parsable == true"
                 then: "step_3_expand_decision"
-          - bookmark: "./docs/benchmarks/outputs/checkpoints/step2-context.json"
-          - save_to: "./docs/benchmarks/outputs/output/iterative-step2-context.json"
+          - bookmark: "./docs/benchmarks/outputs/checkpoints/multi-iterative-step2-context.json"
+          - save_to: "./docs/benchmarks/outputs/output/multi-iterative-step2-context.json"
           - shell:
               command: "free"
               args: ["-h"]
               fail_on_error: false
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, duration_ms, json_parsable, token_count]
         after_step_fails:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, error_type, error_message, model_name]
         after_all_retries_exhausted:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, total_attempts, last_error, last_error_type]
         on_requires_failed:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [failed_step, reason]
 
     # ── STEP 3: Expand decision + technical_spec sections ───────
     step_3_expand_decision:
-      generative_entity: "${models.target-model}"
+      generative_entity: "${models.reasoning-model}"      # schema line 297 — Qwen3-4B-Thinking for architecture decisions
       depends_on: [step_2_expand_context]
       prompt: |
         You are REFINING a JSON Architecture Decision Record. You will receive a JSON string and expand TWO sections, then output the complete JSON.
@@ -239,37 +319,37 @@ agentic_workflow:                                        # schema line 196
       when:
         before_step_starts:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, model_name, step_type]
         after_step_succeeds:
           - gwt:
               - given: "json_parsable == true"
                 then: "step_4_expand_consequences"
-          - bookmark: "./docs/benchmarks/outputs/checkpoints/step3-decision.json"
-          - save_to: "./docs/benchmarks/outputs/output/iterative-step3-decision.json"
+          - bookmark: "./docs/benchmarks/outputs/checkpoints/multi-iterative-step3-decision.json"
+          - save_to: "./docs/benchmarks/outputs/output/multi-iterative-step3-decision.json"
           - shell:
               command: "free"
               args: ["-h"]
               fail_on_error: false
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, duration_ms, json_parsable, token_count]
         after_step_fails:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, error_type, error_message, model_name]
         after_all_retries_exhausted:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, total_attempts, last_error, last_error_type]
         on_requires_failed:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [failed_step, reason]
 
     # ── STEP 4: Expand consequences section ─────────────────────
     step_4_expand_consequences:
-      generative_entity: "${models.target-model}"
+      generative_entity: "${models.quality-model}"       # schema line 297 — Hermes-7B for deep risk analysis
       depends_on: [step_3_expand_decision]
       prompt: |
         You are REFINING a JSON Architecture Decision Record. You will receive a JSON string and expand ONE section, then output the complete JSON.
@@ -294,39 +374,39 @@ agentic_workflow:                                        # schema line 196
       when:
         before_step_starts:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, model_name, step_type]
         after_step_succeeds:
           - gwt:
               - given: "json_parsable == true"
                 then: "step_5_validate_clean"
-          - bookmark: "./docs/benchmarks/outputs/checkpoints/step4-consequences.json"
-          - save_to: "./docs/benchmarks/outputs/output/iterative-step4-consequences.json"
+          - bookmark: "./docs/benchmarks/outputs/checkpoints/multi-iterative-step4-consequences.json"
+          - save_to: "./docs/benchmarks/outputs/output/multi-iterative-step4-consequences.json"
           - shell:
               command: "free"
               args: ["-h"]
               fail_on_error: false
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, duration_ms, json_parsable, token_count]
         after_step_fails:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, error_type, error_message, model_name]
         after_all_retries_exhausted:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, total_attempts, last_error, last_error_type]
         on_requires_failed:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [failed_step, reason]
 
     # ── STEP 5: Final validation, cleanup, and enhancement ───────
     # This is the critical quality gate step. Not just validation —
     # this step MUST enhance the technical_spec and fill gaps.
     step_5_validate_clean:
-      generative_entity: "${models.target-model}"
+      generative_entity: "${models.quality-model}"       # schema line 297 — Hermes-7B for best quality gate
       depends_on: [step_4_expand_consequences]
       prompt: |
         You are the FINAL enhancer and validator for a JSON Architecture Decision Record. You MUST make meaningful improvements — do NOT just copy the input unchanged.
@@ -358,43 +438,43 @@ agentic_workflow:                                        # schema line 196
       when:
         before_step_starts:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, model_name, step_type]
         after_step_succeeds:
           - gwt:                                        # Final quality gate: validated JSON must be parseable
               - given: "json_parsable == true"
                 then: "step_6_save_final"               # Valid → save it
-          - bookmark: "./docs/benchmarks/outputs/checkpoints/step5-validated.json"
-          - save_to: "./docs/benchmarks/outputs/output/iterative-step5-validated.json"
+          - bookmark: "./docs/benchmarks/outputs/checkpoints/multi-iterative-step5-validated.json"
+          - save_to: "./docs/benchmarks/outputs/output/multi-iterative-step5-validated.json"
           - shell:
               command: "free"
               args: ["-h"]
               fail_on_error: false
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, duration_ms, json_parsable, token_count]
         after_step_fails:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, error_type, error_message, model_name]
           - log:                                        # Second log entry: detailed failure context
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-validation-failures.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-validation-failures.log"
               event_fields: [step_name, error_message, model_name]
         after_all_retries_exhausted:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, total_attempts, last_error, last_error_type]
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-validation-failures.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-validation-failures.log"
               event_fields: [step_name, total_attempts, last_error, last_error_type]
         on_requires_failed:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [failed_step, reason]
 
     # ── STEP 6: Generate quality report ─────────────────────────
     step_6_save_final:
-      generative_entity: "${models.target-model}"
+      generative_entity: "${models.reporter-model}"      # schema line 297 — Qwen2.5-0.5B just generates score JSON
       depends_on: [step_5_validate_clean]
       prompt: |
         You are a QA reviewer for an Architecture Decision Record. Generate a brief quality report as JSON.
@@ -418,19 +498,19 @@ agentic_workflow:                                        # schema line 196
       when:
         before_step_starts:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, model_name, step_type]
         after_step_succeeds:
-          - save_to: "./docs/benchmarks/outputs/output/iterative-step6-quality-report.json"
-          - append_to: "./docs/benchmarks/outputs/logs/iterative-benchmark-summary.log"
+          - save_to: "./docs/benchmarks/outputs/output/multi-iterative-step6-quality-report.json"
+          - append_to: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark-summary.log"
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, duration_ms, json_parsable, token_count]
         after_step_fails:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [step_name, error_type, error_message]
         on_requires_failed:
           - log:
-              to_file_path: "./docs/benchmarks/outputs/logs/iterative-benchmark.log"
+              to_file_path: "./docs/benchmarks/outputs/logs/multi-iterative-benchmark.log"
               event_fields: [failed_step, reason]
