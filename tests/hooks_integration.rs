@@ -39,7 +39,7 @@ fn given_log_action_when_executed_then_file_created_with_content() {
         model_name: "m".into(), prompt_preview: "p".into(), workflow_variables: HashMap::new(),
     });
     let mut engine = HookEngine::new();
-    assert!(execute_action(&action, &ctx, &mut engine).is_continue());
+    assert!(execute_action(&action, &ctx, &mut engine, None).is_continue());
     assert!(fs::read_to_string(&log_path).unwrap().contains("my_step"));
 }
 
@@ -53,7 +53,7 @@ fn given_save_to_action_when_executed_then_file_contains_output() {
         quality_score: None, token_count: 0, model_name: "m".into(),
     });
     let mut engine = HookEngine::new();
-    assert!(execute_action(&action, &ctx, &mut engine).is_continue());
+    assert!(execute_action(&action, &ctx, &mut engine, None).is_continue());
     assert_eq!(fs::read_to_string(&path).unwrap(), "content");
 }
 
@@ -68,7 +68,7 @@ fn given_append_to_action_when_executed_then_content_appended_to_file() {
         quality_score: None, token_count: 0, model_name: "m".into(),
     });
     let mut engine = HookEngine::new();
-    execute_action(&action, &ctx, &mut engine);
+    execute_action(&action, &ctx, &mut engine, None);
     let c = fs::read_to_string(&path).unwrap();
     assert!(c.contains("initial") && c.contains("appended"));
 }
@@ -83,7 +83,7 @@ fn given_bookmark_action_when_executed_then_file_and_memory_stored() {
         quality_score: Some(0.95), token_count: 100, model_name: "m".into(),
     });
     let mut engine = HookEngine::new();
-    assert!(execute_action(&action, &ctx, &mut engine).is_continue());
+    assert!(execute_action(&action, &ctx, &mut engine, None).is_continue());
     assert!(std::path::Path::new(&cp).exists());
     assert!(engine.get_bookmark("cp_step").is_some());
 }
@@ -96,7 +96,7 @@ fn given_fail_action_when_executed_then_hook_result_is_fail() {
         model_name: "m".into(), prompt_preview: "p".into(), workflow_variables: HashMap::new(),
     });
     let mut engine = HookEngine::new();
-    assert!(matches!(execute_action(&action, &ctx, &mut engine), HookResult::Fail { .. }));
+    assert!(matches!(execute_action(&action, &ctx, &mut engine, None), HookResult::Fail { .. }));
 }
 
 #[test]
@@ -106,7 +106,7 @@ fn given_skip_step_action_when_executed_then_hook_result_is_skip_step() {
         step_name: "t".into(), step_type: StepType::Generative,
         model_name: "m".into(), prompt_preview: "p".into(), workflow_variables: HashMap::new(),
     });
-    assert_eq!(execute_action(&action, &ctx, &mut HookEngine::new()), HookResult::SkipStep);
+    assert_eq!(execute_action(&action, &ctx, &mut HookEngine::new(), None), HookResult::SkipStep);
 }
 
 #[test]
@@ -116,7 +116,7 @@ fn given_route_to_action_when_executed_then_hook_result_routes_to_target() {
         step_name: "t".into(), step_type: StepType::ControlFlow,
         model_name: "m".into(), prompt_preview: "".into(), workflow_variables: HashMap::new(),
     });
-    match execute_action(&action, &ctx, &mut HookEngine::new()) {
+    match execute_action(&action, &ctx, &mut HookEngine::new(), None) {
         HookResult::RouteTo { targets } => assert_eq!(targets, vec!["next"]),
         r => panic!("Expected RouteTo, got {:?}", r),
     }
@@ -132,7 +132,7 @@ fn given_gwt_matching_clause_when_executed_then_routes_to_then_target() {
         step_name: "test".into(), step_type: StepType::ControlFlow,
         model_name: "m".into(), prompt_preview: "".into(), workflow_variables: HashMap::new(),
     });
-    match execute_action(&action, &ctx, &mut HookEngine::new()) {
+    match execute_action(&action, &ctx, &mut HookEngine::new(), None) {
         HookResult::RouteTo { targets } => assert_eq!(targets, vec!["target"]),
         r => panic!("Expected RouteTo, got {:?}", r),
     }
@@ -148,7 +148,7 @@ fn given_gwt_non_matching_clause_when_executed_then_continues() {
         step_name: "test".into(), step_type: StepType::ControlFlow,
         model_name: "m".into(), prompt_preview: "".into(), workflow_variables: HashMap::new(),
     });
-    assert!(execute_action(&action, &ctx, &mut HookEngine::new()).is_continue());
+    assert!(execute_action(&action, &ctx, &mut HookEngine::new(), None).is_continue());
 }
 
 #[test]
@@ -468,7 +468,7 @@ fn given_save_to_variable_when_executed_then_bookmark_stored_in_engine() {
         model_name: "model".into(),
     });
     let mut engine = HookEngine::new();
-    assert!(execute_action(&action, &ctx, &mut engine).is_continue());
+    assert!(execute_action(&action, &ctx, &mut engine, None).is_continue());
     // Bookmark stored with key "myvar" ($ prefix stripped)
     assert!(engine.get_bookmark("myvar").is_some());
 }
@@ -487,7 +487,7 @@ fn given_save_to_both_when_executed_then_file_written_and_bookmark_stored() {
         model_name: "model".into(),
     });
     let mut engine = HookEngine::new();
-    assert!(execute_action(&action, &ctx, &mut engine).is_continue());
+    assert!(execute_action(&action, &ctx, &mut engine, None).is_continue());
     assert!(std::path::Path::new(&path).exists());
     assert_eq!(fs::read_to_string(&path).unwrap(), "both_test");
     // Bookmark stored with key "var" ($ prefix stripped)
@@ -508,7 +508,7 @@ fn given_bookmark_flag_when_executed_then_stores_but_no_file() {
         model_name: "model".into(),
     });
     let mut engine = HookEngine::new();
-    assert!(execute_action(&action, &ctx, &mut engine).is_continue());
+    assert!(execute_action(&action, &ctx, &mut engine, None).is_continue());
     assert!(engine.get_bookmark("flag_step").is_some());
     // Verify no file created (check that no .cp files exist in temp dir)
     assert_eq!(std::fs::read_dir(temp_dir).unwrap().count(), 0);
@@ -528,7 +528,7 @@ fn given_bookmark_path_when_executed_then_file_and_bookmark_stored() {
         model_name: "model".into(),
     });
     let mut engine = HookEngine::new();
-    assert!(execute_action(&action, &ctx, &mut engine).is_continue());
+    assert!(execute_action(&action, &ctx, &mut engine, None).is_continue());
     assert!(std::path::Path::new(&path).exists());
     assert!(engine.get_bookmark("path_step").is_some());
 }
@@ -543,7 +543,7 @@ fn given_skip_remaining_action_when_executed_then_returns_skip_remaining() {
         prompt_preview: "p".into(),
         workflow_variables: HashMap::new(),
     });
-    assert_eq!(execute_action(&action, &ctx, &mut HookEngine::new()), HookResult::SkipRemaining);
+    assert_eq!(execute_action(&action, &ctx, &mut HookEngine::new(), None), HookResult::SkipRemaining);
 }
 
 #[test]
@@ -570,9 +570,9 @@ fn given_multi_action_trigger_when_executed_then_merge_results_continue() {
     });
     let mut engine = HookEngine::new();
 
-    let r1 = execute_action(&log_action, &ctx, &mut engine);
-    let r2 = execute_action(&save_action, &ctx, &mut engine);
-    let r3 = execute_action(&bookmark_action, &ctx, &mut engine);
+    let r1 = execute_action(&log_action, &ctx, &mut engine, None);
+    let r2 = execute_action(&save_action, &ctx, &mut engine, None);
+    let r3 = execute_action(&bookmark_action, &ctx, &mut engine, None);
 
     let merged = HookResult::merge(HookResult::merge(r1, r2), r3);
     assert!(merged.is_continue());
@@ -595,7 +595,7 @@ fn given_action_with_after_step_fails_context_when_executed_then_file_contains_e
         model_name: "model".into(),
     });
     let mut engine = HookEngine::new();
-    assert!(execute_action(&action, &ctx, &mut engine).is_continue());
+    assert!(execute_action(&action, &ctx, &mut engine, None).is_continue());
     let content = fs::read_to_string(&path).unwrap();
     assert!(content.contains("Connection timeout"));
 }
@@ -612,7 +612,7 @@ fn given_action_with_during_step_streaming_context_when_executed_then_file_conta
         elapsed_ms: 100,
     });
     let mut engine = HookEngine::new();
-    assert!(execute_action(&action, &ctx, &mut engine).is_continue());
+    assert!(execute_action(&action, &ctx, &mut engine, None).is_continue());
     let content = fs::read_to_string(&path).unwrap();
     assert_eq!(content, "Hello world");
 }
@@ -630,7 +630,7 @@ fn given_append_to_variable_when_executed_then_returns_continue() {
     });
     let mut engine = HookEngine::new();
     // Should not panic, just return Continue (stub implementation)
-    assert!(execute_action(&action, &ctx, &mut engine).is_continue());
+    assert!(execute_action(&action, &ctx, &mut engine, None).is_continue());
 }
 
 #[test]
@@ -645,7 +645,7 @@ fn given_notify_with_message_when_executed_then_returns_continue() {
         model_name: "model".into(),
     });
     let mut engine = HookEngine::new();
-    assert!(execute_action(&action, &ctx, &mut engine).is_continue());
+    assert!(execute_action(&action, &ctx, &mut engine, None).is_continue());
 }
 
 #[test]
@@ -738,9 +738,9 @@ fn given_multiple_actions_with_fail_when_merged_then_fail_wins() {
     });
     let mut engine = HookEngine::new();
 
-    let log_result = execute_action(&log_action, &ctx, &mut engine);
-    let fail_result = execute_action(&fail_action, &ctx, &mut engine);
-    let bookmark_result = execute_action(&bookmark_action, &ctx, &mut engine);
+    let log_result = execute_action(&log_action, &ctx, &mut engine, None);
+    let fail_result = execute_action(&fail_action, &ctx, &mut engine, None);
+    let bookmark_result = execute_action(&bookmark_action, &ctx, &mut engine, None);
 
     assert!(log_result.is_continue());
     assert!(matches!(fail_result, HookResult::Fail { .. }));

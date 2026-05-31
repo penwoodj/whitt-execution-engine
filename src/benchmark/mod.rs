@@ -62,6 +62,8 @@ pub struct WorkflowStepResult {
     pub benchmark_result: ModelBenchmarkResult,
     /// Routing directive from hooks (step IDs to jump to next)
     pub route_to: Option<Vec<String>>,
+    /// Whether to skip all remaining steps
+    pub skip_remaining: bool,
 }
 
 impl BenchmarkSuiteResult {

@@ -10,7 +10,7 @@ use crate::workflow::step::{
     BookmarkActionDetail, NotifyAction, FailAction, RouteToAction, GwtClause, ShellAction
 };
 use crate::workflow::schema::LogLevel;
-use crate::workflow::hooks::context::WorkflowHookContext;
+use crate::workflow::hooks::context::{WorkflowHookContext, BeforeGwtEvaluatesContext, AfterGwtEvaluatesContext};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -26,6 +26,7 @@ pub fn execute_action(
     action: &HookAction,
     context: &WorkflowHookContext,
     engine: &mut HookEngine,
+    hook_config: Option<&serde_json::Value>,
 ) -> HookResult {
     match action {
         HookAction::Log(log_action) => execute_log(log_action, context, engine),
@@ -38,7 +39,7 @@ pub fn execute_action(
         HookAction::Shell(shell_action) => execute_shell(shell_action, context, engine),
         HookAction::SkipStep(skip) => execute_skip_step(*skip, context, engine),
         HookAction::SkipRemaining(skip) => execute_skip_remaining(*skip, context, engine),
-        HookAction::Gwt(clauses) => execute_gwt(clauses, context, engine),
+        HookAction::Gwt(clauses) => execute_gwt(clauses, context, engine, hook_config),
         HookAction::IterateValues(_) => HookResult::Continue,
     }
 }
@@ -481,10 +482,13 @@ fn execute_gwt(
     clauses: &[GwtClause],
     context: &WorkflowHookContext,
     engine: &mut HookEngine,
+    hook_config: Option<&serde_json::Value>,
 ) -> HookResult {
     let json = context.to_json_value();
-    info!("[hook] before_gwt_evaluates: step={} clauses={}", 
-        context.get_field("step_name").unwrap_or_default(), clauses.len());
+    let step_name = context.get_field("step_name").unwrap_or_default();
+    info!("[hook] before_gwt_evaluates: step={} clauses={}", step_name, clauses.len());
+
+    fire_gwt_trigger("before_gwt_evaluates", hook_config, engine, &step_name, &json, "before", None, None);
 
     for clause in clauses {
         if let Some(ref given) = clause.given {
@@ -494,13 +498,59 @@ fn execute_gwt(
                     RouteToAction::Multiple(ts) => ts.join(","),
                 };
                 info!("[hook] after_gwt_evaluates: decision=routed target={}", target);
+                fire_gwt_trigger("after_gwt_evaluates", hook_config, engine, &step_name, &json, "routed", None, Some(&target));
                 return execute_route_to(&clause.r#then, context, engine);
             }
         }
     }
 
     info!("[hook] after_gwt_evaluates: decision=continue (no clause matched)");
+    fire_gwt_trigger("after_gwt_evaluates", hook_config, engine, &step_name, &json, "continue", None, None);
     HookResult::Continue
+}
+
+fn fire_gwt_trigger(
+    trigger_name: &str,
+    hook_config: Option<&serde_json::Value>,
+    engine: &mut HookEngine,
+    step_name: &str,
+    input_value: &serde_json::Value,
+    decision: &str,
+    quality_score: Option<f32>,
+    route_target: Option<&str>,
+) {
+    let Some(config) = hook_config else { return };
+    let Some(triggers) = config.get("when") else { return };
+    let Some(actions_val) = triggers.get(trigger_name) else { return };
+
+    let ctx = match trigger_name {
+        "before_gwt_evaluates" => WorkflowHookContext::BeforeGwtEvaluates(BeforeGwtEvaluatesContext {
+            step_name: step_name.to_string(),
+            input_value: input_value.clone(),
+        }),
+        "after_gwt_evaluates" => WorkflowHookContext::AfterGwtEvaluates(AfterGwtEvaluatesContext {
+            step_name: step_name.to_string(),
+            decision: decision.to_string(),
+            quality_score,
+            route_target: route_target.unwrap_or("").to_string(),
+        }),
+        _ => return,
+    };
+
+    let actions = if actions_val.is_array() {
+        actions_val.as_array().unwrap().clone()
+    } else {
+        vec![actions_val.clone()]
+    };
+
+    for action_val in actions {
+        if let Ok(action) = serde_json::from_value::<HookAction>(action_val) {
+            if matches!(action, HookAction::Gwt(_)) {
+                continue;
+            }
+            let _ = execute_action(&action, &ctx, engine, None);
+        }
+    }
 }
 
 fn evaluate_gwt_condition(condition: &str, json: &serde_json::Value) -> bool {
@@ -899,7 +949,7 @@ mod tests {
         });
         let mut engine = HookEngine::new();
 
-        let result = execute_action(&action, &context, &mut engine);
+        let result = execute_action(&action, &context, &mut engine, None);
 
         assert_eq!(result, HookResult::SkipStep);
     }
@@ -916,7 +966,7 @@ mod tests {
         });
         let mut engine = HookEngine::new();
 
-        let result = execute_action(&action, &context, &mut engine);
+        let result = execute_action(&action, &context, &mut engine, None);
 
         assert_eq!(result, HookResult::SkipRemaining);
     }
@@ -937,7 +987,7 @@ mod tests {
         });
         let mut engine = HookEngine::new();
 
-        let result = execute_gwt(&clauses, &context, &mut engine);
+        let result = execute_gwt(&clauses, &context, &mut engine, None);
 
         match result {
             HookResult::RouteTo { targets } => {
@@ -963,7 +1013,7 @@ mod tests {
         });
         let mut engine = HookEngine::new();
 
-        let result = execute_gwt(&clauses, &context, &mut engine);
+        let result = execute_gwt(&clauses, &context, &mut engine, None);
 
         assert_eq!(result, HookResult::Continue);
     }
@@ -984,7 +1034,7 @@ mod tests {
         });
         let mut engine = HookEngine::new();
 
-        let result = execute_gwt(&clauses, &context, &mut engine);
+        let result = execute_gwt(&clauses, &context, &mut engine, None);
 
         assert_eq!(result, HookResult::Continue);
     }
@@ -1003,7 +1053,7 @@ mod tests {
         });
         let mut engine = HookEngine::new();
 
-        let result = execute_action(&action, &context, &mut engine);
+        let result = execute_action(&action, &context, &mut engine, None);
 
         match result {
             HookResult::Fail { reason } => {
@@ -1129,7 +1179,7 @@ mod tests {
         });
         let mut engine = HookEngine::new();
 
-        let result = execute_action(&action, &context, &mut engine);
+        let result = execute_action(&action, &context, &mut engine, None);
 
         assert_eq!(result, HookResult::Continue);
     }
@@ -1146,7 +1196,7 @@ mod tests {
         });
         let mut engine = HookEngine::new();
 
-        let result = execute_action(&action, &context, &mut engine);
+        let result = execute_action(&action, &context, &mut engine, None);
 
         assert_eq!(result, HookResult::Continue);
     }
@@ -1299,7 +1349,7 @@ mod tests {
         });
         let mut engine = HookEngine::new();
 
-        let result = execute_gwt(&clauses, &context, &mut engine);
+        let result = execute_gwt(&clauses, &context, &mut engine, None);
 
         match result {
             HookResult::RouteTo { targets } => {
@@ -1324,7 +1374,7 @@ mod tests {
         });
         let mut engine = HookEngine::new();
 
-        let result = execute_action(&action, &context, &mut engine);
+        let result = execute_action(&action, &context, &mut engine, None);
 
         assert_eq!(result, HookResult::Continue);
     }

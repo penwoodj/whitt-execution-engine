@@ -847,7 +847,7 @@ impl BenchmarkRunner {
             let action: HookAction = serde_json::from_value(action_value.clone())
                 .with_context(|| format!("Failed to deserialize hook action: {}", action_value))?;
 
-            let result = execute_action(&action, context, &mut self.hook_engine);
+            let result = execute_action(&action, context, &mut self.hook_engine, Some(hook_value));
             merged_result = HookResult::merge(merged_result, result);
 
             if merged_result.is_terminal() {
@@ -1231,6 +1231,7 @@ impl BenchmarkRunner {
         info!("[benchmark] executing step {} with model {}", step.step_id, model_id);
 
         let mut route_to: Option<Vec<String>> = None;
+        let mut skip_remaining = false;
 
         // Build workflow variables map for hooks
         let workflow_variables = if let Some(vars) = variables {
@@ -1271,6 +1272,7 @@ impl BenchmarkRunner {
                         speedup_factor: None,
                     },
                     route_to: None,
+                    skip_remaining: false,
                 });
             }
             Ok(HookResult::RouteTo { targets }) => {
@@ -1294,6 +1296,7 @@ impl BenchmarkRunner {
                         speedup_factor: None,
                     },
                     route_to: Some(targets),
+                    skip_remaining: false,
                 });
             }
             Ok(HookResult::Fail { reason }) => {
@@ -1336,6 +1339,7 @@ impl BenchmarkRunner {
                         speedup_factor: None,
                     },
                     route_to: None,
+                    skip_remaining: false,
                 });
             }
             Ok(HookResult::RouteTo { targets }) => {
@@ -1359,6 +1363,7 @@ impl BenchmarkRunner {
                         speedup_factor: None,
                     },
                     route_to: Some(targets),
+                    skip_remaining: false,
                 });
             }
             Ok(_) => {}
@@ -1460,6 +1465,10 @@ impl BenchmarkRunner {
                     info!("[benchmark] step {} routed to {:?} by after_step_succeeds hook", step.step_id, targets);
                     route_to = Some(targets);
                 }
+                Ok(HookResult::SkipRemaining) => {
+                    info!("[benchmark] step {} triggered skip_remaining by after_step_succeeds hook", step.step_id);
+                    skip_remaining = true;
+                }
                 Ok(_) => {}
                 Err(e) => {
                     warn!("[benchmark] after_step_succeeds hook error: {}", e);
@@ -1470,6 +1479,7 @@ impl BenchmarkRunner {
         Ok(WorkflowStepResult {
             benchmark_result: model_result,
             route_to,
+            skip_remaining,
         })
     }
 
@@ -1635,6 +1645,7 @@ impl BenchmarkRunner {
                     info!("[benchmark] step {} has {} iteration values", step.step_id, var_sets.len());
 
                     let mut routed: Option<Vec<String>> = None;
+                    let mut should_skip_remaining = false;
 
                     for (iter_idx, vars) in var_sets.iter().enumerate() {
                         let iteration = iter_idx + 1;
@@ -1699,11 +1710,20 @@ impl BenchmarkRunner {
                                         step.step_id, targets, loop_count);
                                     break;
                                 }
+                                if step_result.skip_remaining {
+                                    info!("[benchmark] skip_remaining triggered at step {} (iteration #{})", step.step_id, loop_count);
+                                    should_skip_remaining = true;
+                                    break;
+                                }
                             } else {
                                 warn!("[benchmark] iteration {}: could not resolve model for step {}: {}",
                                     iteration, step.step_id, model_name);
                             }
                         }
+                    }
+
+                    if should_skip_remaining {
+                        break;
                     }
 
                     if let Some(ref targets) = routed {
@@ -1763,6 +1783,11 @@ impl BenchmarkRunner {
                                 } else {
                                     warn!("[benchmark] route_to target '{}' not found", targets[0]);
                                 }
+                            }
+
+                            if step_result.skip_remaining {
+                                info!("[benchmark] skip_remaining triggered at step {} — stopping workflow", step.step_id);
+                                break;
                             }
 
                             current_index += 1;
@@ -1833,6 +1858,11 @@ impl BenchmarkRunner {
                                 } else {
                                     warn!("[benchmark] route_to target '{}' not found", targets[0]);
                                 }
+                            }
+
+                            if step_result.skip_remaining {
+                                info!("[benchmark] skip_remaining triggered at step {} — stopping workflow", step.step_id);
+                                break;
                             }
 
                             current_index += 1;

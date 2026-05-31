@@ -955,4 +955,219 @@ mod tests {
         let unique_names: std::collections::HashSet<_> = names.into_iter().collect();
         assert_eq!(unique_names.len(), 10);
     }
+
+    // --------------------------------------------------------------------------
+    // Missing get_field tests
+    // --------------------------------------------------------------------------
+
+    #[test]
+    fn after_step_succeeds_get_field_returns_all_fields() {
+        // Given: Context with quality_score Some
+        let context = AfterStepSucceedsContext {
+            step_name: "generate".to_string(),
+            output: "{\"key\":\"val\"}".to_string(),
+            duration_ms: 2000,
+            quality_score: Some(0.85f32),
+            token_count: 500,
+            model_name: "llama-3.2".to_string(),
+        };
+
+        // When: Getting all fields
+        let step_name = context.get_field("step_name");
+        let output = context.get_field("output");
+        let duration_ms = context.get_field("duration_ms");
+        let quality_score = context.get_field("quality_score");
+        let token_count = context.get_field("token_count");
+        let model_name = context.get_field("model_name");
+        let json_parsable = context.get_field("json_parsable");
+
+        // Then: Returns correct values
+        assert_eq!(step_name, Some("generate".to_string()));
+        assert_eq!(output, Some("{\"key\":\"val\"}".to_string()));
+        assert_eq!(duration_ms, Some("2000".to_string()));
+        assert_eq!(quality_score, Some("0.85".to_string()));
+        assert_eq!(token_count, Some("500".to_string()));
+        assert_eq!(model_name, Some("llama-3.2".to_string()));
+        assert_eq!(json_parsable, Some("true".to_string()));
+    }
+
+    #[test]
+    fn after_step_succeeds_get_field_quality_score_none_returns_none() {
+        // Given: Context with quality_score None
+        let context = AfterStepSucceedsContext {
+            step_name: "step".to_string(),
+            output: "done".to_string(),
+            duration_ms: 100,
+            quality_score: None,
+            token_count: 10,
+            model_name: "model".to_string(),
+        };
+
+        // When: Getting quality_score field
+        let quality_score = context.get_field("quality_score");
+
+        // Then: Returns None
+        assert_eq!(quality_score, None);
+    }
+
+    #[test]
+    fn after_step_succeeds_get_field_returns_none_for_missing() {
+        // Given: Context
+        let context = AfterStepSucceedsContext {
+            step_name: "step".to_string(),
+            output: "done".to_string(),
+            duration_ms: 100,
+            quality_score: None,
+            token_count: 10,
+            model_name: "model".to_string(),
+        };
+
+        // When: Getting non-existent field
+        let result = context.get_field("non_existent");
+
+        // Then: Returns None
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn after_all_retries_exhausted_get_field_returns_all_fields() {
+        // Given: Context
+        let context = AfterAllRetriesExhaustedContext {
+            step_name: "failing".to_string(),
+            total_attempts: 5,
+            last_error: "All retries failed".to_string(),
+            last_error_type: "PermanentError".to_string(),
+        };
+
+        // When: Getting all fields
+        let step_name = context.get_field("step_name");
+        let total_attempts = context.get_field("total_attempts");
+        let last_error = context.get_field("last_error");
+        let last_error_type = context.get_field("last_error_type");
+
+        // Then: Returns correct values
+        assert_eq!(step_name, Some("failing".to_string()));
+        assert_eq!(total_attempts, Some("5".to_string()));
+        assert_eq!(last_error, Some("All retries failed".to_string()));
+        assert_eq!(last_error_type, Some("PermanentError".to_string()));
+    }
+
+    #[test]
+    fn after_all_retries_exhausted_get_field_returns_none_for_missing() {
+        // Given: Context
+        let context = AfterAllRetriesExhaustedContext {
+            step_name: "step".to_string(),
+            total_attempts: 3,
+            last_error: "error".to_string(),
+            last_error_type: "type".to_string(),
+        };
+
+        // When: Getting non-existent field
+        let result = context.get_field("non_existent");
+
+        // Then: Returns None
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn after_step_starts_get_field_returns_all_fields() {
+        // Given: Context with Generative step type
+        let context = AfterStepStartsContext {
+            step_name: "minimal".to_string(),
+            step_type: StepType::Generative,
+        };
+
+        // When: Getting all fields
+        let step_name = context.get_field("step_name");
+        let step_type = context.get_field("step_type");
+
+        // Then: Returns correct values
+        assert_eq!(step_name, Some("minimal".to_string()));
+        assert_eq!(step_type, Some("generative".to_string()));
+    }
+
+    #[test]
+    fn before_gwt_evaluates_get_field_returns_all_fields() {
+        // Given: Context with complex input
+        let context = BeforeGwtEvaluatesContext {
+            step_name: "gwt_step".to_string(),
+            input_value: serde_json::json!({"key": "value"}),
+        };
+
+        // When: Getting all fields
+        let step_name = context.get_field("step_name");
+        let input_value = context.get_field("input_value");
+
+        // Then: Returns correct values
+        assert_eq!(step_name, Some("gwt_step".to_string()));
+        assert!(input_value.is_some());
+        assert!(input_value.unwrap().contains("key"));
+    }
+
+    #[test]
+    fn after_gwt_evaluates_get_field_returns_all_fields() {
+        // Given: Context with quality_score Some
+        let context = AfterGwtEvaluatesContext {
+            step_name: "decision".to_string(),
+            decision: "proceed".to_string(),
+            quality_score: Some(0.87f32),
+            route_target: "next_step".to_string(),
+        };
+
+        // When: Getting all fields
+        let step_name = context.get_field("step_name");
+        let decision = context.get_field("decision");
+        let quality_score = context.get_field("quality_score");
+        let route_target = context.get_field("route_target");
+
+        // Then: Returns correct values
+        assert_eq!(step_name, Some("decision".to_string()));
+        assert_eq!(decision, Some("proceed".to_string()));
+        assert_eq!(quality_score, Some("0.87".to_string()));
+        assert_eq!(route_target, Some("next_step".to_string()));
+    }
+
+    #[test]
+    fn on_requires_failed_get_field_returns_all_fields() {
+        // Given: Context with dependency chain
+        let context = OnRequiresFailedContext {
+            failed_step: "dependent".to_string(),
+            reason: "Dependency not satisfied".to_string(),
+            dependency_chain: vec!["dep1".to_string()],
+        };
+
+        // When: Getting all fields
+        let failed_step = context.get_field("failed_step");
+        let reason = context.get_field("reason");
+        let dependency_chain = context.get_field("dependency_chain");
+
+        // Then: Returns correct values
+        assert_eq!(failed_step, Some("dependent".to_string()));
+        assert_eq!(reason, Some("Dependency not satisfied".to_string()));
+        assert!(dependency_chain.is_some());
+        assert!(dependency_chain.unwrap().contains("dep1"));
+    }
+
+    #[test]
+    fn after_loop_iteration_fails_get_field_returns_all_fields() {
+        // Given: Context
+        let context = AfterLoopIterationFailsContext {
+            step_name: "loop_step".to_string(),
+            iteration: 3,
+            error_message: "Iteration failed".to_string(),
+            loop_type: "validation".to_string(),
+        };
+
+        // When: Getting all fields
+        let step_name = context.get_field("step_name");
+        let iteration = context.get_field("iteration");
+        let error_message = context.get_field("error_message");
+        let loop_type = context.get_field("loop_type");
+
+        // Then: Returns correct values
+        assert_eq!(step_name, Some("loop_step".to_string()));
+        assert_eq!(iteration, Some("3".to_string()));
+        assert_eq!(error_message, Some("Iteration failed".to_string()));
+        assert_eq!(loop_type, Some("validation".to_string()));
+    }
 }
