@@ -2161,6 +2161,7 @@ impl BenchmarkRunner {
         }
 
         let mut inference_results = Vec::new();
+        let mut any_retry_exhausted: Option<String> = None;
 
         for prompt in prompts {
             const MAX_RETRIES: u32 = 3;
@@ -2233,9 +2234,7 @@ impl BenchmarkRunner {
 
             if let Some(err) = last_error {
                 warn!("[benchmark] all {} inference attempts failed for {}: {}", MAX_RETRIES, model_id, err);
-                // TODO: Wire after_all_retries_exhausted trigger here with AfterAllRetriesExhaustedContext
-                // Context requires: step_name, total_attempts (MAX_RETRIES), last_error, last_error_type
-                // This is the retry loop exit point after all attempts fail.
+                any_retry_exhausted = Some(format!("All {} attempts failed: {}", MAX_RETRIES, err));
                 inference_results.push(InferenceResult {
                     prompt: prompt.clone(),
                     prompt_tokens: 0,
@@ -2297,7 +2296,7 @@ impl BenchmarkRunner {
             p50_latency_ms: p50,
             p95_latency_ms: p95,
             p99_latency_ms: p99,
-            error: None,
+            error: any_retry_exhausted,
             gpu_mode: gpu_mode.to_string(),
             speedup_factor: None,
         }

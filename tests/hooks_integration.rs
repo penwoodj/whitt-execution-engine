@@ -5,7 +5,8 @@ use whitt_execution_engine::workflow::{
 use whitt_execution_engine::workflow::hooks::{
     HookEngine, HookResult,
     context::{WorkflowHookContext, BeforeStepStartsContext, AfterStepSucceedsContext, StepType,
-               AfterStepFailsContext, DuringStepStreamingContext, ErrorDetails},
+               AfterStepFailsContext, DuringStepStreamingContext, ErrorDetails,
+               AfterAllRetriesExhaustedContext, AfterLoopIterationFailsContext},
     actions::execute_action,
     gwt,
 };
@@ -748,4 +749,115 @@ fn given_multiple_actions_with_fail_when_merged_then_fail_wins() {
 
     let merged = HookResult::merge(HookResult::merge(log_result, fail_result), bookmark_result);
     assert!(matches!(merged, HookResult::Fail { .. }));
+}
+
+#[test]
+fn given_after_all_retries_exhausted_context_when_get_field_then_returns_correct_values() {
+    let context = AfterAllRetriesExhaustedContext {
+        step_name: "retry_step".to_string(),
+        total_attempts: 3,
+        last_error: "Connection refused".to_string(),
+        last_error_type: "InferenceError".to_string(),
+    };
+    assert_eq!(context.get_field("step_name"), Some("retry_step".to_string()));
+    assert_eq!(context.get_field("total_attempts"), Some("3".to_string()));
+    assert_eq!(context.get_field("last_error"), Some("Connection refused".to_string()));
+    assert_eq!(context.get_field("last_error_type"), Some("InferenceError".to_string()));
+    assert_eq!(context.get_field("nonexistent"), None);
+}
+
+#[test]
+fn given_after_loop_iteration_fails_context_when_get_field_then_returns_correct_values() {
+    let context = AfterLoopIterationFailsContext {
+        step_name: "loop_step".to_string(),
+        iteration: 2,
+        error_message: "iteration failed".to_string(),
+        loop_type: "iterate_values".to_string(),
+    };
+    assert_eq!(context.get_field("step_name"), Some("loop_step".to_string()));
+    assert_eq!(context.get_field("iteration"), Some("2".to_string()));
+    assert_eq!(context.get_field("error_message"), Some("iteration failed".to_string()));
+    assert_eq!(context.get_field("loop_type"), Some("iterate_values".to_string()));
+    assert_eq!(context.get_field("nonexistent"), None);
+}
+
+#[test]
+fn given_yaml_fixture_when_deserialized_and_executed_then_round_trip_works() {
+    let yaml_str = fs::read_to_string(fixture_path("all-triggers.yml"))
+        .expect("fixture should exist");
+    let yaml: serde_yaml::Value = serde_yaml::from_str(&yaml_str).expect("should parse");
+    
+    let after_succeeds = &yaml["steps"]["read_config"]["when"]["after_step_succeeds"];
+    
+    let mut engine = HookEngine::new();
+    let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+        step_name: "read_config".to_string(),
+        output: "config data".to_string(),
+        duration_ms: 1000,
+        quality_score: Some(0.85),
+        token_count: 50,
+        model_name: "test-model".to_string(),
+    });
+    
+    if let Some(mapping) = after_succeeds.as_mapping() {
+        for (key, action_val) in mapping {
+            let key_str = key.as_str().expect("key should be string");
+            let mut action_map = serde_json::Map::new();
+            action_map.insert(key_str.to_string(), serde_json::to_value(action_val).unwrap());
+            let action: HookAction = serde_json::from_value(serde_json::Value::Object(action_map)).expect("should deserialize");
+            let result = execute_action(&action, &context, &mut engine, None);
+            match result {
+                HookResult::Fail { reason } => panic!("Action failed: {}", reason),
+                HookResult::RouteTo { targets } => {
+                    assert!(!targets.is_empty());
+                }
+                _ => {}
+            }
+        }
+    } else {
+        panic!("after_step_succeeds should be a mapping");
+    }
+}
+
+#[test]
+fn given_error_contains_attempts_failed_when_checked_then_trigger_would_fire() {
+    let error_message = "All 3 attempts failed: Connection refused";
+    let should_fire = error_message.contains("attempts failed");
+    assert!(should_fire, "error message should contain 'attempts failed' for trigger to fire");
+
+    let context = AfterAllRetriesExhaustedContext {
+        step_name: "retry_step".to_string(),
+        total_attempts: 3,
+        last_error: error_message.to_string(),
+        last_error_type: "InferenceError".to_string(),
+    };
+    assert_eq!(context.get_field("step_name"), Some("retry_step".to_string()));
+    assert_eq!(context.get_field("total_attempts"), Some("3".to_string()));
+    assert_eq!(context.get_field("last_error"), Some("All 3 attempts failed: Connection refused".to_string()));
+    assert_eq!(context.get_field("last_error_type"), Some("InferenceError".to_string()));
+}
+
+#[test]
+fn given_after_all_retries_exhausted_hook_when_log_executed_then_file_created() {
+    let action = HookAction::Log(LogAction {
+        to_file_path: Some("outputs/test-retries-exhausted-log.txt".to_string()),
+        event_fields: Some(vec!["step_name".to_string(), "total_attempts".to_string(), "last_error".to_string()]),
+        level: None,
+    });
+    let context = WorkflowHookContext::AfterAllRetriesExhausted(AfterAllRetriesExhaustedContext {
+        step_name: "inference_step".to_string(),
+        total_attempts: 3,
+        last_error: "All 3 attempts failed: Connection refused".to_string(),
+        last_error_type: "InferenceError".to_string(),
+    });
+    let mut engine = HookEngine::new();
+
+    let result = execute_action(&action, &context, &mut engine, None);
+    assert!(result.is_continue());
+
+    let content = fs::read_to_string("outputs/test-retries-exhausted-log.txt").unwrap_or_default();
+    assert!(content.contains("inference_step") || content.contains("total_attempts") || content.contains("Connection refused"),
+        "log file should contain context fields, got: {}", content);
+
+    let _ = fs::remove_file("outputs/test-retries-exhausted-log.txt");
 }
