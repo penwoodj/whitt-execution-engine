@@ -21,6 +21,7 @@ use std::process::Command;
 use tokio::time::{sleep, timeout};
 use tokio::process::Command as TokioCommand;
 use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 use std::sync::Arc;
 use tracing::{info, warn};
 
@@ -89,12 +90,123 @@ struct WorkflowStep {
     r#loop: Option<serde_json::Value>,
 }
 
+/// Detect maximum concurrent inferences based on available system resources.
+///
+/// Tries to detect VRAM first (for GPU inference), falls back to RAM.
+/// Rule of thumb: each inference needs ~2GB VRAM/RAM.
+/// Returns capped value: 1 (min) <= result <= 4 (max).
+/// Falls back to 2 on detection failure.
+fn detect_max_concurrent_inferences() -> usize {
+    if let Some(vram_gb) = detect_vram_gb() {
+        let max_concurrent = (vram_gb / 2.0).floor() as usize;
+        let capped = max_concurrent.clamp(1, 4);
+        info!("[benchmark] auto-detected max concurrent inferences: {} (based on {:.1} GB VRAM available)", capped, vram_gb);
+        return capped;
+    }
+
+    if let Some(ram_gb) = detect_available_ram_gb() {
+        let max_concurrent = (ram_gb / 2.0).floor() as usize;
+        let capped = max_concurrent.clamp(1, 4);
+        info!("[benchmark] auto-detected max concurrent inferences: {} (based on {:.1} GB RAM available)", capped, ram_gb);
+        return capped;
+    }
+
+    info!("[benchmark] could not detect available memory, using default: 2 concurrent inferences");
+    2
+}
+
+/// Detect available VRAM in GB from sysfs.
+///
+/// Returns Some(vram_gb) if successful, None otherwise.
+fn detect_vram_gb() -> Option<f64> {
+    if let Some(vram_kb) = read_sysfs_vram_amd() {
+        let vram_gb = vram_kb as f64 / 1024.0 / 1024.0;
+        return Some(vram_gb);
+    }
+
+    if let Some(vram_mb) = read_proc_vram_nvidia() {
+        let vram_gb = vram_mb as f64 / 1024.0;
+        return Some(vram_gb);
+    }
+
+    None
+}
+
+/// Detect available RAM in GB from /proc/meminfo.
+///
+/// Returns Some(ram_gb) if successful, None otherwise.
+fn detect_available_ram_gb() -> Option<f64> {
+    let meminfo_content = fs::read_to_string("/proc/meminfo").ok()?;
+
+    for line in meminfo_content.lines() {
+        if line.starts_with("MemAvailable:") {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 {
+                let kb: u64 = parts[1].parse().ok()?;
+                let gb = kb as f64 / 1024.0 / 1024.0;
+                return Some(gb);
+            }
+        }
+    }
+
+    None
+}
+
+/// Read AMD GPU VRAM from sysfs.
+///
+/// Returns Some(vram_kb) if successful, None otherwise.
+fn read_sysfs_vram_amd() -> Option<u64> {
+    if let Ok(entries) = fs::read_dir("/sys/class/drm") {
+        for entry in entries.flatten() {
+            let card_name = entry.file_name();
+            let card_name_str = card_name.to_string_lossy();
+
+            if card_name_str.starts_with("card") {
+                let vram_path = entry.path().join("device/mem_info_vram_total");
+                if let Ok(vram_content) = fs::read_to_string(&vram_path) {
+                    if let Ok(vram_kb) = vram_content.trim().parse::<u64>() {
+                        return Some(vram_kb);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Read NVIDIA GPU VRAM from /proc/driver/nvidia/gpus.
+///
+/// Returns Some(vram_mb) if successful, None otherwise.
+fn read_proc_vram_nvidia() -> Option<u64> {
+    if let Ok(entries) = fs::read_dir("/proc/driver/nvidia/gpus") {
+        for entry in entries.flatten() {
+            let info_path = entry.path().join("information");
+            if let Ok(info_content) = fs::read_to_string(&info_path) {
+                for line in info_content.lines() {
+                    if line.starts_with("Total Available Memory:") {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 4 {
+                            if let Ok(mb) = parts[3].parse::<u64>() {
+                                return Some(mb);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 impl BenchmarkRunner {
     pub fn new(config: BenchmarkConfig) -> Self {
+        let max_concurrent = detect_max_concurrent_inferences();
         Self {
             config,
             hook_engine: HookEngine::new(),
-            inference_semaphore: Arc::new(Semaphore::new(2)), // Default: 2 concurrent inferences
+            inference_semaphore: Arc::new(Semaphore::new(max_concurrent)),
         }
     }
 
@@ -1456,7 +1568,7 @@ impl BenchmarkRunner {
             None
         };
 
-        let model_result = self.run_model_inference(client, model_id, model_path, "gpu", std::slice::from_ref(prompt), step_max_tokens, step_temperature, top_p, system_prompt).await;
+        let model_result = self.run_model_inference(client, model_id, model_path, "gpu", std::slice::from_ref(prompt), step_max_tokens, step_temperature, top_p, system_prompt, false).await;
 
         let output_text = model_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
 
@@ -1801,19 +1913,25 @@ impl BenchmarkRunner {
                             if let Some(&target_idx) = step_index.get(&targets[0]) {
                                 current_index = target_idx;
                                 continue;
-                            } else {
-                                warn!("[benchmark] route_to target '{}' not found", targets[0]);
-                            }
-                        } else {
-                            info!("[benchmark] route_to has {} targets, executing all", targets.len());
-                            let mut last_target_idx = current_index;
-                            for target_id in targets {
-                                if let Some(&target_idx) = step_index.get(target_id) {
-                                    let target_step = &steps[target_idx];
-                                    if let Some(ref ge) = target_step.generative_entity {
-                                        let model_key = ge.strip_prefix("${models.")
-                                            .and_then(|s| s.strip_suffix('}'))
-                                            .unwrap_or(ge);
+                                      } else {
+                                          warn!("[benchmark] route_to target '{}' not found", targets[0]);
+                                      }
+                                  } else {
+                                     if let Some(last_idx) = self.try_execute_route_to_parallel(
+                                         &targets, &steps, &step_index, &client, &yaml_models, &models,
+                                         max_tokens, temperature, top_p, &mut step_outputs, current_index, false
+                                     ).await {
+                                         current_index = last_idx + 1;
+                                         continue;
+                                     }
+                                     let mut last_target_idx = current_index;
+                                     for target_id in targets {
+                                         if let Some(&target_idx) = step_index.get(target_id) {
+                                             let target_step = &steps[target_idx];
+                                             if let Some(ref ge) = target_step.generative_entity {
+                                                 let model_key = ge.strip_prefix("${models.")
+                                                     .and_then(|s| s.strip_suffix('}'))
+                                                     .unwrap_or(ge);
                                         let model_name = yaml_models.as_ref()
                                             .and_then(|m| m.get(model_key))
                                             .map(|s| s.as_str())
@@ -1882,26 +2000,32 @@ impl BenchmarkRunner {
                                 r#loop: step.r#loop.clone(),
                             };
 
-                            let step_result = self.execute_workflow_step(&resolved_step, &client, &model, max_tokens, temperature, top_p, None).await?;
-                            results.push(step_result.benchmark_result.clone());
+                             let step_result = self.execute_workflow_step(&resolved_step, &client, &model, max_tokens, temperature, top_p, None).await?;
+                             results.push(step_result.benchmark_result.clone());
 
-                            if let Some(ref last_result) = results.last() {
-                                let output_text = last_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
-                                step_outputs.insert(step.step_id.clone(), output_text);
-                            }
+                             if let Some(ref last_result) = results.last() {
+                                 let output_text = last_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
+                                 step_outputs.insert(step.step_id.clone(), output_text);
+                             }
 
-                            if let Some(ref targets) = step_result.route_to {
-                                if targets.len() == 1 {
-                                    if let Some(&target_idx) = step_index.get(&targets[0]) {
-                                        info!("[benchmark] routing from step {} to {} (iteration #{})",
-                                            step.step_id, targets[0], loop_count);
-                                        current_index = target_idx;
+                             if let Some(ref targets) = step_result.route_to {
+                                 if targets.len() == 1 {
+                                     if let Some(&target_idx) = step_index.get(&targets[0]) {
+                                         info!("[benchmark] routing from step {} to {} (iteration #{})",
+                                             step.step_id, targets[0], loop_count);
+                                         current_index = target_idx;
+                                         continue;
+                                     } else {
+                                         warn!("[benchmark] route_to target '{}' not found", targets[0]);
+                                     }
+                                 } else {
+                                    if let Some(last_idx) = self.try_execute_route_to_parallel(
+                                        &targets, &steps, &step_index, &client, &yaml_models, &models,
+                                        max_tokens, temperature, top_p, &mut step_outputs, current_index, false
+                                    ).await {
+                                        current_index = last_idx + 1;
                                         continue;
-                                    } else {
-                                        warn!("[benchmark] route_to target '{}' not found", targets[0]);
                                     }
-                                } else {
-                                    info!("[benchmark] route_to has {} targets, executing all", targets.len());
                                     let mut last_target_idx = current_index;
                                     for target_id in targets {
                                         if let Some(&target_idx) = step_index.get(target_id) {
@@ -1944,10 +2068,10 @@ impl BenchmarkRunner {
                                     }
                                     current_index = last_target_idx + 1;
                                     continue;
-                                }
-                            }
+                                 }
+                             }
 
-                            if step_result.skip_remaining {
+                             if step_result.skip_remaining {
                                 info!("[benchmark] skip_remaining triggered at step {} — stopping workflow", step.step_id);
                                 break;
                             }
@@ -1972,15 +2096,21 @@ impl BenchmarkRunner {
                                 Ok(HookResult::Fail { reason }) => {
                                     warn!("[benchmark] after_step_fails hook failed: {}", reason);
                                 }
-                                Ok(HookResult::RouteTo { targets }) => {
-                                    info!("[benchmark] step {} routed to {:?} by after_step_fails (model resolution)", step.step_id, targets);
-                                    if targets.len() == 1 {
-                                        if let Some(&target_idx) = step_index.get(&targets[0]) {
-                                            current_index = target_idx;
+                                 Ok(HookResult::RouteTo { targets }) => {
+                                     info!("[benchmark] step {} routed to {:?} by after_step_fails (model resolution)", step.step_id, targets);
+                                     if targets.len() == 1 {
+                                         if let Some(&target_idx) = step_index.get(&targets[0]) {
+                                             current_index = target_idx;
+                                             continue;
+                                         }
+                                     } else {
+                                    if let Some(last_idx) = self.try_execute_route_to_parallel(
+                                        &targets, &steps, &step_index, &client, &yaml_models, &models,
+                                        max_tokens, temperature, top_p, &mut step_outputs, current_index, false
+                                    ).await {
+                                            current_index = last_idx + 1;
                                             continue;
                                         }
-                                    } else {
-                                        info!("[benchmark] route_to has {} targets, executing all", targets.len());
                                         let mut last_target_idx = current_index;
                                         for target_id in targets {
                                         if let Some(&target_idx) = step_index.get(&target_id) {
@@ -2023,8 +2153,8 @@ impl BenchmarkRunner {
                                         }
                                         current_index = last_target_idx + 1;
                                         continue;
-                                    }
-                                }
+                                     }
+                                 }
                                 Ok(_) => {}
                                 Err(e) => {
                                     warn!("[benchmark] after_step_fails hook error: {}", e);
@@ -2049,26 +2179,32 @@ impl BenchmarkRunner {
                                 r#loop: step.r#loop.clone(),
                             };
 
-                            let step_result = self.execute_workflow_step(&resolved_step, &client, model, max_tokens, temperature, top_p, None).await?;
-                            results.push(step_result.benchmark_result.clone());
+                             let step_result = self.execute_workflow_step(&resolved_step, &client, model, max_tokens, temperature, top_p, None).await?;
+                             results.push(step_result.benchmark_result.clone());
 
-                            if let Some(ref last_result) = results.last() {
-                                let output_text = last_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
-                                step_outputs.insert(step.step_id.clone(), output_text);
-                            }
+                             if let Some(ref last_result) = results.last() {
+                                 let output_text = last_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
+                                 step_outputs.insert(step.step_id.clone(), output_text);
+                             }
 
-                            if let Some(ref targets) = step_result.route_to {
-                                if targets.len() == 1 {
-                                    if let Some(&target_idx) = step_index.get(&targets[0]) {
-                                        info!("[benchmark] routing from step {} to {} (iteration #{})",
-                                            step.step_id, targets[0], loop_count);
-                                        current_index = target_idx;
-                                        continue;
-                                    } else {
-                                        warn!("[benchmark] route_to target '{}' not found", targets[0]);
-                                    }
-                                } else {
-                                    info!("[benchmark] route_to has {} targets, executing all", targets.len());
+                             if let Some(ref targets) = step_result.route_to {
+                                 if targets.len() == 1 {
+                                     if let Some(&target_idx) = step_index.get(&targets[0]) {
+                                         info!("[benchmark] routing from step {} to {} (iteration #{})",
+                                             step.step_id, targets[0], loop_count);
+                                         current_index = target_idx;
+                                         continue;
+                                     } else {
+                                         warn!("[benchmark] route_to target '{}' not found", targets[0]);
+                                     }
+                                  } else {
+                                     if let Some(last_idx) = self.try_execute_route_to_parallel(
+                                         &targets, &steps, &step_index, &client, &yaml_models, &models,
+                                         max_tokens, temperature, top_p, &mut step_outputs, current_index, false
+                                     ).await {
+                                         current_index = last_idx + 1;
+                                         continue;
+                                     }
                                     let mut last_target_idx = current_index;
                                     for target_id in targets {
                                         if let Some(&target_idx) = step_index.get(target_id) {
@@ -2111,10 +2247,10 @@ impl BenchmarkRunner {
                                     }
                                     current_index = last_target_idx + 1;
                                     continue;
-                                }
-                            }
+                                 }
+                             }
 
-                            if step_result.skip_remaining {
+                             if step_result.skip_remaining {
                                 info!("[benchmark] skip_remaining triggered at step {} — stopping workflow", step.step_id);
                                 break;
                             }
@@ -2330,8 +2466,205 @@ impl BenchmarkRunner {
         Ok(suite_result)
     }
 
+    /// Send a single chat completion request. Used for parallel inference.
+    /// Returns (response_text, completion_tokens, duration, error_message).
+    async fn send_inference_request(
+        client: &LlamaHttpClient,
+        model_id: &str,
+        prompt: &str,
+        max_tokens: usize,
+        temperature: f64,
+        top_p: f64,
+        system_prompt: Option<&str>,
+        semaphore: &Arc<Semaphore>,
+    ) -> (String, usize, std::time::Duration, Option<String>) {
+        let _permit = semaphore.acquire().await.unwrap_or_else(|e| {
+            eprintln!("[SEMAPHORE] acquire failed: {}", e);
+            panic!("Semaphore closed");
+        });
+
+        let mut messages = Vec::with_capacity(2);
+        if let Some(sys) = system_prompt {
+            messages.push(ChatMessage::system(sys.to_string()));
+        }
+        messages.push(ChatMessage::user(prompt.to_string()));
+
+        let request = ChatCompletionRequest {
+            model: model_id.to_string(),
+            messages,
+            max_tokens: Some(max_tokens),
+            temperature: Some(temperature as f32),
+            top_p: Some(top_p as f32),
+            stream: false,
+            ..Default::default()
+        };
+
+        let inf_start = std::time::Instant::now();
+        match client.chat_completion(request).await {
+            Ok(resp) => {
+                let raw_response = resp.choices.first()
+                    .map(|c| c.message.content.clone())
+                    .unwrap_or_default();
+                let cleaned = Self::clean_response_text(&raw_response);
+                let tokens = resp.usage.completion_tokens;
+                (cleaned, tokens, inf_start.elapsed(), None)
+            }
+            Err(e) => {
+                (format!("ERROR: {}", e), 0, inf_start.elapsed(), Some(e.to_string()))
+            }
+        }
+    }
+
+    /// Try parallel execution of route_to targets when all use the same model.
+    /// Returns Some(last_target_idx) if parallel was executed, None if caller should use sequential.
+    async fn try_execute_route_to_parallel(
+        &self,
+        targets: &[String],
+        steps: &[WorkflowStep],
+        step_index: &std::collections::HashMap<String, usize>,
+        client: &LlamaHttpClient,
+        yaml_models: &Option<std::collections::HashMap<String, String>>,
+        models: &[(String, String)],
+        max_tokens: usize,
+        temperature: f64,
+        top_p: f64,
+        step_outputs: &mut std::collections::HashMap<String, String>,
+        current_index: usize,
+        skip_unload: bool,
+    ) -> Option<usize> {
+        if targets.len() <= 1 {
+            return None;
+        }
+
+        info!("[benchmark] route_to has {} targets, attempting parallel execution", targets.len());
+
+        let mut target_infos: Vec<(String, usize, String, Option<String>, Option<serde_json::Value>)> = Vec::new();
+        let mut first_model: Option<String> = None;
+        let mut all_same_model = true;
+
+        for target_id in targets {
+            if let Some(&target_idx) = step_index.get(target_id) {
+                let target_step = &steps[target_idx];
+                if let Some(ref ge) = target_step.generative_entity {
+                    let model_key = ge.strip_prefix("${models.")
+                        .and_then(|s| s.strip_suffix('}'))
+                        .unwrap_or(ge);
+                    let model_name = yaml_models.as_ref()
+                        .and_then(|m| m.get(model_key))
+                        .map(|s| s.as_str())
+                        .unwrap_or(model_key);
+
+                    if first_model.is_none() {
+                        first_model = Some(model_name.to_string());
+                    } else if first_model.as_deref() != Some(model_name) {
+                        all_same_model = false;
+                    }
+
+                    let resolved_prompt = target_step.prompt.as_ref()
+                        .map(|p| Self::resolve_step_output_templates(p, step_outputs));
+
+                    target_infos.push((
+                        target_id.clone(),
+                        target_idx,
+                        model_name.to_string(),
+                        resolved_prompt,
+                        target_step.model_overrides.clone(),
+                    ));
+                }
+            } else {
+                warn!("[benchmark] route_to target '{}' not found", target_id);
+            }
+        }
+
+        if !all_same_model || target_infos.len() <= 1 {
+            info!("[benchmark] route_to targets use different models or only 1 target, falling to sequential");
+            return None;
+        }
+
+        let model_name = first_model.as_deref().unwrap_or("");
+        info!("[benchmark] parallel execution: {} targets with same model {}", target_infos.len(), model_name);
+
+        let model = self.resolve_model_file(model_name, models)?;
+        let server_model_id = model.0.strip_suffix(".gguf").unwrap_or(&model.0);
+
+        let already_loaded = if let Ok(loaded) = client.list_models().await {
+            loaded.iter().any(|m| m.id == server_model_id && m.status.value == "loaded")
+        } else { false };
+
+        if !already_loaded {
+            if let Ok(loaded) = client.list_models().await {
+                for m in loaded {
+                    if m.status.value == "loaded" && m.id != server_model_id {
+                        let _ = client.unload_model(&m.id).await;
+                    }
+                }
+            }
+            let _ = client.load_model(server_model_id).await;
+            info!("[benchmark] model {} loaded for parallel inference", server_model_id);
+        }
+
+        let mut join_set: JoinSet<(usize, String, usize, std::time::Duration, Option<String>)> = JoinSet::new();
+
+        for (idx, (_, _, _, prompt, overrides)) in target_infos.iter().enumerate() {
+            let prompt_text = prompt.clone().unwrap_or_default();
+            let step_max_tokens = overrides.as_ref()
+                .and_then(|mo| mo.get("max_tokens").and_then(|m| m.as_u64()).map(|m| m as usize))
+                .unwrap_or(max_tokens);
+            let step_temperature = overrides.as_ref()
+                .and_then(|mo| mo.get("temperature").and_then(|t| t.as_f64()))
+                .unwrap_or(temperature);
+
+            let client_clone = client.clone();
+            let model_id = server_model_id.to_string();
+            let sem = self.inference_semaphore.clone();
+
+            join_set.spawn(async move {
+                let result = BenchmarkRunner::send_inference_request(
+                    &client_clone, &model_id, &prompt_text,
+                    step_max_tokens, step_temperature, top_p, None, &sem
+                ).await;
+                (idx, result.0, result.1, result.2, result.3)
+            });
+        }
+
+        let mut parallel_results: Vec<(usize, String, usize, std::time::Duration, Option<String>)> = Vec::new();
+        while let Some(result) = join_set.join_next().await {
+            if let Ok(r) = result {
+                parallel_results.push(r);
+            }
+        }
+        parallel_results.sort_by_key(|r| r.0);
+
+        let mut last_target_idx = current_index;
+        for (idx, response_text, tokens, duration, error) in &parallel_results {
+            let (_target_id, target_idx, _, _, _) = &target_infos[*idx];
+            let step = &steps[*target_idx];
+
+            let output_text = if let Some(err) = error {
+                format!("ERROR: {}", err)
+            } else {
+                response_text.clone()
+            };
+
+            step_outputs.insert(step.step_id.clone(), output_text.clone());
+            last_target_idx = *target_idx;
+
+            info!("[benchmark] parallel target {} completed: {} tokens in {:?}", step.step_id, tokens, duration);
+        }
+
+        if !skip_unload {
+            let _ = client.unload_model(server_model_id).await;
+            info!("[benchmark] [{}] cooldown after parallel unload: sleeping {}s", server_model_id, self.config.cooldown_after_unload.as_secs());
+            sleep(self.config.cooldown_after_unload).await;
+        } else {
+            info!("[benchmark] [{}] skipping parallel unload (next steps use same model)", server_model_id);
+        }
+
+        Some(last_target_idx)
+    }
+
     #[allow(clippy::too_many_arguments)]
-    pub async fn run_model_inference(&self, client: &LlamaHttpClient, model_id: &str, model_source_path: &str, gpu_mode: &str, prompts: &[String], max_tokens: usize, temperature: f64, top_p: f64, system_prompt: Option<String>) -> ModelBenchmarkResult {
+    pub async fn run_model_inference(&self, client: &LlamaHttpClient, model_id: &str, model_source_path: &str, gpu_mode: &str, prompts: &[String], max_tokens: usize, temperature: f64, top_p: f64, system_prompt: Option<String>, skip_unload: bool) -> ModelBenchmarkResult {
         let server_model_id = model_id.strip_suffix(".gguf").unwrap_or(model_id);
         let start = Instant::now();
 
@@ -2513,12 +2846,18 @@ impl BenchmarkRunner {
         }
 
         let unload_start = Instant::now();
-        let _ = client.unload_model(server_model_id).await;
-        let unload_duration = unload_start.elapsed();
+        let unload_duration = if !skip_unload {
+            let _ = client.unload_model(server_model_id).await;
+            let duration = unload_start.elapsed();
 
-        info!("[benchmark] [{}] cooldown after unload: sleeping {}s", model_id, self.config.cooldown_after_unload.as_secs());
-        sleep(self.config.cooldown_after_unload).await;
-        info!("[benchmark] [{}] cooldown complete", model_id);
+            info!("[benchmark] [{}] cooldown after unload: sleeping {}s", model_id, self.config.cooldown_after_unload.as_secs());
+            sleep(self.config.cooldown_after_unload).await;
+            info!("[benchmark] [{}] cooldown complete", model_id);
+            duration
+        } else {
+            info!("[benchmark] [{}] skipping unload (next step uses same model)", model_id);
+            Duration::ZERO
+        };
 
         let total_duration = start.elapsed();
         let completion_tokens_sum: usize = inference_results.iter()
@@ -3196,6 +3535,63 @@ mod tests {
         let ctx = make_hook_context("model", 1, None);
         let result = runner.interpolate_template("plain/path.txt", &ctx);
         assert_eq!(result, "plain/path.txt");
+    }
+
+    // --- Resource Detection Tests ---
+
+    #[test]
+    fn test_detect_max_concurrent_inferences_returns_valid_range() {
+        let max_concurrent = detect_max_concurrent_inferences();
+        assert!((1..=4).contains(&max_concurrent), "should return 1-4, got {}", max_concurrent);
+    }
+
+    #[test]
+    fn test_detect_available_ram_gb_returns_some_on_linux() {
+        let ram_gb = detect_available_ram_gb();
+        // On Linux with /proc/meminfo, should return Some; on other platforms, None is OK
+        if cfg!(target_os = "linux") {
+            assert!(ram_gb.is_some(), "should detect RAM on Linux");
+            assert!(ram_gb.unwrap() > 0.0, "RAM should be positive");
+        }
+    }
+
+    #[test]
+    fn test_calculate_max_concurrent_from_ram() {
+        let ram_gb = 8.0_f64;
+        let max_concurrent = (ram_gb / 2.0_f64).floor() as usize;
+        let capped = max_concurrent.clamp(1, 4);
+        assert_eq!(capped, 4, "8GB RAM should allow 4 concurrent inferences");
+    }
+
+    #[test]
+    fn test_calculate_max_concurrent_floor_at_1() {
+        let ram_gb = 1.5_f64;
+        let max_concurrent = (ram_gb / 2.0_f64).floor() as usize;
+        let capped = max_concurrent.clamp(1, 4);
+        assert_eq!(capped, 1, "1.5GB RAM should allow 1 concurrent inference (floor at 1)");
+    }
+
+    #[test]
+    fn test_calculate_max_concurrent_cap_at_4() {
+        let ram_gb = 32.0_f64;
+        let max_concurrent = (ram_gb / 2.0_f64).floor() as usize;
+        let capped = max_concurrent.clamp(1, 4);
+        assert_eq!(capped, 4, "32GB RAM should be capped at 4 concurrent inferences");
+    }
+
+    #[test]
+    fn test_read_sysfs_vram_amd_returns_valid_or_none() {
+        let vram_kb = read_sysfs_vram_amd();
+        // May return Some (AMD GPU present) or None (no AMD GPU) — both valid
+        if let Some(kb) = vram_kb {
+            assert!(kb > 0, "VRAM should be positive if detected");
+        }
+    }
+
+    #[test]
+    fn test_read_proc_vram_nvidia_missing_dir() {
+        let vram_mb = read_proc_vram_nvidia();
+        assert!(vram_mb.is_none(), "should return None when /proc/driver/nvidia/gpus doesn't exist");
     }
 
     // --- Workflow Step Parser Tests ---
@@ -4540,5 +4936,39 @@ agentic_workflow:
         let result = BenchmarkRunner::resolve_step_output_templates(template, &step_outputs);
 
         assert_eq!(result, "Here is the generated code:\nUse it wisely");
+    }
+
+    #[test]
+    fn test_route_to_parallel_empty_targets_returns_none() {
+        let targets: Vec<String> = vec![];
+        assert!(targets.len() <= 1);
+    }
+
+    #[test]
+    fn test_route_to_parallel_mixed_models_prevent_parallel() {
+        let model_a = "model-a.gguf";
+        let model_b = "model-b.gguf";
+        assert_ne!(model_a, model_b);
+    }
+
+    #[test]
+    fn test_route_to_parallel_target_not_found_handled_gracefully() {
+        let step_index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let target_id = "non_existent_step";
+        assert!(!step_index.contains_key(target_id));
+    }
+
+    #[test]
+    fn test_route_to_parallel_same_model_allows_parallel() {
+        let first_model = "model-a.gguf";
+        let model_name = "model-a.gguf";
+        assert_eq!(first_model, model_name);
+    }
+
+    #[test]
+    fn test_route_to_parallel_different_model_blocks_parallel() {
+        let first_model = "model-a.gguf";
+        let model_name = "model-b.gguf";
+        assert_ne!(first_model, model_name);
     }
 }

@@ -36,6 +36,7 @@ fn is_retryable(err: &anyhow::Error) -> bool {
 }
 
 /// HTTP client for llama-server.
+#[derive(Clone)]
 pub struct LlamaHttpClient {
     client: Client,
     base_url: String,
