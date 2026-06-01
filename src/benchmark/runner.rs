@@ -20,6 +20,8 @@ use std::time::{Duration, Instant};
 use std::process::Command;
 use tokio::time::{sleep, timeout};
 use tokio::process::Command as TokioCommand;
+use tokio::sync::Semaphore;
+use std::sync::Arc;
 use tracing::{info, warn};
 
 pub struct BenchmarkConfig {
@@ -61,6 +63,7 @@ fn default_min_tmp_space_mb() -> u64 {
 pub struct BenchmarkRunner {
     config: BenchmarkConfig,
     hook_engine: HookEngine,
+    inference_semaphore: Arc<Semaphore>,
 }
 
 struct BenchmarkWorkflowConfig {
@@ -91,6 +94,7 @@ impl BenchmarkRunner {
         Self {
             config,
             hook_engine: HookEngine::new(),
+            inference_semaphore: Arc::new(Semaphore::new(2)), // Default: 2 concurrent inferences
         }
     }
 
@@ -988,12 +992,78 @@ impl BenchmarkRunner {
             let placeholder = format!("{{{{step.{}.output}}}}", step_id);
             result = result.replace(&placeholder, output);
         }
-
         result
     }
 }
 
 impl BenchmarkRunner {
+
+    /// Execute multiple workflow steps that use the same model concurrently.
+    /// Returns (step_id, result) pairs for all completed steps.
+    async fn execute_parallel_steps(
+        &mut self,
+        target_step_ids: &[String],
+        steps: &[WorkflowStep],
+        client: &LlamaHttpClient,
+        model: &(String, String),
+        max_tokens: usize,
+        temperature: f64,
+        top_p: f64,
+        step_index: &std::collections::HashMap<String, usize>,
+    ) -> Vec<(String, Result<WorkflowStepResult>)> {
+        let target_steps: Vec<(String, usize)> = target_step_ids.iter()
+            .filter_map(|id| step_index.get(id).map(|&idx| (id.clone(), idx)))
+            .collect();
+
+        if target_steps.is_empty() {
+            return Vec::new();
+        }
+
+        // Single target: execute normally
+        if target_steps.len() == 1 {
+            let (step_id, step_idx) = &target_steps[0];
+            let step = &steps[*step_idx];
+            let resolved_prompt = step.prompt.as_ref()
+                .map(|p| Self::resolve_step_output_templates(p, &std::collections::HashMap::new()));
+            let resolved_step = WorkflowStep {
+                step_name: step.step_name.clone(),
+                step_id: step.step_id.clone(),
+                requires: step.requires.clone(),
+                when: step.when.clone(),
+                prompt: resolved_prompt,
+                generative_entity: step.generative_entity.clone(),
+                model_overrides: step.model_overrides.clone(),
+                r#loop: step.r#loop.clone(),
+            };
+            let result = self.execute_workflow_step(&resolved_step, client, model, max_tokens, temperature, top_p, None).await;
+            return vec![(step_id.clone(), result)];
+        }
+
+        // Multiple targets: execute sequentially (cannot spawn tokio tasks due to &mut self)
+        // TODO: Enable true parallelism when hook_engine becomes Send+Sync
+        info!("[benchmark] executing {} targets (sequential due to hook_engine mutability)", target_steps.len());
+        let mut results = Vec::new();
+
+        for (step_id, step_idx) in &target_steps {
+            let step = &steps[*step_idx];
+            let resolved_prompt = step.prompt.as_ref()
+                .map(|p| Self::resolve_step_output_templates(p, &std::collections::HashMap::new()));
+            let step_clone = WorkflowStep {
+                step_name: step.step_name.clone(),
+                step_id: step.step_id.clone(),
+                requires: step.requires.clone(),
+                when: step.when.clone(),
+                prompt: resolved_prompt,
+                generative_entity: step.generative_entity.clone(),
+                model_overrides: step.model_overrides.clone(),
+                r#loop: step.r#loop.clone(),
+            };
+            let result = self.execute_workflow_step(&step_clone, client, model, max_tokens, temperature, top_p, None).await;
+            results.push((step_id.clone(), result));
+        }
+
+        results
+    }
 
 
     fn copy_workflow_yaml(&self) -> Result<()> {
@@ -1727,11 +1797,57 @@ impl BenchmarkRunner {
                     }
 
                     if let Some(ref targets) = routed {
-                        if let Some(&target_idx) = step_index.get(&targets[0]) {
-                            current_index = target_idx;
-                            continue;
+                        if targets.len() == 1 {
+                            if let Some(&target_idx) = step_index.get(&targets[0]) {
+                                current_index = target_idx;
+                                continue;
+                            } else {
+                                warn!("[benchmark] route_to target '{}' not found", targets[0]);
+                            }
                         } else {
-                            warn!("[benchmark] route_to target '{}' not found", targets[0]);
+                            info!("[benchmark] route_to has {} targets, executing all", targets.len());
+                            let mut last_target_idx = current_index;
+                            for target_id in targets {
+                                if let Some(&target_idx) = step_index.get(target_id) {
+                                    let target_step = &steps[target_idx];
+                                    if let Some(ref ge) = target_step.generative_entity {
+                                        let model_key = ge.strip_prefix("${models.")
+                                            .and_then(|s| s.strip_suffix('}'))
+                                            .unwrap_or(ge);
+                                        let model_name = yaml_models.as_ref()
+                                            .and_then(|m| m.get(model_key))
+                                            .map(|s| s.as_str())
+                                            .unwrap_or(model_key);
+                                        if let Some(model) = self.resolve_model_file(model_name, &models) {
+                                            let resolved_prompt = target_step.prompt.as_ref()
+                                                .map(|p| Self::resolve_step_output_templates(p, &step_outputs));
+                                            let resolved_target = WorkflowStep {
+                                                step_name: target_step.step_name.clone(),
+                                                step_id: target_step.step_id.clone(),
+                                                requires: target_step.requires.clone(),
+                                                when: target_step.when.clone(),
+                                                prompt: resolved_prompt,
+                                                generative_entity: target_step.generative_entity.clone(),
+                                                model_overrides: target_step.model_overrides.clone(),
+                                                r#loop: target_step.r#loop.clone(),
+                                            };
+                                            let target_result = self.execute_workflow_step(&resolved_target, &client, &model, max_tokens, temperature, top_p, None).await?;
+                                            results.push(target_result.benchmark_result.clone());
+                                            if let Some(ref last) = results.last() {
+                                                let output_text = last.inference_results.first()
+                                                    .map(|inf| inf.response_text.clone())
+                                                    .unwrap_or_default();
+                                                step_outputs.insert(target_step.step_id.clone(), output_text);
+                                            }
+                                            last_target_idx = target_idx;
+                                        }
+                                    }
+                                } else {
+                                    warn!("[benchmark] route_to target '{}' not found", target_id);
+                                }
+                            }
+                            current_index = last_target_idx + 1;
+                            continue;
                         }
                     }
 
@@ -1775,13 +1891,59 @@ impl BenchmarkRunner {
                             }
 
                             if let Some(ref targets) = step_result.route_to {
-                                if let Some(&target_idx) = step_index.get(&targets[0]) {
-                                    info!("[benchmark] routing from step {} to {} (iteration #{})",
-                                        step.step_id, targets[0], loop_count);
-                                    current_index = target_idx;
-                                    continue;
+                                if targets.len() == 1 {
+                                    if let Some(&target_idx) = step_index.get(&targets[0]) {
+                                        info!("[benchmark] routing from step {} to {} (iteration #{})",
+                                            step.step_id, targets[0], loop_count);
+                                        current_index = target_idx;
+                                        continue;
+                                    } else {
+                                        warn!("[benchmark] route_to target '{}' not found", targets[0]);
+                                    }
                                 } else {
-                                    warn!("[benchmark] route_to target '{}' not found", targets[0]);
+                                    info!("[benchmark] route_to has {} targets, executing all", targets.len());
+                                    let mut last_target_idx = current_index;
+                                    for target_id in targets {
+                                        if let Some(&target_idx) = step_index.get(target_id) {
+                                            let target_step = &steps[target_idx];
+                                            if let Some(ref ge) = target_step.generative_entity {
+                                                let model_key = ge.strip_prefix("${models.")
+                                                    .and_then(|s| s.strip_suffix('}'))
+                                                    .unwrap_or(ge);
+                                                let model_name = yaml_models.as_ref()
+                                                    .and_then(|m| m.get(model_key))
+                                                    .map(|s| s.as_str())
+                                                    .unwrap_or(model_key);
+                                                if let Some(model) = self.resolve_model_file(model_name, &models) {
+                                                    let resolved_prompt = target_step.prompt.as_ref()
+                                                        .map(|p| Self::resolve_step_output_templates(p, &step_outputs));
+                                                    let resolved_target = WorkflowStep {
+                                                        step_name: target_step.step_name.clone(),
+                                                        step_id: target_step.step_id.clone(),
+                                                        requires: target_step.requires.clone(),
+                                                        when: target_step.when.clone(),
+                                                        prompt: resolved_prompt,
+                                                        generative_entity: target_step.generative_entity.clone(),
+                                                        model_overrides: target_step.model_overrides.clone(),
+                                                        r#loop: target_step.r#loop.clone(),
+                                                    };
+                                                    let target_result = self.execute_workflow_step(&resolved_target, &client, &model, max_tokens, temperature, top_p, None).await?;
+                                                    results.push(target_result.benchmark_result.clone());
+                                                    if let Some(ref last) = results.last() {
+                                                        let output_text = last.inference_results.first()
+                                                            .map(|inf| inf.response_text.clone())
+                                                            .unwrap_or_default();
+                                                        step_outputs.insert(target_step.step_id.clone(), output_text);
+                                                    }
+                                                    last_target_idx = target_idx;
+                                                }
+                                            }
+                                        } else {
+                                            warn!("[benchmark] route_to target '{}' not found", target_id);
+                                        }
+                                    }
+                                    current_index = last_target_idx + 1;
+                                    continue;
                                 }
                             }
 
@@ -1812,8 +1974,54 @@ impl BenchmarkRunner {
                                 }
                                 Ok(HookResult::RouteTo { targets }) => {
                                     info!("[benchmark] step {} routed to {:?} by after_step_fails (model resolution)", step.step_id, targets);
-                                    if let Some(&target_idx) = step_index.get(&targets[0]) {
-                                        current_index = target_idx;
+                                    if targets.len() == 1 {
+                                        if let Some(&target_idx) = step_index.get(&targets[0]) {
+                                            current_index = target_idx;
+                                            continue;
+                                        }
+                                    } else {
+                                        info!("[benchmark] route_to has {} targets, executing all", targets.len());
+                                        let mut last_target_idx = current_index;
+                                        for target_id in targets {
+                                        if let Some(&target_idx) = step_index.get(&target_id) {
+                                                let target_step = &steps[target_idx];
+                                                if let Some(ref ge) = target_step.generative_entity {
+                                                    let model_key = ge.strip_prefix("${models.")
+                                                        .and_then(|s| s.strip_suffix('}'))
+                                                        .unwrap_or(ge);
+                                                    let model_name = yaml_models.as_ref()
+                                                        .and_then(|m| m.get(model_key))
+                                                        .map(|s| s.as_str())
+                                                        .unwrap_or(model_key);
+                                                    if let Some(model) = self.resolve_model_file(model_name, &models) {
+                                                        let resolved_prompt = target_step.prompt.as_ref()
+                                                            .map(|p| Self::resolve_step_output_templates(p, &step_outputs));
+                                                        let resolved_target = WorkflowStep {
+                                                            step_name: target_step.step_name.clone(),
+                                                            step_id: target_step.step_id.clone(),
+                                                            requires: target_step.requires.clone(),
+                                                            when: target_step.when.clone(),
+                                                            prompt: resolved_prompt,
+                                                            generative_entity: target_step.generative_entity.clone(),
+                                                            model_overrides: target_step.model_overrides.clone(),
+                                                            r#loop: target_step.r#loop.clone(),
+                                                        };
+                                                        let target_result = self.execute_workflow_step(&resolved_target, &client, &model, max_tokens, temperature, top_p, None).await?;
+                                                        results.push(target_result.benchmark_result.clone());
+                                                        if let Some(ref last) = results.last() {
+                                                            let output_text = last.inference_results.first()
+                                                                .map(|inf| inf.response_text.clone())
+                                                                .unwrap_or_default();
+                                                            step_outputs.insert(target_step.step_id.clone(), output_text);
+                                                        }
+                                                        last_target_idx = target_idx;
+                                                    }
+                                                }
+                                            } else {
+                                                warn!("[benchmark] route_to target '{}' not found", target_id);
+                                            }
+                                        }
+                                        current_index = last_target_idx + 1;
                                         continue;
                                     }
                                 }
@@ -1850,13 +2058,59 @@ impl BenchmarkRunner {
                             }
 
                             if let Some(ref targets) = step_result.route_to {
-                                if let Some(&target_idx) = step_index.get(&targets[0]) {
-                                    info!("[benchmark] routing from step {} to {} (iteration #{})",
-                                        step.step_id, targets[0], loop_count);
-                                    current_index = target_idx;
-                                    continue;
+                                if targets.len() == 1 {
+                                    if let Some(&target_idx) = step_index.get(&targets[0]) {
+                                        info!("[benchmark] routing from step {} to {} (iteration #{})",
+                                            step.step_id, targets[0], loop_count);
+                                        current_index = target_idx;
+                                        continue;
+                                    } else {
+                                        warn!("[benchmark] route_to target '{}' not found", targets[0]);
+                                    }
                                 } else {
-                                    warn!("[benchmark] route_to target '{}' not found", targets[0]);
+                                    info!("[benchmark] route_to has {} targets, executing all", targets.len());
+                                    let mut last_target_idx = current_index;
+                                    for target_id in targets {
+                                        if let Some(&target_idx) = step_index.get(target_id) {
+                                            let target_step = &steps[target_idx];
+                                            if let Some(ref ge) = target_step.generative_entity {
+                                                let model_key = ge.strip_prefix("${models.")
+                                                    .and_then(|s| s.strip_suffix('}'))
+                                                    .unwrap_or(ge);
+                                                let model_name = yaml_models.as_ref()
+                                                    .and_then(|m| m.get(model_key))
+                                                    .map(|s| s.as_str())
+                                                    .unwrap_or(model_key);
+                                                if let Some(model) = self.resolve_model_file(model_name, &models) {
+                                                    let resolved_prompt = target_step.prompt.as_ref()
+                                                        .map(|p| Self::resolve_step_output_templates(p, &step_outputs));
+                                                    let resolved_target = WorkflowStep {
+                                                        step_name: target_step.step_name.clone(),
+                                                        step_id: target_step.step_id.clone(),
+                                                        requires: target_step.requires.clone(),
+                                                        when: target_step.when.clone(),
+                                                        prompt: resolved_prompt,
+                                                        generative_entity: target_step.generative_entity.clone(),
+                                                        model_overrides: target_step.model_overrides.clone(),
+                                                        r#loop: target_step.r#loop.clone(),
+                                                    };
+                                                    let target_result = self.execute_workflow_step(&resolved_target, &client, &model, max_tokens, temperature, top_p, None).await?;
+                                                    results.push(target_result.benchmark_result.clone());
+                                                    if let Some(ref last) = results.last() {
+                                                        let output_text = last.inference_results.first()
+                                                            .map(|inf| inf.response_text.clone())
+                                                            .unwrap_or_default();
+                                                        step_outputs.insert(target_step.step_id.clone(), output_text);
+                                                    }
+                                                    last_target_idx = target_idx;
+                                                }
+                                            }
+                                        } else {
+                                            warn!("[benchmark] route_to target '{}' not found", target_id);
+                                        }
+                                    }
+                                    current_index = last_target_idx + 1;
+                                    continue;
                                 }
                             }
 
@@ -2099,12 +2353,23 @@ impl BenchmarkRunner {
             }
         };
 
-        if let Ok(models) = client.list_models().await {
-            for m in models {
-                if m.status.value == "loaded" && m.id != server_model_id {
-                    let _ = client.unload_model(&m.id).await;
+        let already_loaded = if let Ok(models) = client.list_models().await {
+            models.iter().any(|m| m.id == server_model_id && m.status.value == "loaded")
+        } else {
+            false
+        };
+
+        if !already_loaded {
+            if let Ok(models) = client.list_models().await {
+                for m in models {
+                    if m.status.value == "loaded" && m.id != server_model_id {
+                        info!("[benchmark] unloading {} to make room for {}", m.id, server_model_id);
+                        let _ = client.unload_model(&m.id).await;
+                    }
                 }
             }
+        } else {
+            info!("[benchmark] model {} already loaded, reusing", server_model_id);
         }
 
         let load_start = Instant::now();
@@ -2326,12 +2591,23 @@ impl BenchmarkRunner {
             }
         };
 
-        if let Ok(models) = client.list_models().await {
-            for m in models {
-                if m.status.value == "loaded" && m.id != server_model_id {
-                    let _ = client.unload_model(&m.id).await;
+        let already_loaded = if let Ok(models) = client.list_models().await {
+            models.iter().any(|m| m.id == server_model_id && m.status.value == "loaded")
+        } else {
+            false
+        };
+
+        if !already_loaded {
+            if let Ok(models) = client.list_models().await {
+                for m in models {
+                    if m.status.value == "loaded" && m.id != server_model_id {
+                        info!("[benchmark] unloading {} to make room for {}", m.id, server_model_id);
+                        let _ = client.unload_model(&m.id).await;
+                    }
                 }
             }
+        } else {
+            info!("[benchmark] model {} already loaded, reusing", server_model_id);
         }
 
         if let Err(e) = self.check_system_health().await {

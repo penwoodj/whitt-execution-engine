@@ -1,0 +1,149 @@
+# ═══════════════════════════════════════════════════════════════════
+# Resource Guard Test — Overload Protection
+# Schema-compliant per docs/schema/unified-workflow-schema.yml v2.0
+#
+# Tests that the engine handles overload gracefully.
+# Route_to triggers 5 simultaneous analyses. With semaphore=2,
+# only 2 should execute concurrently, the rest queue.
+#
+# Expected behavior:
+#   - ALL 5 targets must complete (no silent drops)
+#   - Engine should NOT crash under load
+#   - Steps should complete in ~3 sequential batches of 2+2+1
+#   - step_6_report confirms all 5 analyses completed
+# ═══════════════════════════════════════════════════════════════════
+
+workflow_id: test_resource_guard_overload
+name: "Resource Guard Test - Overload Protection"
+description: "Test that engine handles 5 parallel targets gracefully with resource limits"
+version: "2.0.0"
+author: "Whitt Execution Engine"
+tags: [test, parallel, resource-guard, negative]
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+    hosting:
+      gpu_layers: 999
+
+models:
+  "target-model":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+      connection_settings: {}
+    ram_allocation:
+      strategy: dynamic
+    execution:
+      timeout:
+        load_into_memory: 30s
+        time_to_first_response: 10s
+        total_time_to_response: 120s
+      max_turns: 3
+      stop_on_tool_failure: false
+      accumulate_tool_results: false
+    tools:
+      default_permissions:
+        web_access: false
+        file_read: true
+        file_write: true
+        shell_exec: false
+
+agentic_workflow:
+  inputs:
+    topic: "data pipeline architecture"
+
+  steps:
+    step_1_topic:
+      generative_entity: "${models.target-model}"
+      prompt: |
+        Generate a 2-sentence software architecture topic description.
+        Return JSON: {"topic": "...", "context": "..."}
+        Topic: {{inputs.topic}}
+      model_overrides:
+        max_tokens: 200
+        temperature: 0.5
+      when:
+        after_step_succeeds:
+          - route_to: [step_2_aspect_1, step_2_aspect_2, step_2_aspect_3, step_2_aspect_4, step_2_aspect_5]
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/resource-guard-test.log"
+              event_fields: [step_name, duration_ms]
+
+    step_2_aspect_1:
+      generative_entity: "${models.target-model}"
+      prompt: |
+        Analyze this topic from a SCALABILITY angle in exactly 1 sentence.
+        Return JSON: {"aspect": "scalability", "finding": "...", "severity": "low|medium|high"}
+        Topic: {{step.step_1_topic.output}}
+      model_overrides:
+        max_tokens: 200
+        temperature: 0.3
+
+    step_2_aspect_2:
+      generative_entity: "${models.target-model}"
+      prompt: |
+        Analyze this topic from a RELIABILITY angle in exactly 1 sentence.
+        Return JSON: {"aspect": "reliability", "finding": "...", "severity": "low|medium|high"}
+        Topic: {{step.step_1_topic.output}}
+      model_overrides:
+        max_tokens: 200
+        temperature: 0.3
+
+    step_2_aspect_3:
+      generative_entity: "${models.target-model}"
+      prompt: |
+        Analyze this topic from a COST angle in exactly 1 sentence.
+        Return JSON: {"aspect": "cost", "finding": "...", "severity": "low|medium|high"}
+        Topic: {{step.step_1_topic.output}}
+      model_overrides:
+        max_tokens: 200
+        temperature: 0.3
+
+    step_2_aspect_4:
+      generative_entity: "${models.target-model}"
+      prompt: |
+        Analyze this topic from a COMPLIANCE angle in exactly 1 sentence.
+        Return JSON: {"aspect": "compliance", "finding": "...", "severity": "low|medium|high"}
+        Topic: {{step.step_1_topic.output}}
+      model_overrides:
+        max_tokens: 200
+        temperature: 0.3
+
+    step_2_aspect_5:
+      generative_entity: "${models.target-model}"
+      prompt: |
+        Analyze this topic from a OBSERVABILITY angle in exactly 1 sentence.
+        Return JSON: {"aspect": "observability", "finding": "...", "severity": "low|medium|high"}
+        Topic: {{step.step_1_topic.output}}
+      model_overrides:
+        max_tokens: 200
+        temperature: 0.3
+
+    step_3_report:
+      generative_entity: "${models.target-model}"
+      requires:
+        - step_2_aspect_1
+        - step_2_aspect_2
+        - step_2_aspect_3
+        - step_2_aspect_4
+        - step_2_aspect_5
+      prompt: |
+        Merge these 5 analyses into a summary.
+        Return JSON with: aspects_count, overall_risk, top_concern
+        1: {{step.step_2_aspect_1.output}}
+        2: {{step.step_2_aspect_2.output}}
+        3: {{step.step_2_aspect_3.output}}
+        4: {{step.step_2_aspect_4.output}}
+        5: {{step.step_2_aspect_5.output}}
+      model_overrides:
+        max_tokens: 300
+        temperature: 0.2
+      when:
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/output/resource-guard-report.json"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/resource-guard-test.log"
+              event_fields: [step_name, duration_ms, token_count]

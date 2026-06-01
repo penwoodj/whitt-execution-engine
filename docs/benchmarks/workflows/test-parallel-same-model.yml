@@ -1,0 +1,224 @@
+# ═══════════════════════════════════════════════════════════════════
+# Parallel Execution Test — Same Model Concurrent Inference
+# Schema-compliant per docs/schema/unified-workflow-schema.yml v2.0
+#
+# Tests parallel step execution via route_to with multiple targets.
+# Step 1 generates a topic, then route_to triggers 3 parallel analyses
+# of the SAME topic using the SAME model concurrently.
+#
+# Architecture:
+#   step_1_generate_topic → route_to [step_2a, step_2b, step_2c]
+#   step_2a, step_2b, step_2c all use same model → parallel execution
+#   step_3_merge → collects all results, produces summary
+#
+# Expected behavior:
+#   - Steps 2a/2b/2c should execute concurrently (if engine supports)
+#   - OR sequentially (if engine doesn't support parallel yet)
+#   - Either way, ALL targets must execute (not just first)
+#   - step_3_merge gets all 3 outputs via template interpolation
+# ═══════════════════════════════════════════════════════════════════
+
+workflow_id: test_parallel_same_model
+name: "Parallel Execution Test - Same Model Concurrent Inference"
+description: "Test parallel step execution with route_to multiple targets using a single model"
+version: "2.0.0"
+author: "Whitt Execution Engine"
+tags: [test, parallel, concurrent]
+
+# ── PROVIDERS ───────────────────────────────────────────────────
+providers:
+  llama_cpp_with_vulkan:                               # schema line 28
+    config:                                             # schema line 29
+      host: localhost                                   # schema line 30
+      port: 8080                                        # schema line 31
+    hosting:                                            # schema line 33
+      gpu_layers: 999                                   # schema line 35
+
+# ── MODELS ──────────────────────────────────────────────────────
+models:
+  "target-model":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan                       # schema line 71
+      connection_settings: {}
+    ram_allocation:                                     # schema line 75
+      strategy: dynamic                                 # schema line 76
+    execution:                                          # schema line 96
+      timeout:
+        load_into_memory: 30s
+        time_to_first_response: 10s
+        total_time_to_response: 120s
+      max_turns: 3
+      stop_on_tool_failure: false
+      accumulate_tool_results: false
+    tools:
+      default_permissions:
+        web_access: false
+        file_read: true
+        file_write: true
+        shell_exec: false
+
+# ── WORKFLOW ────────────────────────────────────────────────────
+agentic_workflow:
+  inputs:
+    topic: "microservices architecture"
+
+  steps:
+    # ── STEP 1: Generate analysis topic ──────────────────────
+    step_1_generate_topic:
+      generative_entity: "${models.target-model}"
+      prompt: |
+        Generate a specific software architecture topic for analysis.
+        Return ONLY valid JSON with this structure:
+        {
+          "topic": "a specific architecture pattern or technology choice",
+          "context": "2-3 sentence description of why this topic matters",
+          "analysis_dimensions": ["security", "performance", "maintainability"]
+        }
+        Topic should be about: {{inputs.topic}}
+      model_overrides:
+        max_tokens: 500
+        temperature: 0.7
+      when:
+        before_step_starts:
+          log:
+            to_file_path: "./docs/benchmarks/outputs/logs/parallel-test.log"
+            event_fields: [step_name, model_name]
+            level: info
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/output/parallel-topic.json"
+          - route_to: [step_2a_security, step_2b_performance, step_2c_maintainability]
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/parallel-test.log"
+              event_fields: [step_name, duration_ms, token_count]
+
+    # ── STEP 2a: Security Analysis (parallel branch A) ──────
+    step_2a_security:
+      generative_entity: "${models.target-model}"
+      prompt: |
+        Analyze the following topic from a SECURITY perspective.
+        Return ONLY valid JSON:
+        {
+          "dimension": "security",
+          "topic": "{{step.step_1_generate_topic.output}}",
+          "findings": ["finding 1", "finding 2", "finding 3"],
+          "risk_level": "high|medium|low",
+          "recommendations": ["rec 1", "rec 2"]
+        }
+        Be specific and actionable. 2-3 findings minimum.
+      model_overrides:
+        max_tokens: 1000
+        temperature: 0.3
+      when:
+        before_step_starts:
+          log:
+            to_file_path: "./docs/benchmarks/outputs/logs/parallel-test.log"
+            event_fields: [step_name, model_name]
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/output/parallel-security.json"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/parallel-test.log"
+              event_fields: [step_name, duration_ms]
+
+    # ── STEP 2b: Performance Analysis (parallel branch B) ──
+    step_2b_performance:
+      generative_entity: "${models.target-model}"
+      prompt: |
+        Analyze the following topic from a PERFORMANCE perspective.
+        Return ONLY valid JSON:
+        {
+          "dimension": "performance",
+          "topic": "{{step.step_1_generate_topic.output}}",
+          "findings": ["finding 1", "finding 2", "finding 3"],
+          "bottleneck_risk": "high|medium|low",
+          "optimizations": ["opt 1", "opt 2"]
+        }
+        Be specific and actionable. 2-3 findings minimum.
+      model_overrides:
+        max_tokens: 1000
+        temperature: 0.3
+      when:
+        before_step_starts:
+          log:
+            to_file_path: "./docs/benchmarks/outputs/logs/parallel-test.log"
+            event_fields: [step_name, model_name]
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/output/parallel-performance.json"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/parallel-test.log"
+              event_fields: [step_name, duration_ms]
+
+    # ── STEP 2c: Maintainability Analysis (parallel branch C) ──
+    step_2c_maintainability:
+      generative_entity: "${models.target-model}"
+      prompt: |
+        Analyze the following topic from a MAINTAINABILITY perspective.
+        Return ONLY valid JSON:
+        {
+          "dimension": "maintainability",
+          "topic": "{{step.step_1_generate_topic.output}}",
+          "findings": ["finding 1", "finding 2", "finding 3"],
+          "complexity_level": "high|medium|low",
+          "best_practices": ["practice 1", "practice 2"]
+        }
+        Be specific and actionable. 2-3 findings minimum.
+      model_overrides:
+        max_tokens: 1000
+        temperature: 0.3
+      when:
+        before_step_starts:
+          log:
+            to_file_path: "./docs/benchmarks/outputs/logs/parallel-test.log"
+            event_fields: [step_name, model_name]
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/output/parallel-maintainability.json"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/parallel-test.log"
+              event_fields: [step_name, duration_ms]
+
+    # ── STEP 3: Merge all analyses ──────────────────────────
+    step_3_merge:
+      generative_entity: "${models.target-model}"
+      requires:
+        - step_2a_security
+        - step_2b_performance
+        - step_2c_maintainability
+      prompt: |
+        You are merging three separate analyses into a comprehensive report.
+
+        Security Analysis:
+        {{step.step_2a_security.output}}
+
+        Performance Analysis:
+        {{step.step_2b_performance.output}}
+
+        Maintainability Analysis:
+        {{step.step_2c_maintainability.output}}
+
+        Produce a unified JSON report:
+        {
+          "summary": {
+            "topic": "the topic",
+            "dimensions_analyzed": 3,
+            "overall_assessment": "brief summary"
+          },
+          "security": { "findings_count": N, "risk_level": "..." },
+          "performance": { "findings_count": N, "bottleneck_risk": "..." },
+          "maintainability": { "findings_count": N, "complexity_level": "..." },
+          "top_recommendations": ["rec 1", "rec 2", "rec 3"],
+          "parallel_execution_verified": true
+        }
+      model_overrides:
+        max_tokens: 2000
+        temperature: 0.2
+      when:
+        before_step_starts:
+          log:
+            to_file_path: "./docs/benchmarks/outputs/logs/parallel-test.log"
+            event_fields: [step_name, model_name]
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/output/parallel-merged-report.json"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/parallel-test.log"
+              event_fields: [step_name, duration_ms, token_count]
+              level: info
