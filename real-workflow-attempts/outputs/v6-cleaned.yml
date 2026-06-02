@@ -1,0 +1,174 @@
+workflow_id: database_schema_optimization_pipeline
+name: "Database Schema Optimization Pipeline"
+description: "Automated database schema analysis and optimization workflow"
+version: "2.0.0"
+author: "Whitt Execution Engine"
+tags:
+  - database-optimization
+  - normalization
+  - indexing
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+    hosting:
+      gpu_layers: 999
+models:
+  "target-model":
+    name: "Qwen2.5-Coder-3B-Instruct-Q8_0"
+    host:
+      type: llama_cpp_with_vulkan
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: true
+agentic_workflow:
+  steps:
+    step_1_read_schema:
+      generative_entity: "${models.target-model}"
+      prompt: |
+        Read and display the SQL schema definitions from multiple tables.
+        Output each table's schema in a structured format, including column names,
+        data types, primary keys, foreign keys, and any constraints.
+        Ensure that the output is clear and easy to read.
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step1-schema.txt"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+    step_2_identify_normalization_violations:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_1_read_schema]
+      prompt: |
+        Analyze the SQL schema definitions from multiple tables and identify any normalization violations.
+        Specifically check for 1NF, 2NF, and 3NF violations.
+        Output a numbered list of identified violations with file location,
+        severity (critical/warning/info), and a brief explanation of each violation.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step2-normalization-violations.txt"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+    step_3_detect_missing_indexes:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_1_read_schema]
+      prompt: |
+        Analyze the SQL schema definitions from multiple tables and detect any missing indexes
+        for common query patterns such as JOINs, WHERE clauses, GROUP BY, ORDER BY.
+        Output a numbered list of identified missing indexes with file location,
+        severity (critical/warning/info), and a brief explanation of each index.
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step3-missing-indexes.txt"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+    step_4_generate_alter_table_statements:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_2_identify_normalization_violations, step_3_detect_missing_indexes]
+      prompt: |
+        Generate ALTER TABLE statements for optimizing the identified normalization violations
+        and missing indexes. Ensure that each statement is syntactically correct and follows best practices.
+        Output a numbered list of generated ALTER TABLE statements with file location,
+        severity (critical/warning/info), and a brief explanation of each statement.
+      model_overrides:
+        temperature: 0.4
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step4-alter-table-statements.txt"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+    step_5_validate_sql_syntax:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_4_generate_alter_table_statements]
+      prompt: |
+        Validate the SQL syntax of the generated ALTER TABLE statements.
+        Ensure that each statement is syntactically correct and follows best practices.
+        Output a numbered list of validated ALTER TABLE statements with file location,
+        severity (critical/warning/info), and a brief explanation of each statement.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step5-validated-statements.txt"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+    step_6_generate_optimization_report:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_1_read_schema, step_2_identify_normalization_violations, step_3_detect_missing_indexes, step_4_generate_alter_table_statements, step_5_validate_sql_syntax]
+      prompt: |
+        Compile a comprehensive database optimization report from the analysis results below.
+
+        SCHEMA ANALYSIS:
+        {{step.step_1_read_schema.output}}
+
+        NORMALIZATION VIOLATIONS:
+        {{step.step_2_identify_normalization_violations.output}}
+
+        MISSING INDEXES:
+        {{step.step_3_detect_missing_indexes.output}}
+
+        ALTER TABLE STATEMENTS:
+        {{step.step_4_generate_alter_table_statements.output}}
+
+        VALIDATED STATEMENTS:
+        {{step.step_5_validate_sql_syntax.output}}
+
+        Create a markdown report with:
+        1. Executive summary with total issue count by severity
+        2. Critical issues section (must fix before migration)
+        3. Warnings section (should fix)
+        4. Info section (nice to fix)
+        5. Prioritized action items list
+
+        Format each issue as: [SEVERITY] File:Line - Description
+      model_overrides:
+        temperature: 0.4
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step6-final-report.md"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
