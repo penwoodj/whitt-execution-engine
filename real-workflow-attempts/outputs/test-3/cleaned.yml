@@ -1,0 +1,210 @@
+workflow_id: api_contract_testing_pipeline
+name: "API Contract Testing Pipeline"
+description: "Automated API contract testing pipeline for OpenAPI/Swagger specifications"
+version: "2.0.0"
+author: "Whitt Execution Engine"
+tags:
+  - api-contract-testing
+  - openapi-swagger
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+    hosting:
+      gpu_layers: 999
+models:
+  "target-model":
+    name: "Qwen2.5-Coder-3B-Instruct-Q8_0"
+    host:
+      type: llama_cpp_with_vulkan
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: true
+agentic_workflow:
+  steps:
+    step_1_read_specification:
+      generative_entity: "${models.target-model}"
+      prompt: |
+        Read and display the complete contents of the OpenAPI/Swagger specification file provided.
+        Output every line with line numbers prefixed.
+        Preserve all whitespace, comments, and formatting exactly.
+        If the file is very long, output the first 500 lines.
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step1-specification.txt"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+    step_2_extract_endpoints:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_1_read_specification]
+      prompt: |
+        Extract all endpoint definitions from the following OpenAPI/Swagger specification file.
+        Output each endpoint with its path, method, and summary.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step2-endpoints.txt"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+    step_3_extract_schemas:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_1_read_specification]
+      prompt: |
+        Extract all expected response schemas from the following OpenAPI/Swagger specification file.
+        Output each schema with its type and any required fields.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step3-schemas.txt"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+    step_4_generate_test_cases:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_2_extract_endpoints, step_3_extract_schemas]
+      prompt: |
+        Generate test cases for each endpoint in the following OpenAPI/Swagger specification file.
+        Include happy path, error responses, edge cases (empty payloads, oversized inputs, invalid types),
+        and prioritize them based on importance.
+
+        ENDPOINT DEFINITIONS:
+        {{step.step_2_extract_endpoints.output}}
+
+        EXPECTED RESPONSE SCHEMAS:
+        {{step.step_3_extract_schemas.output}}
+
+        Output each test case with the following format:
+        - Endpoint Path: /example-endpoint
+        - Method: GET/POST/etc.
+        - Test Case Description: Happy path, Error response, Edge case 1, etc.
+        - Expected Response Schema: {type: string, required: [field1, field2]}
+      model_overrides:
+        temperature: 0.4
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step4-test-cases.txt"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+    step_5_validate_responses:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_4_generate_test_cases]
+      prompt: |
+        Validate the actual API responses against the expected schemas for each test case in the following file.
+        Output a numbered list of failed assertions with file location, severity (critical/warning/info),
+        and a brief explanation of each failure.
+
+        TEST CASES TO VALIDATE:
+        {{step.step_4_test_cases.output}}
+
+        Expected Response Schemas:
+        {{step.step_3_extract_schemas.output}}
+
+        Actual API Responses: (This should be provided by the API testing tool or framework)
+        (Assuming this is a placeholder for actual responses, replace with actual data)
+
+        Output each failure as: [SEVERITY] File:Line - Description
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step5-validation-report.txt"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+    step_6_check_slas:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_4_generate_test_cases]
+      prompt: |
+        Check the HTTP status codes and response times for each test case in the following file against SLA thresholds.
+        Output a numbered list of failed assertions with file location, severity (critical/warning/info),
+        and a brief explanation of each failure.
+
+        TEST CASES TO CHECK:
+        {{step.step_4_test_cases.output}}
+
+        SLA Thresholds: (This should be provided by the API owner or team)
+        - HTTP Status Code: 200-299
+        - Response Time: <100ms
+
+        Output each failure as: [SEVERITY] File:Line - Description
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step6-sla-report.txt"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+    step_7_generate_compliance_report:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_5_validate_responses, step_6_check_slas]
+      prompt: |
+        Compile a comprehensive API compliance report from the validation and SLA results below.
+
+        VALIDATION RESULTS:
+        {{step.step_5_validation_report.output}}
+
+        SLA RESULTS:
+        {{step.step_6_sla_report.output}}
+
+        Create a markdown report with:
+        1. Executive summary with total failure count by severity
+        2. Critical failures section (must fix before deployment)
+        3. Warning failures section (should fix)
+        4. Info failures section (nice to fix)
+        5. Prioritized action items list
+
+        Format each failure as: [SEVERITY] File:Line - Description
+      model_overrides:
+        temperature: 0.4
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step7-compliance-report.md"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
