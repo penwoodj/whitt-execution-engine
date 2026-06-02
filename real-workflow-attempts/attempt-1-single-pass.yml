@@ -1,0 +1,270 @@
+# ═══════════════════════════════════════════════════════════════════
+# Meta-Workflow: Prompt → YAML Workflow Generator (Attempt 1)
+# Schema-compliant per docs/schema/unified-workflow-schema.yml v2.0
+#
+# Takes a natural language description and generates a valid YAML
+# agentic workflow using a local SLM (Qwen2.5-Coder-3B).
+#
+# Strategy: Single-pass generation with extensive schema context
+# baked into the prompt, followed by shell validation.
+#
+# Steps:
+#   step_1_analyze:   Identify required features from prompt
+#   step_2_generate:  Generate complete YAML workflow
+#   step_3_validate:  Shell action to validate output YAML
+#   step_4_report:    Summarize success/failure
+# ═══════════════════════════════════════════════════════════════════
+
+workflow_id: meta_workflow_generator_v1
+name: "Meta-Workflow Generator v1"
+description: "Generate valid YAML agentic workflows from natural language prompts using local SLMs"
+version: "2.0.0"
+author: "Whitt Execution Engine"
+tags: [meta-workflow, yaml-generation, code-model]
+min_schema_version: "2.0.0"
+schema_version: "2.0.0"
+
+# ── PROVIDERS ───────────────────────────────────────────────────
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+    hosting:
+      gpu_layers: 999
+
+# ── MODELS ───────────────────────────────────────────────────────
+models:
+  "coder-model":
+    name: "Qwen2.5-Coder-3B-Instruct-Q8_0"
+    host:
+      type: llama_cpp_with_vulkan
+    execution:
+      max_tokens: 50000
+      timeout:
+        load_into_memory: "30s"
+        time_to_first_response: "10s"
+        total_time_to_response: "120s"
+
+  "reviewer-model":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+    execution:
+      max_tokens: 50000
+      timeout:
+        load_into_memory: "30s"
+        time_to_first_response: "10s"
+        total_time_to_response: "120s"
+
+# ── WORKFLOW EXECUTION STRATEGY ────────────────────────────────
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: true
+
+# ── AGENTIC WORKFLOW ───────────────────────────────────────────
+agentic_workflow:
+
+  steps:
+
+    # ── STEP 1: Analyze the prompt ────────────────────────────────
+    step_1_analyze:
+      generative_entity: "${models.coder-model}"
+      prompt: |
+        You are a YAML workflow architect. Analyze the following user request and output a JSON plan.
+
+        USER REQUEST:
+        "Build a workflow that reads a Python source file, analyzes it for code quality issues, suggests fixes, and generates a summary report with metrics"
+
+        Output a JSON object with these keys:
+        - "workflow_id": snake_case identifier
+        - "name": short human-readable name
+        - "description": one sentence
+        - "num_steps": number of steps needed (3-6)
+        - "steps": array of objects, each with:
+          - "step_name": snake_case name
+          - "purpose": what this step does (one sentence)
+          - "needs_previous_output": boolean
+          - "model_overrides": object with temperature and max_tokens
+        - "hooks_needed": array of trigger names (e.g. "after_step_succeeds", "before_step_starts")
+        - "dependencies": array of arrays showing which steps depend on which
+
+        Output ONLY the JSON. No markdown. No backticks.
+        First character: { Last character: }
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 2000
+      when:
+        after_step_succeeds:
+          - save_to: "./real-workflow-attempts/outputs/v1-step1-analysis.json"
+          - log:
+              to_file_path: "./real-workflow-attempts/logs/v1-generator.log"
+              event_fields: [step_name, duration_ms, token_count]
+        after_step_fails:
+          - log:
+              to_file_path: "./real-workflow-attempts/logs/v1-generator.log"
+              event_fields: [step_name, error_message]
+
+    # ── STEP 2: Generate the complete YAML workflow ───────────────
+    step_2_generate:
+      generative_entity: "${models.coder-model}"
+      depends_on: [step_1_analyze]
+      prompt: |
+        You are a YAML workflow generator. Generate a COMPLETE, VALID YAML agentic workflow file.
+
+        REFERENCE: The analysis plan from step 1:
+        {{step.step_1_analyze.output}}
+
+        Generate a YAML workflow with EXACTLY this structure. Follow these rules STRICTLY:
+
+        REQUIRED TOP-LEVEL KEYS (in this order):
+        1. workflow_id: snake_case string
+        2. name: quoted string
+        3. description: quoted string
+        4. version: "2.0.0"
+        5. author: "Whitt Execution Engine"
+        6. tags: [list of strings]
+        7. schema_version: "2.0.0"
+
+        8. providers: mapping with one key "llama_cpp_with_vulkan" containing:
+           config: {host: localhost, port: 8080}
+           hosting: {gpu_layers: 999}
+
+        9. models: mapping with key "target-model" containing:
+           name: "Qwen2.5-Coder-3B-Instruct-Q8_0"
+           host: {type: llama_cpp_with_vulkan}
+
+        10. workflow_execution_strategy:
+            memory: {model_lifecycle: {unload_unused: true}}
+
+        11. agentic_workflow: mapping with key "steps" containing all steps
+
+        STEP FORMAT (each step is a mapping):
+        - step_name_here:
+            generative_entity: "${models.target-model}"
+            prompt: |
+              <prompt text here>
+            model_overrides:
+              temperature: 0.3
+              max_tokens: 50000
+            depends_on: [previous_step_name]
+            when:
+              after_step_succeeds:
+                - save_to: "./outputs/step-output.txt"
+                - log:
+                    to_file_path: "./logs/workflow.log"
+                    event_fields: [step_name, duration_ms]
+              after_step_fails:
+                - log:
+                    to_file_path: "./logs/workflow.log"
+                    event_fields: [step_name, error_message]
+
+        CRITICAL YAML RULES:
+        - Use 2-space indentation consistently
+        - All strings with special chars must be quoted
+        - Use | for multi-line prompt strings
+        - Lists use - dash notation
+        - No tabs, only spaces
+        - No trailing commas (YAML doesn't use them)
+        - Do NOT wrap output in ```yaml``` code fences
+        - Output ONLY the raw YAML, starting with workflow_id:
+
+        Generate the complete workflow now. First line must be: workflow_id:
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./real-workflow-attempts/outputs/v1-generated-workflow.yml"
+          - log:
+              to_file_path: "./real-workflow-attempts/logs/v1-generator.log"
+              event_fields: [step_name, duration_ms, token_count, json_parsable]
+        after_step_fails:
+          - log:
+              to_file_path: "./real-workflow-attempts/logs/v1-generator.log"
+              event_fields: [step_name, error_message]
+
+    # ── STEP 3: Validate the generated YAML ───────────────────────
+    step_3_validate:
+      generative_entity: "${models.reviewer-model}"
+      depends_on: [step_2_generate]
+      prompt: |
+        You are a YAML validation reviewer. The following is a generated YAML workflow. Check it for:
+        1. Valid YAML syntax
+        2. Required fields present (workflow_id, name, providers, models, agentic_workflow)
+        3. Correct indentation
+        4. No markdown artifacts (backticks, code fences)
+        5. Proper use of template variables (${} and {{}})
+
+        GENERATED YAML:
+        {{step.step_2_generate.output}}
+
+        Output a JSON object:
+        - "valid": true or false
+        - "errors": array of error strings (empty if valid)
+        - "warnings": array of warning strings
+        - "line_count": number of lines in the YAML
+
+        Output ONLY the JSON. No markdown. No backticks.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 2000
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3"
+              args: ["./real-workflow-attempts/scripts/validate-yaml.py", "./real-workflow-attempts/outputs/v1-generated-workflow.yml"]
+              fail_on_error: false
+          - log:
+              to_file_path: "./real-workflow-attempts/logs/v1-generator.log"
+              event_fields: [step_name, shell_output]
+        after_step_succeeds:
+          - save_to: "./real-workflow-attempts/outputs/v1-validation-result.json"
+          - log:
+              to_file_path: "./real-workflow-attempts/logs/v1-generator.log"
+              event_fields: [step_name, duration_ms, json_parsable]
+        after_step_fails:
+          - log:
+              to_file_path: "./real-workflow-attempts/logs/v1-generator.log"
+              event_fields: [step_name, error_message]
+
+    # ── STEP 4: Fix any issues and produce final output ────────────
+    step_4_fix:
+      generative_entity: "${models.coder-model}"
+      depends_on: [step_3_validate]
+      prompt: |
+        You are a YAML fixer. You will receive a YAML workflow that may have issues, and a validation report.
+
+        ORIGINAL YAML:
+        {{step.step_2_generate.output}}
+
+        VALIDATION REPORT:
+        {{step.step_3_validate.output}}
+
+        Fix ALL errors listed in the validation report. Common fixes:
+        1. Strip any markdown code fences (```yaml or ```)
+        2. Fix indentation (use 2 spaces consistently)
+        3. Ensure all required fields exist
+        4. Fix YAML syntax errors
+        5. Remove any trailing content after the YAML ends
+
+        Output the COMPLETE FIXED YAML. No markdown. No backticks. No explanations.
+        First line must be: workflow_id:
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./real-workflow-attempts/outputs/v1-final-workflow.yml"
+          - shell:
+              command: "python3"
+              args: ["./real-workflow-attempts/scripts/validate-yaml.py", "./real-workflow-attempts/outputs/v1-final-workflow.yml"]
+              fail_on_error: false
+          - log:
+              to_file_path: "./real-workflow-attempts/logs/v1-generator.log"
+              event_fields: [step_name, duration_ms, shell_output]
+        after_step_fails:
+          - log:
+              to_file_path: "./real-workflow-attempts/logs/v1-generator.log"
+              event_fields: [step_name, error_message]

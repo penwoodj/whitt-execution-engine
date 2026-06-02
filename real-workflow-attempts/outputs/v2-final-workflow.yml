@@ -1,0 +1,137 @@
+workflow_id: python_code_quality_checker
+name: "Python Code Quality Checker"
+description: "Analyze Python files for quality issues and generate fix suggestions"
+version: "2.0.0"
+author: "Whitt Execution Engine"
+tags: [python, code-quality]
+schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+    hosting:
+      gpu_layers: 999
+
+models:
+  "target-model":
+    name: "Qwen2.5-Coder-3B-Instruct-Q8_0"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: true
+
+agentic_workflow:
+
+  steps:
+
+    step_1_read_file:
+      generative_entity: "${models.target-model}"
+      prompt: |
+        Read and display the contents of the Python source file at the given path.
+        Output the complete file contents with line numbers.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step1-file-contents.txt"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+
+    step_2_analyze_quality:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_1_read_file]
+      prompt: |
+        Analyze the following Python code for quality issues. Check for:
+        - Code style violations (PEP 8)
+        - Potential bugs or errors
+        - Performance issues
+        - Security vulnerabilities
+
+        INPUT CODE:
+        {{step.step_1_read_file.output}}
+
+        Output a numbered list of issues found.
+      model_overrides:
+        temperature: 0.4
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step2-analysis.txt"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+
+    step_3_suggest_fixes:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_2_analyze_quality]
+      prompt: |
+        Suggest fixes for the identified quality issues in the following Python code.
+        Provide detailed explanations and examples of how to apply each fix.
+
+        INPUT CODE:
+        {{step.step_1_read_file.output}}
+
+        ISSUES TO FIX:
+        {{step.step_2_analyze_quality.output}}
+
+        Output a numbered list of suggested fixes with explanations.
+      model_overrides:
+        temperature: 0.5
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step3-fixes.txt"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+
+    step_4_generate_report:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_3_suggest_fixes]
+      prompt: |
+        Generate a summary report with metrics based on the analysis and suggested fixes.
+        Include:
+        - Overall code quality score
+        - Number of issues found
+        - Number of fix suggestions provided
+        - Recommendations for next steps
+
+        ANALYSIS SUMMARY:
+        {{step.step_2_analyze_quality.output}}
+
+        FIX SUGGESTIONS:
+        {{step.step_3_suggest_fixes.output}}
+
+        Output the summary report in a structured format.
+      model_overrides:
+        temperature: 0.6
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step4-report.txt"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
