@@ -1,0 +1,234 @@
+workflow_id: data_pipeline_etl
+name: "Data Pipeline ETL Workflow"
+description: "Automated ETL workflow for extracting, normalizing, validating, transforming, deduplicating, enriching, and loading customer order data."
+version: "2.0.0"
+author: "Your Name"
+tags:
+  - data-pipeline
+  - etl
+  - normalization
+  - validation
+  - transformation
+  - deduplication
+  - enrichment
+  - loading
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+    hosting:
+      gpu_layers: 999
+models:
+  "target-model":
+    name: "Qwen2.5-Coder-3B-Instruct-Q8_0"
+    host:
+      type: llama_cpp_with_vulkan
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: true
+agentic_workflow:
+  steps:
+    step_1_extract_data:
+      generative_entity: "${models.target-model}"
+      prompt: |
+        Extract customer order data from multiple sources (CSV files, JSON API responses, database dumps).
+        Output the extracted data in a structured format.
+        Ensure that all fields are included and correctly formatted.
+        Include timestamps for each record extraction.
+        Handle edge cases such as missing or malformed source data gracefully.
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step1-extracted-data.json"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+    step_2_normalize_data:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_1_extract_data]
+      prompt: |
+        Normalize the extracted customer order data.
+        Ensure that all fields are consistent and correctly formatted.
+        Handle missing values appropriately.
+        INPUT FROM PREVIOUS STEP:
+        {{step.step_1_extract_data.output}}
+        Convert all date fields to ISO 8601 format.
+        Standardize currency fields to USD with 2 decimal places.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step2-normalized-data.json"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+    step_3_validate_data:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_2_normalize_data]
+      prompt: |
+        Validate the normalized customer order data against a schema.
+        Ensure that all required fields are present and correctly formatted.
+        Perform range checks for numerical fields.
+        Handle any validation errors appropriately.
+        INPUT FROM PREVIOUS STEP:
+        {{step.step_2_normalize_data.output}}
+        Verify that all required fields (customer_id, order_id, amount, date) exist in each record.
+        Validate that amounts are positive and within a reasonable range (0 to 100000).
+      model_overrides:
+        temperature: 0.4
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step3-validated-data.json"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+    step_4_transform_data:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_3_validate_data]
+      prompt: |
+        Transform the validated customer order data.
+        Convert dates and currencies to standard formats.
+        Handle any transformation errors appropriately.
+        INPUT FROM PREVIOUS STEP:
+        {{step.step_3_validate_data.output}}
+        Format all date fields as YYYY-MM-DD.
+        Convert currency amounts from local units to USD using a fixed exchange rate of 1.0.
+      model_overrides:
+        temperature: 0.5
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step4-transformed-data.json"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+    step_5_deduplicate_data:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_4_transform_data]
+      prompt: |
+        Deduplicate the transformed customer order data by customer_id + order_id.
+        Ensure that each record is unique and consistent.
+        Handle any deduplication errors appropriately.
+        INPUT FROM PREVIOUS STEP:
+        {{step.step_4_transformed_data.output}}
+        Remove duplicate records where both customer_id and order_id match exactly.
+        Log the number of duplicates removed in a metadata field.
+      model_overrides:
+        temperature: 0.6
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step5-deduplicated-data.json"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+    step_6_enrich_data:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_5_deduplicate_data]
+      prompt: |
+        Enrich the deduplicated customer order data with geographic data based on zip codes.
+        Ensure that all enriched fields are correctly formatted and consistent.
+        Handle any enrichment errors appropriately.
+        INPUT FROM PREVIOUS STEP:
+        {{step.step_5_deduplicate_data.output}}
+        For each record, enrich with city, state, country from the zip code using a public geolocation API.
+        If no location is found, set all geographic fields to "Unknown".
+      model_overrides:
+        temperature: 0.7
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step6-enriched-data.json"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+    step_7_load_data:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_6_enrich_data]
+      prompt: |
+        Load the enriched customer order data into a structured output.
+        Ensure that all records are correctly formatted and consistent.
+        Handle any loading errors appropriately.
+        INPUT FROM PREVIOUS STEP:
+        {{step.step_6_enriched_data.output}}
+        Format the final dataset as JSON with proper schema validation.
+        Store in a file with timestamped filename to ensure versioning.
+      model_overrides:
+        temperature: 0.8
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step7-loaded-data.json"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+    step_8_generate_report:
+      generative_entity: "${models.target-model}"
+      depends_on: [step_7_load_data]
+      prompt: |
+        Generate a comprehensive data quality report with statistics.
+        Include the following information:
+        - Total records
+        - Valid/invalid counts
+        - Transformation log (include any errors or warnings)
+        - Deduplication stats (include duplicates removed and count)
+
+        DATA QUALITY REPORT:
+        {{step.step_7_load_data.output}}
+
+        Create a markdown report with:
+        1. Executive summary with total issue count by severity
+        2. Critical issues section (must fix before merge)
+        3. Warnings section (should fix)
+        4. Info section (nice to fix)
+        5. Prioritized action items list
+
+        Format each issue as: [SEVERITY] File:Line - Description
+      model_overrides:
+        temperature: 0.9
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+          - save_to: "./outputs/step8-final-report.md"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
