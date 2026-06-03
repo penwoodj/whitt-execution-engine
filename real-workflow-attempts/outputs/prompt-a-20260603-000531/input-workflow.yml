@@ -1,0 +1,373 @@
+workflow_id: meta_workflow_generator
+name: "Meta-Workflow Generator"
+description: "3-step meta-workflow: generate → clean → validate/fix. Produces valid YAML agentic workflows from task descriptions."
+version: "10.0.0"
+author: "Whitt Execution Engine"
+tags: [meta-workflow, yaml-generation, parameterized]
+schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+    hosting:
+      gpu_layers: 999
+
+models:
+  "coder-model":
+    name: "Qwen2.5-Coder-3B-Instruct-Q8_0"
+    host:
+      type: llama_cpp_with_vulkan
+  "reviewer-model":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: true
+
+agentic_workflow:
+
+  steps:
+
+    step_1_generate:
+      generative_entity: "${models.coder-model}"
+      prompt: |
+        Generate a COMPLETE YAML agentic workflow file for the following task:
+
+        TASK: Read the file at /tmp/pipeline-input.csv which contains sales transaction data with columns: transaction_id, customer_email, product_sku, quantity, unit_price, sale_date, sales_region, payment_method. Execute a complete data pipeline in these phases: PHASE 1 - INGESTION AND VALIDATION: Load the CSV file. Validate that transaction_id is unique across all rows. Validate that customer_email matches standard email format containing @ and a domain. Validate that quantity is a positive integer and unit_price is a positive number. Validate that sale_date follows YYYY-MM-DD format. Count and report how many rows fail each validation check. PHASE 2 - ENRICHMENT AND COMPUTATION: For each valid transaction compute total_amount as quantity multiplied by unit_price. Classify transactions into size buckets: micro under 25 small 25-100 medium 100-500 large 500-1000 enterprise over 1000. Determine the most common payment_method per sales_region. PHASE 3 - ANOMALY DETECTION: Identify transactions where total_amount is more than 3 standard deviations above the mean. Identify customers with more than 10 transactions in a single day. Flag any sales_region with an average total_amount that differs by more than 50 percent from the overall average. PHASE 4 - REPORT GENERATION: Produce a structured report containing total valid and invalid row counts from Phase 1 transaction size distribution from Phase 2 complete list of anomalous transactions with reasons from Phase 3 and a final data quality score calculated as valid_rows divided by total_rows multiplied by 100. Save the report to outputs/output/pipeline-report.txt.
+
+        Follow this EXAMPLE exactly. Copy its structure, notation, and style:
+
+        ---
+        workflow_id: code_review_pipeline
+        name: "Code Review Pipeline"
+        description: "Automated code review with static analysis, security scan, and final report"
+        version: "2.0.0"
+        author: "Whitt Execution Engine"
+        tags: [code-review, security, analysis]
+        schema_version: "2.0.0"
+
+        providers:
+          llama_cpp_with_vulkan:
+            config:
+              host: localhost
+              port: 8080
+            hosting:
+              gpu_layers: 999
+
+        models:
+          "target-model":
+            name: "Qwen2.5-Coder-3B-Instruct-Q8_0"
+            host:
+              type: llama_cpp_with_vulkan
+
+        workflow_execution_strategy:
+          memory:
+            model_lifecycle:
+              unload_unused: true
+
+        agentic_workflow:
+
+          steps:
+
+            step_1_read_code:
+              generative_entity: "${models.target-model}"
+              prompt: |
+                Read and display the complete contents of the source file provided.
+                Output every line with line numbers prefixed.
+                Preserve all whitespace, comments, and formatting exactly.
+                If the file is very long, output the first 500 lines.
+              model_overrides:
+                temperature: 0.2
+                max_tokens: 50000
+              when:
+                before_step_starts:
+                  shell:
+                    command: "cat"
+                    args: ["./src/main.rs"]
+                    fail_on_error: false
+                after_step_succeeds:
+                  - save_to: "./outputs/step1-source-code.txt"
+                  - log:
+                      to_file_path: "./logs/workflow.log"
+                      event_fields: [step_name, duration_ms]
+                after_step_fails:
+                  - log:
+                      to_file_path: "./logs/workflow.log"
+                      event_fields: [step_name, error_message]
+
+            step_2_static_analysis:
+              generative_entity: "${models.target-model}"
+              depends_on: [step_1_read_code]
+              prompt: |
+                Perform a thorough static analysis of the following source code.
+                Check for these specific issues:
+                - Dead code and unreachable branches
+                - Unused variables and imports
+                - Type mismatches and potential runtime errors
+                - Performance bottlenecks (O(n²) loops, unnecessary allocations)
+                - Naming convention violations
+
+                SOURCE CODE TO ANALYZE:
+                {{step.step_1_read_code.output}}
+
+                Output a numbered list of issues with file location, severity (critical/warning/info),
+                and a brief explanation of each issue.
+              model_overrides:
+                temperature: 0.3
+                max_tokens: 50000
+              when:
+                after_step_succeeds:
+                  - save_to: "./outputs/step2-static-analysis.txt"
+                  - log:
+                      to_file_path: "./logs/workflow.log"
+                      event_fields: [step_name, duration_ms]
+                after_step_fails:
+                  - log:
+                      to_file_path: "./logs/workflow.log"
+                      event_fields: [step_name, error_message]
+
+            step_3_security_scan:
+              generative_entity: "${models.target-model}"
+              depends_on: [step_1_read_code]
+              prompt: |
+                Perform a security scan of the following source code.
+                Look for these vulnerability categories:
+                - SQL injection and command injection
+                - Cross-site scripting (XSS) vectors
+                - Insecure cryptographic usage
+                - Hardcoded secrets or credentials
+                - Path traversal vulnerabilities
+
+                SOURCE CODE TO SCAN:
+                {{step.step_1_read_code.output}}
+
+                Output each finding with: vulnerability type, location (line number),
+                severity (critical/high/medium/low), and remediation advice.
+              model_overrides:
+                temperature: 0.2
+                max_tokens: 50000
+              when:
+                after_step_succeeds:
+                  - save_to: "./outputs/step3-security-scan.txt"
+                  - log:
+                      to_file_path: "./logs/workflow.log"
+                      event_fields: [step_name, duration_ms]
+                after_step_fails:
+                  - log:
+                      to_file_path: "./logs/workflow.log"
+                      event_fields: [step_name, error_message]
+
+            step_4_compile_report:
+              generative_entity: "${models.target-model}"
+              depends_on: [step_2_static_analysis, step_3_security_scan]
+              prompt: |
+                Compile a comprehensive code review report from the analysis results below.
+
+                STATIC ANALYSIS RESULTS:
+                {{step.step_2_static_analysis.output}}
+
+                SECURITY SCAN RESULTS:
+                {{step.step_3_security_scan.output}}
+
+                Create a markdown report with:
+                1. Executive summary with total issue count by severity
+                2. Critical issues section (must fix before merge)
+                3. Warnings section (should fix)
+                4. Info section (nice to fix)
+                5. Prioritized action items list
+
+                Format each issue as: [SEVERITY] File:Line - Description
+              model_overrides:
+                temperature: 0.4
+                max_tokens: 50000
+              when:
+                after_step_succeeds:
+                  - save_to: "./outputs/step4-final-report.md"
+                  - log:
+                      to_file_path: "./logs/workflow.log"
+                      event_fields: [step_name, duration_ms]
+                after_step_fails:
+                  - log:
+                      to_file_path: "./logs/workflow.log"
+                      event_fields: [step_name, error_message]
+        ---
+
+        IMPORTANT PATTERNS IN THE EXAMPLE ABOVE:
+        - step_1 uses before_step_starts shell hook to read a real file (cat ./src/main.rs)
+        - step_2 depends_on: [step_1] and uses {{step.step_1_read_code.output}} in its prompt
+        - step_3 ALSO depends_on: [step_1] (PARALLEL with step_2)
+        - step_4 depends_on BOTH: [step_2, step_3] and uses BOTH outputs
+        - Every prompt is 5+ lines with specific instructions
+        - Every step after step 1 uses {{step.X.output}} template interpolation
+        - Shell hooks can read real files: {{bookmarks.shell_output.stdout}} accesses the file content
+
+        NOW generate a COMPLETE YAML workflow for the TASK described at the top.
+
+        CRITICAL RULES:
+        1. Output ONLY raw YAML. NO markdown fences. NO ```yaml```. NO ``` anywhere.
+        2. First line: workflow_id:  Last line: a YAML value.
+        3. Steps MUST use MAP notation (step_name: with indented properties), NOT list notation
+        4. Generate at least 6 steps
+        5. At least 2 steps must run in PARALLEL (share the same dependency)
+        6. At least 1 step must depend on 2+ other steps
+        7. Every step after the first MUST have depends_on and MUST include {{step.X.output}} in its prompt
+        8. Every prompt must be 5+ lines with specific detailed instructions
+        9. Every step MUST have: generative_entity, prompt, model_overrides, when
+        10. Every step MUST have model_overrides with temperature (0.1-0.7) and max_tokens: 50000
+        11. Every step MUST have when: with after_step_succeeds (save_to + log) and after_step_fails (log)
+        12. Template interpolation MUST use the EXACT step name from depends_on. If a step is named step_3_check_deps then use {{step.step_3_check_deps.output}} NOT {{step.step_3_deps_check.output}}
+        13. The FIRST step of every workflow SHOULD use before_step_starts shell hook to read real files when the task involves file analysis (e.g., command: "cat", args: ["./path/to/file"])
+        14. When shell hook is used, the prompt can reference {{bookmarks.shell_output.stdout}} to include the file content
+      model_overrides:
+        temperature: 0.15
+        max_tokens: 50000
+      when:
+        before_step_starts:
+          - log:
+              to_file_path: "./real-workflow-attempts/outputs/prompt-a-20260603-000531/logs/meta-workflow.log"
+              event_fields: [step_name, model_name, prompt_preview]
+              level: info
+        after_step_succeeds:
+          - save_to: "./real-workflow-attempts/outputs/prompt-a-20260603-000531/generated-raw.yml"
+          - log:
+              to_file_path: "./real-workflow-attempts/outputs/prompt-a-20260603-000531/logs/meta-workflow.log"
+              event_fields: [step_name, duration_ms, token_count, model_name]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./real-workflow-attempts/outputs/prompt-a-20260603-000531/logs/meta-workflow.log"
+              event_fields: [step_name, error_message, error_type]
+              level: error
+
+    step_2_clean:
+      generative_entity: "${models.reviewer-model}"
+      depends_on: [step_1_generate]
+      prompt: |
+        You are a YAML cleanup specialist. Your ONLY job is to strip formatting artifacts.
+
+        INPUT:
+        {{step.step_1_generate.output}}
+
+        Perform these steps:
+        1. Strip any markdown code fences (```yaml or ```) from start and end
+        2. Strip any leading/trailing text before "workflow_id:" or after the last YAML line
+        3. Ensure file starts with "workflow_id:" (no leading whitespace)
+        4. Ensure proper YAML indentation (2 spaces per level)
+
+        Output ONLY the cleaned YAML. No explanations. No markdown fences.
+        First line: workflow_id:
+        Last line: a YAML value, not a backtick.
+      model_overrides:
+        temperature: 0.05
+        max_tokens: 50000
+      when:
+        before_step_starts:
+          - log:
+              to_file_path: "./real-workflow-attempts/outputs/prompt-a-20260603-000531/logs/meta-workflow.log"
+              event_fields: [step_name, model_name]
+              level: info
+        after_step_succeeds:
+          - save_to: "./real-workflow-attempts/outputs/prompt-a-20260603-000531/cleaned.yml"
+          - log:
+              to_file_path: "./real-workflow-attempts/outputs/prompt-a-20260603-000531/logs/meta-workflow.log"
+              event_fields: [step_name, duration_ms, token_count]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./real-workflow-attempts/outputs/prompt-a-20260603-000531/logs/meta-workflow.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_3_validate_fix:
+      generative_entity: "${models.reviewer-model}"
+      depends_on: [step_2_clean]
+      prompt: |
+        You are a YAML workflow validation and repair specialist. You MUST fix the workflow to pass ALL checks below.
+
+        INPUT WORKFLOW:
+        {{step.step_2_clean.output}}
+
+        MANDATORY CHECKS — Fix EVERY issue you find:
+
+        CHECK 1: MAP notation. Steps must be "step_name:" with indented properties. NOT "- step_name:". Fix any list notation to map notation.
+
+        CHECK 2: Required fields per step. Every step MUST have: generative_entity, prompt, model_overrides, when. Add any missing ones using this pattern:
+          generative_entity: "${models.target-model}"
+          model_overrides:
+            temperature: 0.3
+            max_tokens: 50000
+          when:
+            after_step_succeeds:
+              - save_to: "./outputs/stepN-name.txt"
+              - log:
+                  to_file_path: "./logs/workflow.log"
+                  event_fields: [step_name, duration_ms]
+            after_step_fails:
+              - log:
+                  to_file_path: "./logs/workflow.log"
+                  event_fields: [step_name, error_message]
+
+        CHECK 3: depends_on. Every step except the first MUST have depends_on with at least one step name. Remove depends_on from the first step.
+
+        CHECK 4: TEMPLATE INTERPOLATION — THIS IS THE MOST IMPORTANT CHECK.
+        For EVERY step that has depends_on, its prompt MUST include at least one {{step.X.output}} reference.
+        If a step's prompt does NOT contain {{step. then you MUST add this text block to its prompt:
+
+            INPUT FROM PREVIOUS STEP:
+            {{step.DEPENDENCY_STEP_NAME.output}}
+
+        CRITICAL RULES FOR INTERPOLATION:
+        - The format is ALWAYS {{step.STEP_NAME.output}} — the "step." prefix is MANDATORY
+        - WRONG: {{step_1_read_csv.output}} — missing "step." prefix
+        - RIGHT: {{step.step_1_read_csv.output}} — has "step." prefix
+        - Use the EXACT step name as it appears in the depends_on list
+        - Do NOT abbreviate, rename, or guess step names
+        - If depends_on says [step_2_check_deps], use {{step.step_2_check_deps.output}}
+        - If depends_on says [step_4_analyze_crypto, step_5_check_auth], use BOTH:
+            {{step.step_4_analyze_crypto.output}}
+            {{step.step_5_check_auth.output}}
+        - NEVER change an existing {{step.X.output}} reference. Keep it exactly as-is
+        - EVERY existing reference MUST start with "step." — fix any that don't
+
+        CHECK 5: Prompt quality. Every prompt must be 5+ lines with specific instructions. Replace any placeholder text like "<prompt text here>" with a real detailed prompt relevant to the workflow's task.
+
+        CHECK 6: Parallel structure. At least 2 steps must share the same parent in depends_on. At least 1 step must have 2+ items in depends_on.
+
+        CHECK 7: Remove empty depends_on: [] from the first step.
+
+        Output ONLY the fixed, validated YAML. No explanations. No markdown fences.
+        First line: workflow_id:
+        Last line: a YAML value.
+      model_overrides:
+        temperature: 0.05
+        max_tokens: 50000
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3"
+              args: ["./real-workflow-attempts/scripts/validate-yaml.py", "./real-workflow-attempts/outputs/prompt-a-20260603-000531/cleaned.yml"]
+              fail_on_error: false
+          - log:
+              to_file_path: "./real-workflow-attempts/outputs/prompt-a-20260603-000531/logs/meta-workflow.log"
+              event_fields: [step_name, shell_output]
+              level: info
+        after_step_succeeds:
+          - save_to: "./real-workflow-attempts/outputs/prompt-a-20260603-000531/final-workflow.yml"
+          - shell:
+              command: "python3"
+              args: ["./real-workflow-attempts/scripts/validate-yaml.py", "./real-workflow-attempts/outputs/prompt-a-20260603-000531/final-workflow.yml"]
+              fail_on_error: false
+          - log:
+              to_file_path: "./real-workflow-attempts/outputs/prompt-a-20260603-000531/logs/meta-workflow.log"
+              event_fields: [step_name, duration_ms, token_count, shell_output]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./real-workflow-attempts/outputs/prompt-a-20260603-000531/logs/meta-workflow.log"
+              event_fields: [step_name, error_message]
+              level: error

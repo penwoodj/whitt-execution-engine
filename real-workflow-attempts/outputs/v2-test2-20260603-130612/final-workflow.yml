@@ -1,0 +1,114 @@
+```yaml
+workflow_id: markdown_analysis_workflow
+name: Markdown Analysis Workflow
+description: Analyzes markdown files in /tmp/docs/ to generate a comprehensive summary report.
+version: "1.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+    hosting:
+      gpu_layers: 999
+models:
+  "worker":
+    name: "Qwen2.5-Coder-3B-Instruct-Q8_0"
+    host:
+      type: llama_cpp_with_vulkan
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: true
+
+agentic_workflow:
+  steps:
+    step_01_read_directory:
+      generative_entity: "${models.worker}"
+      prompt: |
+        Use the shell command `ls -la /tmp/docs/` to list all files and directories in the /tmp/docs/ path. Capture the full output of this command, including file names and metadata such as permissions, size, and timestamps. Extract only the filenames from the output by filtering out directory entries and metadata lines that do not represent actual files. Output a clean, newline-separated list of all items in the directory as text. Ensure no extra formatting or headers are included. This raw listing will be used to identify markdown files in the next step.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+
+    step_02_identify_markdown_files:
+      generative_entity: "${models.worker}"
+      depends_on: [step_01_read_directory]
+      prompt: |
+        Use the output from {{step_01_read_directory.output}} and filter it with a shell grep command to extract only entries that end with the .md extension. Run the command `grep -E '\.md$' <(ls -la /tmp/docs/ | cut -d' ' -f9)` to isolate markdown files from the directory listing. The output should be a clean, newline-separated list of filenames ending in .md. Ensure no duplicates or partial matches are included. This list will be used to identify which files contain Markdown content for further processing.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+
+    step_03_count_markdown_files:
+      generative_entity: "${models.worker}"
+      depends_on: [step_02_identify_markdown_files]
+      prompt: |
+        Analyze the output from {{step_02_identify_markdown_files.output}} and count how many markdown files are present in the directory. Each line in the list represents one .md file, so simply count the number of lines to determine the total. Output only a single integer value representing this count, with no additional text or explanation. This number will be used as the file count in the final summary report.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+
+    step_04_parse_markdown_content:
+      generative_entity: "${models.worker}"
+      depends_on: [step_02_identify_markdown_files]
+      prompt: |
+        Using Python's regex module, extract all words from each markdown file listed in {{step_02_identify_markdown_files.output}}. For each file, parse its content by removing non-word characters (such as punctuation and special symbols) and split the text into individual words using a regular expression pattern like r'\b[a-zA-Z]+\b'. Process only alphabetic sequences to avoid numbers or abbreviations. Store all extracted words from every file in a structured format: a list of lists, where each inner list corresponds to one markdown file and contains its parsed words. Output this data as a JSON array with the filename as key and the list of words as value.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+
+    step_05_total_word_count:
+      generative_entity: "${models.worker}"
+      depends_on: [step_04_parse_markdown_content]
+      prompt: |
+        Aggregate all word counts extracted from {{step_04_parse_markdown_content.output}} by summing up the total number of valid words across every markdown file. For each entry in the JSON array, count how many words were parsed and add them to a running total. After processing all files, output only one integer value representing the total word count across all markdown files. This total will be used in the final summary report.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+
+    step_06_top_10_common_words:
+      generative_entity: "${models.worker}"
+      depends_on: [step_04_parse_markdown_content]
+      prompt: |
+        Analyze the list of words extracted from {{step_04_parse_markdown_content.output}} and tally their frequencies using a frequency counter. Identify all unique words across all files, count how often each appears, then sort them in descending order by frequency. Extract only the top 10 most common words based on this ranking. Output a numbered list of exactly ten entries, each containing the word and its count (e.g., "1. 'the': 45"). Ensure no duplicates or extra formatting is included. This list will be used in the final summary report.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+
+    step_07_determine_file_sizes:
+      generative_entity: "${models.worker}"
+      depends_on: [step_02_identify_markdown_files]
+      prompt: |
+        Use shell commands to retrieve the file sizes of each markdown file listed in {{step_02_identify_markdown_files.output}}. Run `ls -l /tmp/docs/ | grep '\.md$'` and extract only the size field (the 5th column) for each .md file, then format it as a clean list where each entry is "filename: size_in_bytes". For example, "document1.md: 2345" or "notes.md: 890". Output this list in a newline-separated format with no headers or extra text. This data will be used to include file sizes in the final report.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+
+    step_08_calculate_readability_scores:
+      generative_entity: "${models.worker}"
+      depends_on: [step_04_parse_markdown_content]
+      prompt: |
+        For each markdown file listed in {{step_04_parse_markdown_content.output}}, compute its Flesch Reading Ease score using the formula: 206.835 - (1.015 × (total_words / total_sentences)) - (84.6 × (syllables_per_word / total_words)). First, extract sentence counts from each file by splitting on sentence-ending punctuation and counting full sentences. Then, estimate syllable count per word using a standard syllabary rule (e.g., one syllable for "a", two for "be"). Use the parsed words and sentence counts to calculate the score. Output a JSON list where each entry has the filename as key and the readability score as value (rounded to 2 decimal places).
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+
+    step_09_generate_summary_report:
+      generative_entity: "${models.worker}"
+      depends_on: [step_03_count_markdown_files, step_05_total_word_count, step_06_top_10_common_words, step_07_determine_file_sizes, step_08_calculate_readability_scores]
+      prompt: |
+        Compile all relevant data into a comprehensive, well-structured summary report. Include the total number of markdown files from {{step_03_count_markdown_files.output}}, the total word count from {{step_05_total_word_count.output}}, and the top 10 most common words from {{step_06_top_10_common_words.output}}. List each file with its size as extracted in {{step_07_determine_file_sizes.output}} and include a readability score for each file as derived in {{step_08_calculate_readability_scores.output}}. Format the report as a markdown document with clear section headers: "File Count", "Total Word Count", "Top 10 Common Words", "File Sizes", and "Readability Scores". Ensure all data is presented clearly, consistently, and without redundancy.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+
+    step_10_save_summary_report:
+      generative_entity: "${models.worker}"
+      depends_on: [step_09_generate_summary_report]
+      prompt: |
+        Take the fully generated summary report from {{step_09_generate_summary_report.output}} and save it to a file named `report.md` in the `outputs/` directory. Use shell commands to create the outputs directory if it does not already exist, then write the content of the report into the file using standard output redirection. Ensure the file is saved with proper markdown formatting and no extra whitespace or headers. Confirm that the file path `/tmp/outputs/report.md` exists and contains the complete report. Output only a confirmation message stating "Summary report successfully saved to outputs/report.md".
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+```
