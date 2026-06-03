@@ -1867,8 +1867,7 @@ impl BenchmarkRunner {
                         let resolved_prompt = step.prompt.as_ref()
                             .map(|p| {
                                 let after_resolve = Self::resolve_templates(p, vars, iteration);
-                                let after_step = Self::resolve_step_output_templates(&after_resolve, &step_outputs);
-                                Self::resolve_bookmark_templates(&after_step, &self.hook_engine.bookmarks)
+                                Self::resolve_step_output_templates(&after_resolve, &step_outputs)
                             });
 
                         if let Some(ref ge) = resolved_ge {
@@ -1968,11 +1967,11 @@ impl BenchmarkRunner {
                                             .map(|s| s.as_str())
                                             .unwrap_or(model_key);
                                         if let Some(model) = self.resolve_model_file(model_name, &models) {
-                                            let resolved_prompt = target_step.prompt.as_ref()
-                                                .map(|p| {
-                                                    let after = Self::resolve_step_output_templates(p, &step_outputs);
-                                                    Self::resolve_bookmark_templates(&after, &self.hook_engine.bookmarks)
-                                                });
+                                                      // Bookmark resolution deferred — hooks must fire first.
+                                                      let resolved_prompt = target_step.prompt.as_ref()
+                                                          .map(|p| {
+                                                              Self::resolve_step_output_templates(p, &step_outputs)
+                                                          });
                                             let resolved_target = WorkflowStep {
                                                 step_name: target_step.step_name.clone(),
                                                 step_id: target_step.step_id.clone(),
@@ -2020,10 +2019,10 @@ impl BenchmarkRunner {
                         if let Some(model) = model_file {
                             info!("[benchmark] executing step {} with model {}", step.step_id, model.0);
 
+                            // Bookmark resolution deferred — hooks must fire first.
                             let resolved_prompt = step.prompt.as_ref()
                                 .map(|p| {
-                                    let after = Self::resolve_step_output_templates(p, &step_outputs);
-                                    Self::resolve_bookmark_templates(&after, &self.hook_engine.bookmarks)
+                                    Self::resolve_step_output_templates(p, &step_outputs)
                                 });
 
                             let resolved_step = WorkflowStep {
@@ -2076,12 +2075,11 @@ impl BenchmarkRunner {
                                                      .map(|s| s.as_str())
                                                      .unwrap_or(model_key);
                                                  if let Some(model) = self.resolve_model_file(model_name, &models) {
-                                                     let resolved_prompt = target_step.prompt.as_ref()
-                                                         .map(|p| {
-                                                             let after = Self::resolve_step_output_templates(p, &step_outputs);
-                                                             Self::resolve_bookmark_templates(&after, &self.hook_engine.bookmarks)
-                                                         });
-                                                    let resolved_target = WorkflowStep {
+                                                      let resolved_prompt = target_step.prompt.as_ref()
+                                                          .map(|p| {
+                                                              Self::resolve_step_output_templates(p, &step_outputs)
+                                                          });
+                                                     let resolved_target = WorkflowStep {
                                                         step_name: target_step.step_name.clone(),
                                                         step_id: target_step.step_id.clone(),
                                                         requires: target_step.requires.clone(),
@@ -2166,10 +2164,9 @@ impl BenchmarkRunner {
                                                 if let Some(model) = self.resolve_model_file(model_name, &models) {
                                                     let resolved_prompt = target_step.prompt.as_ref()
                                                         .map(|p| {
-                                                            let after = Self::resolve_step_output_templates(p, &step_outputs);
-                                                            Self::resolve_bookmark_templates(&after, &self.hook_engine.bookmarks)
+                                                            Self::resolve_step_output_templates(p, &step_outputs)
                                                         });
-                                                    let resolved_target = WorkflowStep {
+                                                     let resolved_target = WorkflowStep {
                                                             step_name: target_step.step_name.clone(),
                                                             step_id: target_step.step_id.clone(),
                                                             requires: target_step.requires.clone(),
@@ -2210,8 +2207,7 @@ impl BenchmarkRunner {
                         if let Some(model) = models.first() {
                             let resolved_prompt = step.prompt.as_ref()
                                 .map(|p| {
-                                    let after = Self::resolve_step_output_templates(p, &step_outputs);
-                                    Self::resolve_bookmark_templates(&after, &self.hook_engine.bookmarks)
+                                    Self::resolve_step_output_templates(p, &step_outputs)
                                 });
 
                             let resolved_step = WorkflowStep {
@@ -2266,8 +2262,7 @@ impl BenchmarkRunner {
                                                 if let Some(model) = self.resolve_model_file(model_name, &models) {
                                                     let resolved_prompt = target_step.prompt.as_ref()
                                                         .map(|p| {
-                                                            let after = Self::resolve_step_output_templates(p, &step_outputs);
-                                                            Self::resolve_bookmark_templates(&after, &self.hook_engine.bookmarks)
+                                                            Self::resolve_step_output_templates(p, &step_outputs)
                                                         });
                                                     let resolved_target = WorkflowStep {
                                                         step_name: target_step.step_name.clone(),
@@ -2610,10 +2605,7 @@ impl BenchmarkRunner {
                     }
 
                     let resolved_prompt = target_step.prompt.as_ref()
-                        .map(|p| {
-                            let after = Self::resolve_step_output_templates(p, step_outputs);
-                            Self::resolve_bookmark_templates(&after, &self.hook_engine.bookmarks)
-                        });
+                        .map(|p| Self::resolve_step_output_templates(p, &step_outputs));
 
                     target_infos.push((
                         target_id.clone(),
