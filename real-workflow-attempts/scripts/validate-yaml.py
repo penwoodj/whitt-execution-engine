@@ -61,6 +61,7 @@ def validate(filepath):
                     errors.append(f"Model '{mname}' host missing 'type'")
         
         # Agentic workflow validation
+        warnings = []
         if 'agentic_workflow' in data and isinstance(data['agentic_workflow'], dict):
             if 'steps' not in data['agentic_workflow']:
                 errors.append("agentic_workflow missing 'steps'")
@@ -73,6 +74,32 @@ def validate(filepath):
                         # Control flow steps don't need generative_entity
                         if 'when' not in sval:
                             errors.append(f"Step '{sname}' missing 'generative_entity' or 'when'")
+                    
+                    # Hook validation
+                    if 'when' not in sval:
+                        warnings.append(f"Step '{sname}' has NO 'when:' hooks — output will not be saved or logged")
+                    else:
+                        when = sval['when']
+                        if 'after_step_succeeds' not in when and 'before_step_starts' not in when:
+                            warnings.append(f"Step '{sname}' has 'when:' but no actionable triggers")
+                        if 'after_step_succeeds' in when:
+                            has_save = any('save_to' in action or 'SaveTo' in str(action) 
+                                          for action in when['after_step_succeeds'] 
+                                          if isinstance(action, dict))
+                            if not has_save:
+                                warnings.append(f"Step '{sname}' after_step_succeeds has no save_to — output lost")
+                    
+                    # Prompt validation  
+                    if 'prompt' in sval:
+                        prompt_text = str(sval['prompt'])
+                        if '{{bookmarks.shell_output.stdout}}' in prompt_text and 'when' in sval:
+                            has_shell_hook = False
+                            if 'before_step_starts' in sval['when']:
+                                for action in sval['when']['before_step_starts']:
+                                    if isinstance(action, dict) and 'shell' in action:
+                                        has_shell_hook = True
+                            if not has_shell_hook:
+                                warnings.append(f"Step '{sname}' prompt references bookmarks.shell_output but no before_step_starts shell hook")
         
         # Check for invalid top-level keys (basic schema compliance)
         valid_top_keys = {
@@ -85,8 +112,11 @@ def validate(filepath):
             if key not in valid_top_keys:
                 errors.append(f"Unknown top-level key: '{key}' (may not be schema-compliant)")
         
+        for w in warnings:
+            print(f"WARNING: {w}", file=sys.stderr)
+        
         if not errors:
-            print(f"VALID: {filepath}")
+            print(f"VALID: {filepath} ({len(warnings)} warnings)")
             return []
         else:
             for e in errors:
