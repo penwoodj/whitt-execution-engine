@@ -54,9 +54,9 @@ echo "[1/3] Running meta-workflow (2-4 min)..."
 cd "$PROJECT_DIR"
 
 if [ "$VERBOSE" = true ]; then
-  cargo run --release --features client --bin whitt -- benchmark --workflow "$WORKFLOW_FILE" 2>&1 | tee "$OUTPUT_DIR/logs/engine.log"
+  cargo run --release --features client --bin whitt -- benchmark --workflow "$WORKFLOW_FILE" --min-tmp-space 10 2>&1 | tee "$OUTPUT_DIR/logs/engine.log"
 else
-  cargo run --release --features client --bin whitt -- benchmark --workflow "$WORKFLOW_FILE" > "$OUTPUT_DIR/logs/engine.log" 2>&1
+  cargo run --release --features client --bin whitt -- benchmark --workflow "$WORKFLOW_FILE" --min-tmp-space 10 > "$OUTPUT_DIR/logs/engine.log" 2>&1
 fi
 
 FINAL="$OUTPUT_DIR/final-workflow.yml"
@@ -85,6 +85,6 @@ if [ "$RUN_GENERATED" = true ]; then
   echo "[BONUS] Running generated workflow..."
   cd "$E2E_DIR"
   cargo run --release --features client --bin whitt --manifest-path "$PROJECT_DIR/Cargo.toml" -- \
-    benchmark --workflow "$FINAL" 2>&1 | tee "$E2E_DIR/engine.log" || true
+    benchmark --workflow "$FINAL" --min-tmp-space 10 2>&1 | tee "$E2E_DIR/engine.log" || true
   echo "  E2E output: $E2E_DIR/"
 fi

@@ -34,7 +34,7 @@ agentic_workflow:
   steps:
 
     step_1_generate:
-      generative_entity: "${models.coder-model}"
+      generative_entity: "${models.reviewer-model}"
       prompt: |
         Generate a COMPLETE YAML agentic workflow file for the following task:
 
@@ -221,8 +221,23 @@ agentic_workflow:
         10. Every step MUST have model_overrides with temperature (0.1-0.7) and max_tokens: 50000
         11. Every step MUST have when: with after_step_succeeds (save_to + log) and after_step_fails (log)
         12. Template interpolation MUST use the EXACT step name from depends_on. If a step is named step_3_check_deps then use {{step.step_3_check_deps.output}} NOT {{step.step_3_deps_check.output}}
-        13. The FIRST step of every workflow SHOULD use before_step_starts shell hook to read real files when the task involves file analysis (e.g., command: "cat", args: ["./path/to/file"])
-        14. When shell hook is used, the prompt can reference {{bookmarks.shell_output.stdout}} to include the file content
+        13. MANDATORY FILE READING: If the TASK mentions reading files, analyzing files, or processing data from files, the FIRST step MUST use before_step_starts with a shell hook to read the file:
+            WRONG (LLM hallucinates content):
+              step_1:
+                prompt: "Read the CSV file at /tmp/data.csv and analyze..."
+            RIGHT (shell hook reads actual file):
+              step_1:
+                prompt: |
+                  Analyze the following file content:
+                  {{bookmarks.shell_output.stdout}}
+                  Provide statistics, row count, and data quality assessment.
+                when:
+                  before_step_starts:
+                    shell:
+                      command: "cat"
+                      args: ["/tmp/data.csv"]
+                      fail_on_error: false
+        14. When a shell hook reads a file, the prompt MUST reference {{bookmarks.shell_output.stdout}} to access the real file content. Without this, the model hallucinates file contents.
       model_overrides:
         temperature: 0.15
         max_tokens: 50000
@@ -339,6 +354,16 @@ agentic_workflow:
         CHECK 6: Parallel structure. At least 2 steps must share the same parent in depends_on. At least 1 step must have 2+ items in depends_on.
 
         CHECK 7: Remove empty depends_on: [] from the first step.
+
+        CHECK 8: FILE READING SHELL HOOKS. If the workflow task involves reading, analyzing, or processing files, the first step MUST have a before_step_starts shell hook that reads the file using cat. The prompt MUST reference {{bookmarks.shell_output.stdout}}. If missing, add this structure to the first step:
+          when:
+            before_step_starts:
+              shell:
+                command: "cat"
+                args: ["<FILE_PATH_FROM_TASK>"]
+                fail_on_error: false
+          And add to the first step's prompt:
+            "File content:\n{{bookmarks.shell_output.stdout}}\n"
 
         Output ONLY the fixed, validated YAML. No explanations. No markdown fences.
         First line: workflow_id:
