@@ -1,0 +1,81 @@
+workflow_id: os-release-info
+name: Extract OS information from /etc/os-release
+description: Combine step plan and prompts into ONE workflow YAML file
+version: 1.0.0
+schema_version: 2.0.0
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  worker:
+    name: Qwen2.5-Coder-3B-Instruct-Q8_0
+    host:
+      type: llama_cpp_with_vulkan
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: true
+agentic_workflow:
+  steps:
+    step_01:
+      generative_entity: ${models.worker}
+      depends_on: []
+      prompt: "--- STEP: step_01_read_os_release ---\nRead the file /etc/os-release using the cat command. Execute the command and capture its stdout. Here is the data:  \n{{bookmarks.shell_output.stdout}}\
+        \  \nParse the raw output to retrieve the full content of the file as a string. Output only the text content of the file, without any additional commentary or formatting.  \nEnsure the output contains\
+        \ all key-value pairs from /etc/os-release in their original form.  \nOutput exactly what cat produces when run on /etc/os-release.  \nOutput ONLY the raw text content of the file. No explanations.\
+        \ No process descriptions.  \n--- END ---\n"
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+        - save_to: ./outputs/step_01-output.txt
+        - log: &id001
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - duration_ms
+            level: info
+        after_step_fails:
+        - log: &id002
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - error_message
+            level: error
+    step_02:
+      generative_entity: ${models.worker}
+      depends_on:
+      - step_01
+      prompt: "--- STEP: step_02_extract_os_info ---\nGiven the data: {{step_01.output}}, extract only the values for the keys NAME, VERSION_ID, and VERSION from the file. The output must be a numbered\
+        \ list with three entries corresponding to these fields.  \nThe first entry should be the OS name (value of NAME), second is version ID (VERSION_ID), third is full version string (VERSION).  \n\
+        Output a numbered list in this format:  \n1. [OS Name]  \n2. [Version ID]  \n3. [Full Version String]  \nEnsure values are extracted directly from the file content, not inferred or guessed.  \n\
+        Output ONLY the result. No explanations. No process descriptions.  \n--- END ---\n"
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+        - save_to: ./outputs/step_02-output.txt
+        - log: *id001
+        after_step_fails:
+        - log: *id002
+    step_03:
+      generative_entity: ${models.worker}
+      depends_on:
+      - step_02
+      prompt: "--- STEP: 03_format_as_json ---\nGiven the output from step_02: {{step_02.output}}, convert it into a valid JSON object with exactly three keys: name, version, id.  \nThe value for \"name\"\
+        \ must be the OS name extracted in step_02 (first entry).  \nThe value for \"version\" must be the full version string from step_02 (third entry).  \nThe value for \"id\" must be the version ID\
+        \ from step_02 (second entry).  \nOutput JSON: {\"name\": \"value\", \"version\": \"value\", \"id\": \"value\"}  \nEnsure no extra keys, no comments, and no formatting beyond valid JSON.  \nOutput\
+        \ ONLY the result. No explanations. No process descriptions.  \n--- END ---\n"
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        after_step_succeeds:
+        - save_to: ./outputs/step_03-output.txt
+        - log: *id001
+        after_step_fails:
+        - log: *id002

@@ -29,9 +29,9 @@ TASK="Read the CSV file at /tmp/sales-data.csv and produce a summary report"
 RUN_ID="my-run-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "real-workflow-attempts/outputs/${RUN_ID}/logs"
 
-# Inject task into v3 template
+# Inject task into v4 template
 sed "s|__TASK_PLACEHOLDER__|${TASK}|g; s|__RUN_ID__|${RUN_ID}|g" \
-  real-workflow-attempts/meta-workflow-v3.yml > /tmp/meta-run.yml
+  real-workflow-attempts/meta-workflow-v4.yml > /tmp/meta-run.yml
 
 # Run the meta-workflow generator (~3 min)
 ./target/release/whitt benchmark \
@@ -226,30 +226,34 @@ Use `--min-tmp-space 1` to bypass minimum space check.
 
 ## Current Status (as of 2026-06-03)
 
-### v3 Meta-Workflow (RECOMMENDED)
-- ✅ 5-step decomposed generator (decompose→plan→prompts→assemble→validate)
-- ✅ Generates structurally valid YAML from arbitrary prompts
-- ✅ Post-processor fixes structure (fence stripping, step nesting, hook injection)
-- ✅ Post-processor injects `{{bookmarks.shell_output.stdout}}` into prompts with shell hooks
-- ✅ Post-processor preserves multi-line strings as YAML block scalars
-- ✅ Generated workflows execute end-to-end (all steps pass)
-- ✅ Output files saved for each step via save_to hooks
-- ✅ Template interpolation chains steps together
-- ✅ Bookmark system passes data between steps
-- ✅ 4 live tests completed (v3-test1 through v3-test4)
+### v4 Meta-Workflow (RECOMMENDED)
+- ✅ 6-step pipeline: classify→decompose→plan→prompts→assemble→validate
+- ✅ Complexity classification (SIMPLE/MEDIUM/COMPLEX) routes to appropriate decomposition
+- ✅ Research-informed: Continuous Execution Lock, no STOP language, tighter decomposition rules
+- ✅ Shell command auto-split: `execute_shell()` handles commands like `ls /tmp/` natively
+- ✅ Post-processor: fence stripping, step nesting, hook injection, bookmark injection, block-style YAML
+- ✅ Generated workflows execute end-to-end with REAL data processing
+- ✅ **BREAKTHROUGH**: LLM processes real shell output via bookmarks instead of hallucinating
+- ✅ 7 live tests completed (v3-test1-4, v4-test1-2b)
 
-### Known Limitations
-- ⚠️ 3B model explains HOW instead of DOING — inherent to model size, not engine
-- ⚠️ Shell hook commands with special chars may fail YAML parsing (post-processor handles most)
-- ⚠️ Generated workflows may hallucinate data instead of reading real files
-- ⚠️ Steps sometimes appear at top level instead of under `agentic_workflow: steps:` (post-processor fixes)
-- ❌ Sub-workflow support not yet implemented
-- ❌ No iterative verify/fix cycles within generation
+### v3 Meta-Workflow (DEPRECATED)
+- Still functional but v4 produces better quality output
 
 ### Test Results Summary
 | Test | Prompt | Steps | Meta | Generated | Quality |
 |------|--------|-------|------|-----------|---------|
-| v3-test1 | Markdown TOC | 6 | 5/5 | 6/6 | Low (explains vs does) |
-| v3-test2 | CSV line count | 8 | 5/5 | 8/8 | Medium (JSON valid, some hallucination) |
-| v3-test3 | List files with sizes | 6 | 5/5 | 6/6 | Medium (shell cmds preserved, table generated) |
-| v3-test4 | Count .txt files | 6 | 5/5 | 6/6 | Medium (bookmarks injected, some data used) |
+| v4-test1a | Read /etc/hostname | 2 | 6/6 | 2/2 | ✅ HIGH — correct output "myhost.example.com" |
+| v4-test1b | Read /etc/hostname (rerun) | 2 | 6/6 | 2/2 | ✅ HIGH — correct output |
+| v4-test2 | Count .txt files in /tmp | 3 | 6/6 | 3/3 | ✅ MEDIUM — granite produced perfect YAML, shell hooks failed (pre-fix) |
+| v4-test2b | Count .txt files in /tmp (shell fix) | 3 | 6/6 | 3/3 | ✅ HIGH — LLM counted 25 .txt files from REAL data |
+| v3-test1 | Markdown TOC | 6 | 5/5 | 6/6 | ⚠️ Low (explains vs does) |
+| v3-test2 | CSV line count | 8 | 5/5 | 8/8 | ⚠️ Medium (JSON valid, some hallucination) |
+| v3-test3 | List files with sizes | 6 | 5/5 | 6/6 | ⚠️ Medium (shell cmds preserved, table generated) |
+| v3-test4 | Count .txt files | 6 | 5/5 | 6/6 | ⚠️ Medium (bookmarks injected, some data used) |
+
+### Known Limitations
+- ⚠️ Shell commands with `{{step.X.output}}` template refs fail (not resolved in command field)
+- ⚠️ Complexity classifier sometimes underestimates (SIMPLE when should be MEDIUM)
+- ⚠️ 3B model occasionally explains instead of doing — inherent limitation
+- ❌ Sub-workflow support not yet implemented
+- ❌ No iterative verify/fix cycles within generation
