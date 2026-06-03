@@ -188,18 +188,26 @@ Use `--min-tmp-space 1` flag to bypass the minimum space check.
 - ✅ 5-step decomposed generator (decompose→plan→prompts→assemble→validate)
 - ✅ Generates structurally valid YAML from arbitrary prompts
 - ✅ Post-processor fixes structure (fence stripping, step nesting, hook injection)
+- ✅ Post-processor injects `{{bookmarks.shell_output.stdout}}` into prompts with shell hooks
+- ✅ Post-processor preserves multi-line strings as YAML block scalars
 - ✅ Generated workflows execute end-to-end (6/6 steps pass)
 - ✅ Output files saved for each step via save_to hooks
 - ✅ Template interpolation chains steps together
 - ✅ Bookmark system passes data between steps
+- ✅ 4 live tests completed (v3-test1 through v3-test4)
 
 ### Known Limitations
-- ⚠️ 3B model outputs are explanatory (explains HOW vs does it) — LLM quality issue, not engine
-- ⚠️ Shell hooks may fail if yaml.dump reformats commands — manual fix needed
+- ⚠️ 3B model explains HOW instead of DOING — inherent to model size, not engine
+- ⚠️ Shell hook commands with special chars may fail YAML parsing (post-processor handles most)
 - ⚠️ Generated workflows may hallucinate data instead of reading real files
+- ⚠️ Steps sometimes appear at top level instead of under `agentic_workflow: steps:` (post-processor fixes)
 - ❌ Sub-workflow support not yet implemented
 - ❌ No iterative verify/fix cycles within generation
 
-### v2 Meta-Workflow (DEPRECATED)
-- ⚠️ Generated valid YAML but with ZERO hooks — model dropped all when: blocks
-- ⚠️ Use v3 with post-processor instead
+### Test Results Summary
+| Test | Prompt | Steps | Meta | Generated | Quality |
+|------|--------|-------|------|-----------|---------|
+| v3-test1 | Markdown TOC | 6 | 5/5 | 6/6 | Low (explains vs does) |
+| v3-test2 | CSV line count | 8 | 5/5 | 8/8 | Medium (JSON valid, some hallucination) |
+| v3-test3 | List files with sizes | 6 | 5/5 | 6/6 | Medium (shell cmds preserved, table generated) |
+| v3-test4 | Count .txt files | 6 | 5/5 | 6/6 | Medium (bookmarks injected, some data used) |
