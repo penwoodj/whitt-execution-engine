@@ -15,56 +15,53 @@ Generate executable YAML workflows from natural language prompts using the Whitt
    cargo build --release --features client
    ```
 
+3. Python 3 with PyYAML (for post-processor):
+   ```bash
+   pip install pyyaml
+   ```
+
 ## Quick Start
 
 ### 1. Generate a Workflow from a Prompt
 
 ```bash
-# Set your task prompt
-TASK="Read the CSV file at /tmp/sales-data.csv and produce a summary report with row counts, column statistics, and anomaly detection"
-
-# Create output directory
+TASK="Read the CSV file at /tmp/sales-data.csv and produce a summary report"
 RUN_ID="my-run-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "real-workflow-attempts/outputs/${RUN_ID}/logs"
 
-# Run the meta-workflow generator
-./target/release/whitt benchmark \
-  --workflow real-workflow-attempts/meta-workflow-template.yml \
-  --min-tmp-space 1 \
-  2>&1 | tee "real-workflow-attempts/outputs/${RUN_ID}/run.log"
-```
+# Inject task into v3 template
+sed "s|__TASK_PLACEHOLDER__|${TASK}|g; s|__RUN_ID__|${RUN_ID}|g" \
+  real-workflow-attempts/meta-workflow-v3.yml > /tmp/meta-run.yml
 
-Before running, edit `meta-workflow-template.yml` and replace these placeholders:
-- `__TASK_PLACEHOLDER__` → your task description
-- `__RUN_ID__` → your run directory name (e.g., `my-run-20260603-120000`)
+# Run the meta-workflow generator (~3 min)
+./target/release/whitt benchmark \
+  --workflow /tmp/meta-run.yml \
+  --min-tmp-space 1 \
+  2>&1 | tee "real-workflow-attempts/outputs/${RUN_ID}/meta-run.log"
+```
 
 ### 2. Post-Process and Validate
 
 ```bash
-# Post-process: strip fences, fix step nesting, inject hooks
+# Post-process: strip fences, fix step nesting, inject hooks and prompts
 python3 real-workflow-attempts/scripts/post-process-workflow.py \
-  "real-workflow-attempts/outputs/${RUN_ID}/final-workflow.yml"
+  "real-workflow-attempts/outputs/${RUN_ID}/final-workflow.yml" \
+  "real-workflow-attempts/outputs/${RUN_ID}/03-prompts.txt"
 
 # Validate the result
 python3 real-workflow-attempts/scripts/validate-yaml.py \
   "real-workflow-attempts/outputs/${RUN_ID}/final-workflow.yml"
-
-# Check logs
-cat "real-workflow-attempts/outputs/${RUN_ID}/logs/meta-workflow.log"
 ```
 
 ### 3. Run the Generated Workflow
 
 ```bash
-# Copy to a clean location and customize paths
 cp "real-workflow-attempts/outputs/${RUN_ID}/final-workflow.yml" /tmp/my-workflow.yml
 
-# Edit file paths in the YAML to match your actual data
-# Then run it
 ./target/release/whitt benchmark \
   --workflow /tmp/my-workflow.yml \
   --min-tmp-space 1 \
-  2>&1 | tee /tmp/my-workflow-run.log
+  2>&1 | tee "real-workflow-attempts/outputs/${RUN_ID}/gen-run.log"
 
 # Check outputs
 ls outputs/output/
@@ -72,30 +69,52 @@ ls outputs/output/
 
 ## Template Variables
 
-The meta-workflow template uses these placeholders that must be replaced before running:
+The v3 meta-workflow template uses these placeholders:
 
 | Variable | Where | Replace With |
 |----------|-------|-------------|
-| `__TASK_PLACEHOLDER__` | step_1_generate prompt | Your natural language task description |
-| `__RUN_ID__` | All `save_to` and `log` paths | A unique directory name like `run-20260603-120000` |
+| `__TASK_PLACEHOLDER__` | step_01_decompose prompt | Your natural language task description |
+| `__RUN_ID__` | All `save_to` and `log` paths | A unique directory name like `my-run-20260603-120000` |
 
-## Models Used
+## v3 Pipeline Architecture
 
-The meta-workflow uses two models by default:
+The v3 meta-workflow decomposes workflow generation into 5 specialized steps:
+
+| Step | Model | Output | Purpose |
+|------|-------|--------|---------|
+| step_01_decompose | 4B planner | `01-actions.txt` | Extract action items from task prompt |
+| step_02_plan_steps | 4B planner | `02-plan.txt` | Turn actions into ordered step plan |
+| step_03_write_prompts | 4B planner | `03-prompts.txt` | Write detailed prompts for each step |
+| step_04_assemble | 3B coder | `04-assembled.yml` | Generate YAML skeleton with hooks |
+| step_05_validate | 3B coder | `final-workflow.yml` | Fix all issues, validate structure |
+
+### Post-Processor Transforms
+
+After generation, `post-process-workflow.py` applies these fixes (because 3B models can't reliably produce them):
+
+1. Strip markdown fences (`\`\`\`yaml ... \`\`\``)
+2. Move top-level steps under `agentic_workflow: steps:`
+3. Inject actual prompts from `03-prompts.txt`
+4. Remove placeholder shell hooks (`command: "none"`)
+5. Inject `{{bookmarks.shell_output.stdout}}` into prompts with shell hooks
+6. Inject missing `after_step_succeeds` / `after_step_fails` hooks
+7. Preserve multi-line strings as YAML block scalars
+8. Remove invalid `hosting: gpu_layers` fields
+
+## Models
 
 | Role | Model | Purpose |
 |------|-------|---------|
-| Generator | `Qwen3-4B-Instruct-2507-Q4_K_M` | Generates, cleans, and validates YAML |
-| Coder | `Qwen2.5-Coder-3B-Instruct-Q8_0` | Used in generated workflows for execution |
+| Planner | `Qwen3-4B-Instruct-2507-Q4_K_M` | Decompose, plan, write prompts |
+| Coder | `Qwen2.5-Coder-3B-Instruct-Q8_0` | Assemble YAML, validate |
+| Executor | `Qwen2.5-Coder-3B-Instruct-Q8_0` | Run in generated workflows |
 
-To change models, edit the `models:` section of the template. Available models can be listed with:
+Available models:
 ```bash
 curl -s http://localhost:8080/v1/models | jq '.data[].id' -r
 ```
 
 ## Generated Workflow Structure
-
-The meta-workflow produces YAML files with this structure:
 
 ```yaml
 workflow_id: <unique-id>
@@ -119,30 +138,61 @@ agentic_workflow:
     step_01_name:          # ← ZERO-PAD step names! (step_01, step_02, ...)
       generative_entity: "${models.target-model}"
       prompt: |
-        <detailed prompt with {{step.X.output}} references>
+        Here is the data to process:
+        {{bookmarks.shell_output.stdout}}
+
+        <task instructions>
       when:
         before_step_starts:
-          shell:           # Read files via shell hooks
-            command: "cat"
-            args: ["<filepath>"]
+          - shell:
+              command: "cat"
+              args: ["<filepath>"]
+              fail_on_error: false
         after_step_succeeds:
-          - save_to: "./outputs/stepN-output.txt"
+          - save_to: "./outputs/step_01_name-output.txt"
           - log:
               to_file_path: "./logs/workflow.log"
               event_fields: [step_name, duration_ms]
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+              level: error
 ```
 
-## Critical Rules for Generated Workflows
+## Critical Rules
 
-1. **Zero-pad step names**: Use `step_01`, `step_02`, not `step_1`, `step_2`. YAML mapping keys are sorted alphabetically, so `step_10` sorts before `step_2`.
+1. **Zero-pad step names**: Use `step_01`, `step_02`, not `step_1`, `step_2`. YAML mapping keys sort alphabetically, so `step_10` sorts before `step_2`.
 
-2. **Use shell hooks for file reading**: Don't ask the LLM to "read a file" in the prompt. Use `before_step_starts` shell hooks with `cat` and reference `{{bookmarks.shell_output.stdout}}` in the prompt.
+2. **Shell hooks for file reading**: Use `before_step_starts` shell hooks with `cat`/`head`/`find` and reference `{{bookmarks.shell_output.stdout}}` in prompts. The post-processor injects this automatically.
 
-3. **Template interpolation**: Use `{{step.step_name.output}}` to pass output from one step to the next. The `step.` prefix is mandatory.
+3. **Template interpolation**: Use `{{step.step_name.output}}` to pass output between steps.
 
-4. **Keep prompts under 4K tokens**: The 3B model has ~4K token context. Keep prompts concise and specific.
+4. **Keep prompts under 4K tokens**: 3B model has ~4K token context. Concise and specific prompts only.
 
-5. **Small chunks, many steps**: Instead of one complex step, break into multiple small steps with validate-and-fix cycles.
+5. **Small chunks, many steps**: Break complex tasks into multiple small steps.
+
+6. **Always run post-processor**: The 3B model can't reliably produce correct hook structure. Post-processor fixes this.
+
+## Directory Structure
+
+```
+real-workflow-attempts/
+├── meta-workflow-v3.yml          # v3 generator (RECOMMENDED)
+├── meta-workflow-v2.yml          # v2 generator (deprecated)
+├── meta-workflow-template.yml    # v1 generator (deprecated)
+├── scripts/
+│   ├── validate-yaml.py          # Check generated YAML against schema
+│   └── post-process-workflow.py  # Fix structure, inject hooks/prompts
+└── outputs/
+    ├── v3-test1-* through v3-test4-*  # v3 live test results
+    ├── v2-test-*/                      # v2 live test results
+    ├── v1-attempts/                    # v1 attempt ymls + generator logs
+    ├── gen-*/                          # v1 generation runs
+    ├── test-*/                         # v1 test runs
+    ├── idea-board/                     # 10-step note analysis outputs
+    └── config-drift-run/              # Config drift analysis outputs
+```
 
 ## Troubleshooting
 
@@ -150,37 +200,29 @@ agentic_workflow:
 ```
 500 Internal Server Error – proxy error: Could not establish connection
 ```
-The model may not be loaded on the server. List available models:
+Model not loaded. Check available models:
 ```bash
 curl -s http://localhost:8080/v1/models | jq '.data[].id' -r
 ```
 
 ### Steps Execute Out of Order
-Zero-pad step names. `step_1` through `step_9` work, but `step_10` sorts before `step_2`. Always use `step_01` through `step_99`.
+Zero-pad step names. `step_10` sorts before `step_2`. Always use `step_01` through `step_99`.
 
 ### Empty Output or "NO IDEAS FOUND"
-The 3B model may not be capable enough for nuanced extraction. Try:
-- Using a larger model (7B if available)
-- Making the prompt more specific with examples
-- Reducing the input data size (use `head -c 8000` instead of `head -c 12000`)
+3B model may lack capability. Try:
+- Larger model (7B if available)
+- More specific prompt with examples
+- Smaller input data (`head -c 8000` instead of `head -c 12000`)
+
+### YAML Parse Error in Post-Processor
+The 3B model may generate shell commands with special characters that break YAML parsing. Post-processor handles most cases automatically.
 
 ### /tmp Space Full
 ```bash
 df -h /tmp
-# If 99%+ full, clean up:
 rm -rf /tmp/tech-notes-extract /tmp/idea-board-* /tmp/run*.log
 ```
-Use `--min-tmp-space 1` flag to bypass the minimum space check.
-
-## File Locations
-
-| File | Purpose |
-|------|---------|
-| `real-workflow-attempts/meta-workflow-template.yml` | The meta-workflow generator template |
-| `real-workflow-attempts/scripts/validate-yaml.py` | YAML validation script |
-| `real-workflow-attempts/outputs/` | Generated workflow outputs |
-| `outputs/output/` | Output from running generated workflows |
-| `docs/schema/unified-workflow-schema.yml` | Schema reference for valid YAML |
+Use `--min-tmp-space 1` to bypass minimum space check.
 
 ## Current Status (as of 2026-06-03)
 
@@ -190,7 +232,7 @@ Use `--min-tmp-space 1` flag to bypass the minimum space check.
 - ✅ Post-processor fixes structure (fence stripping, step nesting, hook injection)
 - ✅ Post-processor injects `{{bookmarks.shell_output.stdout}}` into prompts with shell hooks
 - ✅ Post-processor preserves multi-line strings as YAML block scalars
-- ✅ Generated workflows execute end-to-end (6/6 steps pass)
+- ✅ Generated workflows execute end-to-end (all steps pass)
 - ✅ Output files saved for each step via save_to hooks
 - ✅ Template interpolation chains steps together
 - ✅ Bookmark system passes data between steps
