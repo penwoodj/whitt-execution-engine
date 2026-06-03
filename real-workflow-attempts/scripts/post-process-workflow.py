@@ -237,6 +237,27 @@ def process(filepath, prompts_path=None):
 
     content = strip_fences(content)
 
+    # Fix shell command quoting: wrap complex commands in single quotes
+    # Models generate things like: command: for file in $(find ...); do cat "$file"; done
+    # which breaks YAML parsing due to nested quotes and special chars
+    def fix_command_quoting(text):
+        # Replace double-quoted command values containing nested quotes
+        # with single-quoted values (YAML-safe for shell commands)
+        pattern = re.compile(r'^(\s*command:\s*)"(.*)"$', re.MULTILINE)
+        def replacer(match):
+            indent_and_key = match.group(1)
+            cmd_val = match.group(2)
+            if '"' in cmd_val or '$(' in cmd_val or ';' in cmd_val:
+                escaped = cmd_val.replace("'", "''")
+                return f"{indent_and_key}'{escaped}'"
+            return match.group(0)
+        return pattern.sub(replacer, text)
+
+    content = fix_command_quoting(content)
+
+    # Remove markdown table separators that break YAML block scalar parsing
+    content = re.sub(r'^\s*\|[-|]+\|$', '', content, flags=re.MULTILINE)
+
     try:
         data = yaml.safe_load(content)
     except yaml.YAMLError as e:
