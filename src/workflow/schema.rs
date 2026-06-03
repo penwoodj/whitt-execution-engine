@@ -459,6 +459,8 @@ pub enum RetryLevel {
     StepUnload,
     PromptRestart,
     ToolsRetry,
+    StepContinue,
+    ModelSkip,
 }
 
 /// Log level.
