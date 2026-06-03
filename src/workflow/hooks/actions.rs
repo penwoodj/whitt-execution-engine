@@ -409,10 +409,19 @@ fn execute_shell(
     engine: &mut HookEngine,
 ) -> HookResult {
     // When args is empty but command contains spaces, split command into binary + args
+    // Strip surrounding quotes from each arg (shell would do this automatically)
+    fn strip_quotes(s: &str) -> String {
+        let s = s.trim();
+        if (s.starts_with('\'') && s.ends_with('\'')) || (s.starts_with('"') && s.ends_with('"')) {
+            s[1..s.len()-1].to_string()
+        } else {
+            s.to_string()
+        }
+    }
     let (binary, cmd_args) = if action.args.as_ref().map_or(true, |a| a.is_empty()) {
         let parts: Vec<&str> = action.command.split_whitespace().collect();
         if parts.len() > 1 {
-            (parts[0].to_string(), Some(parts[1..].iter().map(|s| s.to_string()).collect()))
+            (parts[0].to_string(), Some(parts[1..].iter().map(|s| strip_quotes(s)).collect()))
         } else {
             (action.command.clone(), None)
         }

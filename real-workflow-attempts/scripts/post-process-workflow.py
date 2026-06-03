@@ -176,6 +176,16 @@ def fix_step_hooks(step_name, step_data, changes):
                 )
                 changes.append(f"{step_name}: injected bookmark reference into prompt")
 
+    # Inject working_dir for shell hooks that lack it
+    REPO_DIR = os.environ.get('REPO_DIR', '/home/jon/code/whitt-execution-engine')
+    if isinstance(when.get('before_step_starts'), list):
+        for action in when['before_step_starts']:
+            if isinstance(action, dict) and isinstance(action.get('shell'), dict):
+                shell = action['shell']
+                if 'working_dir' not in shell:
+                    shell['working_dir'] = REPO_DIR
+                    changes.append(f"{step_name}: injected working_dir into shell hook")
+
     # Fix after_step_succeeds
     after_s = when.get('after_step_succeeds')
     if after_s is not None and not isinstance(after_s, list):

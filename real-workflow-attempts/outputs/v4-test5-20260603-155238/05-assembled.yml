@@ -1,0 +1,219 @@
+workflow_id: whitt-rust-analysis
+name: Rust Analysis Workflow
+description: Analyze Rust source files for line count, table creation, sorting, and formatting.
+version: 1.0.0
+schema_version: 2.0.0
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  worker:
+    name: Qwen2.5-Coder-3B-Instruct-Q8_0
+    host:
+      type: llama_cpp_with_vulkan
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: true
+agentic_workflow:
+  steps:
+    step_01_find_rust_files:
+      generative_entity: ${models.worker}
+      depends_on: []
+      prompt: "Given the project root directory, find all Rust source files (files with .rs extension) in the src directory using shell glob patterns. Use the find command to locate only regular files under\
+        \ the src/ path. Output a list of full file paths as a newline-separated string. Example output:  \nsrc/lib.rs  \nsrc/main.rs  \nsrc/utils/mod.rs  \nOutput ONLY the result. No explanations. No process\
+        \ descriptions.  \nHere is the data:  \n{{bookmarks.shell_output.stdout}}  \nOutput ONLY the result. No explanations. No process descriptions.\n"
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        before_step_starts:
+        - shell:
+            command: find src -type f -name '*.rs'
+            args: []
+            working_dir: /home/jon/code/whitt-execution-engine
+            fail_on_error: false
+        after_step_succeeds:
+        - save_to: ./outputs/step_01_find_rust_files-output.txt
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - duration_ms
+            - token_count
+            level: info
+        after_step_fails:
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - error_message
+            level: error
+    step_02_read_files:
+      generative_entity: ${models.worker}
+      depends_on:
+      - step_01_find_rust_files
+      prompt: "Here is the data to process:\n{{bookmarks.shell_output.stdout}}\n\nGiven the list of Rust files from {{step.step_01_find_rust_files.output}}, read each file's content using the cat command.\
+        \ For each file, extract its full content as a string and preserve all lines exactly as they appear in the file. Output a JSON array where each element is an object with keys \"filename\" and \"\
+        content\", and values are the corresponding file name and raw content. Example output:  \n[{\"filename\": \"src/lib.rs\", \"content\": \"fn main() { println!(\\\"hello\\\"); }\"}]  \nOutput ONLY\
+        \ the result. No explanations. No process descriptions.\n"
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        before_step_starts:
+        - shell:
+            command: cat $file
+            args: []
+            working_dir: /home/jon/code/whitt-execution-engine
+            fail_on_error: false
+        after_step_succeeds:
+        - save_to: ./outputs/step_02_read_files-output.txt
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - duration_ms
+            - token_count
+            level: info
+        after_step_fails:
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - error_message
+            level: error
+    step_03_count_lines:
+      generative_entity: ${models.worker}
+      depends_on:
+      - step_02_read_files
+      prompt: "Here is the data to process:\n{{bookmarks.shell_output.stdout}}\n\nGiven the file contents from {{step.step_02_read_files.output}}, count the total number of lines in each file. For each\
+        \ file, extract only the line count as an integer and output a JSON array where each element is an object with keys \"filename\" and \"lines\", containing the filename and its line count. Example\
+        \ output:  \n[{\"filename\": \"src/lib.rs\", \"lines\": 4}, {\"filename\": \"src/main.rs\", \"lines\": 12}]  \nOutput ONLY the result. No explanations. No process descriptions.\n"
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        before_step_starts:
+        - shell:
+            command: wc -l $file
+            args: []
+            working_dir: /home/jon/code/whitt-execution-engine
+            fail_on_error: false
+        after_step_succeeds:
+        - save_to: ./outputs/step_03_count_lines-output.txt
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - duration_ms
+            - token_count
+            level: info
+        after_step_fails:
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - error_message
+            level: error
+    step_04_create_table:
+      generative_entity: ${models.worker}
+      depends_on:
+      - step_03_count_lines
+      prompt: "Here is the data to process:\n{{bookmarks.shell_output.stdout}}\n\nGiven the line count data from {{step.step_03_count_lines.output}}, create a table with two columns: filename and lines.\
+        \ Each row corresponds to one file, with its name and line count. Output only this table as a JSON array of objects in the format [{\"filename\": \"string\", \"lines\": number}, ...]. Example output:\
+        \  \n[{\"filename\": \"src/lib.rs\", \"lines\": 4}]  \nOutput ONLY the result. No explanations. No process descriptions.\n"
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        before_step_starts:
+        - shell:
+            command: 'jq ''.[] | {filename: .filename, lines: .lines}'''
+            args: []
+            working_dir: /home/jon/code/whitt-execution-engine
+            fail_on_error: false
+        after_step_succeeds:
+        - save_to: ./outputs/step_04_create_table-output.txt
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - duration_ms
+            - token_count
+            level: info
+        after_step_fails:
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - error_message
+            level: error
+    step_05_sort_table:
+      generative_entity: ${models.worker}
+      depends_on:
+      - step_04_create_table
+      prompt: "Here is the data to process:\n{{bookmarks.shell_output.stdout}}\n\nGiven the table from {{step.step_04_create_table.output}}, sort the entries by line count in descending order (highest first).\
+        \ Output only a JSON array of objects with \"filename\" and \"lines\", sorted by lines in descending order. Example output:  \n[{\"filename\": \"src/main.rs\", \"lines\": 12}, {\"filename\": \"\
+        src/lib.rs\", \"lines\": 4}]  \nOutput ONLY the result. No explanations. No process descriptions.\n"
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        before_step_starts:
+        - shell:
+            command: 'jq ''.[] | {filename: .filename, lines: .lines} | sort_by(.lines) | reverse'''
+            args: []
+            working_dir: /home/jon/code/whitt-execution-engine
+            fail_on_error: false
+        after_step_succeeds:
+        - save_to: ./outputs/step_05_sort_table-output.txt
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - duration_ms
+            - token_count
+            level: info
+        after_step_fails:
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - error_message
+            level: error
+    step_06_format_output:
+      generative_entity: ${models.worker}
+      depends_on:
+      - step_05_sort_table
+      prompt: "Here is the data to process:\n{{bookmarks.shell_output.stdout}}\n\nGiven the sorted table from {{step.step_05_sort_table.output}}, format it as a clean, readable table with two columns: filename\
+        \ and lines. Output only this formatted table in Markdown syntax with a header row. Example output:  \n| filename       | lines |\n\n| src/main.rs   | 12    |\n| src/lib.rs    | 4     |  \nOutput\
+        \ ONLY the result. No explanations. No process descriptions.\n"
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        before_step_starts:
+        - shell:
+            command: "printf 'filename\tlines\\n'"
+            args: []
+            working_dir: /home/jon/code/whitt-execution-engine
+            fail_on_error: false
+        after_step_succeeds:
+        - save_to: ./outputs/step_06_format_output-output.txt
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - duration_ms
+            - token_count
+            level: info
+        after_step_fails:
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - error_message
+            level: error
