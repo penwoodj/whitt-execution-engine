@@ -81,7 +81,7 @@ LOG_FAIL = {
 
 
 def strip_fences(content):
-    """Remove ```yaml ... ``` wrappers."""
+    """Remove ```yaml ... ``` wrappers and non-YAML preamble."""
     if content.strip().startswith('```'):
         lines = content.strip().split('\n')
         if lines[0].startswith('```'):
@@ -89,6 +89,14 @@ def strip_fences(content):
         if lines and lines[-1].strip() == '```':
             lines = lines[:-1]
         return '\n'.join(lines)
+    # Strip preamble: find first line starting with a YAML key
+    lines = content.split('\n')
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped and not stripped.startswith('#') and ':' in stripped and not stripped.startswith('-'):
+            if stripped.split(':')[0].replace('_', '').replace('-', '').isalnum():
+                if i > 0:
+                    return '\n'.join(lines[i:])
     return content
 
 

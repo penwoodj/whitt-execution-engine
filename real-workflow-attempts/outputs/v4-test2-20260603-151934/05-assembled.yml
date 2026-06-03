@@ -1,0 +1,118 @@
+Here is the combined workflow YAML file:
+
+```yaml
+workflow_id: combined_workflow
+name: Combined Workflow
+description: Combine step plan and prompts into ONE workflow YAML file
+version: 1.0.0
+schema_version: 2.0.0
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  "worker":
+    name: "Qwen2.5-Coder-3B-Instruct-Q8_0"
+    host:
+      type: llama_cpp_with_vulkan
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: true
+agentic_workflow:
+  steps:
+    step_01_read_files:
+      generative_entity: "${models.worker}"
+      depends_on: []
+      prompt: |
+        Read all .txt files in /tmp using glob pattern /tmp/*.txt. Here is the data:  
+        {{bookmarks.shell_output.stdout}}  
+        Extract the full content of each file as a string, preserving line breaks and original formatting. Output only the raw text content from each file, one per line, with no additional commentary or metadata.  
+        Format output exactly as:  
+        file1.txt: [content]  
+        file2.txt: [content]  
+        ...  
+        Output ONLY the result. No explanations. No process descriptions.  
+        Ensure all files are included even if empty; do not skip any.  
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat /tmp/*.txt"
+              args: []
+              fail_on_error: false
+        after_step_succeeds:
+          - save_to: "./outputs/step_01_read_files-output.txt"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms, token_count]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+              level: error
+    step_02_count_lines:
+      generative_entity: "${models.worker}"
+      depends_on: [step_01_read_files]
+      prompt: |
+        Given the data from {{step_01_read_files.output}}, extract the number of lines in each file. Each line count must be calculated accurately based on newline characters (including \n, \r\n). Output a numbered list where each entry is formatted as:  
+        - [filename]: [line_count]  
+        For example:  
+        - file1.txt: 42  
+        - file2.txt: 3  
+        Output ONLY the result. No explanations. No process descriptions.  
+        Ensure all files listed in step_01_read_files are accounted for with accurate line counts.  
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        before_step_starts:
+          - shell:
+              command: "wc -l /tmp/*.txt"
+              args: []
+              fail_on_error: false
+        after_step_succeeds:
+          - save_to: "./outputs/step_02_count_lines-output.txt"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms, token_count]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+              level: error
+    step_03_output_table:
+      generative_entity: "${models.worker}"
+      depends_on: [step_02_count_lines]
+      prompt: |
+        Given the line count data from {{step_02_count_lines.output}}, output a clean, well-formatted table of filename and line count. The table must be structured as a JSON object with an array of objects, each containing "filename" and "line_count".  
+        Output exactly in this format:  
+        [{"filename": "file1.txt", "line_count": 42}, {"filename": "file2.txt", "line_count": 3}]  
+        Ensure all filenames match those from the input files. No extra fields, no comments.  
+        Output ONLY the result. No explanations. No process descriptions.  
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        before_step_starts:
+          - shell:
+              command: "python -c 'import json, os; files = [f for f in os.listdir(\"/tmp\") if f.endswith(\".txt\")]; data = []; for f in files: with open(os.path.join(\"/tmp\", f), \"r\") as file: data.append({\"filename\": f, \"line_count\": len(file.readlines())}); print(json.dumps(data))'"
+              args: []
+              fail_on_error: false
+        after_step_succeeds:
+          - save_to: "./outputs/step_03_output_table-output.txt"
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, duration_ms, token_count]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./logs/workflow.log"
+              event_fields: [step_name, error_message]
+              level: error
+```

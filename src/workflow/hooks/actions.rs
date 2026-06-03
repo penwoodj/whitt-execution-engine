@@ -408,9 +408,20 @@ fn execute_shell(
     _context: &WorkflowHookContext,
     engine: &mut HookEngine,
 ) -> HookResult {
-    let mut cmd = std::process::Command::new(&action.command);
+    // When args is empty but command contains spaces, split command into binary + args
+    let (binary, cmd_args) = if action.args.as_ref().map_or(true, |a| a.is_empty()) {
+        let parts: Vec<&str> = action.command.split_whitespace().collect();
+        if parts.len() > 1 {
+            (parts[0].to_string(), Some(parts[1..].iter().map(|s| s.to_string()).collect()))
+        } else {
+            (action.command.clone(), None)
+        }
+    } else {
+        (action.command.clone(), action.args.clone())
+    };
 
-    if let Some(ref args) = action.args {
+    let mut cmd = std::process::Command::new(&binary);
+    if let Some(ref args) = cmd_args {
         cmd.args(args);
     }
     if let Some(ref dir) = action.working_dir {

@@ -1,0 +1,115 @@
+workflow_id: my_workflow
+name: My Workflow
+description: A sample workflow to list files, count .txt files, and output the count
+version: 1.0.0
+schema_version: 2.0.0
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  worker:
+    name: Qwen2.5-Coder-3B-Instruct-Q8_0
+    host:
+      type: llama_cpp_with_vulkan
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: true
+agentic_workflow:
+  steps:
+    step_01_list_files:
+      generative_entity: ${models.worker}
+      depends_on: []
+      prompt: "Given the directory /tmp, execute the ls command to list all files. Here is the data:  \n{{bookmarks.shell_output.stdout}}  \nParse the output and return only the list of file names as a\
+        \ plain text list, one per line, with no extra formatting or comments.  \nEnsure each entry is a valid filename (e.g., file1.txt, data.txt) without path prefixes.  \nOutput ONLY the list of filenames,\
+        \ exactly as listed by ls.  \nExample output:  \nfile1.txt  \ndata.txt  \nlog2023.txt  \n"
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        before_step_starts:
+        - shell:
+            command: ls /tmp/
+            args: []
+            fail_on_error: false
+        after_step_succeeds:
+        - save_to: ./outputs/step_01_list_files-output.txt
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - duration_ms
+            - token_count
+            level: info
+        after_step_fails:
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - error_message
+            level: error
+    step_02_count_txt:
+      generative_entity: ${models.worker}
+      depends_on:
+      - step_01_list_files
+      prompt: "Here is the data to process:\n{{bookmarks.shell_output.stdout}}\n\nGiven the file list from {{step.step_01_list_files.output}}, extract only the number of files that have a .txt extension.\
+        \  \nFrom the text, output exactly how many entries end with \".txt\" (case-sensitive).  \nThe input is a plain text list of filenames, one per line.  \nOutput a single integer representing the\
+        \ count of .txt files.  \nExample output: 3  \n"
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        before_step_starts:
+        - shell:
+            command: grep '.txt$' {{step.step_01_list_files.output}} | wc -l
+            args: []
+            fail_on_error: false
+        after_step_succeeds:
+        - save_to: ./outputs/step_02_count_txt-output.txt
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - duration_ms
+            - token_count
+            level: info
+        after_step_fails:
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - error_message
+            level: error
+    step_03_output_count:
+      generative_entity: ${models.worker}
+      depends_on:
+      - step_02_count_txt
+      prompt: "Here is the data to process:\n{{bookmarks.shell_output.stdout}}\n\nGiven the count of .txt files from {{step.step_02_count_txt.output}}, output only that number as a plain integer.  \nDo\
+        \ not include any text, explanation, or formatting.  \nThe final result must be a single digit or number (e.g., \"5\", not \"five\").  \nOutput exactly: 4  \n"
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        before_step_starts:
+        - shell:
+            command: cat {{step.step_02_count_txt.output}}
+            args: []
+            fail_on_error: false
+        after_step_succeeds:
+        - save_to: ./outputs/step_03_output_count-output.txt
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - duration_ms
+            - token_count
+            level: info
+        after_step_fails:
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - error_message
+            level: error
