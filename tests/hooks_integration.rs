@@ -861,3 +861,94 @@ fn given_after_all_retries_exhausted_hook_when_log_executed_then_file_created() 
 
     let _ = fs::remove_file("outputs/test-retries-exhausted-log.txt");
 }
+
+#[test]
+fn given_shell_action_when_executed_then_bookmark_stored_with_stdout() {
+    let action = HookAction::Shell(ShellAction {
+        command: "echo".to_string(),
+        args: Some(vec!["hello from shell".to_string()]),
+        working_dir: None,
+        env: None,
+        fail_on_error: None,
+    });
+    let ctx = WorkflowHookContext::BeforeStepStarts(BeforeStepStartsContext {
+        step_name: "my_step".into(), step_type: StepType::Generative,
+        model_name: "m".into(), prompt_preview: "p".into(), workflow_variables: HashMap::new(),
+    });
+    let mut engine = HookEngine::new();
+    let result = execute_action(&action, &ctx, &mut engine, None);
+    assert!(result.is_continue());
+    let bookmark = engine.get_bookmark("shell_output").expect("bookmark stored");
+    assert_eq!(bookmark["stdout"].as_str().unwrap().trim(), "hello from shell");
+    assert_eq!(bookmark["exit_code"].as_i64().unwrap(), 0);
+    assert_eq!(bookmark["success"].as_bool().unwrap(), true);
+}
+
+#[test]
+fn given_shell_action_reads_file_then_bookmark_has_content() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let csv_path = temp.path().join("data.csv");
+    fs::write(&csv_path, "name,age\nAlice,30\nBob,25").unwrap();
+
+    let action = HookAction::Shell(ShellAction {
+        command: "cat".to_string(),
+        args: Some(vec![csv_path.to_string_lossy().to_string()]),
+        working_dir: None,
+        env: None,
+        fail_on_error: None,
+    });
+    let ctx = WorkflowHookContext::BeforeStepStarts(BeforeStepStartsContext {
+        step_name: "read_csv".into(), step_type: StepType::Generative,
+        model_name: "m".into(), prompt_preview: "p".into(), workflow_variables: HashMap::new(),
+    });
+    let mut engine = HookEngine::new();
+    let result = execute_action(&action, &ctx, &mut engine, None);
+    assert!(result.is_continue());
+    let bookmark = engine.get_bookmark("shell_output").expect("bookmark stored");
+    let stdout = bookmark["stdout"].as_str().unwrap();
+    assert!(stdout.contains("name,age"));
+    assert!(stdout.contains("Alice,30"));
+}
+
+#[test]
+fn given_shell_bookmark_in_engine_then_bookmark_data_accessible() {
+    let mut engine = HookEngine::new();
+    engine.store_bookmark("shell_output".to_string(), serde_json::json!({
+        "stdout": "name,age\nAlice,30",
+        "stderr": "",
+        "exit_code": 0,
+        "success": true
+    }));
+
+    let bookmark = engine.get_bookmark("shell_output").expect("bookmark exists");
+    assert_eq!(bookmark["stdout"].as_str().unwrap(), "name,age\nAlice,30");
+    assert_eq!(bookmark["exit_code"].as_i64().unwrap(), 0);
+
+    let flat_value = match &bookmark {
+        serde_json::Value::Object(_) => bookmark["stdout"].as_str().unwrap().to_string(),
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    };
+    assert!(flat_value.contains("Alice,30"));
+}
+
+#[test]
+fn given_shell_fails_then_bookmark_has_error() {
+    let action = HookAction::Shell(ShellAction {
+        command: "ls".to_string(),
+        args: Some(vec!["/nonexistent_dir_xyz_12345".to_string()]),
+        working_dir: None,
+        env: None,
+        fail_on_error: Some(false),
+    });
+    let ctx = WorkflowHookContext::BeforeStepStarts(BeforeStepStartsContext {
+        step_name: "bad_step".into(), step_type: StepType::Generative,
+        model_name: "m".into(), prompt_preview: "p".into(), workflow_variables: HashMap::new(),
+    });
+    let mut engine = HookEngine::new();
+    let result = execute_action(&action, &ctx, &mut engine, None);
+    assert!(result.is_continue());
+    let bookmark = engine.get_bookmark("shell_output").expect("bookmark stored");
+    assert_eq!(bookmark["success"].as_bool().unwrap(), false);
+    assert_ne!(bookmark["exit_code"].as_i64().unwrap(), 0);
+}

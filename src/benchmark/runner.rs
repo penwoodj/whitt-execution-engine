@@ -242,11 +242,12 @@ impl BenchmarkRunner {
             }
         }
 
-        match TokioCommand::new("pgrep")
-            .args(["-c", "llama-server"])
+        // Count only non-defunct (running/sleeping) llama-server processes
+        let zombie_check = TokioCommand::new("sh")
+            .args(["-c", "ps -eo stat,comm | grep -v 'Z' | grep -c llama-server"])
             .output()
-            .await
-        {
+            .await;
+        match zombie_check {
             Ok(output) => {
                 let count_str = String::from_utf8_lossy(&output.stdout);
                 let count: i32 = count_str.trim().parse().unwrap_or(0);
@@ -259,7 +260,7 @@ impl BenchmarkRunner {
                 }
             }
             Err(e) => {
-                let msg = format!("Zombie process check failed to execute pgrep: {}", e);
+                let msg = format!("Zombie process check failed: {}", e);
                 info!("[benchmark] ✗ {}", msg);
                 anyhow::bail!(crate::error::Error::benchmark(msg));
             }
@@ -1106,6 +1107,33 @@ impl BenchmarkRunner {
         }
         result
     }
+
+    fn resolve_bookmark_templates(template: &str, bookmarks: &std::collections::HashMap<String, serde_json::Value>) -> String {
+        let mut result = template.to_string();
+
+        for (key, value) in bookmarks {
+            let flat_placeholder = format!("{{{{bookmarks.{}}}}}", key);
+            let flat_replacement = match value {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            result = result.replace(&flat_placeholder, &flat_replacement);
+
+            if let serde_json::Value::Object(map) = value {
+                for (field, field_val) in map {
+                    let nested_placeholder = format!("{{{{bookmarks.{}.{} }}}}", key, field);
+                    let nested_replacement = match field_val {
+                        serde_json::Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    };
+                    result = result.replace(&nested_placeholder, &nested_replacement);
+                    let nested_placeholder_nospace = format!("{{{{bookmarks.{}.{}}}}}", key, field);
+                    result = result.replace(&nested_placeholder_nospace, &nested_replacement);
+                }
+            }
+        }
+        result
+    }
 }
 
 impl BenchmarkRunner {
@@ -1554,6 +1582,8 @@ impl BenchmarkRunner {
             }
         }
 
+        let resolved_prompt = Self::resolve_bookmark_templates(prompt, &self.hook_engine.bookmarks);
+
         let system_prompt = if let Some(vars) = variables {
             let model_name = vars.get("step.model_name")
                 .and_then(|v| v.as_str())
@@ -1568,7 +1598,7 @@ impl BenchmarkRunner {
             None
         };
 
-        let model_result = self.run_model_inference(client, model_id, model_path, "gpu", std::slice::from_ref(prompt), step_max_tokens, step_temperature, top_p, system_prompt, false).await;
+        let model_result = self.run_model_inference(client, model_id, model_path, "gpu", std::slice::from_ref(&resolved_prompt), step_max_tokens, step_temperature, top_p, system_prompt, false).await;
 
         let output_text = model_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
 
@@ -1837,7 +1867,8 @@ impl BenchmarkRunner {
                         let resolved_prompt = step.prompt.as_ref()
                             .map(|p| {
                                 let after_resolve = Self::resolve_templates(p, vars, iteration);
-                                Self::resolve_step_output_templates(&after_resolve, &step_outputs)
+                                let after_step = Self::resolve_step_output_templates(&after_resolve, &step_outputs);
+                                Self::resolve_bookmark_templates(&after_step, &self.hook_engine.bookmarks)
                             });
 
                         if let Some(ref ge) = resolved_ge {
@@ -1938,7 +1969,10 @@ impl BenchmarkRunner {
                                             .unwrap_or(model_key);
                                         if let Some(model) = self.resolve_model_file(model_name, &models) {
                                             let resolved_prompt = target_step.prompt.as_ref()
-                                                .map(|p| Self::resolve_step_output_templates(p, &step_outputs));
+                                                .map(|p| {
+                                                    let after = Self::resolve_step_output_templates(p, &step_outputs);
+                                                    Self::resolve_bookmark_templates(&after, &self.hook_engine.bookmarks)
+                                                });
                                             let resolved_target = WorkflowStep {
                                                 step_name: target_step.step_name.clone(),
                                                 step_id: target_step.step_id.clone(),
@@ -1987,7 +2021,10 @@ impl BenchmarkRunner {
                             info!("[benchmark] executing step {} with model {}", step.step_id, model.0);
 
                             let resolved_prompt = step.prompt.as_ref()
-                                .map(|p| Self::resolve_step_output_templates(p, &step_outputs));
+                                .map(|p| {
+                                    let after = Self::resolve_step_output_templates(p, &step_outputs);
+                                    Self::resolve_bookmark_templates(&after, &self.hook_engine.bookmarks)
+                                });
 
                             let resolved_step = WorkflowStep {
                                 step_name: step.step_name.clone(),
@@ -2018,29 +2055,32 @@ impl BenchmarkRunner {
                                      } else {
                                          warn!("[benchmark] route_to target '{}' not found", targets[0]);
                                      }
-                                 } else {
-                                    if let Some(last_idx) = self.try_execute_route_to_parallel(
-                                        &targets, &steps, &step_index, &client, &yaml_models, &models,
-                                        max_tokens, temperature, top_p, &mut step_outputs, current_index, false
-                                    ).await {
-                                        current_index = last_idx + 1;
-                                        continue;
-                                    }
-                                    let mut last_target_idx = current_index;
-                                    for target_id in targets {
-                                        if let Some(&target_idx) = step_index.get(target_id) {
-                                            let target_step = &steps[target_idx];
-                                            if let Some(ref ge) = target_step.generative_entity {
-                                                let model_key = ge.strip_prefix("${models.")
-                                                    .and_then(|s| s.strip_suffix('}'))
-                                                    .unwrap_or(ge);
-                                                let model_name = yaml_models.as_ref()
-                                                    .and_then(|m| m.get(model_key))
-                                                    .map(|s| s.as_str())
-                                                    .unwrap_or(model_key);
-                                                if let Some(model) = self.resolve_model_file(model_name, &models) {
-                                                    let resolved_prompt = target_step.prompt.as_ref()
-                                                        .map(|p| Self::resolve_step_output_templates(p, &step_outputs));
+                                   } else {
+                                      if let Some(last_idx) = self.try_execute_route_to_parallel(
+                                          &targets, &steps, &step_index, &client, &yaml_models, &models,
+                                          max_tokens, temperature, top_p, &mut step_outputs, current_index, false
+                                      ).await {
+                                          current_index = last_idx + 1;
+                                          continue;
+                                      }
+                                     let mut last_target_idx = current_index;
+                                     for target_id in targets {
+                                         if let Some(&target_idx) = step_index.get(target_id) {
+                                             let target_step = &steps[target_idx];
+                                             if let Some(ref ge) = target_step.generative_entity {
+                                                 let model_key = ge.strip_prefix("${models.")
+                                                     .and_then(|s| s.strip_suffix('}'))
+                                                     .unwrap_or(ge);
+                                                 let model_name = yaml_models.as_ref()
+                                                     .and_then(|m| m.get(model_key))
+                                                     .map(|s| s.as_str())
+                                                     .unwrap_or(model_key);
+                                                 if let Some(model) = self.resolve_model_file(model_name, &models) {
+                                                     let resolved_prompt = target_step.prompt.as_ref()
+                                                         .map(|p| {
+                                                             let after = Self::resolve_step_output_templates(p, &step_outputs);
+                                                             Self::resolve_bookmark_templates(&after, &self.hook_engine.bookmarks)
+                                                         });
                                                     let resolved_target = WorkflowStep {
                                                         step_name: target_step.step_name.clone(),
                                                         step_id: target_step.step_id.clone(),
@@ -2123,10 +2163,13 @@ impl BenchmarkRunner {
                                                         .and_then(|m| m.get(model_key))
                                                         .map(|s| s.as_str())
                                                         .unwrap_or(model_key);
-                                                    if let Some(model) = self.resolve_model_file(model_name, &models) {
-                                                        let resolved_prompt = target_step.prompt.as_ref()
-                                                            .map(|p| Self::resolve_step_output_templates(p, &step_outputs));
-                                                        let resolved_target = WorkflowStep {
+                                                if let Some(model) = self.resolve_model_file(model_name, &models) {
+                                                    let resolved_prompt = target_step.prompt.as_ref()
+                                                        .map(|p| {
+                                                            let after = Self::resolve_step_output_templates(p, &step_outputs);
+                                                            Self::resolve_bookmark_templates(&after, &self.hook_engine.bookmarks)
+                                                        });
+                                                    let resolved_target = WorkflowStep {
                                                             step_name: target_step.step_name.clone(),
                                                             step_id: target_step.step_id.clone(),
                                                             requires: target_step.requires.clone(),
@@ -2166,7 +2209,10 @@ impl BenchmarkRunner {
                     } else if step.prompt.is_some() {
                         if let Some(model) = models.first() {
                             let resolved_prompt = step.prompt.as_ref()
-                                .map(|p| Self::resolve_step_output_templates(p, &step_outputs));
+                                .map(|p| {
+                                    let after = Self::resolve_step_output_templates(p, &step_outputs);
+                                    Self::resolve_bookmark_templates(&after, &self.hook_engine.bookmarks)
+                                });
 
                             let resolved_step = WorkflowStep {
                                 step_name: step.step_name.clone(),
@@ -2219,7 +2265,10 @@ impl BenchmarkRunner {
                                                     .unwrap_or(model_key);
                                                 if let Some(model) = self.resolve_model_file(model_name, &models) {
                                                     let resolved_prompt = target_step.prompt.as_ref()
-                                                        .map(|p| Self::resolve_step_output_templates(p, &step_outputs));
+                                                        .map(|p| {
+                                                            let after = Self::resolve_step_output_templates(p, &step_outputs);
+                                                            Self::resolve_bookmark_templates(&after, &self.hook_engine.bookmarks)
+                                                        });
                                                     let resolved_target = WorkflowStep {
                                                         step_name: target_step.step_name.clone(),
                                                         step_id: target_step.step_id.clone(),
@@ -2561,7 +2610,10 @@ impl BenchmarkRunner {
                     }
 
                     let resolved_prompt = target_step.prompt.as_ref()
-                        .map(|p| Self::resolve_step_output_templates(p, step_outputs));
+                        .map(|p| {
+                            let after = Self::resolve_step_output_templates(p, step_outputs);
+                            Self::resolve_bookmark_templates(&after, &self.hook_engine.bookmarks)
+                        });
 
                     target_infos.push((
                         target_id.clone(),
@@ -4970,5 +5022,146 @@ agentic_workflow:
         let first_model = "model-a.gguf";
         let model_name = "model-b.gguf";
         assert_ne!(first_model, model_name);
+    }
+
+    // ── resolve_bookmark_templates tests ──────────────────────────────
+
+    #[test]
+    fn test_resolve_bookmark_templates_flat_string() {
+        let mut bookmarks = std::collections::HashMap::new();
+        bookmarks.insert("my_key".to_string(), serde_json::json!("hello world"));
+
+        let template = "Value: {{bookmarks.my_key}}";
+        let result = BenchmarkRunner::resolve_bookmark_templates(template, &bookmarks);
+
+        assert_eq!(result, "Value: hello world");
+    }
+
+    #[test]
+    fn test_resolve_bookmark_templates_nested_stdout() {
+        let mut bookmarks = std::collections::HashMap::new();
+        bookmarks.insert("shell_output".to_string(), serde_json::json!({
+            "stdout": "file content here",
+            "stderr": "",
+            "exit_code": 0,
+            "success": true
+        }));
+
+        let template = "Data:\n{{bookmarks.shell_output.stdout}}";
+        let result = BenchmarkRunner::resolve_bookmark_templates(template, &bookmarks);
+
+        assert_eq!(result, "Data:\nfile content here");
+    }
+
+    #[test]
+    fn test_resolve_bookmark_templates_nested_stderr() {
+        let mut bookmarks = std::collections::HashMap::new();
+        bookmarks.insert("shell_output".to_string(), serde_json::json!({
+            "stdout": "ok",
+            "stderr": "warning msg",
+            "exit_code": 0,
+            "success": true
+        }));
+
+        let template = "Err: {{bookmarks.shell_output.stderr}}";
+        let result = BenchmarkRunner::resolve_bookmark_templates(template, &bookmarks);
+
+        assert_eq!(result, "Err: warning msg");
+    }
+
+    #[test]
+    fn test_resolve_bookmark_templates_flat_object_serializes() {
+        let mut bookmarks = std::collections::HashMap::new();
+        bookmarks.insert("data".to_string(), serde_json::json!({"a": 1, "b": 2}));
+
+        let template = "Full: {{bookmarks.data}}";
+        let result = BenchmarkRunner::resolve_bookmark_templates(template, &bookmarks);
+
+        assert!(result.contains("\"a\":1"));
+        assert!(result.contains("\"b\":2"));
+    }
+
+    #[test]
+    fn test_resolve_bookmark_templates_multiple_bookmarks() {
+        let mut bookmarks = std::collections::HashMap::new();
+        bookmarks.insert("key_a".to_string(), serde_json::json!("val_a"));
+        bookmarks.insert("key_b".to_string(), serde_json::json!("val_b"));
+
+        let template = "{{bookmarks.key_a}} and {{bookmarks.key_b}}";
+        let result = BenchmarkRunner::resolve_bookmark_templates(template, &bookmarks);
+
+        assert_eq!(result, "val_a and val_b");
+    }
+
+    #[test]
+    fn test_resolve_bookmark_templates_unknown_key_unchanged() {
+        let bookmarks = std::collections::HashMap::new();
+
+        let template = "Missing: {{bookmarks.nonexistent}}";
+        let result = BenchmarkRunner::resolve_bookmark_templates(template, &bookmarks);
+
+        assert_eq!(result, "Missing: {{bookmarks.nonexistent}}");
+    }
+
+    #[test]
+    fn test_resolve_bookmark_templates_no_placeholders() {
+        let mut bookmarks = std::collections::HashMap::new();
+        bookmarks.insert("key".to_string(), serde_json::json!("val"));
+
+        let template = "Plain text without bookmarks";
+        let result = BenchmarkRunner::resolve_bookmark_templates(template, &bookmarks);
+
+        assert_eq!(result, "Plain text without bookmarks");
+    }
+
+    #[test]
+    fn test_resolve_bookmark_templates_empty_bookmarks() {
+        let bookmarks = std::collections::HashMap::new();
+
+        let template = "{{bookmarks.missing}}";
+        let result = BenchmarkRunner::resolve_bookmark_templates(template, &bookmarks);
+
+        assert_eq!(result, "{{bookmarks.missing}}");
+    }
+
+    #[test]
+    fn test_resolve_bookmark_templates_nested_number_field() {
+        let mut bookmarks = std::collections::HashMap::new();
+        bookmarks.insert("shell_output".to_string(), serde_json::json!({
+            "stdout": "ok",
+            "exit_code": 42,
+            "success": false
+        }));
+
+        let template = "Exit: {{bookmarks.shell_output.exit_code}}";
+        let result = BenchmarkRunner::resolve_bookmark_templates(template, &bookmarks);
+
+        assert_eq!(result, "Exit: 42");
+    }
+
+    #[test]
+    fn test_resolve_bookmark_templates_nested_boolean_field() {
+        let mut bookmarks = std::collections::HashMap::new();
+        bookmarks.insert("shell_output".to_string(), serde_json::json!({
+            "stdout": "ok",
+            "success": true
+        }));
+
+        let template = "OK: {{bookmarks.shell_output.success}}";
+        let result = BenchmarkRunner::resolve_bookmark_templates(template, &bookmarks);
+
+        assert_eq!(result, "OK: true");
+    }
+
+    #[test]
+    fn test_resolve_bookmark_templates_mixed_step_and_bookmark() {
+        let mut bookmarks = std::collections::HashMap::new();
+        bookmarks.insert("csv_data".to_string(), serde_json::json!("name,age\nAlice,30"));
+
+        let template = "CSV: {{bookmarks.csv_data}}\nStep: {{step.step_1.output}}";
+        let result = BenchmarkRunner::resolve_bookmark_templates(template, &bookmarks);
+
+        // Bookmark resolved, step template left unchanged (handled by different function)
+        assert_eq!(result, "CSV: name,age\nAlice,30\nStep: {{step.step_1.output}}");
     }
 }
