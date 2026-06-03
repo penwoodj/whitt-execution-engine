@@ -245,11 +245,11 @@ Use `--min-tmp-space 1` to bypass minimum space check.
 | v4-test1a | Read /etc/hostname | 2 | 6/6 | 2/2 | ✅ HIGH — correct output "myhost.example.com" |
 | v4-test1b | Read /etc/hostname (rerun) | 2 | 6/6 | 2/2 | ✅ HIGH — correct output |
 | v4-test2 | Count .txt files in /tmp | 3 | 6/6 | 3/3 | ✅ MEDIUM — granite produced perfect YAML, shell hooks failed (pre-fix) |
-| v4-test2b | Count .txt files in /tmp (shell fix) | 3 | 6/6 | 3/3 | ✅ HIGH — LLM counted 25 .txt files from REAL data |
+| v4-test2b | Count .txt files (shell fix) | 3 | 6/6 | 3/3 | ✅ HIGH — LLM counted 25 .txt files from REAL data |
+| v4-test3 | Read /etc/os-release → JSON | 3 | 6/6 | 3/3 | ✅ HIGH — `{name:Ubuntu, version:20.04 LTS, id:focal}` from real data |
+| v4-test4 | Rust file line count | 6 | 6/6 | 6/6 | ⚠️ MEDIUM — shell hooks failed (no working_dir), LLM outputs correct file names |
+| v4-test5 | Rust file line count (fixed) | 6 | 6/6 | 6/6 | ✅ HIGH — `find` returns 1483 bytes, real file listing, markdown table output |
 | v3-test1 | Markdown TOC | 6 | 5/5 | 6/6 | ⚠️ Low (explains vs does) |
-| v3-test2 | CSV line count | 8 | 5/5 | 8/8 | ⚠️ Medium (JSON valid, some hallucination) |
-| v3-test3 | List files with sizes | 6 | 5/5 | 6/6 | ⚠️ Medium (shell cmds preserved, table generated) |
-| v3-test4 | Count .txt files | 6 | 5/5 | 6/6 | ⚠️ Medium (bookmarks injected, some data used) |
 
 ### Known Limitations
 - ⚠️ Shell commands with `{{step.X.output}}` template refs fail (not resolved in command field)
