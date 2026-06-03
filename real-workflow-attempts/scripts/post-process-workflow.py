@@ -4,13 +4,17 @@
 Transformations:
 1. Strip markdown fences (```yaml ... ```)
 2. Move top-level steps under agentic_workflow: steps:
-3. Remove before_step_starts with command: "none"
-4. Fix malformed hook formats (mapping→list)
-5. Inject missing after_step_succeeds/after_step_fails hooks
-6. Validate structure
+3. Inject actual prompts from 03-prompts.txt (replaces placeholders)
+4. Remove before_step_starts with command: "none"
+5. Fix malformed hook formats (mapping→list)
+6. Inject missing after_step_succeeds/after_step_fails hooks
+7. Remove invalid hosting: gpu_layers field
+8. Validate structure
 """
 import sys
 import re
+import os
+import glob
 
 try:
     import yaml
@@ -45,6 +49,40 @@ def strip_fences(content):
             lines = lines[:-1]
         return '\n'.join(lines)
     return content
+
+
+def parse_prompts_file(prompts_path):
+    if not prompts_path or not os.path.exists(prompts_path):
+        return {}
+    with open(prompts_path, 'r') as f:
+        content = f.read()
+    
+    prompts = {}
+    pattern = r'---\s*STEP:\s*(\S+)\s*---\s*\n(.*?)\n---\s*END\s*---'
+    for match in re.finditer(pattern, content, re.DOTALL):
+        step_name = match.group(1).strip()
+        prompt_text = match.group(2).strip()
+        prompts[step_name] = prompt_text
+    return prompts
+
+
+def inject_prompts(steps, prompts, changes):
+    if not prompts or not isinstance(steps, dict):
+        return
+    for step_name, step_data in steps.items():
+        if not isinstance(step_data, dict):
+            continue
+        prompt = step_data.get('prompt', '')
+        if isinstance(prompt, str) and ('<prompt content' in prompt or 'FILL_IN_LATER' in prompt):
+            if step_name in prompts:
+                step_data['prompt'] = prompts[step_name]
+                changes.append(f"{step_name}: injected actual prompt")
+            else:
+                for pname, ptext in prompts.items():
+                    if pname == step_name or pname.endswith(step_name.split('_', 2)[-1] if '_' in step_name else step_name):
+                        step_data['prompt'] = ptext
+                        changes.append(f"{step_name}: injected prompt from {pname}")
+                        break
 
 
 def fix_step_hooks(step_name, step_data, changes):
@@ -125,21 +163,18 @@ def fix_step_hooks(step_name, step_data, changes):
             changes.append(f"{step_name}: injected log into after_step_fails")
 
 
-def process(filepath):
+def process(filepath, prompts_path=None):
     """Main processing pipeline."""
     with open(filepath, 'r') as f:
         content = f.read()
 
     changes = []
 
-    # Step 1: Strip fences
     content = strip_fences(content)
 
-    # Step 2: Parse YAML
     try:
         data = yaml.safe_load(content)
     except yaml.YAMLError as e:
-        # More aggressive cleanup
         content = re.sub(r'^```.*$', '', content, flags=re.MULTILINE).strip()
         try:
             data = yaml.safe_load(content)
@@ -151,7 +186,6 @@ def process(filepath):
         print(f"FATAL: root is {type(data).__name__}, not mapping", file=sys.stderr)
         return False
 
-    # Step 3: Move top-level steps under agentic_workflow.steps
     top_steps = {k: v for k, v in data.items()
                  if isinstance(k, str) and k.startswith('step_') and isinstance(v, dict)}
     if top_steps:
@@ -176,18 +210,32 @@ def process(filepath):
                 steps[k] = v
                 changes.append(f"moved {k} → agentic_workflow.steps")
 
-    # Step 4: Fix hooks for all steps
+    prompts = parse_prompts_file(prompts_path)
+    if 'agentic_workflow' in data and isinstance(data['agentic_workflow'], dict):
+        steps = data['agentic_workflow'].get('steps', {})
+        if isinstance(steps, dict):
+            inject_prompts(steps, prompts, changes)
+
+    providers = data.get('providers', {})
+    if isinstance(providers, dict):
+        for pname, pdata in providers.items():
+            if isinstance(pdata, dict) and 'hosting' in pdata:
+                hosting = pdata['hosting']
+                if isinstance(hosting, dict) and 'gpu_layers' in hosting:
+                    del hosting['gpu_layers']
+                    if not hosting:
+                        del pdata['hosting']
+                    changes.append(f"removed invalid hosting: gpu_layers from provider {pname}")
+
     if 'agentic_workflow' in data and isinstance(data['agentic_workflow'], dict):
         steps = data['agentic_workflow'].get('steps', {})
         if isinstance(steps, dict):
             for sn, sd in steps.items():
                 fix_step_hooks(sn, sd, changes)
 
-    # Step 5: Write back
     with open(filepath, 'w') as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
-    # Report
     for c in changes:
         print(f"  FIX: {c}", file=sys.stderr)
     print(f"Post-processed: {filepath} ({len(changes)} fixes)")
@@ -195,8 +243,9 @@ def process(filepath):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) != 2:
-        print("Usage: post-process-workflow.py <filepath>", file=sys.stderr)
+    if len(sys.argv) < 2:
+        print("Usage: post-process-workflow.py <filepath> [prompts-file]", file=sys.stderr)
         sys.exit(1)
-    success = process(sys.argv[1])
+    prompts_path = sys.argv[2] if len(sys.argv) > 2 else None
+    success = process(sys.argv[1], prompts_path)
     sys.exit(0 if success else 1)
