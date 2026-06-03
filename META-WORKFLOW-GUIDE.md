@@ -38,13 +38,14 @@ Before running, edit `meta-workflow-template.yml` and replace these placeholders
 - `__TASK_PLACEHOLDER__` → your task description
 - `__RUN_ID__` → your run directory name (e.g., `my-run-20260603-120000`)
 
-### 2. Check Generated Output
+### 2. Post-Process and Validate
 
 ```bash
-# View the generated workflow
-cat "real-workflow-attempts/outputs/${RUN_ID}/final-workflow.yml"
+# Post-process: strip fences, fix step nesting, inject hooks
+python3 real-workflow-attempts/scripts/post-process-workflow.py \
+  "real-workflow-attempts/outputs/${RUN_ID}/final-workflow.yml"
 
-# Validate it
+# Validate the result
 python3 real-workflow-attempts/scripts/validate-yaml.py \
   "real-workflow-attempts/outputs/${RUN_ID}/final-workflow.yml"
 
@@ -183,11 +184,22 @@ Use `--min-tmp-space 1` flag to bypass the minimum space check.
 
 ## Current Status (as of 2026-06-03)
 
-- ✅ Meta-workflow generates structurally valid YAML
-- ✅ Shell hooks read real files into prompts
+### v3 Meta-Workflow (RECOMMENDED)
+- ✅ 5-step decomposed generator (decompose→plan→prompts→assemble→validate)
+- ✅ Generates structurally valid YAML from arbitrary prompts
+- ✅ Post-processor fixes structure (fence stripping, step nesting, hook injection)
+- ✅ Generated workflows execute end-to-end (6/6 steps pass)
+- ✅ Output files saved for each step via save_to hooks
 - ✅ Template interpolation chains steps together
 - ✅ Bookmark system passes data between steps
-- ⚠️ 3B/4B models struggle with complex generation tasks
-- ⚠️ Generated workflows may regurgitate examples rather than adapting
+
+### Known Limitations
+- ⚠️ 3B model outputs are explanatory (explains HOW vs does it) — LLM quality issue, not engine
+- ⚠️ Shell hooks may fail if yaml.dump reformats commands — manual fix needed
+- ⚠️ Generated workflows may hallucinate data instead of reading real files
 - ❌ Sub-workflow support not yet implemented
-- ❌ Iterative verify/fix cycles not yet decomposed into separate steps
+- ❌ No iterative verify/fix cycles within generation
+
+### v2 Meta-Workflow (DEPRECATED)
+- ⚠️ Generated valid YAML but with ZERO hooks — model dropped all when: blocks
+- ⚠️ Use v3 with post-processor instead
