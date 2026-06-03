@@ -1,0 +1,208 @@
+workflow_id: file_size_reporter
+name: File Size Reporter
+description: Generates a report of the top three largest files in /tmp directory.
+version: 1.0.0
+schema_version: 2.0.0
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  worker:
+    name: Qwen2.5-Coder-3B-Instruct-Q8_0
+    host:
+      type: llama_cpp_with_vulkan
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: true
+agentic_workflow:
+  steps:
+    step_01_list_files:
+      generative_entity: ${models.worker}
+      depends_on: []
+      prompt: |
+        Given the task of listing all files in the /tmp directory, use the shell command `ls /tmp` to retrieve a list of file names. The output should include only filenames (no directories or hidden files unless explicitly present), and must be formatted as plain text with one filename per line. This step does not require size information; it only returns a raw list of file names in the directory. Use the shell command directly without additional filtering or formatting.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        before_step_starts:
+        - shell:
+            command: ls /tmp
+            args: []
+            fail_on_error: false
+        after_step_succeeds:
+        - save_to: ./outputs/step-01-output.txt
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - duration_ms
+            - token_count
+            level: info
+        after_step_fails:
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - error_message
+            level: error
+    step_02_get_file_sizes:
+      generative_entity: ${models.worker}
+      depends_on:
+      - step_01_list_files
+      prompt: |
+        Given the list of files from step_01_list_files, use the shell command `du -h /tmp/*` to retrieve the human-readable size of each file in the /tmp directory. The output must include both the file name and its corresponding size, with one entry per line in the format "size filename". This step must process only files that exist in /tmp and match the names listed in step_01_list_files. Store this output into a file named /tmp/du_output.txt.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        before_step_starts:
+        - shell:
+            command: du -h /tmp/*
+            args: []
+            fail_on_error: false
+        after_step_succeeds:
+        - save_to: ./outputs/step-02-output.txt
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - duration_ms
+            - token_count
+            level: info
+        after_step_fails:
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - error_message
+            level: error
+    step_03_sort_by_size:
+      generative_entity: ${models.worker}
+      depends_on:
+      - step_02_get_file_sizes
+      prompt: |
+        Given the file size data from step_02_get_file_sizes stored in /tmp/du_output.txt, sort the entries by size in descending order using the shell command `sort -hr -k2 /tmp/du_output.txt`. The sorting must be stable and based on human-readable sizes (e.g., 1G > 500M). The output should maintain the original file name and size pairings with one entry per line. The sorted list must be saved to a new file named /tmp/sorted_sizes.txt.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        before_step_starts:
+        - shell:
+            command: sort -hr -k2 /tmp/du_output.txt
+            args: []
+            fail_on_error: false
+        after_step_succeeds:
+        - save_to: ./outputs/step-03-output.txt
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - duration_ms
+            - token_count
+            level: info
+        after_step_fails:
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - error_message
+            level: error
+    step_04_extract_top_three:
+      generative_entity: ${models.worker}
+      depends_on:
+      - step_03_sort_by_size
+      prompt: |
+        Given the sorted size list from step_03_sort_by_size stored in /tmp/sorted_sizes.txt, extract only the first three entries using the shell command `head -n 3 /tmp/sorted_sizes.txt`. The output must contain exactly three lines, each representing a file name and its size as provided in the input. Do not modify or reformat the content—only extract the top three lines from the sorted list.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        before_step_starts:
+        - shell:
+            command: head -n 3 /tmp/sorted_sizes.txt
+            args: []
+            fail_on_error: false
+        after_step_succeeds:
+        - save_to: ./outputs/step-04-output.txt
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - duration_ms
+            - token_count
+            level: info
+        after_step_fails:
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - error_message
+            level: error
+    step_05_parse_file_names_and_sizes:
+      generative_entity: ${models.worker}
+      depends_on:
+      - step_04_extract_top_three
+      prompt: |
+        Given the top three entries from step_04_extract_top_three stored in /tmp/top_three_output.txt, parse each line to extract only the file name and its size using the shell command `cut -d' ' -f1,2`. The output must contain exactly three lines, with each line containing a file name (first field) and its corresponding size (second field), separated by a space. Ensure that no extra fields or whitespace are included.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        before_step_starts:
+        - shell:
+            command: cut -d' ' -f1,2 /tmp/top_three_output.txt
+            args: []
+            fail_on_error: false
+        after_step_succeeds:
+        - save_to: ./outputs/step-05-output.txt
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - duration_ms
+            - token_count
+            level: info
+        after_step_fails:
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - error_message
+            level: error
+    step_06_format_as_table:
+      generative_entity: ${models.worker}
+      depends_on:
+      - step_05_parse_file_names_and_sizes
+      prompt: |
+        Given the parsed file names and sizes from step_05_parse_file_names_and_sizes, format them as a clean table with two columns: "Name" and "Size". The output must be a well-formatted markdown table that includes headers ("Name", "Size") and exactly three rows corresponding to the top three files. Each row should contain one file name and its size as extracted from the input data.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 50000
+      when:
+        before_step_starts:
+        - shell:
+            command: 'echo | ${models.worker} --prompt "Given the parsed file names and sizes from step_05_parse_file_names_and_sizes, format them as a clean table with two columns: ''Name'' and ''Size''.
+              The output must be a well-formatted markdown table that includes headers (''Name'', ''Size'') and exactly three rows corresponding to the top three files. Each row should contain one file
+              name and its size as extracted from the input data."'
+            args: []
+            fail_on_error: false
+        after_step_succeeds:
+        - save_to: ./outputs/step-06-output.txt
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - duration_ms
+            - token_count
+            level: info
+        after_step_fails:
+        - log:
+            to_file_path: ./logs/workflow.log
+            event_fields:
+            - step_name
+            - error_message
+            level: error

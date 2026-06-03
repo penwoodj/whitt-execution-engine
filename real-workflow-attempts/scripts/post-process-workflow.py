@@ -22,6 +22,47 @@ except ImportError:
     print("FATAL: PyYAML required. Install: pip install pyyaml", file=sys.stderr)
     sys.exit(1)
 
+
+# Custom representer to preserve multi-line strings as block scalars
+class _MultiLineStr(str):
+    """String subclass that yaml.dump will render as literal block (|)."""
+    pass
+
+
+def _repr_multiline_str(dumper, data):
+    """Use literal block style for multi-line strings, flow style for single-line."""
+    if '\n' in data:
+        return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
+    return dumper.represent_scalar('tag:yaml.org,2002:str', data)
+
+
+yaml.add_representer(_MultiLineStr, _repr_multiline_str)
+
+
+def _preserve_str(value):
+    """Wrap multi-line strings so yaml.dump uses block style."""
+    if isinstance(value, str) and '\n' in value:
+        return _MultiLineStr(value)
+    return value
+
+
+def _preserve_all_strings(obj):
+    """Walk data tree, wrapping multi-line strings for block-style YAML output."""
+    if isinstance(obj, dict):
+        for k, v in list(obj.items()):
+            if isinstance(v, str):
+                obj[k] = _preserve_str(v)
+            elif isinstance(v, dict):
+                _preserve_all_strings(v)
+            elif isinstance(v, list):
+                _preserve_all_strings(v)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            if isinstance(v, str):
+                obj[i] = _preserve_str(v)
+            elif isinstance(v, (dict, list)):
+                _preserve_all_strings(v)
+
 # Standard hook templates
 LOG_SUCCESS = {
     "log": {
@@ -111,6 +152,22 @@ def fix_step_hooks(step_name, step_data, changes):
                     changes.append(f"{step_name}: removed before_step_starts with command none")
                     break
 
+    # Inject bookmark reference into prompts for steps with shell hooks
+    if isinstance(when.get('before_step_starts'), list):
+        has_shell = any(
+            isinstance(a, dict) and isinstance(a.get('shell'), dict)
+            for a in when['before_step_starts']
+        )
+        if has_shell:
+            prompt = step_data.get('prompt', '')
+            if isinstance(prompt, str) and 'bookmarks.shell_output' not in prompt:
+                step_data['prompt'] = (
+                    "Here is the data to process:\n"
+                    "{{bookmarks.shell_output.stdout}}\n\n"
+                    + prompt
+                )
+                changes.append(f"{step_name}: injected bookmark reference into prompt")
+
     # Fix after_step_succeeds
     after_s = when.get('after_step_succeeds')
     if after_s is not None and not isinstance(after_s, list):
@@ -179,8 +236,14 @@ def process(filepath, prompts_path=None):
         try:
             data = yaml.safe_load(content)
         except yaml.YAMLError as e2:
-            print(f"FATAL: YAML unparseable: {e2}", file=sys.stderr)
-            return False
+            # Try with safe_loader that handles more edge cases
+            try:
+                # Fix common YAML quoting issues in shell commands
+                fixed = re.sub(r'command:\s+"([^"]*)"', lambda m: 'command: "' + m.group(1).replace('\\', '\\\\') + '"', content)
+                data = yaml.safe_load(fixed)
+            except yaml.YAMLError:
+                print(f"FATAL: YAML unparseable: {e2}", file=sys.stderr)
+                return False
 
     if not isinstance(data, dict):
         print(f"FATAL: root is {type(data).__name__}, not mapping", file=sys.stderr)
@@ -234,7 +297,8 @@ def process(filepath, prompts_path=None):
                 fix_step_hooks(sn, sd, changes)
 
     with open(filepath, 'w') as f:
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        _preserve_all_strings(data)
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True, width=200)
 
     for c in changes:
         print(f"  FIX: {c}", file=sys.stderr)
