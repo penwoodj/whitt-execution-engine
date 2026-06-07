@@ -16,8 +16,8 @@ use whitt_execution_engine::model::resource::ResourceManager;
 // ResourceManager Property Tests
 // ============================================================================
 
-/// Property: Allocation never exceeds total capacity.
-/// After any sequence of allocations, allocated resources must be ≤ total.
+// Property: Allocation never exceeds total capacity.
+// After any sequence of allocations, allocated resources must be <= total.
 proptest! {
     #[test]
     fn prop_allocation_never_exceeds_total(
@@ -135,8 +135,8 @@ impl ResourceManagerExt for ResourceManager {
 // TemplateInterpolator Property Tests
 // ============================================================================
 
-/// Property: Non-references pass through unchanged.
-/// Strings without ${...} or {{...}} should be returned as-is.
+// Property: Non-references pass through unchanged.
+// Strings without ${...} or {{...}} should be returned as-is.
 proptest! {
     #[test]
     fn prop_non_references_pass_through(
@@ -247,8 +247,8 @@ fn prop_runtime_placeholders_resolved() {
 // Error Enum Property Tests
 // ============================================================================
 
-/// Property: Display never panics for any Error variant.
-/// All error variants can be formatted to String without panicking.
+// Property: Display never panics for any Error variant.
+// All error variants can be formatted to String without panicking.
 proptest! {
     #[test]
     fn prop_error_display_never_panics(
@@ -302,8 +302,8 @@ proptest! {
 // ModelRegistry Property Tests
 // ============================================================================
 
-/// Property: State transition validation is sound.
-/// Valid transitions are allowed, invalid are rejected.
+// Property: State transition validation is sound.
+// Valid transitions are allowed, invalid are rejected.
 proptest! {
     #[test]
     fn prop_state_transition_validity(
@@ -362,7 +362,7 @@ fn prop_model_names_unique() {
     assert_eq!(unique_names.len(), 2);
 }
 
-/// Property: Unknown model references return None.
+// Property: Unknown model references return None.
 proptest! {
     #[test]
     fn prop_unknown_model_returns_none(

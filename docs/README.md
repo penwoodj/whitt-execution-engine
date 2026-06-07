@@ -1,26 +1,41 @@
 # Documentation Index
 
-Complete documentation for Whitt Execution Engine, organized by purpose.
+Documentation for Whitt Execution Engine.
 
-## New User Path
+## Contributing
 
-1. **[Main README](../README.md)** — Project overview, Getting Started, features, status
-2. **[TUTORIAL.md](./TUTORIAL.md)** — Step-by-step guide: build, start server, chat, agents, benchmarks
-3. **[Schema](./schema/)** — Unified workflow schema (source of truth for YAML definitions)
-4. **[Examples](./workflows/examples/)** — 53 example workflows across 19 categories
+- **[contributing/](./contributing/)** — Contributing guide, developer setup, testing, environment variables
+  - [README.md](./contributing/README.md) — Contribution guidelines
+  - [developer-guide.md](./contributing/developer-guide.md) — Development workflow
+  - [testing-guide.md](./contributing/testing-guide.md) — Testing strategies
+  - [environment-variables.md](./contributing/environment-variables.md) — Config reference
+  - [install.md](./contributing/install.md) — Installation guide
+  - [hooks-reference.md](./contributing/hooks-reference.md) — Hooks API reference
 
-## Directories
+## Reference
 
-- **[benchmarks/](./benchmarks/)** — Benchmark workflows, userflows, and plans
-- **[examples/](./examples/)** — Top-level example files
-- **[guides/](./guides/)** — Contributing, developer guide, environment variables, install, testing
+- **[schema/](./schema/)** — Unified workflow schema (source of truth for YAML definitions)
+- **[TUTORIAL.md](./TUTORIAL.md)** — Step-by-step: build, start server, chat, agents, benchmarks
+- **[prompts/](./prompts/)** — Prompt engineering guides and examples
+
+## Planning
+
 - **[plans/](./plans/)** — 8-phase implementation plans (00–07), architecture, testing strategy
-- **[poc/](./poc/)** — Proof of concept documentation (extended POC + local LLM Docker)
-- **[qa/](./qa/)** — QA suites per phase, CLI QOL, archived phases 00–06
-- **[reports/](./reports/)** — Analysis and audit reports
+- **[roadmap/](./roadmap/)** — Architecture Decision Records (ADR-0000 through ADR-0007)
 - **[requirements/](./requirements/)** — Requirements and critical evaluations
 - **[research/](./research/)** — Upstream research, infinite context, next steps
-- **[roadmap/](./roadmap/)** — Architecture Decision Records (ADR-0000 through ADR-0007)
-- **[schema/](./schema/)** — Unified workflow schema (source of truth), hooks semantics
-- **[_metadata/](./_metadata/)** — Research archive, requirements backlog (SoT)
+
+## Benchmarks & QA
+
+- **[benchmarks/](./benchmarks/)** — Benchmark workflows, userflows, and plans
+- **[qa/](./qa/)** — QA suites per phase, CLI QOL, archived phases
+
+## Examples
+
 - **[workflows/](./workflows/)** — Example workflows organized by category
+- **[examples/](./examples/)** — Top-level example files
+
+## Historical
+
+- **[poc/](./poc/)** — Proof of concept documentation
+- **[_metadata/](./_metadata/)** — Research archive, requirements backlog

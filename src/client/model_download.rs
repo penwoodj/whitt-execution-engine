@@ -4,12 +4,15 @@ use reqwest::Client;
 use std::path::Path;
 use std::time::Duration;
 
+/// Base URL for HuggingFace model hub. Can be overridden for mirrors/enterprise registries.
+const HF_BASE_URL: &str = "https://huggingface.co";
+
 pub async fn download_model_from_hf(
     repo: &str,
     filename: &str,
     dest_path: &str,
 ) -> Result<u64> {
-    let url = format!("https://huggingface.co/{}/resolve/main/{}", repo, filename);
+    let url = format!("{}/{}/resolve/main/{}", HF_BASE_URL, repo, filename);
 
     let client = Client::builder()
         .timeout(Duration::from_secs(600))

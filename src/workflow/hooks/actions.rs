@@ -7,7 +7,7 @@
 use super::{HookResult, HookEngine, NotifyMessage};
 use crate::workflow::step::{
     HookAction, LogAction, AppendToAction, SaveToAction, BookmarkAction,
-    BookmarkActionDetail, NotifyAction, FailAction, RouteToAction, GwtClause, ShellAction
+    NotifyAction, FailAction, RouteToAction, GwtClause, ShellAction
 };
 use crate::workflow::schema::LogLevel;
 use crate::workflow::hooks::context::{WorkflowHookContext, BeforeGwtEvaluatesContext, AfterGwtEvaluatesContext};
@@ -40,7 +40,10 @@ pub fn execute_action(
         HookAction::SkipStep(skip) => execute_skip_step(*skip, context, engine),
         HookAction::SkipRemaining(skip) => execute_skip_remaining(*skip, context, engine),
         HookAction::Gwt(clauses) => execute_gwt(clauses, context, engine, hook_config),
-        HookAction::IterateValues(_) => HookResult::Continue,
+        HookAction::IterateValues(data) => {
+            tracing::warn!("[hooks] IterateValues action is not yet implemented — {} values ignored. This action currently returns Continue without iteration logic.", data.len());
+            HookResult::Continue
+        }
     }
 }
 
@@ -51,7 +54,7 @@ pub fn execute_action(
 fn execute_log(
     action: &LogAction,
     context: &WorkflowHookContext,
-    engine: &mut HookEngine,
+    _engine: &mut HookEngine,
 ) -> HookResult {
     let level = action.level.unwrap_or_default();
     let json = context.to_json_value();
@@ -335,17 +338,23 @@ fn execute_notify(
     };
 
     if let Some(ref tx) = engine.notify_tx {
-        let _ = tx.try_send(notify_msg.clone());
+        if let Err(e) = tx.try_send(notify_msg.clone()) {
+            tracing::warn!("[hooks] notify channel send failed: {}", e);
+        }
     } else {
         info!("No notification channel, logging: {:?}", notify_msg);
         if let Ok(json_line) = serde_json::to_string(&notify_msg) {
             let log_path = std::path::Path::new("outputs/notifications.jsonl");
             if let Some(parent) = log_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    tracing::warn!("[hooks] failed to create notification log dir: {}", e);
+                }
             }
             use std::io::Write;
             if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(log_path) {
-                let _ = writeln!(file, "{}", json_line);
+                if let Err(e) = writeln!(file, "{}", json_line) {
+                    tracing::warn!("[hooks] failed to write notification log: {}", e);
+                }
             }
         }
     }
@@ -408,31 +417,55 @@ fn execute_shell(
     _context: &WorkflowHookContext,
     engine: &mut HookEngine,
 ) -> HookResult {
-    // When args is empty but command contains spaces, split command into binary + args
+    let resolved_command = engine.resolve_templates(&action.command);
+    let command = resolved_command.as_str();
+
+    fn needs_shell(cmd: &str) -> bool {
+        cmd.contains('$')
+            || cmd.contains('*')
+            || cmd.contains('?')
+            || cmd.contains('|')
+            || cmd.contains('>')
+            || cmd.contains('<')
+            || cmd.contains("&&")
+            || cmd.contains("||")
+            || cmd.contains(';')
+            || cmd.contains('`')
+            || cmd.contains("$(")
+    }
+
     // Strip surrounding quotes from each arg (shell would do this automatically)
     fn strip_quotes(s: &str) -> String {
         let s = s.trim();
-        if (s.starts_with('\'') && s.ends_with('\'')) || (s.starts_with('"') && s.ends_with('"')) {
-            s[1..s.len()-1].to_string()
+        if (s.starts_with('\'') && s.ends_with('\''))
+            || (s.starts_with('"') && s.ends_with('"'))
+        {
+            s[1..s.len() - 1].to_string()
         } else {
             s.to_string()
         }
     }
-    let (binary, cmd_args) = if action.args.as_ref().map_or(true, |a| a.is_empty()) {
-        let parts: Vec<&str> = action.command.split_whitespace().collect();
+
+    let mut cmd = if needs_shell(command) {
+        let mut c = std::process::Command::new("sh");
+        c.arg("-c").arg(command);
+        c
+    } else if action.args.as_ref().is_none_or(|a| a.is_empty()) {
+        let parts: Vec<&str> = command.split_whitespace().collect();
         if parts.len() > 1 {
-            (parts[0].to_string(), Some(parts[1..].iter().map(|s| strip_quotes(s)).collect()))
+            let mut c = std::process::Command::new(parts[0]);
+            c.args(parts[1..].iter().map(|s| strip_quotes(s)));
+            c
         } else {
-            (action.command.clone(), None)
+            std::process::Command::new(command)
         }
     } else {
-        (action.command.clone(), action.args.clone())
+        let mut c = std::process::Command::new(command);
+        if let Some(ref args) = action.args {
+            c.args(args);
+        }
+        c
     };
-
-    let mut cmd = std::process::Command::new(&binary);
-    if let Some(ref args) = cmd_args {
-        cmd.args(args);
-    }
     if let Some(ref dir) = action.working_dir {
         cmd.current_dir(dir);
     }
@@ -459,7 +492,7 @@ fn execute_shell(
 
             info!(
                 "[shell] {} {:?} → exit={}, stdout={} bytes, stderr={} bytes",
-                action.command,
+                command,
                 action.args.as_deref().unwrap_or(&[]),
                 exit_code,
                 stdout.len(),
@@ -529,6 +562,7 @@ fn execute_gwt(
     HookResult::Continue
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fire_gwt_trigger(
     trigger_name: &str,
     hook_config: Option<&serde_json::Value>,
@@ -540,8 +574,10 @@ fn fire_gwt_trigger(
     route_target: Option<&str>,
 ) {
     let Some(config) = hook_config else { return };
-    let Some(triggers) = config.get("when") else { return };
-    let Some(actions_val) = triggers.get(trigger_name) else { return };
+    let actions_val = config
+        .get(trigger_name)
+        .or_else(|| config.get("when").and_then(|triggers| triggers.get(trigger_name)));
+    let Some(actions_val) = actions_val else { return };
 
     let ctx = match trigger_name {
         "before_gwt_evaluates" => WorkflowHookContext::BeforeGwtEvaluates(BeforeGwtEvaluatesContext {
@@ -568,13 +604,22 @@ fn fire_gwt_trigger(
             if matches!(action, HookAction::Gwt(_)) {
                 continue;
             }
-            let _ = execute_action(&action, &ctx, engine, None);
+            let result = execute_action(&action, &ctx, engine, None);
+            if !result.is_continue() {
+                tracing::debug!("[hooks] non-GWT action in '{}' trigger produced {:?} (ignored for GWT triggers)", trigger_name, result);
+            }
         }
     }
 }
 
 fn evaluate_gwt_condition(condition: &str, json: &serde_json::Value) -> bool {
-    super::gwt::evaluate(condition, json).unwrap_or(false)
+    match super::gwt::evaluate(condition, json) {
+        Ok(result) => result,
+        Err(e) => {
+            tracing::warn!("[hooks] GWT expression evaluation failed: {} — expression: \"{}\" — treating as false", e, condition);
+            false
+        }
+    }
 }
 
 /// Extract output string from context based on context type.
@@ -594,6 +639,7 @@ fn extract_context_output(context: &WorkflowHookContext) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workflow::step::BookmarkActionDetail;
     use crate::workflow::hooks::context::{
         AfterStepSucceedsContext, BeforeStepStartsContext, StepType
     };
@@ -1165,7 +1211,6 @@ mod tests {
 
     #[test]
     fn given_bookmark_detailed_without_path_when_execute_then_bookmark_stored_no_file() {
-        let temp_dir = TempDir::new().unwrap();
         let action = BookmarkAction::Detailed(BookmarkActionDetail {
             path: None,
         });
@@ -1403,7 +1448,7 @@ mod tests {
     fn given_save_to_variable_without_dollar_when_execute_then_treated_as_file_path() {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("plain_path.txt").to_string_lossy().to_string();
-        let action = SaveToAction::Variable("plain_path.txt".to_string());
+        let action = SaveToAction::Variable(file_path.clone());
         let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
             step_name: "test".to_string(),
             output: "file content".to_string(),
@@ -1417,10 +1462,9 @@ mod tests {
         let result = execute_save_to(&action, &context, &mut engine);
 
         assert_eq!(result, HookResult::Continue);
-        assert!(Path::new("plain_path.txt").exists());
-        let content = fs::read_to_string("plain_path.txt").unwrap();
+        assert!(Path::new(&file_path).exists());
+        let content = fs::read_to_string(file_path).unwrap();
         assert!(content.contains("file content"));
-        std::fs::remove_file("plain_path.txt").unwrap();
     }
 
     #[test]

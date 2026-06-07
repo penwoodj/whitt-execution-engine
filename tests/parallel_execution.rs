@@ -6,7 +6,6 @@
 //! - Workflow parsing and validation
 
 use std::fs;
-use std::path::PathBuf;
 
 #[test]
 fn test_route_to_with_non_existent_target_in_yaml() {

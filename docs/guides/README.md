@@ -1,20 +1,17 @@
-# 📋 Guides Directory
+# Guides Directory
 
-Contributing, development, environment, and testing guides for Whitt Execution Engine project.
+Guides have been reorganized. Contributing-related docs are now in [../contributing/](../contributing/).
 
-## Files
+## Moved Files
 
-- [contributing.md](./contributing.md) - Contribution guidelines
-- [developer-guide.md](./developer-guide.md) - Development setup and workflow
-- [environment-variables.md](./environment-variables.md) - Environment configuration reference
-- [install.md](./install.md) - Installation guide
-- [testing-guide.md](./testing-guide.md) - Testing strategies and procedures
+- `contributing.md` → [../contributing/README.md](../contributing/README.md)
+- `developer-guide.md` → [../contributing/developer-guide.md](../contributing/developer-guide.md)
+- `testing-guide.md` → [../contributing/testing-guide.md](../contributing/testing-guide.md)
+- `environment-variables.md` → [../contributing/environment-variables.md](../contributing/environment-variables.md)
+- `install.md` → [../contributing/install.md](../contributing/install.md)
+- `hooks-reference.md` → [../contributing/hooks-reference.md](../contributing/hooks-reference.md)
 
-## 🔗 Related Documentation
+## See Also
 
-| Document | Description |
-|----------|-------------|
-| [../README.md](../README.md) | Documentation index |
-| [../plans/README.md](../plans/README.md) | Implementation plans |
-| [../schema/README.md](../schema/README.md) | Schema reference |
-| [../requirements/](../requirements/) | Requirements and benchmarks |
+- [../contributing/](../contributing/) — Contributing to the project
+- [../prompts/](../prompts/) — Prompt engineering guides

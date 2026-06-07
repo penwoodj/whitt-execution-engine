@@ -768,8 +768,8 @@ mod expr {
                     let result = match op {
                         BinaryOp::Gte => *l >= *r,
                         BinaryOp::Lte => *l <= *r,
-                        BinaryOp::Gt => *l > *r,
-                        BinaryOp::Lt => *l < *r,
+                        BinaryOp::Gt => *l && !*r,
+                        BinaryOp::Lt => !*l && *r,
                         _ => unreachable!(),
                     };
                     Ok(JsonValue::Bool(result))

@@ -525,7 +525,7 @@ other-model:
         let config = create_test_config();
         let registry = ThreadSafeModelRegistry::new(config);
 
-        registry.set_state("test-model", ModelLifecycle::Loaded);
+        assert!(registry.set_state("test-model", ModelLifecycle::Loaded).is_ok());
         let result = registry.unload_model("test-model");
         assert!(result.is_ok());
     }

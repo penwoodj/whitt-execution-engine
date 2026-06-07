@@ -103,7 +103,7 @@ impl WorkflowFile {
     pub fn from_yaml(yaml: &str) -> Result<Self> {
         Self::validate_raw_keys(yaml)?;
         let workflow: WorkflowFile = serde_saphyr::from_str(yaml).map_err(Error::YamlParse)?;
-        workflow.validate_nested_keys(yaml)?;
+        workflow.validate_nested_keys()?;
         workflow.validate()?;
         Ok(workflow)
     }
@@ -117,7 +117,7 @@ impl WorkflowFile {
     ///
     /// This must run *after* deserialization to access the deserialized struct
     /// (to compare values for redundancy).
-    fn validate_nested_keys(&self, _yaml: &str) -> Result<()> {
+    fn validate_nested_keys(&self) -> Result<()> {
         // Check 1: Redundant connection_settings when it duplicates provider config
         if let (Some(ref providers), Some(ref models)) = (&self.providers, &self.models) {
             // Build a map of provider configs: provider_name -> (host, port as string)

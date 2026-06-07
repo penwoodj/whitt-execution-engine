@@ -14,7 +14,9 @@ use super::types::{
     ModelInfo, ModelListResponse, ModelLoadRequest, ModelLoadResponse, ModelUnloadRequest,
 };
 
+/// Maximum retry attempts for transient HTTP errors (connection refused, 503, etc.).
 const MAX_RETRIES: usize = 5;
+/// Delay between retry attempts.
 const RETRY_DELAY: Duration = Duration::from_secs(1);
 
 fn is_retryable(err: &anyhow::Error) -> bool {

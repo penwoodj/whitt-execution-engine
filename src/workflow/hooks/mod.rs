@@ -18,9 +18,10 @@ pub mod actions;
 ///
 /// Determines how workflow execution proceeds after hook processing.
 /// Hooks can modify execution flow by returning different variants.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub enum HookResult {
     /// Continue execution normally.
+    #[default]
     Continue,
     /// Skip this step, proceed to next.
     SkipStep,
@@ -32,12 +33,6 @@ pub enum HookResult {
     Fail { reason: String },
     /// Route to different step(s).
     RouteTo { targets: Vec<String> },
-}
-
-impl Default for HookResult {
-    fn default() -> Self {
-        HookResult::Continue
-    }
 }
 
 impl HookResult {
@@ -141,6 +136,28 @@ impl HookEngine {
     /// Store a bookmark value.
     pub fn store_bookmark(&mut self, name: String, value: serde_json::Value) {
         self.bookmarks.insert(name, value);
+    }
+
+    /// Resolve {{step.STEP_ID.output}} and {{bookmarks.KEY}} in a template string.
+    pub fn resolve_templates(&self, template: &str) -> String {
+        let mut result = template.to_string();
+        tracing::info!("[resolve_templates] checking {} chars against {} bookmarks: {:?}", template.len(), self.bookmarks.len(), self.bookmarks.keys().collect::<Vec<_>>());
+        for (key, value) in &self.bookmarks {
+            let value_str = match value {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            let placeholder = format!("{{{{bookmarks.{}}}}}", key);
+            result = result.replace(&placeholder, &value_str);
+            let step_placeholder = format!("{{{{step.{}.output}}}}", key);
+            result = result.replace(&step_placeholder, &value_str);
+            let short_placeholder = format!("{{{{{}.output}}}}", key);
+            result = result.replace(&short_placeholder, &value_str);
+        }
+        if result != template {
+            tracing::info!("[resolve_templates] resolved: {} chars → {} chars", template.len(), result.len());
+        }
+        result
     }
 }
 

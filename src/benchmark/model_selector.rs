@@ -114,37 +114,6 @@ impl ModelSelector {
             }
         }
 
-        // Calculate tier allocation (proportional to available models)
-        let mut tier_allocation: HashMap<SizeTier, usize> = HashMap::new();
-
-        for (tier, models) in tier_buckets.iter() {
-            let tier_count = models.len();
-            let allocation = ((tier_count * n) as f64 / candidates.len() as f64).round() as usize;
-            let allocation = allocation.min(tier_count);
-            tier_allocation.insert(*tier, allocation.max(1)); // At least 1 per tier with candidates
-        }
-
-        // Adjust if allocation doesn't sum to n
-        let allocated_sum: usize = tier_allocation.values().sum();
-        if allocated_sum != n {
-            let diff = (n as i64 - allocated_sum as i64).unsigned_abs() as usize;
-            debug!("[model_selector] adjusting allocation: sum={}, target={}, diff={}",
-                allocated_sum, n, diff);
-
-            // Add to tiers with most available candidates
-            let mut tiers_with_capacity: Vec<_> = tier_buckets.iter()
-                .filter(|(tier, models)| {
-                    tier_allocation.get(tier).copied().unwrap_or(0) < models.len()
-                })
-                .collect();
-            tiers_with_capacity.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
-
-            for (tier, models) in tiers_with_capacity.iter().take(diff) {
-                let current = tier_allocation.get(*tier).copied().unwrap_or(0);
-                tier_allocation.insert(**tier, (current + 1).min(models.len()));
-            }
-        }
-
         info!("[model_selector] tier allocation: {:?}", tier_allocation);
 
         // Select models from each tier with architecture/author diversity

@@ -8,6 +8,37 @@ use anyhow::Result;
 use std::fmt::Write as FmtWrite;
 use tracing::info;
 
+/// Configuration for benchmark YAML generation.
+///
+/// Provides overridable values that were previously hardcoded.
+/// All fields have sensible defaults matching llama.cpp conventions.
+#[derive(Debug, Clone)]
+pub struct BenchmarkYamlConfig {
+    /// Directory containing GGUF model files for discovery step.
+    /// Default: "./models" (relative to working directory)
+    pub models_dir: String,
+    /// Host address for llama.cpp server.
+    /// Default: "localhost"
+    pub host: String,
+    /// Port for llama.cpp server.
+    /// Default: 8080
+    pub port: u16,
+    /// Maximum model file size in bytes for discovery filtering.
+    /// Default: 6GB (6442450944)
+    pub max_size_bytes: u64,
+}
+
+impl Default for BenchmarkYamlConfig {
+    fn default() -> Self {
+        Self {
+            models_dir: "./models".to_string(),
+            host: "localhost".to_string(),
+            port: 8080,
+            max_size_bytes: 6_442_450_944, // 6GB
+        }
+    }
+}
+
 /// Benchmark YAML generator.
 pub struct BenchmarkYamlGenerator;
 
@@ -28,6 +59,17 @@ impl BenchmarkYamlGenerator {
         models: &[ModelCandidate],
         _prompts: &[&str],
         _max_tokens: usize,
+    ) -> Result<String> {
+        Self::generate_benchmark_yaml_with_config(_name, models, _prompts, _max_tokens, &BenchmarkYamlConfig::default())
+    }
+
+    /// Generate benchmark YAML with custom configuration.
+    pub fn generate_benchmark_yaml_with_config(
+        _name: &str,
+        models: &[ModelCandidate],
+        _prompts: &[&str],
+        _max_tokens: usize,
+        config: &BenchmarkYamlConfig,
     ) -> Result<String> {
         let n = models.len();
         info!("[yaml_generator] generating benchmark YAML for {} models", n);
@@ -53,8 +95,8 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, "providers:")?;
         writeln!(yaml, "  llama_cpp_with_vulkan:")?;
         writeln!(yaml, "    config:")?;
-        writeln!(yaml, "      host: localhost")?;
-        writeln!(yaml, "      port: 8080")?;
+        writeln!(yaml, "      host: {}", config.host)?;
+        writeln!(yaml, "      port: {}", config.port)?;
         writeln!(yaml)?;
 
         // Models section (schema line 64-71)
@@ -83,9 +125,9 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, "  - step: discover_models")?;
         writeln!(yaml, "    id: discover")?;
         writeln!(yaml, "    input:")?;
-        writeln!(yaml, "      models_dir: \"/run/media/jon/data/models\"")?;
+        writeln!(yaml, "      models_dir: \"{}\"", config.models_dir)?;
         writeln!(yaml, "      filter:")?;
-        writeln!(yaml, "        max_size_bytes: 6442450944")?;
+        writeln!(yaml, "        max_size_bytes: {}", config.max_size_bytes)?;
         writeln!(yaml, "        file_extension: \".gguf\"")?;
         writeln!(yaml, "    output:")?;
         writeln!(yaml, "      save_to: discovered_models")?;
@@ -182,6 +224,16 @@ impl BenchmarkYamlGenerator {
         _prompts: &[&str],
         _max_tokens: usize,
     ) -> Result<String> {
+        Self::generate_benchmark_yaml_with_models_config(_name, models, _prompts, _max_tokens, &BenchmarkYamlConfig::default())
+    }
+
+    pub fn generate_benchmark_yaml_with_models_config(
+        _name: &str,
+        models: &[ModelCandidate],
+        _prompts: &[&str],
+        _max_tokens: usize,
+        config: &BenchmarkYamlConfig,
+    ) -> Result<String> {
         let n = models.len();
         let mut yaml = String::new();
 
@@ -204,8 +256,8 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, "providers:")?;
         writeln!(yaml, "  llama_cpp_with_vulkan:")?;
         writeln!(yaml, "    config:")?;
-        writeln!(yaml, "      host: localhost")?;
-        writeln!(yaml, "      port: 8080")?;
+        writeln!(yaml, "      host: {}", config.host)?;
+        writeln!(yaml, "      port: {}", config.port)?;
         writeln!(yaml)?;
 
         // Models section (schema line 64-71)
@@ -300,6 +352,16 @@ impl BenchmarkYamlGenerator {
         _prompts: &[&str],
         _max_tokens: usize,
     ) -> Result<String> {
+        Self::generate_benchmark_yaml_gpu_cpu_compare_config(_name, models, _prompts, _max_tokens, &BenchmarkYamlConfig::default())
+    }
+
+    pub fn generate_benchmark_yaml_gpu_cpu_compare_config(
+        _name: &str,
+        models: &[ModelCandidate],
+        _prompts: &[&str],
+        _max_tokens: usize,
+        config: &BenchmarkYamlConfig,
+    ) -> Result<String> {
         let n = models.len();
         info!("[yaml_generator] generating GPU/CPU compare benchmark YAML for {} models", n);
 
@@ -324,8 +386,8 @@ impl BenchmarkYamlGenerator {
         writeln!(yaml, "providers:")?;
         writeln!(yaml, "  llama_cpp_with_vulkan:")?;
         writeln!(yaml, "    config:")?;
-        writeln!(yaml, "      host: localhost")?;
-        writeln!(yaml, "      port: 8080")?;
+        writeln!(yaml, "      host: {}", config.host)?;
+        writeln!(yaml, "      port: {}", config.port)?;
         writeln!(yaml)?;
 
         // Models section (schema line 64-71)

@@ -10,6 +10,18 @@ use serde_json::Value;
 use std::collections::HashMap;
 use tracing::debug;
 
+/// Default fallback values for config resolution when no explicit value is provided.
+/// These are used as last resort when step overrides, model config, and provider config
+/// all fail to provide a value.
+mod defaults {
+    /// Default server port (llama.cpp default).
+    pub const PORT: u32 = 1234;
+    /// Default request timeout in seconds.
+    pub const TIMEOUT_SECS: u64 = 120;
+    /// Default max retry attempts.
+    pub const MAX_RETRIES: u32 = 3;
+}
+
 // ---------------------------------------------------------------------------
 // Top-level unified config
 // ---------------------------------------------------------------------------
@@ -191,13 +203,13 @@ impl UnifiedConfig {
         let port = if let Some(step) = step_overrides.and_then(|s| s.get("port")) {
             step.as_u64()
                 .map(|p| p as u32)
-                .unwrap_or(1234)
+                .unwrap_or(defaults::PORT)
         } else if let Some(port) = model_spec.host.connection_settings.get("port") {
-            port.parse().unwrap_or(1234)
+            port.parse().unwrap_or(defaults::PORT)
         } else if let Some(config) = &provider_config.config {
             config.port
         } else {
-            1234
+            defaults::PORT
         };
 
         // Resolve temperature
@@ -216,20 +228,20 @@ impl UnifiedConfig {
 
         // Resolve timeout (from provider request config)
         let timeout_secs = if let Some(step) = step_overrides.and_then(|s| s.get("timeout_secs")) {
-            step.as_u64().unwrap_or(120)
+            step.as_u64().unwrap_or(defaults::TIMEOUT_SECS)
         } else if let Some(requests) = &provider_config.requests {
             requests.request_timeout_secs
         } else {
-            120
+            defaults::TIMEOUT_SECS
         };
 
         // Resolve retry config
         let max_retries = if let Some(step) = step_overrides.and_then(|s| s.get("max_retries")) {
-            step.as_u64().map(|r| r as u32).unwrap_or(3)
+            step.as_u64().map(|r| r as u32).unwrap_or(defaults::MAX_RETRIES)
         } else if let Some(requests) = &provider_config.requests {
-            requests.retry.as_ref().map(|r| r.max_retries).unwrap_or(3)
+            requests.retry.as_ref().map(|r| r.max_retries).unwrap_or(defaults::MAX_RETRIES)
         } else {
-            3
+            defaults::MAX_RETRIES
         };
 
         debug!(

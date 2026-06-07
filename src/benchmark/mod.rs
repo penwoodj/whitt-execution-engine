@@ -64,6 +64,8 @@ pub struct WorkflowStepResult {
     pub route_to: Option<Vec<String>>,
     /// Whether to skip all remaining steps
     pub skip_remaining: bool,
+    /// Whether to skip the current loop iteration (continue to next iteration)
+    pub skip_loop: bool,
 }
 
 impl BenchmarkSuiteResult {
@@ -261,31 +263,31 @@ pub fn generate_gpu_cpu_compare_benchmarks(output_dir: &Path) -> Result<()> {
     ];
     let max_tokens = 128;
 
-    // Generate benchmark-3-models.yml with specific paths
+    // Generate benchmark-3-models.yml with sample model paths
     let models_3 = vec![
         ModelCandidate {
-            path: PathBuf::from("/run/media/jon/data/models/lmstudio-community/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf"),
-            model_id: "Qwen3-4B-Instruct-2507-Q4_K_M".to_string(),
+            path: PathBuf::from("./models/qwen3-4b-instruct-q4_k_m.gguf"),
+            model_id: "Qwen3-4B-Instruct-Q4_K_M".to_string(),
             file_size_bytes: 0,
             estimated_vram_bytes: 0,
             fits_in_vram: true,
-            author: "lmstudio-community".to_string(),
+            author: "example".to_string(),
         },
         ModelCandidate {
-            path: PathBuf::from("/run/media/jon/data/models/lmstudio-community/Phi-4-mini-reasoning-GGUF/Phi-4-mini-reasoning-Q4_K_M.gguf"),
+            path: PathBuf::from("./models/phi-4-mini-reasoning-q4_k_m.gguf"),
             model_id: "Phi-4-mini-reasoning-Q4_K_M".to_string(),
             file_size_bytes: 0,
             estimated_vram_bytes: 0,
             fits_in_vram: true,
-            author: "lmstudio-community".to_string(),
+            author: "example".to_string(),
         },
         ModelCandidate {
-            path: PathBuf::from("/run/media/jon/data/models/hugging-quants/Llama-3.2-1B-Instruct-Q8_0-GGUF/llama-3.2-1b-instruct-q8_0.gguf"),
+            path: PathBuf::from("./models/llama-3.2-1b-instruct-q8_0.gguf"),
             model_id: "Llama-3.2-1B-Instruct-Q8_0".to_string(),
             file_size_bytes: 0,
             estimated_vram_bytes: 0,
             fits_in_vram: true,
-            author: "hugging-quants".to_string(),
+            author: "example".to_string(),
         },
     ];
 
@@ -303,13 +305,13 @@ pub fn generate_gpu_cpu_compare_benchmarks(output_dir: &Path) -> Result<()> {
 
     // Generate benchmark-5-models.yml with placeholder list
     let models_5_placeholder: Vec<ModelCandidate> = (0..5).map(|i| ModelCandidate {
-        path: PathBuf::from(format!("/path/to/model_{}.gguf", i + 1)),
-        model_id: format!("model_{}", i + 1),
-        file_size_bytes: 0,
-        estimated_vram_bytes: 0,
-        fits_in_vram: true,
-        author: "placeholder".to_string(),
-    }).collect();
+            path: PathBuf::from(format!("./models/model_{}.gguf", i + 1)),
+            model_id: format!("model_{}", i + 1),
+            file_size_bytes: 0,
+            estimated_vram_bytes: 0,
+            fits_in_vram: true,
+            author: "placeholder".to_string(),
+        }).collect();
 
     let yaml_5 = BenchmarkYamlGenerator::generate_benchmark_yaml_gpu_cpu_compare(
         "benchmark-5-models",
@@ -325,7 +327,7 @@ pub fn generate_gpu_cpu_compare_benchmarks(output_dir: &Path) -> Result<()> {
 
     // Generate benchmark-15-models.yml with placeholder list
     let models_15_placeholder: Vec<ModelCandidate> = (0..15).map(|i| ModelCandidate {
-        path: PathBuf::from(format!("/path/to/model_{}.gguf", i + 1)),
+            path: PathBuf::from(format!("./models/model_{}.gguf", i + 1)),
         model_id: format!("model_{}", i + 1),
         file_size_bytes: 0,
         estimated_vram_bytes: 0,
@@ -347,7 +349,7 @@ pub fn generate_gpu_cpu_compare_benchmarks(output_dir: &Path) -> Result<()> {
 
     // Generate benchmark-50-models.yml with placeholder list
     let models_50_placeholder: Vec<ModelCandidate> = (0..50).map(|i| ModelCandidate {
-        path: PathBuf::from(format!("/path/to/model_{}.gguf", i + 1)),
+            path: PathBuf::from(format!("./models/model_{}.gguf", i + 1)),
         model_id: format!("model_{}", i + 1),
         file_size_bytes: 0,
         estimated_vram_bytes: 0,
