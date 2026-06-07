@@ -72,6 +72,9 @@ pub struct HookContext {
     pub output: Option<String>,
     pub error_message: Option<String>,
     pub loop_type: String,
+    pub model_size: Option<String>,
+    pub model_family: Option<String>,
+    pub model_quantization: Option<String>,
 }
 
 impl HookContext {
@@ -111,6 +114,9 @@ mod tests {
             output: Some("test output".to_string()),
             error_message: None,
             loop_type: "count".to_string(),
+            model_size: None,
+            model_family: None,
+            model_quantization: None,
         };
 
         hook.execute(&context).expect("execute hook");
@@ -141,6 +147,9 @@ mod tests {
             output: Some("appended".to_string()),
             error_message: None,
             loop_type: "count".to_string(),
+            model_size: None,
+            model_family: None,
+            model_quantization: None,
         };
 
         hook.execute(&context).expect("execute hook");
@@ -157,6 +166,9 @@ mod tests {
             output: Some("my_output".to_string()),
             error_message: Some("my_error".to_string()),
             loop_type: "validation".to_string(),
+            model_size: None,
+            model_family: None,
+            model_quantization: None,
         };
 
         assert_eq!(context.get_field("step_name"), "my_step");
@@ -188,6 +200,9 @@ mod tests {
             output: Some("saved content".to_string()),
             error_message: None,
             loop_type: "count".to_string(),
+            model_size: None,
+            model_family: None,
+            model_quantization: None,
         };
 
         hook.execute(&context).expect("execute hook");

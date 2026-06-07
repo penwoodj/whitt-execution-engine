@@ -1180,6 +1180,16 @@ impl BenchmarkRunner {
         result = result.replace("{{iteration}}", &context.iteration.to_string());
         result = result.replace("{{loop.iteration}}", &context.iteration.to_string());
 
+        if let Some(ref size) = context.model_size {
+            result = result.replace("{{model.size}}", size);
+        }
+        if let Some(ref family) = context.model_family {
+            result = result.replace("{{model.family}}", family);
+        }
+        if let Some(ref quantization) = context.model_quantization {
+            result = result.replace("{{model.quantization}}", quantization);
+        }
+
         result
     }
 
@@ -1239,6 +1249,52 @@ impl BenchmarkRunner {
             }
         }
         result
+    }
+
+    fn parse_model_metadata(model_name: &str) -> (Option<String>, Option<String>, Option<String>) {
+        let lower = model_name.to_lowercase();
+
+        let size = if lower.contains("3b") {
+            Some("3b".to_string())
+        } else if lower.contains("7b") {
+            Some("7b".to_string())
+        } else if lower.contains("8b") {
+            Some("8b".to_string())
+        } else if lower.contains("13b") {
+            Some("13b".to_string())
+        } else if lower.contains("70b") {
+            Some("70b".to_string())
+        } else {
+            None
+        };
+
+        let family = if lower.starts_with("llama") {
+            Some("llama".to_string())
+        } else if lower.starts_with("qwen") {
+            Some("qwen".to_string())
+        } else if lower.starts_with("mistral") || lower.starts_with("ministral") {
+            Some("mistral".to_string())
+        } else if lower.starts_with("phi") {
+            Some("phi".to_string())
+        } else if lower.starts_with("gemma") {
+            Some("gemma".to_string())
+        } else {
+            None
+        };
+
+        let quantization = if lower.contains("q4") {
+            Some("q4".to_string())
+        } else if lower.contains("q8") {
+            Some("q8".to_string())
+        } else if lower.contains("f16") {
+            Some("f16".to_string())
+        } else if lower.contains("f32") {
+            Some("f32".to_string())
+        } else {
+            None
+        };
+
+        (size, family, quantization)
     }
 }
 
@@ -3522,6 +3578,9 @@ mod tests {
             output: output.map(|s| s.to_string()),
             error_message: None,
             loop_type: "count".to_string(),
+            model_size: None,
+            model_family: None,
+            model_quantization: None,
         }
     }
 
@@ -5316,5 +5375,117 @@ agentic_workflow:
 
         // Bookmark resolved, step template left unchanged (handled by different function)
         assert_eq!(result, "CSV: name,age\nAlice,30\nStep: {{step.step_1.output}}");
+    }
+
+    #[test]
+    fn test_parse_model_metadata_llama() {
+        let (size, family, quantization) = BenchmarkRunner::parse_model_metadata("llama-2-7b");
+        assert_eq!(size, Some("7b".to_string()));
+        assert_eq!(family, Some("llama".to_string()));
+        assert_eq!(quantization, None);
+    }
+
+    #[test]
+    fn test_parse_model_metadata_ministral() {
+        let (size, family, quantization) = BenchmarkRunner::parse_model_metadata("ministral-3b");
+        assert_eq!(size, Some("3b".to_string()));
+        assert_eq!(family, Some("mistral".to_string()));
+        assert_eq!(quantization, None);
+    }
+
+    #[test]
+    fn test_parse_model_metadata_qwen() {
+        let (size, family, quantization) = BenchmarkRunner::parse_model_metadata("qwen2-7b");
+        assert_eq!(size, Some("7b".to_string()));
+        assert_eq!(family, Some("qwen".to_string()));
+        assert_eq!(quantization, None);
+    }
+
+    #[test]
+    fn test_parse_model_metadata_quantization() {
+        let (size, family, quantization) = BenchmarkRunner::parse_model_metadata("llama-2-7b-q4");
+        assert_eq!(size, Some("7b".to_string()));
+        assert_eq!(family, Some("llama".to_string()));
+        assert_eq!(quantization, Some("q4".to_string()));
+    }
+
+    #[test]
+    fn test_interpolate_template_with_model_size() {
+        let runner = BenchmarkRunner::new(make_test_config());
+        let context = HookContext {
+            step_name: "llama-2-7b".to_string(),
+            iteration: 0,
+            output: Some("test".to_string()),
+            error_message: None,
+            loop_type: "count".to_string(),
+            model_size: Some("7b".to_string()),
+            model_family: Some("llama".to_string()),
+            model_quantization: Some("q4".to_string()),
+        };
+
+        let template = "Model {{current_model}} has size {{model.size}}";
+        let result = runner.interpolate_template(template, &context);
+
+        assert_eq!(result, "Model llama-2-7b has size 7b");
+    }
+
+    #[test]
+    fn test_interpolate_template_with_model_family() {
+        let runner = BenchmarkRunner::new(make_test_config());
+        let context = HookContext {
+            step_name: "ministral-3b".to_string(),
+            iteration: 0,
+            output: Some("test".to_string()),
+            error_message: None,
+            loop_type: "count".to_string(),
+            model_size: Some("3b".to_string()),
+            model_family: Some("mistral".to_string()),
+            model_quantization: None,
+        };
+
+        let template = "Family: {{model.family}}";
+        let result = runner.interpolate_template(template, &context);
+
+        assert_eq!(result, "Family: mistral");
+    }
+
+    #[test]
+    fn test_interpolate_template_with_model_quantization() {
+        let runner = BenchmarkRunner::new(make_test_config());
+        let context = HookContext {
+            step_name: "llama-2-7b-q4".to_string(),
+            iteration: 0,
+            output: Some("test".to_string()),
+            error_message: None,
+            loop_type: "count".to_string(),
+            model_size: Some("7b".to_string()),
+            model_family: Some("llama".to_string()),
+            model_quantization: Some("q4".to_string()),
+        };
+
+        let template = "Quantization: {{model.quantization}}";
+        let result = runner.interpolate_template(template, &context);
+
+        assert_eq!(result, "Quantization: q4");
+    }
+
+    #[test]
+    fn test_interpolate_template_all_model_vars() {
+        let runner = BenchmarkRunner::new(make_test_config());
+        let context = HookContext {
+            step_name: "ministral-3b".to_string(),
+            iteration: 1,
+            output: Some("output".to_string()),
+            error_message: None,
+            loop_type: "count".to_string(),
+            model_size: Some("3b".to_string()),
+            model_family: Some("mistral".to_string()),
+            model_quantization: None,
+        };
+
+        let template = "{{model.family}}-{{model.size}} iter={{iteration}}";
+        let result = runner.interpolate_template(template, &context);
+
+        assert_eq!(result, "mistral-3b iter=1");
     }
 }
