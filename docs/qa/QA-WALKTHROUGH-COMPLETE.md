@@ -4,7 +4,7 @@
 **Branch**: initial-creation
 **Server**: localhost:8081 (qwen2.5-1.5b-instruct-q4_k_m.gguf)
 **Date**: 2026-05-03
-**Re-verified**: 2026-05-03 (fresh pass, all 14 UF flows live-tested)
+**Re-verified**: 2026-06-07 (fresh pass, all 14 UF flows live-tested)
 **Status**: ✅ All 14 User Flows Live-Verified
 
 ---
@@ -28,9 +28,9 @@
 | UF-13 | Config file — load from YAML config | ✅ PASS | ✅ Automated | Full (config tests, 18 tests) | P0 |
 | UF-14 | Conversation save — save chat to JSON | ✅ PASS | ✅ Live (JSON valid) | Partial (cli_coverage_gaps.rs) | P2 |
 
-**Live Verification Date**: 2026-05-03 (re-verified from scratch)
+**Live Verification Date**: 2026-06-07 (re-verified from scratch)
 **Server**: localhost:8081, qwen2.5-1.5b-instruct-q4_k_m.gguf
-**Test Suite**: 195 passed, 0 failed, 15 ignored, 0 clippy warnings (--all-features)
+**Test Suite**: 645 passed, 0 failed, 15 ignored, 0 clippy warnings (--all-features)
 **Schema Alignment**: 12 misalignments fixed — all Rust structs now match unified-workflow-schema.yml
 
 ---

@@ -11,6 +11,7 @@ use crate::workflow::hooks::context::{
 };
 use crate::workflow::HookAction;
 use super::{BenchmarkSuiteResult, ModelBenchmarkResult, InferenceResult, WorkflowStepResult};
+use super::detail_generator::DetailGenerator;
 use anyhow::{Context, Result};
 use regex::Regex;
 use std::fs;
@@ -2527,6 +2528,14 @@ impl BenchmarkRunner {
                     };
                     self.log_step_result(&failed_result)?;
                     self.log_step_error(model_id, failed_result.error.as_deref().unwrap_or("unknown error"))?;
+
+                    if let Some(ref output_dir) = self.config.output_dir {
+                        let detail_gen = DetailGenerator::new(output_dir);
+                        if let Err(e) = detail_gen.write_model_detail(&failed_result) {
+                            warn!("[detail] Failed to generate detail.md for {} (GPU health check failed): {}", model_id, e);
+                        }
+                    }
+
                     results.push(failed_result);
                     continue;
                 }
@@ -2567,6 +2576,14 @@ impl BenchmarkRunner {
                         };
                         self.log_step_result(&cpu_result)?;
                         self.log_step_error(model_id, cpu_result.error.as_deref().unwrap_or("unknown error"))?;
+
+                        if let Some(ref output_dir) = self.config.output_dir {
+                            let detail_gen = DetailGenerator::new(output_dir);
+                            if let Err(e) = detail_gen.write_model_detail(&cpu_result) {
+                                warn!("[detail] Failed to generate detail.md for {} (CPU health check failed): {}", model_id, e);
+                            }
+                        }
+
                         results.push(gpu_result);
                         results.push(cpu_result);
                         self.restart_docker_with_gpu_layers(999).await
@@ -2589,18 +2606,54 @@ impl BenchmarkRunner {
                         gpu_result_with_speedup.speedup_factor = Some(speedup);
                         self.write_per_model_report(&gpu_result_with_speedup, &suite_metadata, wf_ctx.as_ref())?;
                         self.append_chat_log_markdown(&gpu_result_with_speedup, &run_timestamp)?;
+
+                        // Generate detail.md for GPU mode
+                        if let Some(ref output_dir) = self.config.output_dir {
+                            let detail_gen = DetailGenerator::new(output_dir);
+                            if let Err(e) = detail_gen.write_model_detail(&gpu_result_with_speedup) {
+                                warn!("[detail] Failed to generate detail.md for {} (GPU): {}", model_id, e);
+                            }
+                        }
+
                         results.push(gpu_result_with_speedup);
 
                         let mut cpu_result_with_speedup = cpu_result.clone();
                         cpu_result_with_speedup.speedup_factor = Some(speedup);
                         self.write_per_model_report(&cpu_result_with_speedup, &suite_metadata, wf_ctx.as_ref())?;
                         self.append_chat_log_markdown(&cpu_result_with_speedup, &run_timestamp)?;
+
+                        // Generate detail.md for CPU mode
+                        if let Some(ref output_dir) = self.config.output_dir {
+                            let detail_gen = DetailGenerator::new(output_dir);
+                            if let Err(e) = detail_gen.write_model_detail(&cpu_result_with_speedup) {
+                                warn!("[detail] Failed to generate detail.md for {} (CPU): {}", model_id, e);
+                            }
+                        }
+
                         results.push(cpu_result_with_speedup);
                     } else {
                         self.write_per_model_report(&gpu_result, &suite_metadata, wf_ctx.as_ref())?;
                         self.append_chat_log_markdown(&gpu_result, &run_timestamp)?;
+
+                        // Generate detail.md for GPU mode (CPU failed)
+                        if let Some(ref output_dir) = self.config.output_dir {
+                            let detail_gen = DetailGenerator::new(output_dir);
+                            if let Err(e) = detail_gen.write_model_detail(&gpu_result) {
+                                warn!("[detail] Failed to generate detail.md for {} (GPU, CPU failed): {}", model_id, e);
+                            }
+                        }
+
                         self.write_per_model_report(&cpu_result, &suite_metadata, wf_ctx.as_ref())?;
                         self.append_chat_log_markdown(&cpu_result, &run_timestamp)?;
+
+                        // Generate detail.md for CPU mode (even though it failed)
+                        if let Some(ref output_dir) = self.config.output_dir {
+                            let detail_gen = DetailGenerator::new(output_dir);
+                            if let Err(e) = detail_gen.write_model_detail(&cpu_result) {
+                                warn!("[detail] Failed to generate detail.md for {} (CPU, failed): {}", model_id, e);
+                            }
+                        }
+
                         results.push(gpu_result);
                         results.push(cpu_result);
                     }
@@ -2610,6 +2663,14 @@ impl BenchmarkRunner {
                 } else {
                     self.write_per_model_report(&gpu_result, &suite_metadata, wf_ctx.as_ref())?;
                     self.append_chat_log_markdown(&gpu_result, &run_timestamp)?;
+
+                    if let Some(ref output_dir) = self.config.output_dir {
+                        let detail_gen = DetailGenerator::new(output_dir);
+                        if let Err(e) = detail_gen.write_model_detail(&gpu_result) {
+                            warn!("[detail] Failed to generate detail.md for {} (GPU only): {}", model_id, e);
+                        }
+                    }
+
                     results.push(gpu_result);
                 }
 
@@ -2645,6 +2706,14 @@ impl BenchmarkRunner {
                     };
                     self.log_step_result(&failed_result)?;
                     self.log_step_error(model_id, failed_result.error.as_deref().unwrap_or("unknown error"))?;
+
+                    if let Some(ref output_dir) = self.config.output_dir {
+                        let detail_gen = DetailGenerator::new(output_dir);
+                        if let Err(e) = detail_gen.write_model_detail(&failed_result) {
+                            warn!("[detail] Failed to generate detail.md for {} (non-compare health check failed): {}", model_id, e);
+                        }
+                    }
+
                     results.push(failed_result);
                     continue;
                 }
@@ -2657,6 +2726,14 @@ impl BenchmarkRunner {
                 self.log_step_result(&model_result)?;
                 self.write_per_model_report(&model_result, &suite_metadata, wf_ctx.as_ref())?;
                 self.append_chat_log_markdown(&model_result, &run_timestamp)?;
+
+                // Generate detail.md for this model
+                if let Some(ref output_dir) = self.config.output_dir {
+                    let detail_gen = DetailGenerator::new(output_dir);
+                    if let Err(e) = detail_gen.write_model_detail(&model_result) {
+                        warn!("[detail] Failed to generate detail.md for {}: {}", model_id, e);
+                    }
+                }
 
                 results.push(model_result);
 

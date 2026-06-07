@@ -4,6 +4,8 @@ pub mod runner;
 pub mod model_selector;
 pub mod yaml_generator;
 pub mod error_types;
+pub mod circuit_breaker;
+pub mod detail_generator;
 
 use crate::client::model_discovery::ModelCandidate;
 use anyhow::{Context, Result};

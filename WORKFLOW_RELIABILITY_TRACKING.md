@@ -454,6 +454,8 @@ All hardcoded values found in production code paths:
 
 | Date | Change |
 |------|--------|
+| 2026-06-07 | **YAML Generator Audit**: Section 15 added. G1-G9 findings documented. Generator fixes in progress. |
+| 2026-06-07 | **Phase 3 complete**: All 10 hook triggers wired (7 full + 2 GWT internal + 1 streaming). Runner split into mod.rs + tests.rs. Config layering (UF16). Model metadata templates (UF05). Cleanup policies (UF18). 645 tests, 0 failures. |
 | 2026-06-06 | **Final batch — ALL 99 GAPS RESOLVED:** M2 (SkipLoop wired with WorkflowStepResult.skip_loop), C3 (real parallelism via `Arc<Mutex<HookEngine>>` + tokio::spawn), C4 (after_all_retries_exhausted wired in benchmark_single_model), H10 (11 tests migrated from execute_hook_legacy to execute_hooks_for_trigger). 637 tests pass, 0 fail. Clippy clean. Build clean. |
 | 2026-06-06 | **Batch 5 fixes applied (7 gaps closed):** M6 (config defaults → named constants), M7 (retry constants documented), M8 (HF URL → named constant), M9 (duplicate tier allocation code removed), M10 (copy_workflow_yaml error logged), M11 (unused _yaml param removed), M12 (already logged). 637 tests pass, 0 fail. Clippy clean. Build clean. |
 | 2026-06-06 | **Batch 4 fixes applied (2 gaps closed):** C4 (retry exhaustion now logged with structured data in deprecated path), M3 (notify path `let _` → proper error logging). 637 tests pass, 0 fail. Clippy clean. Build clean. |
@@ -546,3 +548,116 @@ All hardcoded values found in production code paths:
 | M6-M12 (hardcoded config) | ✅ Fixed | Named constants, doc comments, dead code removed |
 
 **All 99 audit findings resolved. 0 remaining gaps.**
+
+---
+
+## 15. YAML Generator Audit
+
+**Audit Date:** 2026-06-07
+**Method:** Direct code reading of `src/benchmark/yaml_generator.rs` (652 lines)
+
+### Generator Entry Points
+
+| Method | Signature | Purpose |
+|--------|-----------|---------|
+| `generate_benchmark_yaml()` | `(_name, models, _prompts, _max_tokens) → Result<String>` | With model discovery step |
+| `generate_benchmark_yaml_with_config()` | `(..., config: &BenchmarkYamlConfig) → Result<String>` | Configurable discovery variant |
+| `generate_benchmark_yaml_with_models()` | `(_name, models, _prompts, _max_tokens) → Result<String>` | Pre-selected models, no discovery |
+| `generate_benchmark_yaml_with_models_config()` | `(..., config: &BenchmarkYamlConfig) → Result<String>` | Configurable pre-selected variant |
+| `generate_benchmark_yaml_gpu_cpu_compare()` | `(_name, models, _prompts, _max_tokens) → Result<String>` | GPU vs CPU comparison |
+| `generate_benchmark_yaml_gpu_cpu_compare_config()` | `(..., config: &BenchmarkYamlConfig) → Result<String>` | Configurable GPU/CPU variant |
+
+### Current Output Format
+
+- **Method**: String concatenation via `writeln!()` macro — NOT serde_yaml serialization
+- **Structure**: Header → Providers → Models → Execution Strategy → Agentic Workflow (steps)
+- **Steps generated**: 
+  - Discovery variant: discover_models → benchmark_loop → refine_document → generate_report
+  - Pre-selected variant: benchmark_loop → refine_document
+  - GPU/CPU variant: benchmark_performance → refine_document → generate_speedup_report → generate_report
+
+### Validation Behavior
+
+| Check | Status | Details |
+|-------|--------|---------|
+| YAML syntax valid | ⚠️ PARTIAL | String formatting can produce invalid YAML with special chars in model names |
+| Schema validation | ❌ NONE | Comment at line 56: "Does not validate against UnifiedConfig" |
+| `WorkflowFile::validate()` called | ❌ NEVER | Generator output never validated against schema |
+| `validate_raw_keys()` called | ❌ NEVER | Unknown top-level keys not caught |
+| Required fields present | ⚠️ PARTIAL | Some required fields hardcoded correctly, others missing |
+
+### Critical Findings
+
+| # | Severity | Issue | Impact |
+|---|----------|-------|--------|
+| G1 | CRITICAL | **`_prompts` parameter ignored** — underscore-prefixed, never used in output | Generator accepts prompts but generates workflows with hardcoded refine_document prompts instead |
+| G2 | CRITICAL | **`_max_tokens` parameter ignored** — underscore-prefixed | Token budget not reflected in generated YAML |
+| G3 | HIGH | **No schema validation** of generated YAML | Invalid YAML can reach executor, causing runtime failures |
+| G4 | HIGH | **String-based generation** — no serde serialization | Fragile, no type safety, special chars break YAML syntax |
+| G5 | HIGH | **`_name` parameter ignored** — used only in header, not in workflow_id | Misleading API |
+| G6 | MEDIUM | **Hardcoded refine_document step** — always generates document refinement | Generator cannot produce pure benchmark workflows |
+| G7 | MEDIUM | **Only 2 `info!()` logs** — "generating...N models" and "generated N bytes" | No observability into generation details |
+| G8 | MEDIUM | **No prompt parameter in generated steps** | `benchmark_loop` has no `prompt:` field — executor must infer prompt from elsewhere |
+| G9 | LOW | **Test coverage is weak** — only asserts string containment, not schema compliance | Tests pass even if YAML is structurally invalid |
+
+### Missing Logs
+
+| Event | Currently Logged? | What Should Be Logged |
+|-------|-------------------|-----------------------|
+| Generator input (name, model count, prompt count) | ❌ Only model count | Full input parameters |
+| Generator output (full YAML content) | ❌ Only byte count | Full YAML for debugging |
+| YAML syntax validation | ❌ None | Parse result via serde_yaml |
+| Schema validation | ❌ None | WorkflowFile::validate() result |
+| Step structure generated | ❌ None | Step names, types, dependencies |
+| Prompt inclusion | ❌ None | Which prompts were included/excluded |
+| Generation errors | ❌ None (writeln! uses Result) | Any formatting failures |
+| Round-trip verification | ❌ None | Parse generated YAML back to struct |
+
+### Missing Tests
+
+| Test | What It Verifies | Currently Exists? |
+|------|-----------------|-------------------|
+| Generated YAML parses as valid YAML | serde_yaml::from_str succeeds | ❌ No |
+| Generated YAML passes WorkflowFile::validate() | Schema compliance | ❌ No |
+| Prompts parameter reflected in output | _prompts actually used | ❌ No (parameter ignored) |
+| max_tokens reflected in output | _max_tokens actually used | ❌ No (parameter ignored) |
+| Model names with special chars | YAML still valid | ❌ No |
+| Empty model list | Graceful handling | ❌ No |
+| Generated YAML round-trips | Generate → parse → regenerate | ❌ No |
+| GPU/CPU variant produces valid YAML | Schema compliance for compare mode | ❌ No |
+| Comparison across runs | Deterministic output for same input | ❌ No |
+
+### Recommended Next Fixes (Priority Order)
+
+1. **G1/G2**: Make `_prompts` and `_max_tokens` actually used — add prompt: and max_tokens: fields to generated steps
+2. **G3**: Call `WorkflowFile::validate()` on generated YAML before returning — catch invalid output early
+3. **G4**: Refactor from string concatenation to serde_yaml::to_string() — type-safe generation
+4. **G7**: Add comprehensive logging (input params, full YAML output, validation result)
+5. **G9**: Replace string-containment assertions with schema validation in tests
+6. **G6**: Make refine_document step optional — parameter to control which steps to generate
+
+### Generator Architecture Diagram
+
+```
+CLI / Config
+    │
+    ├── name (ignored)
+    ├── models (used for count only)
+    ├── prompts (IGNORED)
+    └── max_tokens (IGNORED)
+          │
+          ▼
+    BenchmarkYamlGenerator
+    ├── writeln!() string concatenation
+    ├── Hardcoded step structure
+    ├── Hardcoded refine_document prompts
+    └── No validation
+          │
+          ▼
+    String output (YAML text)
+    ├── 2x info!() logs
+    └── No error handling beyond writeln!
+          │
+          ▼
+    Executor (assumes valid YAML)
+```

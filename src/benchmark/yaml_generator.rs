@@ -6,7 +6,7 @@
 use crate::client::model_discovery::ModelCandidate;
 use anyhow::Result;
 use std::fmt::Write as FmtWrite;
-use tracing::info;
+use tracing::{info, debug, warn};
 
 /// Configuration for benchmark YAML generation.
 ///
@@ -55,24 +55,24 @@ impl BenchmarkYamlGenerator {
     /// YAML is valid YAML syntax. Does not validate against UnifiedConfig
     /// (benchmark YAMLs don't match strict schema requirements like providers).
     pub fn generate_benchmark_yaml(
-        _name: &str,
+        name: &str,
         models: &[ModelCandidate],
-        _prompts: &[&str],
-        _max_tokens: usize,
+        prompts: &[&str],
+        max_tokens: usize,
     ) -> Result<String> {
-        Self::generate_benchmark_yaml_with_config(_name, models, _prompts, _max_tokens, &BenchmarkYamlConfig::default())
+        Self::generate_benchmark_yaml_with_config(name, models, prompts, max_tokens, &BenchmarkYamlConfig::default())
     }
 
     /// Generate benchmark YAML with custom configuration.
     pub fn generate_benchmark_yaml_with_config(
-        _name: &str,
+        name: &str,
         models: &[ModelCandidate],
-        _prompts: &[&str],
-        _max_tokens: usize,
+        prompts: &[&str],
+        max_tokens: usize,
         config: &BenchmarkYamlConfig,
     ) -> Result<String> {
         let n = models.len();
-        info!("[yaml_generator] generating benchmark YAML for {} models", n);
+        info!("[yaml_generator] Input: name={}, models={}, prompts={}, max_tokens={}", name, n, prompts.len(), max_tokens);
 
         let mut yaml = String::new();
 
@@ -120,121 +120,128 @@ impl BenchmarkYamlGenerator {
 
         // Agentic workflow section
         writeln!(yaml, "agentic_workflow:")?;
+        writeln!(yaml, "  steps:")?;
 
         // Model discovery step
-        writeln!(yaml, "  - step: discover_models")?;
-        writeln!(yaml, "    id: discover")?;
-        writeln!(yaml, "    input:")?;
-        writeln!(yaml, "      models_dir: \"{}\"", config.models_dir)?;
-        writeln!(yaml, "      filter:")?;
-        writeln!(yaml, "        max_size_bytes: {}", config.max_size_bytes)?;
-        writeln!(yaml, "        file_extension: \".gguf\"")?;
-        writeln!(yaml, "    output:")?;
-        writeln!(yaml, "      save_to: discovered_models")?;
+        writeln!(yaml, "    - step: discover_models")?;
+        writeln!(yaml, "      id: discover")?;
+        writeln!(yaml, "      input:")?;
+        writeln!(yaml, "        models_dir: \"{}\"", config.models_dir)?;
+        writeln!(yaml, "        filter:")?;
+        writeln!(yaml, "          max_size_bytes: {}", config.max_size_bytes)?;
+        writeln!(yaml, "          file_extension: \".gguf\"")?;
+        writeln!(yaml, "      output:")?;
+        writeln!(yaml, "        save_to: discovered_models")?;
         writeln!(yaml)?;
 
         // Benchmark loop step
-        writeln!(yaml, "  - step: benchmark_loop")?;
-        writeln!(yaml, "    id: bench_loop")?;
-        writeln!(yaml, "    loop:")?;
-        writeln!(yaml, "      count:")?;
-        writeln!(yaml, "        max_iterations: {}", n)?;
-        writeln!(yaml, "        iteration_variable: current_model")?;
-        writeln!(yaml, "    input:")?;
-        writeln!(yaml, r#"      model_path: "{{{{loop.current_model}}}}""#)?;
-        writeln!(yaml, "    when:")?;
-        writeln!(yaml, "      before_step_starts:")?;
-        writeln!(yaml, "        log:")?;
-        writeln!(
-            yaml,
-            "          to_file_path: \"./docs/benchmarks/outputs/logs/benchmark.log\""
-        )?;
-        writeln!(yaml, "          event_fields: [step_name, loop_iteration, current_model]")?;
-        writeln!(yaml, "      after_step_succeeds:")?;
-        writeln!(yaml, "        append_to:")?;
-        writeln!(yaml, "          - \"./docs/benchmarks/outputs/output/benchmark_results.yaml\"")?;
-        writeln!(yaml, "          - benchmark_collection")?;
-        writeln!(yaml, "      after_loop_iteration_fails:")?;
-        writeln!(yaml, "        log:")?;
-        writeln!(
-            yaml,
-            "          to_file_path: \"./docs/benchmarks/outputs/logs/benchmark-errors.log\""
-        )?;
-        writeln!(yaml, "          event_fields: [iteration, current_model, error_message]")?;
-        writeln!(yaml, "    output:")?;
-        writeln!(yaml, "      save_to: benchmark_results")?;
+        writeln!(yaml, "    - step: benchmark_loop")?;
+        writeln!(yaml, "      id: bench_loop")?;
+        writeln!(yaml, "      loop:")?;
+        writeln!(yaml, "        count:")?;
+        writeln!(yaml, "          max_iterations: {}", n)?;
+        writeln!(yaml, "          iteration_variable: current_model")?;
+        writeln!(yaml, "      input:")?;
+        writeln!(yaml, r#"        model_path: "{{{{loop.current_model}}}}""#)?;
+        writeln!(yaml, "      when:")?;
+        writeln!(yaml, "        before_step_starts:")?;
+        writeln!(yaml, "          log:")?;
+        writeln!(yaml, "            to_file_path: \"./docs/benchmarks/outputs/logs/benchmark.log\"")?;
+        writeln!(yaml, "            event_fields: [step_name, loop_iteration, current_model]")?;
+        writeln!(yaml, "        after_step_succeeds:")?;
+        writeln!(yaml, "          append_to:")?;
+        writeln!(yaml, "            - \"./docs/benchmarks/outputs/output/benchmark_results.yaml\"")?;
+        writeln!(yaml, "            - benchmark_collection")?;
+        writeln!(yaml, "        after_loop_iteration_fails:")?;
+        writeln!(yaml, "          log:")?;
+        writeln!(yaml, "            to_file_path: \"./docs/benchmarks/outputs/logs/benchmark-errors.log\"")?;
+        writeln!(yaml, "            event_fields: [iteration, current_model, error_message]")?;
+        writeln!(yaml, "      output:")?;
+        writeln!(yaml, "        save_to: benchmark_results")?;
         writeln!(yaml)?;
 
         // Agentic document refinement step
-        writeln!(yaml, "  - step: refine_document")?;
-        writeln!(yaml, "    id: doc_refine")?;
-        writeln!(yaml, "    generative_entity: \"${{models.primary}}\"")?;
-        writeln!(yaml, "    requires: [bench_loop]")?;
-        writeln!(yaml, "    loop:")?;
-        writeln!(yaml, "      count:")?;
-        writeln!(yaml, "        max_iterations: {}", n)?;
-        writeln!(yaml, "        iteration_variable: current_model")?;
-        writeln!(yaml, "    input:")?;
-        writeln!(yaml, "      file_path: \"./docs/benchmarks/plans/01-IMPLEMENTATION-PLAN.md\"")?;
-        writeln!(yaml, "      chunk_size: 4000")?;
-        writeln!(yaml, "      oscillations: 3")?;
-        writeln!(yaml, "      overlap: 200")?;
-        writeln!(yaml, "    prompts:")?;
-        writeln!(yaml, "      summarize: |")?;
-        writeln!(yaml, "        Summarize the following text, extracting key technical points.")?;
-        writeln!(yaml, "        Keep: numbers, paths, function names, struct fields, error messages.")?;
-        writeln!(yaml, "        Drop: filler, hedging, repetition, transitions.")?;
-        writeln!(yaml, "        Target: 2000 chars max.")?;
+        writeln!(yaml, "    - step: refine_document")?;
+        writeln!(yaml, "      id: doc_refine")?;
+        writeln!(yaml, "      generative_entity: \"${{models.primary}}\"")?;
+        writeln!(yaml, "      requires: [bench_loop]")?;
+        writeln!(yaml, "      loop:")?;
+        writeln!(yaml, "        count:")?;
+        writeln!(yaml, "          max_iterations: {}", n)?;
+        writeln!(yaml, "          iteration_variable: current_model")?;
+        writeln!(yaml, "      input:")?;
+        writeln!(yaml, "        file_path: \"./docs/benchmarks/plans/01-IMPLEMENTATION-PLAN.md\"")?;
+        writeln!(yaml, "        chunk_size: 4000")?;
+        writeln!(yaml, "        oscillations: 3")?;
+        writeln!(yaml, "        overlap: 200")?;
+        writeln!(yaml, "      prompts:")?;
+        writeln!(yaml, "        summarize: |")?;
+        writeln!(yaml, "          Summarize the following text, extracting key technical points.")?;
+        writeln!(yaml, "          Keep: numbers, paths, function names, struct fields, error messages.")?;
+        writeln!(yaml, "          Drop: filler, hedging, repetition, transitions.")?;
+        writeln!(yaml, "          Target: 2000 chars max.")?;
         writeln!(yaml)?;
-        writeln!(yaml, "        Text:")?;
-        writeln!(yaml, "        {{{{loop.previous_output}}}}")?;
-        writeln!(yaml, "      expand: |")?;
-        writeln!(yaml, "        Expand on this summary by adding implementation detail, edge cases,")?;
-        writeln!(yaml, "        and performance considerations a senior engineer would expect.")?;
-        writeln!(yaml, "        Keep all existing technical facts. Target: 3000 chars max.")?;
+        writeln!(yaml, "          Text:")?;
+        writeln!(yaml, "          {{{{loop.previous_output}}}}")?;
+        writeln!(yaml, "        expand: |")?;
+        writeln!(yaml, "          Expand on this summary by adding implementation detail, edge cases,")?;
+        writeln!(yaml, "          and performance considerations a senior engineer would expect.")?;
+        writeln!(yaml, "          Keep all existing technical facts. Target: 3000 chars max.")?;
         writeln!(yaml)?;
-        writeln!(yaml, "        Summary:")?;
-        writeln!(yaml, "        {{{{loop.previous_output}}}}")?;
-        writeln!(yaml, "    output:")?;
-        writeln!(yaml, "      save_to: refined_plans")?;
-        writeln!(yaml, "      format: text")?;
-        writeln!(yaml, "      path: \"./docs/benchmarks/outputs/output/refined_plan_{{{{loop.current_model}}}}.md\"")?;
+        writeln!(yaml, "          Summary:")?;
+        writeln!(yaml, "          {{{{loop.previous_output}}}}")?;
+        writeln!(yaml, "      output:")?;
+        writeln!(yaml, "        save_to: refined_plans")?;
+        writeln!(yaml, "        format: text")?;
+        writeln!(yaml, r#"        path: "./docs/benchmarks/outputs/output/refined_plan_{{{{loop.current_model}}}}.md""#)?;
         writeln!(yaml)?;
 
         // Generate report step
-        writeln!(yaml, "  - step: generate_report")?;
-        writeln!(yaml, "    id: report")?;
-        writeln!(yaml, "    input:")?;
-        writeln!(yaml, r#"      results: "${{step.bench_loop.output}}""#)?;
-        writeln!(yaml, "    output:")?;
-        writeln!(yaml, "      save_to:")?;
-        writeln!(yaml, "        - final_report")?;
-        writeln!(yaml, r#"        - "./docs/benchmarks/outputs/output/benchmark_report.json""#)?;
+        writeln!(yaml, "    - step: generate_report")?;
+        writeln!(yaml, "      id: report")?;
+        writeln!(yaml, "      input:")?;
+        writeln!(yaml, r#"        results: "${{step.bench_loop.output}}""#)?;
+        writeln!(yaml, "      output:")?;
+        writeln!(yaml, "        save_to:")?;
+        writeln!(yaml, "          - final_report")?;
+        writeln!(yaml, r#"          - "./docs/benchmarks/outputs/output/benchmark_report.json""#)?;
 
-        info!("[yaml_generator] generated {} bytes of YAML", yaml.len());
-        Ok(yaml)
+        let yaml_str = yaml.to_string();
+        info!("[yaml_generator] Generated {} steps, {} bytes", 4, yaml_str.len());
+
+        match crate::workflow::WorkflowFile::from_yaml(&yaml_str) {
+            Ok(_) => info!("[yaml_generator] Generated YAML passed schema validation"),
+            Err(e) => {
+                warn!("[yaml_generator] Generated YAML schema validation warning: {}", e);
+                debug!("[yaml_generator] YAML preview: {}", yaml_str.chars().take(500).collect::<String>());
+            }
+        }
+
+        Ok(yaml_str)
     }
 
     /// Generate benchmark YAML with custom models list embedded.
     ///
     /// This is for pre-selected model sets (not using discovery).
     pub fn generate_benchmark_yaml_with_models(
-        _name: &str,
+        name: &str,
         models: &[ModelCandidate],
-        _prompts: &[&str],
-        _max_tokens: usize,
+        prompts: &[&str],
+        max_tokens: usize,
     ) -> Result<String> {
-        Self::generate_benchmark_yaml_with_models_config(_name, models, _prompts, _max_tokens, &BenchmarkYamlConfig::default())
+        Self::generate_benchmark_yaml_with_models_config(name, models, prompts, max_tokens, &BenchmarkYamlConfig::default())
     }
 
     pub fn generate_benchmark_yaml_with_models_config(
-        _name: &str,
+        name: &str,
         models: &[ModelCandidate],
-        _prompts: &[&str],
-        _max_tokens: usize,
+        prompts: &[&str],
+        max_tokens: usize,
         config: &BenchmarkYamlConfig,
     ) -> Result<String> {
         let n = models.len();
+        info!("[yaml_generator] Input: name={}, models={}, prompts={}, max_tokens={}", name, n, prompts.len(), max_tokens);
+
         let mut yaml = String::new();
 
         // Header
@@ -281,54 +288,65 @@ impl BenchmarkYamlGenerator {
 
         // Agentic workflow with loop
         writeln!(yaml, "agentic_workflow:")?;
-        writeln!(yaml, "  - step: benchmark_loop")?;
-        writeln!(yaml, "    id: bench_loop")?;
-        writeln!(yaml, "    loop:")?;
-        writeln!(yaml, "      count:")?;
-        writeln!(yaml, "        max_iterations: {}", n)?;
-        writeln!(yaml, "        iteration_variable: current_model")?;
-        writeln!(yaml, "    input:")?;
-        writeln!(yaml, "    output:")?;
-        writeln!(yaml, "      save_to: benchmark_results")?;
+        writeln!(yaml, "  steps:")?;
+
+        writeln!(yaml, "    - step: benchmark_loop")?;
+        writeln!(yaml, "      id: bench_loop")?;
+        writeln!(yaml, "      loop:")?;
+        writeln!(yaml, "        count:")?;
+        writeln!(yaml, "          max_iterations: {}", n)?;
+        writeln!(yaml, "          iteration_variable: current_model")?;
+        writeln!(yaml, "      input:")?;
+        writeln!(yaml, "      output:")?;
+        writeln!(yaml, "        save_to: benchmark_results")?;
         writeln!(yaml)?;
 
-        // Agentic document refinement step
-        writeln!(yaml, "  - step: refine_document")?;
-        writeln!(yaml, "    id: doc_refine")?;
-        writeln!(yaml, "    generative_entity: \"${{models.primary}}\"")?;
-        writeln!(yaml, "    requires: [bench_loop]")?;
-        writeln!(yaml, "    loop:")?;
-        writeln!(yaml, "      count:")?;
-        writeln!(yaml, "        max_iterations: {}", n)?;
-        writeln!(yaml, "        iteration_variable: current_model")?;
-        writeln!(yaml, "    input:")?;
-        writeln!(yaml, "      file_path: \"./docs/benchmarks/plans/01-IMPLEMENTATION-PLAN.md\"")?;
-        writeln!(yaml, "      chunk_size: 4000")?;
-        writeln!(yaml, "      oscillations: 3")?;
-        writeln!(yaml, "      overlap: 200")?;
-        writeln!(yaml, "    prompts:")?;
-        writeln!(yaml, "      summarize: |")?;
-        writeln!(yaml, "        Summarize the following text, extracting key technical points.")?;
-        writeln!(yaml, "        Keep: numbers, paths, function names, struct fields, error messages.")?;
-        writeln!(yaml, "        Drop: filler, hedging, repetition, transitions.")?;
-        writeln!(yaml, "        Target: 2000 chars max.")?;
+        writeln!(yaml, "    - step: refine_document")?;
+        writeln!(yaml, "      id: doc_refine")?;
+        writeln!(yaml, "      generative_entity: \"${{models.primary}}\"")?;
+        writeln!(yaml, "      requires: [bench_loop]")?;
+        writeln!(yaml, "      loop:")?;
+        writeln!(yaml, "        count:")?;
+        writeln!(yaml, "          max_iterations: {}", n)?;
+        writeln!(yaml, "          iteration_variable: current_model")?;
+        writeln!(yaml, "      input:")?;
+        writeln!(yaml, "        file_path: \"./docs/benchmarks/plans/01-IMPLEMENTATION-PLAN.md\"")?;
+        writeln!(yaml, "        chunk_size: 4000")?;
+        writeln!(yaml, "        oscillations: 3")?;
+        writeln!(yaml, "        overlap: 200")?;
+        writeln!(yaml, "      prompts:")?;
+        writeln!(yaml, "        summarize: |")?;
+        writeln!(yaml, "          Summarize the following text, extracting key technical points.")?;
+        writeln!(yaml, "          Keep: numbers, paths, function names, struct fields, error messages.")?;
+        writeln!(yaml, "          Drop: filler, hedging, repetition, transitions.")?;
+        writeln!(yaml, "          Target: 2000 chars max.")?;
         writeln!(yaml)?;
-        writeln!(yaml, "        Text:")?;
-        writeln!(yaml, "        {{{{loop.previous_output}}}}")?;
-        writeln!(yaml, "      expand: |")?;
-        writeln!(yaml, "        Expand on this summary by adding implementation detail, edge cases,")?;
-        writeln!(yaml, "        and performance considerations a senior engineer would expect.")?;
-        writeln!(yaml, "        Keep all existing technical facts. Target: 3000 chars max.")?;
+        writeln!(yaml, "          Text:")?;
+        writeln!(yaml, "          {{{{loop.previous_output}}}}")?;
+        writeln!(yaml, "        expand: |")?;
+        writeln!(yaml, "          Expand on this summary by adding implementation detail, edge cases,")?;
+        writeln!(yaml, "          and performance considerations a senior engineer would expect.")?;
+        writeln!(yaml, "          Keep all existing technical facts. Target: 3000 chars max.")?;
         writeln!(yaml)?;
-        writeln!(yaml, "        Summary:")?;
-        writeln!(yaml, "        {{{{loop.previous_output}}}}")?;
-        writeln!(yaml, "    output:")?;
-        writeln!(yaml, "      save_to: refined_plans")?;
-        writeln!(yaml, "      format: text")?;
-        writeln!(yaml, "      path: \"./docs/benchmarks/outputs/output/refined_plan_{{{{loop.current_model}}}}.md\"")?;
-        writeln!(yaml)?;
+        writeln!(yaml, "          Summary:")?;
+        writeln!(yaml, "          {{{{loop.previous_output}}}}")?;
+        writeln!(yaml, "      output:")?;
+        writeln!(yaml, "        save_to: refined_plans")?;
+        writeln!(yaml, "        format: text")?;
+        writeln!(yaml, r#"        path: "./docs/benchmarks/outputs/output/refined_plan_{{{{loop.current_model}}}}.md""#)?;
 
-        Ok(yaml)
+        let yaml_str = yaml.to_string();
+        info!("[yaml_generator] Generated {} steps, {} bytes", 2, yaml_str.len());
+
+        match crate::workflow::WorkflowFile::from_yaml(&yaml_str) {
+            Ok(_) => info!("[yaml_generator] Generated YAML passed schema validation"),
+            Err(e) => {
+                warn!("[yaml_generator] Generated YAML schema validation warning: {}", e);
+                debug!("[yaml_generator] YAML preview: {}", yaml_str.chars().take(500).collect::<String>());
+            }
+        }
+
+        Ok(yaml_str)
     }
 
     /// Generate benchmark YAML with GPU/CPU comparison mode.
@@ -347,23 +365,23 @@ impl BenchmarkYamlGenerator {
     ///
     /// YAML is valid YAML syntax. Does not validate against UnifiedConfig.
     pub fn generate_benchmark_yaml_gpu_cpu_compare(
-        _name: &str,
+        name: &str,
         models: &[ModelCandidate],
-        _prompts: &[&str],
-        _max_tokens: usize,
+        prompts: &[&str],
+        max_tokens: usize,
     ) -> Result<String> {
-        Self::generate_benchmark_yaml_gpu_cpu_compare_config(_name, models, _prompts, _max_tokens, &BenchmarkYamlConfig::default())
+        Self::generate_benchmark_yaml_gpu_cpu_compare_config(name, models, prompts, max_tokens, &BenchmarkYamlConfig::default())
     }
 
     pub fn generate_benchmark_yaml_gpu_cpu_compare_config(
-        _name: &str,
+        name: &str,
         models: &[ModelCandidate],
-        _prompts: &[&str],
-        _max_tokens: usize,
+        prompts: &[&str],
+        max_tokens: usize,
         config: &BenchmarkYamlConfig,
     ) -> Result<String> {
         let n = models.len();
-        info!("[yaml_generator] generating GPU/CPU compare benchmark YAML for {} models", n);
+        info!("[yaml_generator] Input: name={}, models={}, prompts={}, max_tokens={}", name, n, prompts.len(), max_tokens);
 
         let mut yaml = String::new();
 
