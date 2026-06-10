@@ -1,0 +1,145 @@
+workflow_id: json_generator_benchmark
+name: "JSON Generator Benchmark"
+description: "Reads Cargo.toml, extracts dependencies, outputs structured JSON. Tests model ability to follow exact output format."
+version: "1.0.0"
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  "worker":
+    name: "MODEL_PLACEHOLDER"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: true
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+
+  steps:
+    step_01_read_file:
+      generative_entity: "${models.worker}"
+      prompt: |
+        Here is the content of a TOML file:
+
+        {{bookmarks.shell_output.stdout}}
+
+        Extract ALL dependency entries from the [dependencies] section. For EACH dependency, output EXACTLY one line in this format:
+
+        DEP|<name>|<version_or_source>
+
+        Where:
+        - <name> is the dependency crate name
+        - <version_or_source> is the version number (e.g., "1.0") or source path/git reference
+
+        If a dependency uses a table format (like serde = { version = "1", features = [...] }), extract the version from inside the braces.
+
+        Output ONLY lines in the DEP|name|version format. No headers, no explanations, no markdown.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 2000
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat Cargo.toml"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: false
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/output/step_01_deps_raw-output.txt"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/json-bench.log"
+              event_fields: [step_name, duration_ms, token_count]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/json-bench.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_02_format_json:
+      generative_entity: "${models.worker}"
+      depends_on: [step_01_read_file]
+      prompt: |
+        Convert the following dependency list into a JSON object. Each dependency becomes a key-value pair where the key is the crate name and the value is an object with a "version" field.
+
+        INPUT:
+        {{step.step_01_read_file.output}}
+
+        OUTPUT FORMAT (follow EXACTLY):
+        {
+          "dependencies": {
+            "crate_name": {"version": "x.y.z"},
+            ...
+          },
+          "total_count": <number>,
+          "model_name": "your model name here"
+        }
+
+        RULES:
+        1. Output ONLY valid JSON. No markdown fences. No explanations.
+        2. The first character must be { and the last must be }
+        3. All keys and string values must be in double quotes
+        4. total_count must equal the number of dependencies
+        5. Sort dependencies alphabetically by crate name
+        6. If a dependency has no explicit version (e.g., path reference), use "path" as the version value
+
+        Output ONLY the JSON object. Nothing else.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 3000
+      when:
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/output/step_02_json-output.txt"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/json-bench.log"
+              event_fields: [step_name, duration_ms, token_count]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/json-bench.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_03_save_result:
+      generative_entity: "${models.worker}"
+      depends_on: [step_02_format_json]
+      prompt: |
+        You are a JSON validator and finalizer. Take the JSON below and output it exactly as-is, but:
+        1. Remove any markdown fences (```json or ```)
+        2. Remove any text before the first { or after the last }
+        3. Remove any trailing commas before } or ]
+        4. Ensure the result is valid JSON
+
+        INPUT JSON:
+        {{step.step_02_format_json.output}}
+
+        Output ONLY the cleaned JSON. First character: {. Last character: }.
+      model_overrides:
+        temperature: 0.05
+        max_tokens: 3000
+      when:
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/output/final-result.json"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/json-bench.log"
+              event_fields: [step_name, duration_ms, token_count]
+              level: info
+          - bookmark: true
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/logs/json-bench.log"
+              event_fields: [step_name, error_message]
+              level: error
