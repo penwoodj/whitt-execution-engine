@@ -1,0 +1,75 @@
+# ═══════════════════════════════════════════════════════════════════
+# Iteration 5A — Two-Step Sequential Workflow
+# Tests: multi-step, {{step.STEP_ID.output}} interpolation, bookmarks
+# Step 1: Generate a book title JSON
+# Step 2: Summarize the book title from step 1 output
+# ═══════════════════════════════════════════════════════════════════
+
+workflow_id: iter5a-two-step
+name: "Two-Step Sequential Book Workflow"
+description: "Generate book JSON then summarize it using previous step output"
+version: "2.0.0"
+author: "Whitt Execution Engine"
+tags: [test, iteration-5, multi-step, interpolation]
+min_schema_version: "2.0.0"
+schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  "qwen-05b":
+    name: "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: true
+
+agentic_workflow:
+  steps:
+    generate_title:
+      generative_entity: "${models.qwen-05b}"
+      prompt: |
+        Output a single JSON object with exactly 2 fields:
+        - "title": a famous book title (just the title string, nothing else)
+        - "year": the publication year as a number
+
+        Output ONLY the JSON. No markdown. No code fences. No explanation.
+      model_overrides:
+        max_tokens: 100
+        temperature: 0.3
+      when:
+        before_workflow:
+          - log:
+              event_fields: [workflow_id, step_count]
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/output/iter5a-{{step.step_name}}.json"
+          - bookmark: true
+          - log:
+              event_fields: [step_name, duration_ms, json_parsable]
+
+    summarize_title:
+      depends_on: [generate_title]
+      generative_entity: "${models.qwen-05b}"
+      prompt: |
+        A book was described as: {{step.generate_title.output}}
+
+        In one short sentence, describe what this book is about.
+        Output plain text only. No JSON. No markdown.
+      model_overrides:
+        max_tokens: 100
+        temperature: 0.3
+      when:
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/output/iter5a-{{step.step_name}}.txt"
+          - log:
+              event_fields: [step_name, duration_ms, output]
+        after_workflow:
+          - log:
+              event_fields: [workflow_id, total_steps, succeeded, failed, correctness, quality]

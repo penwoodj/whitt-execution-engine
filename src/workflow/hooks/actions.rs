@@ -16,6 +16,25 @@ use std::io::Write;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::info;
+use regex::Regex;
+
+/// Resolve {{step.FIELD_NAME}} templates from WorkflowHookContext.
+///
+/// Replaces placeholders like {{step.step_name}}, {{step.model_name}} with actual values
+/// extracted from the context via get_field().
+fn resolve_context_templates(template: &str, context: &WorkflowHookContext) -> String {
+    let re = Regex::new(r"\{\{step\.([^}]+)\}\}").unwrap();
+    let mut result = template.to_string();
+    for cap in re.captures_iter(template) {
+        if let Some(field_name) = cap.get(1) {
+            let placeholder = cap.get(0).unwrap().as_str();
+            if let Some(value) = context.get_field(field_name.as_str()) {
+                result = result.replace(placeholder, &value);
+            }
+        }
+    }
+    result
+}
 
 /// Execute a single hook action.
 ///
@@ -64,8 +83,9 @@ fn execute_log(
 
     // Write to file if path specified
     if let Some(ref path) = action.to_file_path {
-        if let Err(e) = write_log_to_file(path, &log_content) {
-            eprintln!("Failed to write log to {}: {}", path, e);
+        let resolved_path = resolve_context_templates(path, context);
+        if let Err(e) = write_log_to_file(&resolved_path, &log_content) {
+            eprintln!("Failed to write log to {}: {}", resolved_path, e);
         }
     }
 
@@ -147,6 +167,7 @@ fn execute_append_to(
                 let existing = engine.get_bookmark(var_key)
                     .and_then(|v| v.as_str().map(String::from))
                     .unwrap_or_default();
+
                 let combined = if existing.is_empty() {
                     output.clone()
                 } else {
@@ -154,20 +175,21 @@ fn execute_append_to(
                 };
                 engine.store_bookmark(var_key.to_string(), serde_json::Value::String(combined));
             } else {
-                if let Err(e) = append_to_file(var_name, &output) {
-                    eprintln!("Failed to append to {}: {}", var_name, e);
+                let resolved_path = resolve_context_templates(var_name, context);
+                if let Err(e) = append_to_file(&resolved_path, &output) {
+                    eprintln!("Failed to append to {}: {}", resolved_path, e);
                 }
             }
         }
         AppendToAction::FilePath(path) => {
-            if let Err(e) = append_to_file(path, &output) {
-                eprintln!("Failed to append to {}: {}", path, e);
+            let resolved_path = resolve_context_templates(path, context);
+            if let Err(e) = append_to_file(&resolved_path, &output) {
+                eprintln!("Failed to append to {}: {}", resolved_path, e);
             }
         }
         AppendToAction::Both(targets) => {
             for target in targets {
                 if let Some(var_name) = target.strip_prefix('$') {
-                    // Variable reference
                     let existing = engine.get_bookmark(var_name)
                         .and_then(|v| v.as_str().map(String::from))
                         .unwrap_or_default();
@@ -178,9 +200,9 @@ fn execute_append_to(
                     };
                     engine.store_bookmark(var_name.to_string(), serde_json::Value::String(combined));
                 } else {
-                    // File path
-                    if let Err(e) = append_to_file(target, &output) {
-                        eprintln!("Failed to append to {}: {}", target, e);
+                    let resolved_path = resolve_context_templates(target, context);
+                    if let Err(e) = append_to_file(&resolved_path, &output) {
+                        eprintln!("Failed to append to {}: {}", resolved_path, e);
                     }
                 }
             }
@@ -227,14 +249,16 @@ fn execute_save_to(
             if let Some(var_key) = var_name.strip_prefix('$') {
                 engine.store_bookmark(var_key.to_string(), json_value);
             } else {
-                if let Err(e) = save_to_file(var_name, &output) {
-                    eprintln!("Failed to save to {}: {}", var_name, e);
+                let resolved_path = resolve_context_templates(var_name, context);
+                if let Err(e) = save_to_file(&resolved_path, &output) {
+                    eprintln!("Failed to save to {}: {}", resolved_path, e);
                 }
             }
         }
         SaveToAction::FilePath(path) => {
-            if let Err(e) = save_to_file(path, &output) {
-                eprintln!("Failed to save to {}: {}", path, e);
+            let resolved_path = resolve_context_templates(path, context);
+            if let Err(e) = save_to_file(&resolved_path, &output) {
+                eprintln!("Failed to save to {}: {}", resolved_path, e);
             }
         }
         SaveToAction::Both(targets) => {
@@ -242,8 +266,9 @@ fn execute_save_to(
                 if let Some(var_name) = target.strip_prefix('$') {
                     engine.store_bookmark(var_name.to_string(), json_value.clone());
                 } else {
-                    if let Err(e) = save_to_file(target, &output) {
-                        eprintln!("Failed to save to {}: {}", target, e);
+                    let resolved_path = resolve_context_templates(target, context);
+                    if let Err(e) = save_to_file(&resolved_path, &output) {
+                        eprintln!("Failed to save to {}: {}", resolved_path, e);
                     }
                 }
             }
@@ -299,13 +324,13 @@ fn execute_bookmark(
 
     engine.store_bookmark(step_name.clone(), json_value);
 
-    let file_path: Option<&str> = match action {
+    let file_path: Option<String> = match action {
         BookmarkAction::Flag(_) => None,
-        BookmarkAction::Path(path) => Some(path),
-        BookmarkAction::Detailed(detail) => detail.path.as_deref(),
+        BookmarkAction::Path(path) => Some(resolve_context_templates(path, context)),
+        BookmarkAction::Detailed(detail) => detail.path.as_ref().map(|p| resolve_context_templates(p, context)),
     };
 
-    if let Some(path) = file_path {
+    if let Some(ref path) = file_path {
         if let Err(e) = save_to_file(path, &formatted_json) {
             eprintln!("Failed to write bookmark to {}: {}", path, e);
         }
@@ -1551,5 +1576,37 @@ mod tests {
         assert!(result.is_continue());
         let bookmark = engine.get_bookmark("shell_output").expect("bookmark");
         assert_eq!(bookmark["stdout"].as_str().unwrap().trim(), "test_value_123");
+    }
+
+    #[test]
+    fn given_save_to_with_step_template_when_execute_then_resolves_template() {
+        let temp_dir = TempDir::new().unwrap();
+        let path_template = temp_dir.path()
+            .join("outputs/{{step.step_name}}-{{step.model_name}}.json")
+            .to_string_lossy()
+            .to_string();
+        let action = SaveToAction::FilePath(path_template.clone());
+        let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+            step_name: "test_step".to_string(),
+            output: "{\"result\":\"success\"}".to_string(),
+            duration_ms: 100,
+            quality_score: None,
+            token_count: 10,
+            model_name: "TestModel.gguf".to_string(),
+        });
+        let mut engine = HookEngine::new();
+
+        let result = execute_save_to(&action, &context, &mut engine);
+
+        assert_eq!(result, HookResult::Continue);
+
+        let expected_path = temp_dir.path()
+            .join("outputs/test_step-TestModel.gguf.json")
+            .to_string_lossy()
+            .to_string();
+        assert!(Path::new(&expected_path).exists());
+
+        let content = fs::read_to_string(&expected_path).unwrap();
+        assert!(content.contains("success"));
     }
 }

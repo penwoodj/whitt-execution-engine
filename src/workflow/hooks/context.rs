@@ -331,6 +331,75 @@ impl AfterLoopIterationFailsContext {
     }
 }
 
+/// Context for `before_workflow` trigger.
+#[derive(Debug, Clone)]
+pub struct BeforeWorkflowContext {
+    pub workflow_id: String,
+    pub step_count: usize,
+    pub model_count: usize,
+    pub models: Vec<String>,
+}
+
+impl BeforeWorkflowContext {
+    pub fn to_json_value(&self) -> JsonValue {
+        serde_json::json!({
+            "workflow_id": self.workflow_id,
+            "step_count": self.step_count,
+            "model_count": self.model_count,
+            "models": self.models,
+        })
+    }
+
+    pub fn get_field(&self, field: &str) -> Option<String> {
+        match field {
+            "workflow_id" => Some(self.workflow_id.clone()),
+            "step_count" => Some(self.step_count.to_string()),
+            "model_count" => Some(self.model_count.to_string()),
+            "models" => Some(self.models.join(", ")),
+            _ => None,
+        }
+    }
+}
+
+/// Context for `after_workflow` trigger.
+#[derive(Debug, Clone)]
+pub struct AfterWorkflowContext {
+    pub workflow_id: String,
+    pub total_steps: usize,
+    pub succeeded: usize,
+    pub failed: usize,
+    pub duration_ms: u64,
+    pub correctness: String,
+    pub quality: String,
+}
+
+impl AfterWorkflowContext {
+    pub fn to_json_value(&self) -> JsonValue {
+        serde_json::json!({
+            "workflow_id": self.workflow_id,
+            "total_steps": self.total_steps,
+            "succeeded": self.succeeded,
+            "failed": self.failed,
+            "duration_ms": self.duration_ms,
+            "correctness": self.correctness,
+            "quality": self.quality,
+        })
+    }
+
+    pub fn get_field(&self, field: &str) -> Option<String> {
+        match field {
+            "workflow_id" => Some(self.workflow_id.clone()),
+            "total_steps" => Some(self.total_steps.to_string()),
+            "succeeded" => Some(self.succeeded.to_string()),
+            "failed" => Some(self.failed.to_string()),
+            "duration_ms" => Some(self.duration_ms.to_string()),
+            "correctness" => Some(self.correctness.clone()),
+            "quality" => Some(self.quality.clone()),
+            _ => None,
+        }
+    }
+}
+
 /// Workflow hook context enum wrapping all specific trigger contexts.
 #[derive(Debug, Clone)]
 pub enum WorkflowHookContext {
@@ -344,6 +413,8 @@ pub enum WorkflowHookContext {
     AfterGwtEvaluates(AfterGwtEvaluatesContext),
     OnRequiresFailed(OnRequiresFailedContext),
     AfterLoopIterationFails(AfterLoopIterationFailsContext),
+    BeforeWorkflow(BeforeWorkflowContext),
+    AfterWorkflow(AfterWorkflowContext),
 }
 
 impl WorkflowHookContext {
@@ -359,6 +430,8 @@ impl WorkflowHookContext {
             WorkflowHookContext::AfterGwtEvaluates(_) => "after_gwt_evaluates",
             WorkflowHookContext::OnRequiresFailed(_) => "on_requires_failed",
             WorkflowHookContext::AfterLoopIterationFails(_) => "after_loop_iteration_fails",
+            WorkflowHookContext::BeforeWorkflow(_) => "before_workflow",
+            WorkflowHookContext::AfterWorkflow(_) => "after_workflow",
         }
     }
 
@@ -374,6 +447,8 @@ impl WorkflowHookContext {
             WorkflowHookContext::AfterGwtEvaluates(ctx) => ctx.to_json_value(),
             WorkflowHookContext::OnRequiresFailed(ctx) => ctx.to_json_value(),
             WorkflowHookContext::AfterLoopIterationFails(ctx) => ctx.to_json_value(),
+            WorkflowHookContext::BeforeWorkflow(ctx) => ctx.to_json_value(),
+            WorkflowHookContext::AfterWorkflow(ctx) => ctx.to_json_value(),
         }
     }
 
@@ -389,6 +464,8 @@ impl WorkflowHookContext {
             WorkflowHookContext::AfterGwtEvaluates(ctx) => ctx.get_field(field),
             WorkflowHookContext::OnRequiresFailed(ctx) => ctx.get_field(field),
             WorkflowHookContext::AfterLoopIterationFails(ctx) => ctx.get_field(field),
+            WorkflowHookContext::BeforeWorkflow(ctx) => ctx.get_field(field),
+            WorkflowHookContext::AfterWorkflow(ctx) => ctx.get_field(field),
         }
     }
 }
@@ -946,6 +1023,21 @@ mod tests {
                 error_message: "e".to_string(),
                 loop_type: "l".to_string(),
             }),
+            WorkflowHookContext::BeforeWorkflow(BeforeWorkflowContext {
+                workflow_id: "wf".to_string(),
+                step_count: 1,
+                model_count: 1,
+                models: vec![],
+            }),
+            WorkflowHookContext::AfterWorkflow(AfterWorkflowContext {
+                workflow_id: "wf".to_string(),
+                total_steps: 1,
+                succeeded: 1,
+                failed: 0,
+                duration_ms: 100,
+                correctness: "PASS".to_string(),
+                quality: "GOOD".to_string(),
+            }),
         ];
 
         // When: Collecting all trigger names
@@ -953,7 +1045,7 @@ mod tests {
 
         // Then: All names are unique
         let unique_names: std::collections::HashSet<_> = names.into_iter().collect();
-        assert_eq!(unique_names.len(), 10);
+        assert_eq!(unique_names.len(), 12);
     }
 
     // --------------------------------------------------------------------------
@@ -1169,5 +1261,172 @@ mod tests {
         assert_eq!(iteration, Some("3".to_string()));
         assert_eq!(error_message, Some("Iteration failed".to_string()));
         assert_eq!(loop_type, Some("validation".to_string()));
+    }
+
+    #[test]
+    fn before_workflow_to_json_value_contains_all_fields() {
+        // Given: Context with all fields populated
+        let context = BeforeWorkflowContext {
+            workflow_id: "test-workflow".to_string(),
+            step_count: 5,
+            model_count: 3,
+            models: vec!["model-a".to_string(), "model-b".to_string()],
+        };
+
+        // When: Converting to JSON
+        let json = context.to_json_value();
+
+        // Then: JSON contains all fields
+        assert_eq!(json["workflow_id"], "test-workflow");
+        assert_eq!(json["step_count"], 5);
+        assert_eq!(json["model_count"], 3);
+        assert_eq!(json["models"][0], "model-a");
+    }
+
+    #[test]
+    fn before_workflow_get_field_returns_correct_values() {
+        // Given: Context with fields
+        let context = BeforeWorkflowContext {
+            workflow_id: "wf-1".to_string(),
+            step_count: 2,
+            model_count: 1,
+            models: vec!["m1".to_string()],
+        };
+
+        // When: Getting fields
+        let workflow_id = context.get_field("workflow_id");
+        let step_count = context.get_field("step_count");
+        let models = context.get_field("models");
+
+        // Then: Returns correct values
+        assert_eq!(workflow_id, Some("wf-1".to_string()));
+        assert_eq!(step_count, Some("2".to_string()));
+        assert_eq!(models, Some("m1".to_string()));
+    }
+
+    #[test]
+    fn before_workflow_get_field_returns_none_for_missing() {
+        // Given: Context
+        let context = BeforeWorkflowContext {
+            workflow_id: "wf".to_string(),
+            step_count: 1,
+            model_count: 1,
+            models: vec![],
+        };
+
+        // When: Getting non-existent field
+        let result = context.get_field("nonexistent");
+
+        // Then: Returns None
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn before_workflow_trigger_name_is_correct() {
+        // Given: Context
+        let context = BeforeWorkflowContext {
+            workflow_id: "wf".to_string(),
+            step_count: 1,
+            model_count: 1,
+            models: vec![],
+        };
+
+        // When: Getting trigger name
+        let hook_ctx = WorkflowHookContext::BeforeWorkflow(context);
+        let name = hook_ctx.trigger_name();
+
+        // Then: Returns correct trigger name
+        assert_eq!(name, "before_workflow");
+    }
+
+    #[test]
+    fn after_workflow_to_json_value_contains_all_fields() {
+        // Given: Context with all fields
+        let context = AfterWorkflowContext {
+            workflow_id: "test-workflow".to_string(),
+            total_steps: 3,
+            succeeded: 2,
+            failed: 1,
+            duration_ms: 5000,
+            correctness: "FAIL".to_string(),
+            quality: "GOOD".to_string(),
+        };
+
+        // When: Converting to JSON
+        let json = context.to_json_value();
+
+        // Then: JSON contains all fields
+        assert_eq!(json["workflow_id"], "test-workflow");
+        assert_eq!(json["total_steps"], 3);
+        assert_eq!(json["succeeded"], 2);
+        assert_eq!(json["failed"], 1);
+        assert_eq!(json["duration_ms"], 5000);
+        assert_eq!(json["correctness"], "FAIL");
+        assert_eq!(json["quality"], "GOOD");
+    }
+
+    #[test]
+    fn after_workflow_get_field_returns_correct_values() {
+        // Given: Context with fields
+        let context = AfterWorkflowContext {
+            workflow_id: "wf-1".to_string(),
+            total_steps: 1,
+            succeeded: 1,
+            failed: 0,
+            duration_ms: 1000,
+            correctness: "PASS".to_string(),
+            quality: "GOOD".to_string(),
+        };
+
+        // When: Getting fields
+        let workflow_id = context.get_field("workflow_id");
+        let correctness = context.get_field("correctness");
+        let quality = context.get_field("quality");
+
+        // Then: Returns correct values
+        assert_eq!(workflow_id, Some("wf-1".to_string()));
+        assert_eq!(correctness, Some("PASS".to_string()));
+        assert_eq!(quality, Some("GOOD".to_string()));
+    }
+
+    #[test]
+    fn after_workflow_get_field_returns_none_for_missing() {
+        // Given: Context
+        let context = AfterWorkflowContext {
+            workflow_id: "wf".to_string(),
+            total_steps: 1,
+            succeeded: 1,
+            failed: 0,
+            duration_ms: 100,
+            correctness: "PASS".to_string(),
+            quality: "GOOD".to_string(),
+        };
+
+        // When: Getting non-existent field
+        let result = context.get_field("nonexistent");
+
+        // Then: Returns None
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn after_workflow_trigger_name_is_correct() {
+        // Given: Context
+        let context = AfterWorkflowContext {
+            workflow_id: "wf".to_string(),
+            total_steps: 1,
+            succeeded: 1,
+            failed: 0,
+            duration_ms: 100,
+            correctness: "PASS".to_string(),
+            quality: "GOOD".to_string(),
+        };
+
+        // When: Getting trigger name
+        let hook_ctx = WorkflowHookContext::AfterWorkflow(context);
+        let name = hook_ctx.trigger_name();
+
+        // Then: Returns correct trigger name
+        assert_eq!(name, "after_workflow");
     }
 }

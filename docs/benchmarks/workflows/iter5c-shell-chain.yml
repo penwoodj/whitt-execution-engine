@@ -1,0 +1,77 @@
+# ═══════════════════════════════════════════════════════════════════
+# Iteration 5C — Shell Action + Bookmark Chain
+# Tests: shell action, bookmark storage, multi-step with shell between
+# Step 1: Generate data → Step 2: Shell captures system info → Step 3: Generate summary
+# ═══════════════════════════════════════════════════════════════════
+
+workflow_id: iter5c-shell-chain
+name: "Shell Action Bookmark Chain"
+description: "Generate data, run shell command, then generate summary"
+version: "2.0.0"
+author: "Whitt Execution Engine"
+tags: [test, iteration-5, shell, bookmark, chain]
+min_schema_version: "2.0.0"
+schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  "qwen-05b":
+    name: "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: true
+
+agentic_workflow:
+  steps:
+    generate_topic:
+      generative_entity: "${models.qwen-05b}"
+      prompt: |
+        Output a single JSON object with exactly 2 fields:
+        - "topic": a programming language name (just the name)
+        - "type": either "compiled" or "interpreted"
+
+        Output ONLY the JSON. No markdown. No code fences.
+      model_overrides:
+        max_tokens: 50
+        temperature: 0.3
+      when:
+        before_workflow:
+          - log:
+              event_fields: [workflow_id, step_count]
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/output/iter5c-{{step.step_name}}.json"
+          - bookmark: true
+          - shell:
+              command: "echo"
+              args: ["step={{step.step_name}} model={{step.model_name}}"]
+          - log:
+              event_fields: [step_name, duration_ms, json_parsable]
+
+    summarize:
+      depends_on: [generate_topic]
+      generative_entity: "${models.qwen-05b}"
+      prompt: |
+        A programming language was described as: {{step.generate_topic.output}}
+
+        Write ONE sentence about why this language is useful.
+        Plain text only. No JSON.
+      model_overrides:
+        max_tokens: 100
+        temperature: 0.3
+      when:
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/output/iter5c-{{step.step_name}}.txt"
+          - log:
+              event_fields: [step_name, duration_ms, output]
+        after_workflow:
+          - log:
+              event_fields: [workflow_id, total_steps, succeeded, failed, correctness, quality]

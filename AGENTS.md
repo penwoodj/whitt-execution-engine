@@ -287,6 +287,61 @@ Document findings in format:
 
 ---
 
+## Generator Iteration Protocol (MANDATORY)
+
+When iterating on the YAML workflow generator, every iteration MUST follow this process:
+
+### Required Steps (no skipping)
+
+```
+1. Generate YAML workflow
+2. Validate YAML (schema_valid=true in logs)
+3. Run live workflow (`whitt benchmark --workflow <file>`)
+4. Inspect logs (`./scripts/analyze-run.sh LOG OUTPUT`)
+5. Bug/correctness analysis
+6. Quality analysis
+7. Validate iteration gate (`./scripts/validate-iteration.sh LOG OUTPUT YAML [PREV_LOG]`)
+8. Document in WORKFLOW_RELIABILITY_TRACKING.md
+9. Determine next action from allowed list
+```
+
+### Mandatory Evidence Gate
+
+Run `./scripts/validate-iteration.sh` — all 8 checks MUST pass before claiming improvement.
+
+If logs are missing or unclear:
+> "Cannot validate improvement because logs are insufficient."
+
+### Allowed Next Actions
+
+| Action | Trigger |
+|--------|---------|
+| Fix code bug | Engine correctness failures |
+| Improve generated YAML | Schema validation failure |
+| Improve generator logic | Generator produces low-quality YAML |
+| Improve hooks | Hook actions misbehave |
+| Improve logging | Cannot extract required metrics |
+| Improve test workflow | Need better test coverage |
+| Stop — acceptable | All gates pass |
+
+### When NOT to Claim Improvement
+
+- Did not run a live workflow → cannot validate
+- Log file missing or empty → cannot validate
+- No `[workflow:end]` event → run incomplete
+- `./scripts/validate-iteration.sh` failed → fix issues first
+- No comparison against previous iteration → no improvement proof
+
+### Tracking
+
+All iterations tracked in `WORKFLOW_RELIABILITY_TRACKING.md` with:
+- YAML path, log path, run ID
+- 8-point evidence checklist
+- Comparison table with numeric metrics
+- Next action (from allowed list only)
+
+---
+
 ## Lifecycle Hooks & Actions — Verification Gap Analysis
 
 **Last updated:** 2026-05-30
@@ -489,15 +544,18 @@ Tests use `execute_action()` directly (not via runner). Verify end-to-end action
 | UF-LIVE-01: Single model, save_to + log | Load → Infer → Hook(save_to, log) → Unload | after_step_succeeds | ✅ VERIFIED |
 | UF-LIVE-02: Two-step with interpolation | Step1(infer+save) → Interpolate → Step2(infer+save) | after_step_succeeds × 2 | ✅ VERIFIED |
 | UF-LIVE-03: Skip step via before_step_starts | before_step_starts(skip_step:true) → verify step skipped | before_step_starts | ❌ NOT TESTED |
-| UF-LIVE-04: Fail on error via after_step_fails | Intentional bad prompt → after_step_fails(fail) → verify error | after_step_fails | ❌ NOT TESTED |
+| UF-LIVE-04: Fail on error via after_step_fails | Bad model → after_step_fails(log+fail) → verify error | after_step_fails | ✅ VERIFIED (iter5b) |
 | UF-LIVE-05: GWT conditional routing | Step with quality_score → GWT evaluates → route_to branch | after_step_succeeds (GWT) | ❌ NOT TESTED |
-| UF-LIVE-06: Bookmark persistence | Step1(bookmark:true) → Step2 reads bookmark | after_step_succeeds (bookmark) | ❌ NOT TESTED |
+| UF-LIVE-06: Bookmark persistence | Step1(bookmark:true) → Step2 reads bookmark | after_step_succeeds (bookmark) | ✅ VERIFIED (iter5a, iter5c) |
 | UF-LIVE-07: Append accumulation | 3 steps each append_to same file | after_step_succeeds × 3 | ❌ NOT TESTED |
 | UF-LIVE-08: Multi-model benchmark | 3+ models, hook fires for each | after_step_succeeds × N | ⚠️ PARTIAL (log only) |
 | UF-LIVE-09: Notify coordination | Step1(notify) → parent workflow receives | after_step_succeeds (notify) | ❌ NOT TESTED (notify_tx stub) |
 | UF-LIVE-10: Streaming hooks | during_step_streaming fires per chunk | during_step_streaming | ❌ IMPOSSIBLE (not wired) |
 | UF-LIVE-11: Retry exhaustion | Step fails 3× → after_all_retries_exhausted fires | after_all_retries_exhausted | ❌ IMPOSSIBLE (not wired) |
 | UF-LIVE-12: Dependency chain failure | Step1 fails → on_requires_failed fires for Step2 | on_requires_failed | ❌ IMPOSSIBLE (not wired) |
+| UF-LIVE-13: Multi-step with interpolation | 2-step (generate+summarize), {{step.X.output}} resolved | before_workflow, after_step_succeeds × 2, after_workflow | ✅ VERIFIED (iter5a) |
+| UF-LIVE-14: Shell action chain | 2-step with shell echo between, bookmark+interpolation | after_step_succeeds (shell) | ✅ VERIFIED (iter5c) |
+| UF-LIVE-15: Workflow boundary hooks | before_workflow + after_workflow fire at correct points | before_workflow, after_workflow | ✅ VERIFIED (iter5a, 5b, 5c) |
 
 ---
 
@@ -507,11 +565,11 @@ Tests use `execute_action()` directly (not via runner). Verify end-to-end action
 
 | Category | Total Items | Unit ✅ | Integration ✅ | E2E ✅ | Live ✅ |
 |----------|-------------|---------|---------------|--------|---------|
-| **Actions (12 types)** | 12 | 12 (all have some test) | 11 (IterateValues missing) | 3 (Log, SaveTo, Bookmark) | 3 (Log, SaveTo, Bookmark) |
-| **Action variants (30+)** | ~35 | ~33 | ~16 | ~6 | ~5 |
-| **Triggers fired in runner** | 10 | 7 fully + 2 partial | 4 | 2 | 2 |
+| **Actions (12 types)** | 12 | 12 (all have some test) | 11 (IterateValues missing) | 5 (Log, SaveTo, Bookmark, Shell, Fail) | 5 (Log, SaveTo, Bookmark, Shell, Fail) |
+| **Action variants (30+)** | ~35 | ~33 | ~16 | ~8 | ~7 |
+| **Triggers fired in runner** | 10 | 7 fully + 2 partial | 4 | 4 | 4 |
 | **Triggers defined but NOT wired** | 1 | 1 (during_step_streaming) | 0 | 0 | 0 |
-| **Context structs** | 10 | 10 (to_json) | 4 | 2 | 2 |
+| **Context structs** | 10 | 10 (to_json) | 4 | 4 | 4 |
 | **HookResult variants** | 6 | 6 | 4 | 2 | 2 |
 | **GWT expressions** | ~40 patterns | ~35 | 5 | 0 | 0 |
 

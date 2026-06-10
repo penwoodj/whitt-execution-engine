@@ -1,6 +1,7 @@
 use crate::client::http_client::LlamaHttpClient;
 use crate::client::types::{ChatCompletionRequest, ChatMessage};
 use crate::client::disk_monitor;
+use crate::client::memory_monitor;
 use crate::agent::loop_hooks::HookContext;
 use crate::workflow::hooks::{HookEngine, HookResult};
 use crate::workflow::hooks::actions::execute_action;
@@ -61,6 +62,10 @@ fn default_model_load_timeout() -> Duration {
 #[allow(dead_code)]
 fn default_min_tmp_space_mb() -> u64 {
     1024
+}
+
+fn bytes_to_gb(bytes: u64) -> f64 {
+    bytes as f64 / 1_073_741_824.0
 }
 
 pub struct BenchmarkRunner {
@@ -274,6 +279,24 @@ impl BenchmarkRunner {
                 let msg = format!("Zombie process check failed: {}", e);
                 info!("[benchmark] ✗ {}", msg);
                 anyhow::bail!(crate::error::Error::benchmark(msg));
+            }
+        }
+
+        match memory_monitor::check_system_memory() {
+            Ok(info) => {
+                let available_gb = info.available_bytes as f64 / 1_073_741_824.0;
+                let total_gb = info.total_bytes as f64 / 1_073_741_824.0;
+                info!("[benchmark] ✓ memory check passed: {} GB available (total: {} GB)",
+                    available_gb, total_gb);
+
+                if info.available_bytes < 2_147_483_648 { // < 2GB warning
+                    warn!("[benchmark] ⚠ low memory warning: {:.1} GB available (< 2GB threshold)", available_gb);
+                }
+            }
+            Err(e) => {
+                let msg = format!("Memory check failed: {}", e);
+                info!("[benchmark] ✗ {}", msg);
+                warn!("[benchmark] proceeding without memory verification: {}", e);
             }
         }
 
@@ -3230,6 +3253,46 @@ impl BenchmarkRunner {
                 (model_source_path.to_string(), 0)
             }
         };
+
+        let default_context_tokens: u32 = 8192;
+        let safety_margin_bytes: u64 = 1_073_741_824; // 1GB
+
+        match memory_monitor::can_load_model(file_size, default_context_tokens, safety_margin_bytes) {
+            Ok(check) => {
+                info!("[benchmark] memory check: available {:.1}GB, required {:.1}GB (model {:.1}GB + KV cache {:.1}GB + safety {:.1}GB), can_load={}",
+                    bytes_to_gb(check.available_bytes),
+                    bytes_to_gb(check.required_bytes),
+                    bytes_to_gb(check.model_bytes),
+                    bytes_to_gb(check.kv_estimate_bytes),
+                    bytes_to_gb(check.safety_margin_bytes),
+                    check.can_load
+                );
+
+                if !check.can_load {
+                    warn!("[benchmark] [{}] {}", model_id, check.error_message.as_ref().unwrap());
+                    return ModelBenchmarkResult {
+                        model_id: model_id.to_string(),
+                        model_path: resolved_path,
+                        file_size_bytes: file_size,
+                        load_duration: Duration::ZERO,
+                        inference_results: Vec::new(),
+                        unload_duration: Duration::ZERO,
+                        total_duration: start.elapsed(),
+                        tokens_per_second: 0.0,
+                        avg_latency_ms: 0.0,
+                        p50_latency_ms: 0.0,
+                        p95_latency_ms: 0.0,
+                        p99_latency_ms: 0.0,
+                        error: check.error_message,
+                        gpu_mode: gpu_mode.to_string(),
+                        speedup_factor: None,
+                    };
+                }
+            }
+            Err(e) => {
+                warn!("[benchmark] [{}] memory check failed, proceeding with load: {}", model_id, e);
+            }
+        }
 
         let already_loaded = if let Ok(models) = client.list_models().await {
             models.iter().any(|m| m.id == server_model_id && m.status.value == "loaded")

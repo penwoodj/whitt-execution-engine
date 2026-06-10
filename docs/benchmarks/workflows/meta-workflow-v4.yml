@@ -1,0 +1,350 @@
+workflow_id: meta_workflow_generator_v4
+name: "Meta-Workflow Generator v4"
+description: "Complexity-aware decomposed meta-workflow with 128K context models, sequential model switching, iterative validation."
+version: "12.0.0"
+author: "Whitt Execution Engine"
+tags: [meta-workflow, yaml-generation, complexity-aware, 128k-context]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  "planner":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  "coder":
+    name: "granite-3b-code-instruct-128k.i1-Q6_K"
+    host:
+      type: llama_cpp_with_vulkan
+  "reasoner":
+    name: "Phi-4-mini-reasoning-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: true
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+
+  steps:
+
+    step_01_classify:
+      generative_entity: "${models.planner}"
+      prompt: |
+        Rate this task's complexity for workflow generation.
+
+        TASK: __TASK_PLACEHOLDER__
+
+        SIMPLE = read a file, run one command, basic transform (2-3 steps)
+        MEDIUM = multiple files, filtering, aggregation, formatting (4-6 steps)
+        COMPLEX = multi-phase pipeline, cross-references, parallel branches (7+ steps)
+
+        Answer with exactly one word: SIMPLE, MEDIUM, or COMPLEX
+        No other text. No reasoning. No explanation.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 50
+      when:
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/01-complexity.txt"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/meta.log"
+              event_fields: [step_name, duration_ms, token_count]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/meta.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_02_decompose:
+      generative_entity: "${models.planner}"
+      depends_on: [step_01_classify]
+      prompt: |
+        Break this task into the MINIMUM number of atomic actions needed.
+
+        TASK: __TASK_PLACEHOLDER__
+
+        Complexity: {{step.step_01_classify.output}}
+
+        Rules:
+        - SIMPLE tasks: 2-3 actions total
+        - MEDIUM tasks: 3-5 actions total
+        - COMPLEX tasks: 5-8 actions total
+        - Each action = ONE operation (read file, transform text, compute value, format output, save result)
+        - DO NOT split natural single operations into multiple steps
+        - A "read file" action includes extraction — do not add separate "extract" steps
+        - A "format output" action includes writing — do not add separate "save" steps
+        - Shell commands for file reading count as ONE action, not two
+
+        Format each action as a numbered item:
+        N. <verb> <object> [using <method>]
+
+        Example for "Read /tmp/data.csv and count rows":
+        1. Read /tmp/data.csv using cat command
+        2. Count the number of data rows
+        3. Output the count as plain number
+
+        Output ONLY numbered actions. No other text.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 2000
+      when:
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/02-actions.txt"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/meta.log"
+              event_fields: [step_name, duration_ms, token_count]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/meta.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_03_plan_steps:
+      generative_entity: "${models.planner}"
+      depends_on: [step_02_decompose]
+      prompt: |
+        You are a workflow architect. Convert actions into a YAML workflow step plan.
+
+        COMPLEXITY: {{step.step_01_classify.output}}
+
+        ACTIONS:
+        {{step.step_02_decompose.output}}
+
+        For each action, output EXACTLY one line:
+        STEP_NAME: step_XX_<name> | DEPENDS: <comma-separated step names or "none"> | TYPE: <shell|llm> | SHELL_CMD: <command if shell else "none">
+
+        Rules:
+        - Step names: lowercase, underscores, zero-padded (step_01, step_02, step_10)
+        - First step depends on "none"
+        - File read operations = TYPE: shell with actual command (e.g., "cat /tmp/data.csv")
+        - All other actions = TYPE: llm with SHELL_CMD: none
+        - Sequential chain: each step depends on previous
+        - For COMPLEX: phases map to dependency groups (Phase 1 steps → Phase 2 depends on last Phase 1 step)
+
+        Output ONLY step definitions, one per line. No other text.
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 2000
+      when:
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/03-plan.txt"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/meta.log"
+              event_fields: [step_name, duration_ms, token_count]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/meta.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_04_write_prompts:
+      generative_entity: "${models.planner}"
+      depends_on: [step_03_plan_steps, step_02_decompose]
+      prompt: |
+        You are a prompt writer for agentic workflow steps. Write a detailed prompt for EACH step.
+
+        ORIGINAL TASK: __TASK_PLACEHOLDER__
+
+        ACTIONS:
+        {{step.step_02_decompose.output}}
+
+        STEP PLAN:
+        {{step.step_03_plan_steps.output}}
+
+        For EACH step, write a prompt block:
+
+        --- STEP: step_XX_name ---
+        <detailed prompt for this step>
+        --- END ---
+
+        CRITICAL RULES:
+        1. Every prompt MUST be 5-10 lines with specific instructions
+        2. Steps with depends_on MUST reference previous output: {{step.PREVIOUS.output}}
+        3. TYPE: shell steps MUST include: "Here is the data:\n{{bookmarks.shell_output.stdout}}"
+        4. TYPE: llm steps MUST reference previous step outputs via {{step.X.output}}
+        5. EVERY prompt MUST end with: "Output ONLY the result. No explanations. No process descriptions."
+        6. Include concrete output format example in EVERY prompt
+        7. Use action phrases: "Given the data, extract...", "From the text, output..."
+        8. Specify exact output format: "Output a numbered list", "Output JSON: {key: value}", etc.
+
+        Output ALL step prompts. No other text.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 4000
+      when:
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/04-prompts.txt"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/meta.log"
+              event_fields: [step_name, duration_ms, token_count]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/meta.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_05_assemble:
+      generative_entity: "${models.coder}"
+      depends_on: [step_03_plan_steps, step_04_write_prompts]
+      prompt: |
+        You are a YAML assembler. Combine step plan and prompts into ONE workflow YAML file.
+
+        STEP PLAN:
+        {{step.step_03_plan_steps.output}}
+
+        PROMPTS:
+        {{step.step_04_write_prompts.output}}
+
+        CRITICAL: Copy the EXACT hook pattern for EVERY step. Do NOT skip when: blocks.
+        Do NOT explain the YAML. Do NOT describe what you are doing. Output ONLY raw YAML.
+        First line MUST be: workflow_id:
+
+        STEP TEMPLATE (copy for EVERY step, change marked parts):
+
+          step_XX_name:
+            generative_entity: "${models.worker}"
+            depends_on: [step_YY_prev]
+            prompt: |
+              <prompt from PROMPTS section>
+            model_overrides:
+              temperature: 0.3
+              max_tokens: 50000
+            when:
+              before_step_starts:
+                - shell:
+                    command: "SHELL_CMD"
+                    args: []
+                    working_dir: "/home/jon/code/whitt-execution-engine"
+                    fail_on_error: false
+              after_step_succeeds:
+                - save_to: "./docs/benchmarks/outputs/output/step_XX_name-output.txt"
+                - log:
+                    to_file_path: "./docs/benchmarks/outputs/logs/workflow.log"
+                    event_fields: [step_name, duration_ms, token_count]
+                    level: info
+              after_step_fails:
+                - log:
+                    to_file_path: "./docs/benchmarks/outputs/logs/workflow.log"
+                    event_fields: [step_name, error_message]
+                    level: error
+
+        HEADER:
+
+         workflow_id: <descriptive_id>
+         name: "<Name>"
+         description: "<one sentence>"
+         version: "1.0.0"
+         schema_version: "2.0.0"
+         min_schema_version: "2.0.0"
+         providers:
+          llama_cpp_with_vulkan:
+            config:
+              host: localhost
+              port: 8080
+        models:
+          "worker":
+            name: "Qwen2.5-Coder-3B-Instruct-Q8_0.gguf"
+            host:
+              type: llama_cpp_with_vulkan
+        workflow_execution_strategy:
+          memory:
+            model_lifecycle:
+              unload_unused: true
+        agentic_workflow:
+          steps:
+            <ALL STEPS HERE indented 4 spaces>
+
+        RULES:
+        1. Start with header above
+        2. ALL steps under agentic_workflow: steps: at 4-space indent
+        3. Copy when: blocks EXACTLY — never skip them
+        4. TYPE: shell → keep before_step_starts, set command and working_dir
+        5. TYPE: llm → REMOVE entire before_step_starts block
+        6. No markdown fences anywhere
+        7. Step names zero-padded: step_01, step_02, ..., step_10
+        8. Prompts use pipe | syntax
+        9. File starts with "workflow_id:" on line 1
+        10. Shell commands MUST use absolute paths (e.g. /etc/hostname not hostname)
+        11. working_dir MUST be /home/jon/code/whitt-execution-engine for ALL shell steps
+
+        Output ONLY raw YAML. First line: workflow_id:
+      model_overrides:
+        temperature: 0.05
+        max_tokens: 8000
+      when:
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/05-assembled.yml"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/meta.log"
+              event_fields: [step_name, duration_ms, token_count]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/meta.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_06_validate:
+      generative_entity: "${models.coder}"
+      depends_on: [step_05_assemble]
+      prompt: |
+        You are a YAML workflow validator and repair specialist. Fix ALL issues.
+
+        INPUT:
+        {{step.step_05_assemble.output}}
+
+        CHECKS (fix EVERY issue):
+        1. YAML parses correctly
+        2. Has: workflow_id, name, providers, models, agentic_workflow with steps
+        3. Steps nested under agentic_workflow: steps: (NOT top-level)
+        4. Every step has: generative_entity, prompt, model_overrides, when
+        5. Every step except first has depends_on
+        6. Every step with depends_on has {{step.X.output}} in prompt
+        7. Provider: providers: llama_cpp_with_vulkan: config: host: port:
+        8. Model: models: "worker": name: host: type:
+        9. EVERY step has when: with after_step_succeeds (save_to + log)
+        10. EVERY step has when: with after_step_fails (log)
+        11. Shell steps have before_step_starts with shell action
+        12. LLM steps do NOT have before_step_starts
+        13. No markdown fences (no ```)
+        14. File starts with "workflow_id:" on line 1
+        15. Step names zero-padded if >9 steps
+        16. Prompts use pipe | syntax
+        17. Every prompt ends with "Output ONLY the result" directive
+        18. Every prompt includes output format example
+        19. No hosting: gpu_layers field (remove if present)
+
+        Output ONLY the fixed YAML. No fences. No explanations.
+      model_overrides:
+        temperature: 0.05
+        max_tokens: 8000
+      when:
+        after_step_succeeds:
+          - save_to: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/final-workflow.yml"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/meta.log"
+              event_fields: [step_name, duration_ms, token_count]
+              level: info
+          - bookmark: true
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/meta.log"
+              event_fields: [step_name, error_message]
+              level: error
