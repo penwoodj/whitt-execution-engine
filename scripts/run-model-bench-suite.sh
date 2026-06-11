@@ -118,11 +118,11 @@ for IDX in $(seq $START_IDX $END_IDX); do
   VALID_LOG="$MODEL_DIR/validate.log"
   if [ -f "$VALID_LOG" ]; then
     # Parse validation results from log
-    JSON_VALID=$(grep -c "✅ valid_json" "$VALID_LOG" || echo 0)
-    HAS_DEPS=$(grep -c "✅ has_dependencies" "$VALID_LOG" || echo 0)
-    COUNT_MATCH=$(grep -c "✅ count_matches" "$VALID_LOG" || echo 0)
-    SORTED=$(grep -c "✅ sorted_alphabetically" "$VALID_LOG" || echo 0)
-    ALL_PASS=$(grep -c "PASS:" "$VALID_LOG" || echo 0)
+    JSON_VALID=$(grep -c "✅ valid_json" "$VALID_LOG" 2>/dev/null) || JSON_VALID=0
+    HAS_DEPS=$(grep -c "✅ has_dependencies" "$VALID_LOG" 2>/dev/null) || HAS_DEPS=0
+    COUNT_MATCH=$(grep -c "✅ count_matches" "$VALID_LOG" 2>/dev/null) || COUNT_MATCH=0
+    SORTED=$(grep -c "✅ sorted_alphabetically" "$VALID_LOG" 2>/dev/null) || SORTED=0
+    ALL_PASS=$(grep -c "PASS:" "$VALID_LOG" 2>/dev/null) || ALL_PASS=0
     SCORE=$(python3 -c "
 with open('$VALID_LOG') as f:
     content = f.read()
@@ -130,7 +130,7 @@ with open('$VALID_LOG') as f:
     total = checks + content.count('❌')
     print(f'{checks}/{total}' if total > 0 else '0/0')
 ")
-    PASS_FAIL="PASS" if [ "$ALL_PASS" -gt 0 ] || PASS_FAIL="FAIL"
+    if [ "$ALL_PASS" -gt 0 ]; then PASS_FAIL="PASS"; else PASS_FAIL="FAIL"; fi
   else
     JSON_VALID=0; HAS_DEPS=0; COUNT_MATCH=0; SORTED=0; SCORE="0/0"; PASS_FAIL="FAIL"
   fi

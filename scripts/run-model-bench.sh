@@ -14,6 +14,9 @@ TIMING_FILE="$OUTPUT_DIR/timing.json"
 
 mkdir -p "$OUTPUT_DIR"
 
+docker exec whitt-llama-server pkill -f llama-server 2>/dev/null || true
+sleep 2
+
 echo "[bench] Testing model: $MODEL_NAME"
 echo "[bench] Output dir: $OUTPUT_DIR"
 
@@ -75,7 +78,9 @@ echo "{\"model\": \"$MODEL_NAME\", \"engine_pass\": true, \"validate_pass\": $([
 echo "[bench] $STATUS (${ELAPSED_MS}ms)"
 
 # Restart docker between runs for clean state
+docker exec whitt-llama-server pkill -f llama-server 2>/dev/null || true
+sleep 2
 docker restart whitt-llama-server > /dev/null 2>&1 || true
-sleep 5
+sleep 8
 
 exit 0
