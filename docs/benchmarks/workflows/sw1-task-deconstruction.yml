@@ -96,16 +96,32 @@ agentic_workflow:
 
         Output ONLY this exact format, nothing else:
 
-        T1 - <descriptive_name> (<points>pts): <one-line action under 100 chars>
-        T2 - <descriptive_name> (<points>pts): <one-line action under 100 chars>
+        T1 - descriptive name (Npts): one-line action under 100 chars
+        T2 - descriptive name (Npts): one-line action under 100 chars
+        ...
 
-        Rules (STRICT — violations cause rejection):
+        Example:
+        T1 - Add tokio JoinSet import (1pts): Add use tokio::task::JoinSet to runner.rs imports
+        T2 - Create send_inference_request helper (3pts): Add async fn to send single chat completion
+        T3 - Add same-model detection logic (2pts): Check if all route_to targets use same model
+        T4 - Build parallel request batch (5pts): Create JoinSet and spawn inference tasks
+        T5 - Collect ordered responses from JoinSet (3pts): Map results back to target order
+        T6 - Sequential hook processing (3pts): Run after_step_succeeds per target in order
+        T7 - Unload model once after parallel (1pts): Move unload outside target loop
+        T8 - Preserve sequential fallback path (3pts): Keep existing code for mixed-model case
+        T9 - Add parallel inference logging (2pts): Log parallel vs sequential path selection
+        T10 - Write integration test same-model (3pts): Test 3 targets same model, verify parallel
+        T11 - Write integration test mixed-model (2pts): Test 2 targets different models, verify sequential
+        T12 - Update benchmark log metrics (1pts): Add parallel_targets and speedup fields
+
+        Rules (STRICT):
         - Tasks numbered sequentially T1, T2, ...
-        - Produce 10-15 top-level tasks (HARD REQUIREMENT — fewer = incomplete analysis)
+        - Produce 10-15 top-level tasks MINIMUM. 7 or fewer is UNACCEPTABLE. Decompose more.
+        - Break down EVERY aspect of the prompt into its own task. Each function, each test, each config change = separate task.
         - Action description < 100 chars
-        - For prompts involving analysis/modification: FIRST tasks must be analysis-phase (read input, parse structure, identify scope), THEN execution-phase tasks
-        - Do NOT collapse analysis + execution into single task. Each analytical step (read file, compare content, identify scope) gets its own task ID.
-        - Do NOT emit subtasks yet (next step handles that)
+        - FIRST tasks = analysis-phase (read, identify, plan), THEN execution-phase (implement, test, document)
+        - Do NOT collapse multiple steps into one task
+        - Do NOT emit subtasks yet
         - Do NOT include preamble or explanation
       model_overrides:
         temperature: 0.2
@@ -135,7 +151,7 @@ agentic_workflow:
       generative_entity: "${models.qwen35}"
       depends_on: [step_01_initial_breakdown]
       prompt: |
-        You are decomposing high-complexity tasks into subtasks using GROUPS-OF-5 chunking.
+        You are decomposing high-complexity tasks into subtasks.
 
         ORIGINAL PROMPT (for context):
         {{bookmarks.shell_output.stdout}}
@@ -143,20 +159,10 @@ agentic_workflow:
         TASK LIST:
         {{step.step_01_initial_breakdown.output}}
 
-        ## CRITICAL: Process in GROUPS OF 5
+        Process tasks in batches of 5 internally (T1-T5, T6-T10, T11-T15) for focus.
 
-        Small language models work best with focused context. Process tasks in batches of 5:
-
-        - GROUP A: T1 through T5
-        - GROUP B: T6 through T10
-        - GROUP C: T11 through T15 (if present)
-
-        For EACH group, output the expansion blocks AND a group complexity summary.
-
-        ## Per-Task Expansion Format
-
-         For EVERY task scoring >= 3 points, output a subtask expansion block.
-         For tasks scoring 1-2 points, output NO_EXPANSION_NEEDED.
+        For EACH task scoring >= 3 points, output a subtask expansion block.
+        For tasks scoring 1-2 points, output NO_EXPANSION_NEEDED.
 
          Output format (one block per task):
 
@@ -165,43 +171,21 @@ agentic_workflow:
          - T<id>.1 - <subtask_name> (1pts): <action under 100 chars> | Given: <precondition> When: <trigger> Then: <result>
          - T<id>.2 - <subtask_name> (2pts): <action under 100 chars> | Given: <precondition> When: <trigger> Then: <result>
 
-         Rules (STRICT — violations cause rejection):
-         - **RULE 1 (CRITICAL):** Subtask points MUST be 1, 2, or 3 ONLY. NEVER output 5, 8, or 13 for any subtask. IF a subtask would naturally be >=5pts, you MUST break it into multiple 1-2pt pieces. This is non-negotiable.
-         - Each parent task scoring >= 3 MUST have at least 2 subtasks
-         - For analysis/modification tasks: ALWAYS split into phases:
-           (1) READ input file/source
-           (2) ANALYZE content/scope/structure
-           (3) EXECUTE action (modify/create/delete)
-           (4) VERIFY result (grep/check/test)
-           Do NOT collapse these phases into one subtask
-         - Each subtask MUST have inline GWT (Given/When/Then) separated by `|`
-         - Subtask actions < 100 chars
-         - Sum of subtask points should be roughly equal to parent task points
-         - Output one block per task from the task list
+         RULES (CRITICAL — violations cause automatic rejection):
+         - Subtask points MUST be 1, 2, or 3 ONLY. NEVER 5, 8, or 13.
+         - IF a subtask would be >=5pts, BREAK IT into multiple 1-2pt subtasks.
+         - Each parent task >= 3pts MUST have at least 2 subtasks.
+         - Each subtask MUST have inline GWT separated by |.
+         - Subtask actions < 100 chars.
+         - For file/modification tasks: split into READ, ANALYZE, EXECUTE, VERIFY phases.
 
-         ## Group Complexity Rating (REQUIRED after each group)
-
-         After expanding each group of 5 tasks, output a complexity summary:
-
-         ### GROUP <X> Complexity
-         - Tasks processed: <count>
-         - Total subtasks generated: <count>
-         - Sum of subtask story points: <total>
-         - Group complexity rating: <LOW|MEDIUM|HIGH>
-           - LOW: 0-5 subtasks total, all leaves <= 2pts
-           - MEDIUM: 6-10 subtasks total, or any leaf at 3pts
-           - HIGH: 11+ subtasks total, or multiple 3pt leaves
-         - Any task >= 5pts NOT expanded? <YES|NO> (YES = failure)
-
-         ## Story Point Reference (mid-level engineering team)
-         - 1pt: < 4 hours (trivial config change, one-liner fix)
+         Story Point Reference:
+         - 1pt: < 4 hours (trivial, one-liner)
          - 2pts: 4-8 hours (small feature, single function)
-         - 3pts: 1-2 days (medium feature, multi-function module)
-         - 5pts: 2-3 days (REQUIRES breakdown — too complex for single task)
-         - 8pts: 4-5 days (REQUIRES breakdown)
-         - 13pts: 6-8 days (REQUIRES breakdown)
+         - 3pts: 1-2 days (medium feature)
+         - 5pts: 2-3 days (MUST be broken down)
 
-         Output ONLY the expansion blocks and group complexity summaries. No other text.
+         Output ONLY expansion blocks. No preamble.
       model_overrides:
         temperature: 0.2
         max_tokens: 8192
@@ -244,26 +228,27 @@ agentic_workflow:
         Evaluate against EACH criterion. For PASS, cite the specific task IDs you checked.
         For FAIL, cite the specific task ID that violates the criterion.
 
-        1. ATOMIC: Every leaf task is a single, well-scoped action. Check T____ and T____.
-        2. COMPLETE: Every part of the original prompt is covered. List any gaps.
-        3. NON_REDUNDANT: No two tasks duplicate work. Check pairs.
+        1. ATOMIC: Every leaf task is a single, well-scoped action.
+        2. COMPLETE: Every part of the original prompt is covered.
+        3. NON_REDUNDANT: No two tasks duplicate work.
         4. GWT_READY: Each task has Given/When/Then.
-        5. NO_HIGH_COMPLEXITY_LEAVES: No leaf task scores >= 5 pts. CHECK THE MACHINE VIOLATIONS ABOVE — if any leaf has >=5pts, this is FAIL.
+        5. NO_HIGH_COMPLEXITY_LEAVES: CHECK THE MACHINE VIOLATIONS ABOVE. If any leaf >=5pts found by machine, this is FAIL.
         6. CONCISE: Each task action < 100 chars.
-        7. ANALYSIS_PHASE_PRESENT: File/modification tasks have read→analyze→execute→verify sequence.
+        7. ANALYSIS_PHASE_PRESENT: File/modification tasks have READ, ANALYZE, EXECUTE, VERIFY phases.
         8. COVERAGE_DEPTH: Parent task count >= 10.
-        9. SUBTASK_EXPANSION: Every parent >= 3 pts has >= 2 leaf subtasks.
-        10. COMPLEXITY_RATING_VALID: Dynamic complexity matches assigned points.
-        11. GROUP_CHUNKING: CHECK THE MACHINE OUTPUT — if "GROUP markers found: 0" this is FAIL.
-        12. GROUP_COMPLEXITY_CONSISTENT: Each group's rating matches subtask counts.
+        9. SUBTASK_EXPANSION: Every parent >= 3pts has >= 2 leaf subtasks.
+        10. COMPLEXITY_RATING_VALID: Leaf points are 1, 2, or 3 only.
 
-        CRITICAL: The MACHINE-CHECKED VIOLATIONS are ground truth. If the machine found violations, you MUST output FAIL for the relevant criteria. Do NOT rubber-stamp PASS without checking.
+        CRITICAL: The MACHINE-CHECKED VIOLATIONS are ground truth. If the machine found violations, you MUST output FAIL.
 
-        End with EXACTLY one of these two lines on the last line:
+        Format: For each criterion, output the criterion number, PASS or FAIL, and a one-sentence reason citing specific task IDs.
+
+        End with EXACTLY one line:
         VERDICT: PASS
+        or
         VERDICT: FAIL
 
-        Output ONLY the evaluation with evidence citations. No preamble.
+        Output ONLY the evaluation. No preamble.
       model_overrides:
         temperature: 0.1
         max_tokens: 2500
