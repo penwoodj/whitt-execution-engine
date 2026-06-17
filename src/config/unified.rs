@@ -4,7 +4,7 @@
 //! from unified YAML schema (v2.0).
 
 use crate::config::provider::ProvidersConfig;
-use crate::model::schema::ModelsConfig;
+use crate::model::schema::{LoadParams, ModelsConfig, SamplingConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -212,19 +212,23 @@ impl UnifiedConfig {
             defaults::PORT
         };
 
-        // Resolve temperature
-        let temperature = step_overrides
+        // Load params come directly from model spec (has serde defaults)
+        let load_params = model_spec.load_params.clone();
+
+        // Sampling: start from model spec, then apply step overrides
+        let mut sampling = model_spec.sampling.clone();
+        if let Some(step_temp) = step_overrides
             .and_then(|s| s.get("temperature"))
             .and_then(|t| t.as_f64())
-            .map(|t| t as f32)
-            .or(None);
-
-        // Resolve max_tokens
-        let max_tokens = step_overrides
+        {
+            sampling.temperature = Some(step_temp as f32);
+        }
+        if let Some(step_max_tokens) = step_overrides
             .and_then(|s| s.get("max_tokens"))
             .and_then(|t| t.as_u64())
-            .map(|t| t as usize)
-            .or(None);
+        {
+            sampling.max_tokens = Some(step_max_tokens as usize);
+        }
 
         // Resolve timeout (from provider request config)
         let timeout_secs = if let Some(step) = step_overrides.and_then(|s| s.get("timeout_secs")) {
@@ -248,6 +252,8 @@ impl UnifiedConfig {
             model = %model_name,
             host = %host,
             port = port,
+            ctx_size = load_params.context_size,
+            temperature = ?sampling.temperature,
             timeout_secs = timeout_secs,
             max_retries = max_retries,
             "Resolved model configuration"
@@ -256,8 +262,8 @@ impl UnifiedConfig {
         Ok(ResolvedModelConfig {
             host,
             port,
-            temperature,
-            max_tokens,
+            load_params,
+            sampling,
             timeout_secs,
             max_retries,
         })
@@ -277,11 +283,11 @@ pub struct ResolvedModelConfig {
     /// Server port number.
     pub port: u32,
 
-    /// Sampling temperature (optional, uses backend default if None).
-    pub temperature: Option<f32>,
+    /// Model load parameters (context size, GPU layers, cache types, etc.).
+    pub load_params: LoadParams,
 
-    /// Maximum tokens to generate (optional, uses backend default if None).
-    pub max_tokens: Option<usize>,
+    /// Sampling configuration (temperature, top_p, top_k, max_tokens, etc.).
+    pub sampling: SamplingConfig,
 
     /// Request timeout in seconds.
     pub timeout_secs: u64,
@@ -411,8 +417,8 @@ models:
         // Step overrides take highest priority
         assert_eq!(resolved.host, "step-host");
         assert_eq!(resolved.port, 7000);
-        assert_eq!(resolved.temperature, Some(0.5));
-        assert_eq!(resolved.max_tokens, Some(256));
+        assert_eq!(resolved.sampling.temperature, Some(0.5));
+        assert_eq!(resolved.sampling.max_tokens, Some(256));
     }
 
     #[test]
@@ -435,8 +441,8 @@ models:
         // Defaults when not specified
         assert_eq!(resolved.host, "test_provider");
         assert_eq!(resolved.port, 1234);
-        assert_eq!(resolved.temperature, None);
-        assert_eq!(resolved.max_tokens, None);
+        assert_eq!(resolved.sampling.temperature, None);
+        assert_eq!(resolved.sampling.max_tokens, None);
         assert_eq!(resolved.timeout_secs, 120);
         assert_eq!(resolved.max_retries, 3);
     }

@@ -111,7 +111,6 @@ def _parse_step_plan(plan_path: str) -> dict[str, dict]:
     return steps
 
 def _inject_shell_hooks(content: str, plan_steps: dict[str, dict]) -> tuple[int, str]:
-    """Inject before_step_starts shell hooks for steps that need them based on plan."""
     if not plan_steps:
         return 0, content
     
@@ -216,21 +215,41 @@ def _fix_prompt_templates(content: str, plan_steps: dict[str, dict]) -> tuple[in
     if not shell_plan_names:
         return 0, content
 
-    data_block_pattern = re.compile(r'Here is (?:the |some )?data:\s*\n```[^`]*```', re.DOTALL)
-
-    lines = content.split('\n')
-    new_lines = []
     fixes = 0
-    i = 0
 
-    while i < len(lines):
-        new_lines.append(lines[i])
-        i += 1
+    # Pattern 1: backtick-fenced data block (3B coder sometimes produces these)
+    fenced_pattern = re.compile(
+        r'Here is (?:the |some )?data:\s*\n```[^`]*```',
+        re.DOTALL
+    )
 
-    result = '\n'.join(new_lines)
-    result = data_block_pattern.sub('{{bookmarks.shell_output.stdout}}', result)
-    if '{{bookmarks.shell_output.stdout}}' in result and 'Here is' not in result.split('{{bookmarks.shell_output.stdout}}')[0].split('\n')[-1]:
-        fixes = 1
+    # Pattern 2: unfenced data block — "Here is the data:" followed by lines
+    # until next instruction sentence or blank-line + non-continuation line
+    # Captures: "Here is the data:\n<command or fake output>\n\n<next instruction>"
+    unfenced_pattern = re.compile(
+        r'Here is (?:the |some )?data:\s*\n'
+        r'(?:'
+        r'```[^`]*```'  # might have fences after all
+        r'|'
+        r'(?:.*\n){0,6}'  # up to 6 lines of content (command + fake output)
+        r')',
+        re.DOTALL
+    )
+
+    result = content
+
+    # Try fenced pattern first (more precise)
+    new_result = fenced_pattern.sub('{{bookmarks.shell_output.stdout}}\n', result)
+    if new_result != result:
+        fixes = result.count('Here is')
+        result = new_result
+
+    # Then try unfenced pattern for remaining "Here is the data:" blocks
+    if 'Here is' in result:
+        new_result = unfenced_pattern.sub('{{bookmarks.shell_output.stdout}}\n', result)
+        if new_result != result:
+            fixes += result.count('Here is') - new_result.count('Here is')
+            result = new_result
 
     return fixes, result
 

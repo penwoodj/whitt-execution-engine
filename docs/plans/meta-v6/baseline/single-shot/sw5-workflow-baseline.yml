@@ -1,0 +1,578 @@
+workflow_id: doc_consolidation_analysis_v1
+name: "Documentation Consolidation Analysis"
+description: "Analyzes documentation consolidation opportunities, executes high-impact consolidations, creates navigation hubs, and documents automation recommendations"
+version: "1.0.0"
+author: "Whitt Execution Engine"
+tags: [documentation, consolidation, analysis, single-shot-baseline]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  "qwen35":
+    name: "Qwen3-5-9B-Q4_K_M.gguf"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "./outputs/doc-consolidation-workflow.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+
+    # T1: Analyze duplicate README content
+
+    step_t1_1_parse_index:
+      generative_entity: "${models.qwen35}"
+      prompt: |
+        Read requirements/index.md and parse its structure. Extract all section headers, summarize content scope in <200 chars, and note if it references "279 requirements" or schema coverage report.
+
+        Output JSON: {sections: [], summary: "", schema_ref: ""}
+      model_overrides:
+        max_tokens: 1000
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t1_1_parsed
+              - "./outputs/t1_1_parsed.json"
+          - log:
+              to_file_path: "./logs/t1.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    step_t1_2_parse_mvp:
+      generative_entity: "${models.qwen35}"
+      prompt: |
+        Read requirements/benchmark-100-model-userflows/mvp-summary-report.md and parse its structure. Extract all section headers, summarize content scope in <200 chars, and confirm if "Schema Coverage Report" section exists with 279 requirements.
+
+        Output JSON: {sections: [], summary: "", has_schema_coverage: true/false}
+      model_overrides:
+        max_tokens: 1000
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t1_2_parsed
+              - "./outputs/t1_2_parsed.json"
+          - log:
+              to_file_path: "./logs/t1.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    step_t1_3_document_overlap:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_t1_1_parse_index, step_t1_2_parse_mvp]
+      prompt: |
+        Compare parsed structures from {{bookmarks.t1_1_parsed}} and {{bookmarks.t1_2_parsed}}. Identify overlapping content (duplicate text, shared sections) and unique content per file.
+
+        Create markdown table with columns: Section, File A Line Range, File B Line Range, Overlap Status (identical/similar/unique). Include at least 10 rows and summary paragraph with overlap percentage.
+      model_overrides:
+        max_tokens: 2000
+        temperature: 0.2
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t1_overlap
+              - "./outputs/overlap-analysis.md"
+          - log:
+              to_file_path: "./logs/t1.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    # T2: Execute README consolidation
+
+    step_t2_1_create_merged:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_t1_3_document_overlap]
+      prompt: |
+        Using overlap analysis from {{bookmarks.t1_overlap}}, merge unique content from requirements/index.md into requirements/benchmark-100-model-userflows/mvp-summary-report.md as "## Executive Summary" section.
+
+        Preserve existing content, add summary at top after document title. Ensure no duplicate content.
+      model_overrides:
+        max_tokens: 2000
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t2_1_merged
+              - "./outputs/t2_1_merged.md"
+          - log:
+              to_file_path: "./logs/t2.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    step_t2_2_remove_or_repurpose:
+      depends_on: [step_t2_1_create_merged]
+      shell:
+        command: "rm requirements/index.md"
+        args: []
+        fail_on_error: true
+      when:
+        after_step_succeeds:
+          - log:
+              to_file_path: "./logs/t2.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    step_t2_3_update_references:
+      depends_on: [step_t2_2_remove_or_repurpose]
+      shell:
+        command: "find docs/ -type f -name '*.md' -exec sed -i 's|requirements/index.md|requirements/benchmark-100-model-userflows/mvp-summary-report.md|g' {} +"
+        args: []
+        fail_on_error: true
+      when:
+        after_step_succeeds:
+          - log:
+              to_file_path: "./logs/t2.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    # T3: Analyze scattered testing guidance
+
+    step_t3_1_read_guide:
+      generative_entity: "${models.qwen35}"
+      prompt: |
+        Read guides/testing-guide.md and extract: all section headers, summary (<150 chars), intended audience (developer/workflow-author/planner).
+
+        Output JSON: {sections: [], audience: "", summary: ""}
+      model_overrides:
+        max_tokens: 1000
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t3_1_guide
+              - "./outputs/t3_1_guide.json"
+          - log:
+              to_file_path: "./logs/t3.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    step_t3_2_read_workflows:
+      generative_entity: "${models.qwen35}"
+      prompt: |
+        Read workflows/workflows-README.md lines 110-166 (Testing Guidance section). Extract testing pattern names and section summary (<150 chars).
+
+        Output JSON: {patterns: [], section_summary: ""}
+      model_overrides:
+        max_tokens: 1000
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t3_2_workflows
+              - "./outputs/t3_2_workflows.json"
+          - log:
+              to_file_path: "./logs/t3.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    step_t3_3_read_strategy:
+      generative_entity: "${models.qwen35}"
+      prompt: |
+        Read plans/testing-strategy.md and extract: 2-5 key strategy bullet points, scope (automation/process/framework).
+
+        Output JSON: {key_points: [], scope: ""}
+      model_overrides:
+        max_tokens: 1000
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t3_3_strategy
+              - "./outputs/t3_3_strategy.json"
+          - log:
+              to_file_path: "./logs/t3.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    step_t3_4_categorize:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_t3_1_read_guide, step_t3_2_read_workflows, step_t3_3_read_strategy]
+      prompt: |
+        Compare content from {{bookmarks.t3_1_guide}}, {{bookmarks.t3_2_workflows}}, {{bookmarks.t3_3_strategy}}. Categorize by audience (developer/workflow/planner), scope (how-to/patterns/strategy), and list unique content per source.
+
+        Create markdown matrix with 3 rows (one per source) and 3 columns: audience, scope, unique_content.
+      model_overrides:
+        max_tokens: 2000
+        temperature: 0.2
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t3_categorization
+              - "./outputs/testing-categorization.md"
+          - log:
+              to_file_path: "./logs/t3.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    # T4: Refine testing guidance structure
+
+    step_t4_1_consolidate:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_t3_4_categorize]
+      prompt: |
+        Using categorization from {{bookmarks.t3_categorization}}, merge unique strategy content from plans/testing-strategy.md into plans/ARCHITECTURE.md as new "## Testing Strategy" section. Add cross-references to guides/testing-guide.md and workflows/workflows-README.md.
+      model_overrides:
+        max_tokens: 2000
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t4_1_architecture
+              - "./outputs/t4_1_architecture.md"
+          - shell:
+              command: "rm plans/testing-strategy.md"
+              fail_on_error: true
+          - log:
+              to_file_path: "./logs/t4.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    step_t4_2_add_crossrefs:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_t4_1_consolidate]
+      prompt: |
+        Add "## Related Documents" sections to guides/testing-guide.md, workflows/workflows-README.md, and plans/ARCHITECTURE.md. Each section should link to the other two files using proper markdown syntax.
+      model_overrides:
+        max_tokens: 1500
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - log:
+              to_file_path: "./logs/t4.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    # T5: Analyze schema reference gaps
+
+    step_t5_1_catalog_refs:
+      shell:
+        command: "grep -r 'unified-workflow-schema.yml' docs/ --include='*.md' -H | sed 's/:/ | /' | awk '{print $1 \" | \" $0}'"
+        fail_on_error: true
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t5_1_catalog
+              - "./outputs/schema-ref-catalog.md"
+          - log:
+              to_file_path: "./logs/t5.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    step_t5_2_document_gaps:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_t5_1_catalog_refs]
+      prompt: |
+        Using reference catalog from {{bookmarks.t5_1_catalog}}, analyze reference patterns and document missing navigation resources.
+
+        List 4 missing resources: quick start guide, element reference (step types, loops, validations), cross-reference matrix (element → schema section → example workflow), navigation shortcuts. Provide 2-sentence description for each and conclude that current reference pattern is ad-hoc.
+      model_overrides:
+        max_tokens: 1500
+        temperature: 0.2
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t5_2_gaps
+              - "./outputs/schema-nav-gaps.md"
+          - log:
+              to_file_path: "./logs/t5.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    # T6: Create schema navigation hub
+
+    step_t6_1_write_nav:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_t5_2_document_gaps]
+      prompt: |
+        Using gap analysis from {{bookmarks.t5_2_gaps}}, create schema/NAVIGATION.md with 4 comprehensive sections:
+
+        1. "## Quick Start" - 3-5 bullet points for schema newcomers
+        2. "## Element Reference" - list step types, loop types, validation strategies
+        3. "## Cross-Reference Matrix" - table: Element → Schema Section → Example Workflow
+        4. "## Navigation Shortcuts" - 3-5 links to related docs
+
+        Each section must be non-empty.
+      model_overrides:
+        max_tokens: 2000
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t6_1_nav
+              - "schema/NAVIGATION.md"
+          - log:
+              to_file_path: "./logs/t6.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    step_t6_2_update_readmes:
+      depends_on: [step_t6_1_write_nav]
+      shell:
+        command: |
+          for file in schema/README.md roadmap/README.md workflows/workflows-README.md; do
+            echo -e "\n\nFor comprehensive schema navigation, see: [[../schema/NAVIGATION.md]]" >> "$file"
+          done
+        fail_on_error: true
+      when:
+        after_step_succeeds:
+          - log:
+              to_file_path: "./logs/t6.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    # T7: Analyze ADR metadata structure
+
+    step_t7_1_document_adr:
+      generative_entity: "${models.qwen35}"
+      prompt: |
+        Analyze ADR metadata organization across: individual ADR files (adr-000*.yml), master index (adr-0000-roadmap-index.yml), and roadmap/metadata/ directory.
+
+        List metadata fields per location, describe structure, and conclude that distribution is intentional and appropriate.
+      model_overrides:
+        max_tokens: 1500
+        temperature: 0.2
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t7_1_adr
+              - "./outputs/adr-metadata-distribution.md"
+          - log:
+              to_file_path: "./logs/t7.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    # T8: Create metadata README
+
+    step_t8_1_create_readme:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_t7_1_document_adr]
+      prompt: |
+        Using ADR metadata analysis from {{bookmarks.t7_1_adr}}, create roadmap/metadata/README.md explaining:
+
+        1. Why metadata is distributed (self-documenting ADRs, coordination via index, version history)
+        2. Files in metadata/ directory and their purpose
+        3. Future enhancement: single metadata YAML if directory grows
+      model_overrides:
+        max_tokens: 1500
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t8_1_readme
+              - "roadmap/metadata/README.md"
+          - log:
+              to_file_path: "./logs/t8.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    # T9: Analyze formatting status
+
+    step_t9_1_document_patterns:
+      generative_entity: "${models.qwen35}"
+      prompt: |
+        Extract and document 5 formatting patterns that have been applied to 50+ files:
+
+        1. Emoji headings (🔗📋🎯🛠️⚙️🧪)
+        2. Foam wiki-link syntax
+        3. Bidirectional navigation ("See Also"/"Related")
+        4. Cross-directory links
+        5. Table of contents (noted as inconsistent)
+
+        Provide 1-sentence example for each pattern.
+      model_overrides:
+        max_tokens: 1000
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t9_1_patterns
+              - "./outputs/applied-formats.md"
+          - log:
+              to_file_path: "./logs/t9.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    step_t9_2_count_unformatted:
+      depends_on: [step_t9_1_document_patterns]
+      shell:
+        command: |
+          formatted=$(find docs/ -name '*.md' -exec grep -l '🔗\|📋\|🎯' {} + | wc -l)
+          total=$(find docs/ -name '*.md' | wc -l)
+          unformatted=$((total - formatted))
+          echo "Total: $total, Formatted: $formatted, Unformatted: $unformatted" > "./outputs/unformatted-count.md"
+        fail_on_error: true
+      when:
+        after_step_succeeds:
+          - log:
+              to_file_path: "./logs/t9.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    # T10: Prioritize consolidation roadmap
+
+    step_t10_1_prioritize:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_t9_2_count_unformatted]
+      prompt: |
+        Given tasks T1-T8 with impact/effort data, calculate priority scores (impact ÷ effort) and categorize as High/Medium/Low.
+
+        Impact: High (T1, T2, T6), Medium (T3, T5, T10, T11), Low (T4, T7, T8, T9, T12)
+        Effort: Low (T5, T7, T8, T9.1, T9.2, T10.1, T10.2, T11.1, T11.2, T12.1, T12.2, T12.3), Medium (T1, T3, T4, T6), High (T2)
+
+        Create markdown table with columns: Task ID, Impact, Effort, Priority Score, Priority Category. Sort by Priority Score descending.
+      model_overrides:
+        max_tokens: 1500
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t10_1_prioritized
+              - "./outputs/priority-sorted.md"
+          - log:
+              to_file_path: "./logs/t10.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    step_t10_2_create_schedule:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_t10_1_prioritize]
+      prompt: |
+        Using priority-sorted tasks from {{bookmarks.t10_1_prioritized}}, create 3-phase roadmap:
+
+        Phase 1 (Week 1): High-Impact Consolidations - T1, T2, T6
+        Phase 2 (Weeks 2-4): Continue Formatting - describe 260-file formatting work
+        Phase 3 (Week 5): Low-Impact Improvements - T4, T8
+      model_overrides:
+        max_tokens: 1500
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t10_2_schedule
+              - "./outputs/phased-roadmap.md"
+          - log:
+              to_file_path: "./logs/t10.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    # T11: Create cross-directory overlap matrix
+
+    step_t11_1_extract_mapping:
+      generative_entity: "${models.qwen35}"
+      prompt: |
+        Extract all non-empty cells from the "## 📋 Cross-Directory Overlap Matrix" section of the input prompt. Format as CSV with columns: topic, directory, file.
+
+        Include at least 20 rows covering all 10 topics.
+      model_overrides:
+        max_tokens: 2000
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t11_1_mapping
+              - "./outputs/topic-mapping.csv"
+          - log:
+              to_file_path: "./logs/t11.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    step_t11_2_format_table:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_t11_1_extract_mapping]
+      prompt: |
+        Using topic-mapping.csv from {{bookmarks.t11_1_mapping}}, create markdown overlap matrix with:
+
+        - Header row: | Topic | guides/ | plans/ | requirements/ | roadmap/ | schema/ | workflows/ | research/ | benchmark dirs |
+        - 10 data rows (one per topic)
+        - Cells contain file name or "N/A"
+
+        Total dimensions: 10 topics × 8 directories = 80 cells.
+      model_overrides:
+        max_tokens: 2000
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - save_to:
+              - t11_2_matrix
+              - "./outputs/overlap-matrix.md"
+          - log:
+              to_file_path: "./logs/t11.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    # T12: Document automation recommendations
+
+    step_t12_1_link_validation:
+      generative_entity: "${models.qwen35}"
+      prompt: |
+        Write "## Automated Link Validation" recommendation section (2-3 sentences) with implementation hint: use Foam's link check command or bash script with grep.
+      model_overrides:
+        max_tokens: 500
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - append_to:
+              - t12_recommendations
+              - "./outputs/automation-recommendations.md"
+          - log:
+              to_file_path: "./logs/t12.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    step_t12_2_duplicate_detection:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_t12_1_link_validation]
+      prompt: |
+        Write "## Duplicate Content Detection" recommendation section (2-3 sentences) with implementation hint: use text similarity algorithm (TF-IDF) or manual review on schedule.
+      model_overrides:
+        max_tokens: 500
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - append_to:
+              - t12_recommendations
+              - "./outputs/automation-recommendations.md"
+          - log:
+              to_file_path: "./logs/t12.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    step_t12_3_metrics_and_ci:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_t12_2_duplicate_detection]
+      prompt: |
+        Write two recommendation sections:
+
+        1. "## Metrics Tracking" (2-3 sentences): recommend tracking link density, orphaned files, doc coverage
+        2. "## Doc CI Checks" (2-3 sentences): recommend GitHub Actions workflow to prevent broken links
+
+        Each with implementation hint.
+      model_overrides:
+        max_tokens: 800
+        temperature: 0.1
+      when:
+        after_step_succeeds:
+          - append_to:
+              - t12_recommendations
+              - "./outputs/automation-recommendations.md"
+          - log:
+              to_file_path: "./logs/t12.log"
+              event_fields: [step_name, duration_ms]
+              level: info

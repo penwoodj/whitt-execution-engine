@@ -1,0 +1,462 @@
+workflow_id: sw2_desired_output_state
+name: "SW2 Desired Output State"
+description: "Translates task breakdown into desired output state per task — what the system looks like after each task completes."
+version: "1.0.0"
+author: "Whitt Execution Engine"
+tags: [sub-workflow, desired-output-state, evaluation-criteria]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  "qwen35":
+    name: "Qwen3-5-9B-Q4_K_M.gguf"
+    host:
+      type: llama_cpp_with_vulkan
+    load_params:
+      context_size: 102400
+      batch_size: 2048
+      ubatch_size: 512
+      cache_type_k: "q8_0"
+      cache_type_v: "q8_0"
+      gpu_layers: 99
+      threads: 6
+      use_mmap: true
+      flash_attn: true
+      cont_batching: false
+      no_cache_prompt: true
+    sampling:
+      temperature: 0.2
+      max_tokens: 4096
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw2.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+
+    step_00_bootstrap:
+      generative_entity: "${models.qwen35}"
+      prompt: |
+        Bootstrapping SW2 (desired-output-state). Output "READY".
+      model_overrides:
+        temperature: 0.0
+        max_tokens: 10
+      when:
+        before_step_starts:
+          - shell:
+              command: "mkdir -p ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/{sw2,logs,input} && cat ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/tasks.md | head -100"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+          - bookmark:
+              path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw2/00-bootstrap.txt"
+        after_step_succeeds:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw2.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw2.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_01_extract_task_index:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_00_bootstrap]
+      prompt: |
+        You are extracting the task index from a task breakdown document.
+
+        TASK BREAKDOWN:
+        {{bookmarks.shell_output.stdout}}
+
+        Extract a FLAT list of all tasks AND subtasks in this exact format (one per line):
+
+        T1 - <name> (<points>pts) [PARENT]
+        T1.1 - <name> (<points>pts) [LEAF]
+        T1.2 - <name> (<points>pts) [LEAF]
+        T2 - <name> (<points>pts) [PARENT]
+        ...
+
+        Rules:
+        - Include BOTH parents (T1, T2, ...) AND leaves (T1.1, T1.2, ...)
+        - Mark parent tasks with [PARENT] and leaf tasks with [LEAF]
+        - Preserve the original names and points
+        - Output ONLY the flat list. No preamble.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 4096
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/tasks.md"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - sw2_task_index
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw2/01-task-index.txt"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw2.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw2.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_02_plan_chunks:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_01_extract_task_index]
+      prompt: |
+        You are planning how to process tasks in chunks for output-state generation.
+
+        **ABSOLUTE RULE (violations cause workflow failure):**
+        EVERY task ID from the TASK INDEX below MUST appear in exactly ONE chunk.
+        Before outputting, COUNT the tasks in the index, then COUNT tasks across all chunks.
+        These counts MUST be equal. If they differ, you have FAILED.
+
+        TASK INDEX:
+        {{step.step_01_extract_task_index.output}}
+
+        Group tasks into chunks using START-SMALL-GROW pattern:
+        - First 2 chunks: 2-3 leaf tasks each (warm-up, validate approach)
+        - Middle chunks: 3-4 leaf tasks each (steady-state)
+        - Final chunks: 4-5 leaf tasks each (leverage accumulated context)
+
+        Each chunk should represent a coherent unit of work (e.g., all subtasks of one parent, or related validation steps).
+
+        **PARENT WITHOUT LEAVES:** If a parent task (e.g., T1) has NO leaf subtasks (no T1.1, T1.2...), you MUST include the parent itself as a single-task chunk:
+        ```
+        CHUNK X (1 task, complexity: Npts) [PARENT-ONLY]:
+        - T1 - <name>
+        ```
+        Do NOT skip parents without leaves. They still need output-state definitions.
+
+        Output format:
+
+        CHUNK 1 (2 tasks, complexity: <sum>pts) [WARMUP]:
+        - T1.1 - <name>
+        - T1.2 - <name>
+
+        CHUNK 2 (3 tasks, complexity: <sum>pts) [WARMUP]:
+        - T2.1 - <name>
+        ...
+
+        CHUNK N (4-5 tasks, complexity: <sum>pts) [STEADY]:
+        - ...
+
+        Rules:
+        - First 2 chunks MUST have only 2-3 leaf tasks (smaller)
+        - Later chunks may have up to 5 leaf tasks
+        - Each chunk has only LEAF tasks (unless parent has no leaves → include parent)
+        - Sum the points for each chunk
+        - Order chunks by task ID
+        - **COUNT CHECK: tasks_in_index == tasks_across_all_chunks**
+        - Output ONLY the chunk plan. No preamble.
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 2048
+      when:
+        after_step_succeeds:
+          - save_to:
+              - sw2_chunk_plan
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw2/02-chunk-plan.txt"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw2.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw2.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_03_generate_outputs:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_02_plan_chunks]
+      prompt: |
+        You are generating the desired output state for each task.
+
+        ORIGINAL TASK BREAKDOWN:
+        {{bookmarks.shell_output.stdout}}
+
+        TASK INDEX:
+        {{step.step_01_extract_task_index.output}}
+
+        CHUNK PLAN:
+        {{step.step_02_plan_chunks.output}}
+
+        For EACH task (parent AND leaf), produce a desired output state entry.
+
+        ## What is "Desired Output State"?
+
+        The desired output state describes what is TRUE about the system AFTER the task completes.
+        It is NOT the action — it is the RESULT. Think of it as the post-condition.
+
+        Output format (one block per task):
+
+        ### T<id> - <name>
+
+        **Desired state:** <one sentence describing observable end-state>
+        **Artifacts produced:** <files, data structures, or values created>
+        **Acceptance criteria:**
+          - <criterion 1 — observable and testable>
+          - <criterion 2>
+          - <criterion 3>
+        **Evaluation method:** <CONCRETE verification — specific shell command, test name, or check>
+          Examples of CONCRETE methods (use these patterns):
+          - "Run `grep -c 'pattern' file.md` — must return >= N"
+          - "Run `find docs/ -name '*.md' | wc -l` — must equal N"
+          - "Run `python3 -c 'import yaml; yaml.safe_load(open(\"file.yml\"))'` — must exit 0"
+          - "Run `test -f path/to/file.md` — must exit 0"
+          - "Run `diff file_a.md file_b.md` — must produce no output"
+          - "Unit test validates JSON structure has required fields"
+          NEVER use vague methods like "manual inspection" or "visual check"
+        **Downstream dependencies:** <which tasks consume this output>
+        **Failure indicators:**
+          - <what failure looks like>
+          - <common pitfalls>
+
+        Rules (STRICT):
+        - One block per task (both parents and leaves)
+        - "Desired state" must be OBSERVABLE (file exists, value matches, count == N)
+        - "Acceptance criteria" must be TESTABLE (avoid vague terms)
+        - "Evaluation method" must be specific (test name, command, or check)
+        - Cover EVERY task from the task index — none skipped
+        - Keep each block under 200 words
+
+        Output ONLY the task output-state blocks. No preamble.
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 8192
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/tasks.md"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - sw2_outputs
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw2/03-outputs.md"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw2.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw2.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_04_evaluate:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_03_generate_outputs]
+      prompt: |
+        You are a quality reviewer for desired output state specifications.
+
+        TASK INDEX:
+        {{step.step_01_extract_task_index.output}}
+
+        OUTPUT STATE BLOCKS:
+        {{step.step_03_generate_outputs.output}}
+
+        Evaluate against EACH criterion. Output PASS or FAIL with one-sentence reason:
+
+        1. COVERAGE: Every task from the index has an output-state block
+        2. OBSERVABLE: Every "Desired state" describes something measurable
+        3. TESTABLE: Every "Acceptance criteria" can be verified by a test or check
+        4. ARTIFACTS: Every block specifies concrete artifacts (file, value, structure)
+        5. DEPENDENCIES: Every block lists downstream consumers
+        6. FAILURE_MODES: Every block lists failure indicators
+        7. CONCISE: No block exceeds 200 words
+
+        End with EXACTLY one of these on the last line:
+        VERDICT: PASS
+        VERDICT: FAIL
+
+        Output ONLY the evaluation. No preamble.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 1000
+      when:
+        after_step_succeeds:
+          - save_to:
+              - sw2_eval
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw2/04-eval.txt"
+          - shell:
+              command: "grep -qi 'PASS' './docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw2/04-eval.txt' && printf '%s' PASS || printf '%s' FAIL"
+              args: []
+              fail_on_error: false
+          - gwt:
+              - given: '"{{bookmarks.shell_output.stdout}}" == "PASS"'
+                then: step_06_assemble_final
+              - given: "true"
+                then: step_05_fix
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw2.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw2.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_05_fix:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_04_evaluate]
+      prompt: |
+        You are fixing issues in desired output state specifications.
+
+        TASK INDEX:
+        {{step.step_01_extract_task_index.output}}
+
+        CURRENT OUTPUT STATE BLOCKS:
+        {{step.step_03_generate_outputs.output}}
+
+        EVALUATION FAILURES:
+        {{step.step_04_evaluate.output}}
+
+        Address every FAIL. Output the CORRECTED output state blocks (same format as input).
+
+        Common fixes:
+        - If COVERAGE fails: add missing task blocks
+        - If OBSERVABLE fails: rewrite "Desired state" to be measurable
+        - If TESTABLE fails: rewrite criteria with specific checks
+        - If ARTIFACTS fails: name concrete files/values
+        - If DEPENDENCIES fails: list downstream consumers
+        - If FAILURE_MODES fails: add failure indicators
+
+        Output ONLY the corrected blocks (no === HEADERS ===). No preamble.
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 4096
+      when:
+        after_step_succeeds:
+          - save_to:
+              - sw2_corrected
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw2/05-corrected.md"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw2.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw2.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_06_assemble_final:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_04_evaluate]
+      prompt: |
+        You are assembling the final desired output state document.
+
+        TASK BREAKDOWN (source):
+        {{bookmarks.shell_output.stdout}}
+
+        OUTPUT STATE BLOCKS (initial):
+        {{step.step_03_generate_outputs.output}}
+
+        CORRECTED VERSION (if any):
+        {{step.step_05_fix.output}}
+
+        EVALUATION RESULT:
+        {{step.step_04_evaluate.output}}
+
+        Assemble a SINGLE markdown document in this EXACT format:
+
+        # Desired Output State
+
+        **Source task breakdown:** <first 150 chars of task breakdown>
+        **Total tasks covered:** <N>
+        **Total leaves covered:** <M>
+        **Evaluation verdict:** <PASS or FAIL from evaluation>
+
+        ---
+
+        ## T1 - <name>
+
+        **Desired state:** <observable end-state>
+        **Artifacts produced:** <files/values created>
+        **Acceptance criteria:**
+          - <testable criterion>
+          - <testable criterion>
+        **Evaluation method:** <how to verify>
+        **Downstream dependencies:** <consumers>
+        **Failure indicators:**
+          - <what failure looks like>
+
+        ### T1.1 - <subtask_name>
+
+        (same block format, indented under parent)
+
+        ---
+
+        ## T2 - <name>
+        ...
+
+        (continue for ALL tasks)
+
+        ---
+
+        ## Coverage Summary
+
+        | Task | Has Output State | Acceptance Criteria Count | Verifiable |
+        |------|------------------|---------------------------|------------|
+        | T1 | ✅ | 3 | Yes |
+        | T1.1 | ✅ | 2 | Yes |
+        ...
+
+        Rules (STRICT):
+        - Cover EVERY task from the task breakdown
+        - Every "Desired state" must be OBSERVABLE
+        - Every "Acceptance criteria" must be TESTABLE
+        - Use the CORRECTED version if available, else initial
+        - Maximum 200 words per block
+
+        Output ONLY the final markdown document.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 4096
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/tasks.md | head -50"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - sw2_final
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw2/outputs.md"
+          - bookmark: true
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw2.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw2.log"
+              event_fields: [step_name, error_message]
+              level: error

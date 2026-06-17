@@ -1,0 +1,423 @@
+workflow_id: sw1_task_deconstruction
+name: "SW1 Task Deconstruction"
+description: "Breaks a high-complexity prompt into atomic tasks with story-point complexity scoring and GWT criteria."
+version: "1.0.0"
+author: "Whitt Execution Engine"
+tags: [sub-workflow, task-deconstruction, complexity-scoring]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  "qwen35":
+    name: "Qwen3-5-9B-Q4_K_M.gguf"
+    host:
+      type: llama_cpp_with_vulkan
+    load_params:
+      context_size: 102400
+      batch_size: 2048
+      ubatch_size: 512
+      cache_type_k: "q8_0"
+      cache_type_v: "q8_0"
+      gpu_layers: 99
+      threads: 6
+      use_mmap: true
+      flash_attn: true
+      cont_batching: false
+      no_cache_prompt: true
+    sampling:
+      temperature: 0.2
+      max_tokens: 4096
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw1.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+
+    step_00_bootstrap:
+      generative_entity: "${models.qwen35}"
+      prompt: |
+        Bootstrapping SW1 (task-deconstruction). Output "READY".
+      model_overrides:
+        temperature: 0.0
+        max_tokens: 10
+      when:
+        before_step_starts:
+          - shell:
+              command: "mkdir -p ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/{sw1,logs,input} && cat ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/prompt.txt"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+          - bookmark:
+              path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw1/00-bootstrap.txt"
+        after_step_succeeds:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw1.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw1.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_01_initial_breakdown:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_00_bootstrap]
+      prompt: |
+        You are an engineering architect. Decompose the following prompt into a top-level task list with story-point estimates.
+
+        PROMPT:
+        {{bookmarks.shell_output.stdout}}
+
+        Story-point scale (use ONLY these values): 1, 2, 3, 5, 8, 13.
+        - 1 = trivial, <4 hours, single obvious action
+        - 2 = small, 4h-1d, one well-known transform
+        - 3 = medium, 1-2d, multi-step but linear
+        - 5 = large, 2-3d, multi-step with branching (MUST be split into subtasks)
+        - 8 = too large, 3-5d, multi-component (MUST be split)
+        - 13 = epic, 1+ week (MUST be split)
+
+        Output ONLY this exact format, nothing else:
+
+        T1 - <descriptive_name> (<points>pts): <one-line action under 100 chars>
+        T2 - <descriptive_name> (<points>pts): <one-line action under 100 chars>
+
+        Rules (STRICT — violations cause rejection):
+        - Tasks numbered sequentially T1, T2, ...
+        - Produce 10-15 top-level tasks (HARD REQUIREMENT — fewer = incomplete analysis)
+        - Action description < 100 chars
+        - For prompts involving analysis/modification: FIRST tasks must be analysis-phase (read input, parse structure, identify scope), THEN execution-phase tasks
+        - Do NOT collapse analysis + execution into single task. Each analytical step (read file, compare content, identify scope) gets its own task ID.
+        - Do NOT emit subtasks yet (next step handles that)
+        - Do NOT include preamble or explanation
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 8192
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/prompt.txt"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - sw1_initial_breakdown
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw1/01-initial.txt"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw1.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw1.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_02_expand_high_complexity:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_01_initial_breakdown]
+      prompt: |
+        You are decomposing high-complexity tasks into subtasks.
+
+        ORIGINAL PROMPT (for context):
+        {{bookmarks.shell_output.stdout}}
+
+        TASK LIST:
+        {{step.step_01_initial_breakdown.output}}
+
+         For EVERY task scoring >= 3 points, output a subtask expansion block.
+         For tasks scoring 1-2 points, output NO_EXPANSION_NEEDED.
+
+         Output format (one block per task):
+
+         ## T<id> - <name> (<points>pts)
+         EXPANSION: <SUBTASKS | NO_EXPANSION_NEEDED>
+         - T<id>.1 - <subtask_name> (1pts): <action under 100 chars> | Given: <precondition> When: <trigger> Then: <result>
+         - T<id>.2 - <subtask_name> (2pts): <action under 100 chars> | Given: <precondition> When: <trigger> Then: <result>
+
+         Rules (STRICT — violations cause rejection):
+         - Subtask points MUST be one of: 1, 2, or 3 — NEVER 5, 8, or 13
+         - Each parent task scoring >= 3 MUST have at least 2 subtasks
+         - For analysis/modification tasks: ALWAYS split into phases:
+           (1) READ input file/source
+           (2) ANALYZE content/scope/structure
+           (3) EXECUTE action (modify/create/delete)
+           (4) VERIFY result (grep/check/test)
+           Do NOT collapse these phases into one subtask
+         - Each subtask MUST have inline GWT (Given/When/Then) separated by `|`
+         - Subtask actions < 100 chars
+         - Sum of subtask points should be roughly equal to parent task points
+         - Output one block per task from the task list
+
+         Output ONLY the expansion blocks. No other text.
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 8192
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/prompt.txt"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - sw1_expanded
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw1/02-expanded.md"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw1.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw1.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_03_evaluate:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_02_expand_high_complexity]
+      prompt: |
+        You are a quality reviewer for engineering task breakdowns.
+
+        TASK LIST:
+        {{step.step_01_initial_breakdown.output}}
+
+        SUBTASK EXPANSIONS:
+        {{step.step_02_expand_high_complexity.output}}
+
+        Evaluate against EACH criterion. For each, output PASS or FAIL with a one-sentence reason:
+
+        1. ATOMIC: Every leaf task is a single, well-scoped action
+        2. COMPLETE: Every part of the original prompt is covered by some task
+        3. NON_REDUNDANT: No two tasks duplicate work
+        4. GWT_READY: Each task can be expressed as Given/When/Then (we will fill these next)
+        5. NO_HIGH_COMPLEXITY_LEAVES: No leaf task scores >= 5 pts (all expanded)
+        6. CONCISE: Each task action < 100 chars
+        7. ANALYSIS_PHASE_PRESENT: Tasks involving file/modification work have read→analyze→execute→verify subtask sequence (not collapsed)
+        8. COVERAGE_DEPTH: Parent task count >= 10 (analysis requires decomposing into discrete phases)
+        9. SUBTASK_EXPANSION: Every parent task scoring >= 3 pts has >= 2 leaf subtasks
+        10. COMPLEXITY_RATING_VALID: For each parent task, dynamic_complexity = (leaf_count × avg_leaf_points). Verify rating is consistent with assigned story points (e.g., 3 leaves × 2pts avg = 6 dynamic, justifies ≥5pt parent)
+
+        End with EXACTLY one of these two lines on the last line:
+        VERDICT: PASS
+        VERDICT: FAIL
+
+        Output ONLY the evaluation, no preamble.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 1200
+      when:
+        after_step_succeeds:
+          - save_to:
+              - sw1_eval
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw1/03-eval.txt"
+          - shell:
+              command: "grep -q 'VERDICT: PASS' './docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw1/03-eval.txt' && printf '%s' PASS || printf '%s' FAIL"
+              args: []
+              fail_on_error: false
+          - gwt:
+              - given: '"{{bookmarks.shell_output.stdout}}" == "PASS"'
+                then: step_05_assemble_final
+              - given: "true"
+                then: step_04_fix
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw1.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw1.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_04_fix:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_03_evaluate]
+      prompt: |
+        You are fixing issues in a task breakdown.
+
+        ORIGINAL PROMPT:
+        {{bookmarks.shell_output.stdout}}
+
+        CURRENT TASK LIST:
+        {{step.step_01_initial_breakdown.output}}
+
+        CURRENT SUBTASK EXPANSIONS:
+        {{step.step_02_expand_high_complexity.output}}
+
+        EVALUATION FAILURES:
+        {{step.step_03_evaluate.output}}
+
+        Output a CORRECTED version of BOTH:
+        1. The task list (T1, T2, ... format, same as input)
+        2. The subtask expansions (## T<id> ... format, same as input)
+
+        Address every FAIL. If a task needs splitting, split it. If a description is too long, shorten it.
+        If a high-complexity leaf exists, expand it into subtasks.
+
+        Output format:
+
+        === CORRECTED TASK LIST ===
+        T1 - <name> (<pts>pts): <action>
+        ...
+
+        === CORRECTED SUBTASK EXPANSIONS ===
+        ## T<id> - <name> (<pts>pts)
+        EXPANSION: <SUBTASKS | NO_EXPANSION_NEEDED>
+        - T<id>.1 - <name> (<pts>pts): <action>
+        ...
+
+        Output ONLY the corrected sections. No other commentary.
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 8192
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/prompt.txt"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - sw1_corrected
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw1/04-corrected.md"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw1.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw1.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_05_assemble_final:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_03_evaluate]
+      prompt: |
+        You are assembling the final task breakdown document.
+
+        ORIGINAL PROMPT:
+        {{bookmarks.shell_output.stdout}}
+
+        Use the LATEST task list and subtask expansions. If step_04_fix produced output, use that.
+        Otherwise use step_01 and step_02 outputs.
+
+        TASK LIST (initial):
+        {{step.step_01_initial_breakdown.output}}
+
+        SUBTASK EXPANSIONS (initial):
+        {{step.step_02_expand_high_complexity.output}}
+
+        CORRECTED VERSION (if any):
+        {{step.step_04_fix.output}}
+
+        EVALUATION RESULT:
+        {{step.step_03_evaluate.output}}
+
+        Assemble a SINGLE markdown document in this EXACT format. Use the ORIGINAL PROMPT shown above (first 200 chars) as "Source prompt" — do NOT hallucinate.
+
+        # Task Breakdown
+
+        **Source prompt:** (first 200 chars of the ORIGINAL PROMPT shown above)
+
+        **Total tasks:** <N>
+        **Total story points:** <M>
+        **Maximum leaf complexity:** <X> pts (MUST be <= 3)
+
+        ---
+
+        ## T1 - <name> (<X>pts)
+
+        **Story points:** <X>
+        **Why:** <ONE sentence justifying the points — reference the complexity driver>
+        **Action:** <one sentence>
+        **Depends on:** <T0 or prior task>
+        **GWT criteria:**
+          - **Given:** <preconditions from prior task or environment>
+          - **When:** <action this task performs>
+          - **Then:** <observable, verifiable outcome>
+
+        ### T1.1 - <subtask_name> (<Y>pts)
+
+        **Story points:** <Y> (MUST be 1, 2, or 3)
+        **Why:** <ONE sentence justifying>
+        **Action:** <action>
+        **GWT:**
+          - **Given:** <preconditions>
+          - **When:** <trigger>
+          - **Then:** <observable result>
+
+        ---
+
+        ## T2 - <name> ...
+
+        (continue for ALL tasks)
+
+        ---
+
+        ## Complexity Distribution
+
+        | Points | Count |
+        |--------|-------|
+        | 1 | <n1> |
+        | 2 | <n2> |
+        | 3 | <n3> |
+        | 5 | 0 |
+        | 8 | 0 |
+        | 13 | 0 |
+
+        Rules (STRICT):
+        - Every leaf task has full GWT criteria (Given + When + Then, each non-empty)
+        - Every task scoring >= 5 in the original MUST have subtasks in the final output
+        - Every subtask MUST have a "Why" field
+        - "Why" justifies the story point value with a complexity driver
+        - Total story points = sum of all LEAF task points
+        - Maximum leaf complexity MUST be <= 3 (any leaf >= 5 is a violation)
+        - COMPACT FORMAT: Keep each task block under 8 lines. Combine related fields. Avoid redundancy.
+        - Do NOT repeat content already in step_04 corrected output — assemble and format only.
+
+        Output ONLY the final markdown document.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 4096
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/prompt.txt"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - sw1_final
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw1/tasks.md"
+          - bookmark: true
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw1.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw1.log"
+              event_fields: [step_name, error_message]
+              level: error

@@ -1,0 +1,378 @@
+workflow_id: sw5_final_workflow_assembly
+name: "SW5 Final Workflow Assembly"
+description: "Assembles the final executable agentic workflow .yml file from substructures. Most critical step — exhaustive task coverage required."
+version: "1.0.0"
+author: "Whitt Execution Engine"
+tags: [sub-workflow, final-assembly, yaml-generation]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  "qwen35":
+    name: "Qwen3-5-9B-Q4_K_M.gguf"
+    host:
+      type: llama_cpp_with_vulkan
+    load_params:
+      context_size: 102400
+      batch_size: 2048
+      ubatch_size: 512
+      cache_type_k: "q8_0"
+      cache_type_v: "q8_0"
+      gpu_layers: 99
+      threads: 6
+      use_mmap: true
+      flash_attn: true
+      cont_batching: false
+      no_cache_prompt: true
+    sampling:
+      temperature: 0.2
+      max_tokens: 4096
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw5.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+
+    step_00_bootstrap:
+      generative_entity: "${models.qwen35}"
+      prompt: |
+        Bootstrapping SW5 (final-workflow-assembly). Output "READY".
+      model_overrides:
+        temperature: 0.0
+        max_tokens: 10
+      when:
+        before_step_starts:
+          - shell:
+              command: "mkdir -p ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/{sw5,logs,input} && head -30 ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/structs.md"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+          - bookmark:
+              path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw5/00-bootstrap.txt"
+        after_step_succeeds:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw5.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    step_01_inventory_tasks:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_00_bootstrap]
+      prompt: |
+        You are inventorying all tasks that must appear in the final workflow.
+
+        SUBSTRUCTURES DOC:
+        {{bookmarks.shell_output.stdout}}
+
+        Extract EVERY task ID mentioned (T1, T1.1, T1.2, T2, ...). One per line:
+
+        T1 - <name>
+        T1.1 - <name>
+        ...
+
+        Also note the step_count: <N> on the last line.
+
+        Output ONLY the inventory.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 1000
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/structs.md"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - sw5_inventory
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw5/01-inventory.txt"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw5.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+
+    step_02_emit_skeleton:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_01_inventory_tasks]
+      prompt: |
+        You are emitting the workflow skeleton (header + providers + models + strategy).
+
+        TASK INVENTORY:
+        {{step.step_01_inventory_tasks.output}}
+
+        Output ```yaml code block with ONLY the header/skeleton (no steps yet):
+
+        ```yaml
+        workflow_id: generated_workflow_<unique>
+        name: "<descriptive name from task context>"
+        description: "<one-line description>"
+        version: "1.0.0"
+        schema_version: "2.0.0"
+
+        providers:
+          llama_cpp_with_vulkan:
+            config:
+              host: localhost
+              port: 8080
+
+        models:
+          "qwen35":
+            name: "Qwen3-5-9B-Q4_K_M.gguf"
+            host:
+              type: llama_cpp_with_vulkan
+
+        workflow_execution_strategy:
+          memory:
+            model_lifecycle:
+              unload_unused: false
+
+        agentic_workflow:
+          when:
+            after_workflow:
+              - log:
+                  to_file_path: "./outputs/workflow.log"
+                  event_fields: [workflow_id, total_steps, succeeded, failed]
+                  level: info
+
+          steps:
+        ```
+
+        (steps will be added in next step)
+
+        Output ONLY the yaml code block. No other text.
+      model_overrides:
+        temperature: 0.0
+        max_tokens: 800
+      when:
+        after_step_succeeds:
+          - save_to:
+              - sw5_skeleton
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw5/02-skeleton.yml"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw5.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+
+    step_03_assemble_steps:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_02_emit_skeleton]
+      prompt: |
+        You are assembling the complete workflow by combining skeleton + all step substructures.
+
+        SKELETON:
+        {{step.step_02_emit_skeleton.output}}
+
+        SUBSTRUCTURES (from SW4 — these are the step definitions):
+        {{bookmarks.shell_output.stdout}}
+
+        TASK INVENTORY (verify all are covered):
+        {{step.step_01_inventory_tasks.output}}
+
+        Concatenate ALL step YAML snippets under the `steps:` key of the skeleton.
+
+        CRITICAL RULES:
+        1. Every task from the inventory MUST have a corresponding step in the output
+        2. Preserve exact step IDs from the substructures (step_<id>_<name>)
+        3. Maintain correct depends_on chains
+        4. Keep all hooks (save_to, log, gwt, bookmark, shell) from substructures
+        5. Ensure 2-space indentation throughout
+        6. Output a SINGLE ```yaml code block with the COMPLETE workflow
+
+        YAML SYNTAX REQUIREMENTS (CRITICAL — violations cause parse failure):
+        - save_to MUST use indented list format, NOT inline array:
+            CORRECT:
+              - save_to:
+                  - bookmark_name
+                  - "./outputs/file.md"
+            WRONG:
+              - save_to: [bookmark_name, "./outputs/file.md"]
+        - Every step MUST have after_step_succeeds log hook:
+            - log:
+                to_file_path: "./logs/<step_name>.log"
+                event_fields: [step_name, duration_ms, total_tokens]
+                level: info
+        - For GWT conditions referencing shell eval output, ALWAYS use template:
+            CORRECT:
+              - given: '"{{bookmarks.shell_output.stdout}}" == "PASS"'
+                then: <success_step>
+            WRONG:
+              - given: '"some literal text" == "PASS"'
+                then: <success_step>
+        - Every step MUST have generative_entity: "${models.qwen35}"
+        - Every step MUST have model_overrides with max_tokens: 8192
+        - Provider key MUST be exactly: llama_cpp_with_vulkan
+        - schema_version MUST be exactly: "2.0.0"
+
+        Output ONLY the complete workflow yaml. No explanation.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 16384
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/structs.md"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - sw5_assembled
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw5/03-assembled.yml"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw5.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+
+    step_04_evaluate:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_03_assemble_steps]
+      prompt: |
+        You are exhaustively evaluating the assembled workflow.
+
+        TASK INVENTORY (must all be covered):
+        {{step.step_01_inventory_tasks.output}}
+
+        ASSEMBLED WORKFLOW:
+        {{step.step_03_assemble_steps.output}}
+
+        Evaluate EACH criterion. Output PASS/FAIL with reason:
+
+        1. COVERAGE_EXHAUSTIVE: Every task ID from inventory has a corresponding step in the workflow
+        2. VALID_YAML: The output parses as valid YAML (correct indentation, no tabs, proper quoting)
+        3. HAS_WORKFLOW_ID: workflow_id field present and non-empty
+        4. HAS_PROVIDERS: providers.llama_cpp_with_vulkan present
+        5. HAS_MODELS: models.qwen35 present
+        6. STEPS_NON_EMPTY: At least one step under agentic_workflow.steps
+        7. DEPENDS_ON_CORRECT: Each step's depends_on references exist as step IDs
+        8. PROMPTS_PRESENT: Every step has a non-empty prompt
+        9. HOOKS_PRESERVED: save_to, log, gwt hooks from substructures are present
+
+        End with:
+        VERDICT: PASS
+        VERDICT: FAIL
+
+        Output ONLY the evaluation.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 1000
+      when:
+        after_step_succeeds:
+          - save_to:
+              - sw5_eval
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw5/04-eval.txt"
+          - shell:
+              command: "grep -qi 'PASS' './docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw5/04-eval.txt' && printf '%s' PASS || printf '%s' FAIL"
+              args: []
+              fail_on_error: false
+          - gwt:
+              - given: '"{{bookmarks.shell_output.stdout}}" == "PASS"'
+                then: step_06_finalize
+              - given: "true"
+                then: step_05_fix
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw5.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+
+    step_05_fix:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_04_evaluate]
+      prompt: |
+        You are fixing the assembled workflow.
+
+        TASK INVENTORY:
+        {{step.step_01_inventory_tasks.output}}
+
+        CURRENT WORKFLOW:
+        {{step.step_03_assemble_steps.output}}
+
+        EVALUATION FAILURES:
+        {{step.step_04_evaluate.output}}
+
+        Output the COMPLETE corrected workflow YAML (same format as input — single ```yaml block).
+
+        Address EVERY FAIL:
+        - Missing tasks: add their step definitions
+        - Invalid YAML: fix indentation/quotes
+        - Missing hooks: add from substructures
+
+        If workflow has any of these issues, FIX THEM:
+        - save_to using inline array [x, y] → convert to indented list format
+        - Missing log hooks on any step → add them
+        - GWT conditions with literal text → replace with {{bookmarks.shell_output.stdout}} template
+        - Missing generative_entity → add "${models.qwen35}"
+        - Missing model_overrides → add with max_tokens: 8192
+
+        Output ONLY the corrected complete yaml.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 4096
+      when:
+        after_step_succeeds:
+          - save_to:
+              - sw5_corrected
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw5/05-corrected.yml"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw5.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+
+    step_06_finalize:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_04_evaluate]
+      prompt: |
+        You are finalizing the workflow file.
+
+        ASSEMBLED (initial):
+        {{step.step_03_assemble_steps.output}}
+
+        CORRECTED (if any):
+        {{step.step_05_fix.output}}
+
+        EVALUATION:
+        {{step.step_04_evaluate.output}}
+
+        Output the FINAL workflow YAML — use corrected version if available, else initial.
+
+        Strip any markdown formatting (no ```yaml fences). Output RAW YAML only.
+
+        Before outputting final YAML, verify:
+        1. Every step has generative_entity and model_overrides
+        2. Every step has log hook in after_step_succeeds
+        3. All save_to use indented list format
+        4. All GWT conditions use {{bookmarks.shell_output.stdout}} template (no literal text)
+        5. Provider is llama_cpp_with_vulkan
+        6. schema_version is "2.0.0"
+        Output ONLY valid YAML. No markdown code fences in the output itself.
+
+        This is the final executable workflow file.
+      model_overrides:
+        temperature: 0.0
+        max_tokens: 4096
+      when:
+        after_step_succeeds:
+          - save_to:
+              - sw5_final
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw5/workflow.yml"
+          - bookmark: true
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw5.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info

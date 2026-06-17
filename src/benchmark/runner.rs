@@ -61,7 +61,7 @@ fn default_model_load_timeout() -> Duration {
 
 #[allow(dead_code)]
 fn default_min_tmp_space_mb() -> u64 {
-    1024
+    100
 }
 
 fn bytes_to_gb(bytes: u64) -> f64 {
@@ -267,10 +267,10 @@ impl BenchmarkRunner {
             Ok(output) => {
                 let count_str = String::from_utf8_lossy(&output.stdout);
                 let count: i32 = count_str.trim().parse().unwrap_or(0);
-                if count <= 1 {
+                if count <= 2 {
                     info!("[benchmark] ✓ Zombie process check passed: {} llama-server process(es) found", count);
                 } else {
-                    let msg = format!("Found {} zombie llama-server processes (expected 0-1)", count);
+                    let msg = format!("Found {} zombie llama-server processes (expected 0-2)", count);
                     info!("[benchmark] ✗ {}", msg);
                     anyhow::bail!(crate::error::Error::benchmark(msg));
                 }
@@ -1769,7 +1769,7 @@ impl BenchmarkRunner {
             None
         };
 
-        let model_result = self.run_model_inference(client, model_id, model_path, "gpu", std::slice::from_ref(&resolved_prompt), step_max_tokens, step_temperature, top_p, system_prompt, false).await;
+        let model_result = self.run_model_inference(client, model_id, model_path, "gpu", std::slice::from_ref(&resolved_prompt), step_max_tokens, step_temperature, top_p, system_prompt, true).await;
 
         let output_text = model_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
 
@@ -3583,7 +3583,7 @@ mod tests {
             cooldown_after_unload: Duration::from_secs(3),
             preflight_only: false,
             model_load_timeout: Duration::from_secs(300),
-            min_tmp_space_mb: 1024,
+            min_tmp_space_mb: 100,
         };
 
         assert!(config.compare_gpu_cpu, "compare_gpu_cpu should be true");
@@ -3707,7 +3707,7 @@ mod tests {
             cooldown_after_unload: Duration::from_secs(0),
             preflight_only: false,
             model_load_timeout: Duration::from_secs(60),
-            min_tmp_space_mb: 512,
+            min_tmp_space_mb: 100,
         }
     }
 

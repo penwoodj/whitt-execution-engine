@@ -1,0 +1,430 @@
+workflow_id: sw3_agentic_categorization
+name: "SW3 Agentic Categorization"
+description: "Translates deconstructed tasks + desired outputs into agentic behavior categories that correlate to workflow substructures."
+version: "1.0.0"
+author: "Whitt Execution Engine"
+tags: [sub-workflow, agentic-categorization, classification]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  "qwen35":
+    name: "Qwen3-5-9B-Q4_K_M.gguf"
+    host:
+      type: llama_cpp_with_vulkan
+    load_params:
+      context_size: 102400
+      batch_size: 2048
+      ubatch_size: 512
+      cache_type_k: "q8_0"
+      cache_type_v: "q8_0"
+      gpu_layers: 99
+      threads: 6
+      use_mmap: true
+      flash_attn: true
+      cont_batching: false
+      no_cache_prompt: true
+    sampling:
+      temperature: 0.2
+      max_tokens: 4096
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw3.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+
+    step_00_bootstrap:
+      generative_entity: "${models.qwen35}"
+      prompt: |
+        Bootstrapping SW3 (agentic-categorization). Output "READY".
+      model_overrides:
+        temperature: 0.0
+        max_tokens: 10
+      when:
+        before_step_starts:
+          - shell:
+              command: "mkdir -p ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/{sw3,logs,input} && head -50 ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/outputs.md"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+          - bookmark:
+              path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw3/00-bootstrap.txt"
+        after_step_succeeds:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw3.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw3.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_01_extract_task_list:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_00_bootstrap]
+      prompt: |
+        You are extracting the task list from a desired-output-state document.
+
+        OUTPUTS DOCUMENT:
+        {{bookmarks.shell_output.stdout}}
+
+        Extract ONLY the task IDs and names (no output-state details). One per line:
+
+        T1 - <name>
+        T1.1 - <name>
+        T1.2 - <name>
+        ...
+
+        Include BOTH parents and leaves. Output ONLY the flat list.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 1000
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/outputs.md"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - sw3_task_list
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw3/01-task-list.txt"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw3.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw3.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_02_define_categories:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_01_extract_task_list]
+      prompt: |
+        You are defining agentic behavior categories for workflow substructures.
+
+        These are the 6 standard agentic categories. Each maps to a workflow substructure pattern:
+
+        1. SEQUENTIAL_PROCESSOR — Linear chain of steps, each depends on previous
+           Pattern: step_a → step_b → step_c (depends_on chain)
+           Use when: Tasks must execute in strict order, output feeds next input
+
+        2. PARALLEL_FAN_OUT — One input splits to multiple independent processors
+           Pattern: step_a → [step_b1, step_b2, step_b3] → step_c (aggregate)
+           Use when: Independent computations on same input, merge results
+
+        3. ITERATIVE_REFINER — Loop that improves output until quality gate passes
+           Pattern: generate → evaluate → fix → evaluate (GWT gate)
+           Use when: Quality criteria exist, LLM may need multiple passes
+
+        4. CONDITIONAL_ROUTER — Branches based on runtime evaluation
+           Pattern: evaluate → GWT clause → route_to A or B
+           Use when: Different processing paths based on input characteristics
+
+        5. DATA_TRANSFORMER — Pure input→output conversion, no branching
+           Pattern: parse → transform → format (single step or short chain)
+           Use when: Deterministic transformation, well-defined schema
+
+        6. ACCUMULATOR — Iterates over collection, accumulating state
+           Pattern: loop with iterate_values, append_to builds state
+           Use when: Process N items, aggregate into single output
+
+        Task List:
+        {{step.step_01_extract_task_list.output}}
+
+        Output ONLY this (nothing else):
+
+        CATEGORIES DEFINED: 6
+        1. SEQUENTIAL_PROCESSOR
+        2. PARALLEL_FAN_OUT
+        3. ITERATIVE_REFINER
+        4. CONDITIONAL_ROUTER
+        5. DATA_TRANSFORMER
+        6. ACCUMULATOR
+      model_overrides:
+        temperature: 0.0
+        max_tokens: 500
+      when:
+        after_step_succeeds:
+          - save_to:
+              - sw3_categories
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw3/02-categories.txt"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw3.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw3.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_03_categorize_tasks:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_02_define_categories]
+      prompt: |
+        You are categorizing each task into an agentic behavior pattern.
+
+        OUTPUTS DOCUMENT (for context on each task's purpose):
+        {{bookmarks.shell_output.stdout}}
+
+        TASK LIST:
+        {{step.step_01_extract_task_list.output}}
+
+        For EACH task (parent AND leaf), output a categorization block:
+
+        ### T<id> - <name>
+
+        **Primary category:** <one of SEQUENTIAL_PROCESSOR, PARALLEL_FAN_OUT, ITERATIVE_REFINER, CONDITIONAL_ROUTER, DATA_TRANSFORMER, ACCUMULATOR>
+        **Reasoning:** <2-3 sentences explaining why this category fits>
+        **Substructure hint:** <brief description of the workflow substructure pattern>
+          - e.g., "single LLM step with save_to + log hooks"
+          - e.g., "loop with GWT quality gate, max 3 iterations"
+          - e.g., "parallel branches with different prompts, merged via append_to"
+        **Inputs needed:** <what this task consumes — prior step output, file, user param>
+        **Outputs produced:** <what this task generates — file, variable, state change>
+        **Evaluation scope:** <how to verify — single-step check, multi-step integration, end-to-end>
+        **Iteration budget:** <1, 2, or 3 — how many LLM passes this task likely needs>
+
+        Rules:
+        - Assign EXACTLY ONE primary category per task
+        - DEFAULT TO DATA_TRANSFORMER. Most file/document tasks are simple input→output transforms.
+        - Only use SEQUENTIAL_PROCESSOR when task has 3+ ordered steps with strict data dependency
+        - Only use PARALLEL_FAN_OUT when task genuinely splits into 3+ independent branches that can run concurrently
+        - Only use ITERATIVE_REFINER when task needs quality-gate feedback loop (eval → fix → re-eval)
+        - Only use ACCUMULATOR when task genuinely aggregates state across iterations (not single-pass aggregation)
+        - Only use CONDITIONAL_ROUTER when task branches on runtime evaluation
+        - When in doubt between DATA_TRANSFORMER and another category, choose DATA_TRANSFORMER
+        - "Iteration budget" should be 1 by default (simple transforms). Use 2-3 only when task genuinely requires revision loop.
+        - "Reasoning" must reference the task's actual output-state
+        - Cover EVERY task from the task list
+
+        Output ONLY the categorization blocks. No preamble.
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 8192
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/outputs.md"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - sw3_categorized
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw3/03-categorized.md"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw3.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw3.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_04_evaluate:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_03_categorize_tasks]
+      prompt: |
+        You are a quality reviewer for agentic categorization. Review from MULTIPLE PERSPECTIVES.
+
+        TASK LIST:
+        {{step.step_01_extract_task_list.output}}
+
+        CATEGORIZATION BLOCKS:
+        {{step.step_03_categorize_tasks.output}}
+
+        Evaluate from EACH perspective. Output PASS/FAIL with one-sentence reason:
+
+        ## Perspective 1: COVERAGE SCOPE
+        - COVERAGE: Every task from the list has a categorization block
+        - NO_ORPHANS: No categorization for tasks not in the list
+        - LEAF_COVERAGE: Both parent AND leaf tasks are categorized
+
+        ## Perspective 2: CATEGORY VALIDITY SCOPE
+        - SINGLE_CATEGORY: Each task has exactly one primary category
+        - VALID_CATEGORY: Every category is one of: SEQUENTIAL_PROCESSOR, PARALLEL_FAN_OUT, ITERATIVE_REFINER, CONDITIONAL_ROUTER, DATA_TRANSFORMER, ACCUMULATOR
+        - DEFAULT_DATA_TRANSFORMER: Simple file/document tasks use DATA_TRANSFORMER (not over-categorized)
+
+        ## Perspective 3: REASONING QUALITY SCOPE
+        - REASONED: Every "Reasoning" references the task's actual output-state (not generic)
+        - SUBSTRUCTURE_HINT: Every block has a concrete substructure description
+        - INPUTS_OUTPUTS: Every block specifies inputs and outputs
+        - ITERATION_BUDGET: Every block has a budget in {1, 2, 3}, defaulting to 1 for simple transforms
+
+        ## Perspective 4: INTEGRATION SCOPE
+        - EVALUATION_SCOPE: Every block specifies how to verify (single-step, multi-step, e2e)
+        - CATEGORY_OUTPUT_ALIGNMENT: Category matches the output-state description (e.g., accumulator only if state truly accumulates)
+
+        End with EXACTLY one of:
+        VERDICT: PASS  (only if ALL perspectives PASS)
+        VERDICT: FAIL  (any perspective FAIL)
+
+        Output ONLY the evaluation.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 1500
+      when:
+        after_step_succeeds:
+          - save_to:
+              - sw3_eval
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw3/04-eval.txt"
+          - shell:
+              command: "grep -qi 'PASS' './docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw3/04-eval.txt' && printf '%s' PASS || printf '%s' FAIL"
+              args: []
+              fail_on_error: false
+          - gwt:
+              - given: '"{{bookmarks.shell_output.stdout}}" == "PASS"'
+                then: step_06_assemble_final
+              - given: "true"
+                then: step_05_fix
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw3.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw3.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_05_fix:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_04_evaluate]
+      prompt: |
+        You are fixing categorization issues.
+
+        TASK LIST:
+        {{step.step_01_extract_task_list.output}}
+
+        CURRENT CATEGORIZATION:
+        {{step.step_03_categorize_tasks.output}}
+
+        EVALUATION FAILURES:
+        {{step.step_04_evaluate.output}}
+
+        Output CORRECTED categorization blocks (same format as input).
+        Address every FAIL. No preamble.
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 4096
+      when:
+        after_step_succeeds:
+          - save_to:
+              - sw3_corrected
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw3/05-corrected.md"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw3.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw3.log"
+              event_fields: [step_name, error_message]
+              level: error
+
+    step_06_assemble_final:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_04_evaluate]
+      prompt: |
+        You are assembling the final agentic categorization document.
+
+        OUTPUTS DOCUMENT (source):
+        {{bookmarks.shell_output.stdout}}
+
+        CATEGORIZATION BLOCKS (initial):
+        {{step.step_03_categorize_tasks.output}}
+
+        CORRECTED (if any):
+        {{step.step_05_fix.output}}
+
+        EVALUATION:
+        {{step.step_04_evaluate.output}}
+
+        Assemble a SINGLE markdown document:
+
+        # Agentic Categorization
+
+        **Source document:** <first 150 chars of outputs doc>
+        **Total tasks categorized:** <N>
+        **Evaluation verdict:** <PASS/FAIL>
+
+        ---
+
+        ## Category Summary
+
+        | Category | Count | Avg Iteration Budget |
+        |----------|-------|---------------------|
+        | SEQUENTIAL_PROCESSOR | <n> | <avg> |
+        | PARALLEL_FAN_OUT | <n> | <avg> |
+        | ITERATIVE_REFINER | <n> | <avg> |
+        | CONDITIONAL_ROUTER | <n> | <avg> |
+        | DATA_TRANSFORMER | <n> | <avg> |
+        | ACCUMULATOR | <n> | <avg> |
+
+        ---
+
+        ## T1 - <name>
+
+        **Primary category:** <CATEGORY>
+        **Reasoning:** <why>
+        **Substructure hint:** <pattern>
+        **Inputs:** <from where>
+        **Outputs:** <to where>
+        **Evaluation scope:** <how to verify>
+        **Iteration budget:** <N>
+
+        ### T1.1 - <name>
+        (same format)
+
+        ---
+
+        (continue for ALL tasks)
+
+        Output ONLY the final document.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 4096
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/outputs.md | head -30"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - sw3_final
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw3/categories.md"
+          - bookmark: true
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw3.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+        after_step_fails:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw3.log"
+              event_fields: [step_name, error_message]
+              level: error

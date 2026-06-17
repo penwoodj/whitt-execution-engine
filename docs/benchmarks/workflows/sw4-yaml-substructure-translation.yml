@@ -1,0 +1,452 @@
+workflow_id: sw4_yaml_substructure_translation
+name: "SW4 YAML Substructure Translation"
+description: "Translates categorized tasks into individual YAML agentic substructures with intent descriptions. YAML-only code blocks in output."
+version: "1.0.0"
+author: "Whitt Execution Engine"
+tags: [sub-workflow, yaml-translation, substructures]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  "qwen35":
+    name: "Qwen3-5-9B-Q4_K_M.gguf"
+    host:
+      type: llama_cpp_with_vulkan
+    load_params:
+      context_size: 102400
+      batch_size: 2048
+      ubatch_size: 512
+      cache_type_k: "q8_0"
+      cache_type_v: "q8_0"
+      gpu_layers: 99
+      threads: 6
+      use_mmap: true
+      flash_attn: true
+      cont_batching: false
+      no_cache_prompt: true
+    sampling:
+      temperature: 0.2
+      max_tokens: 4096
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw4.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+
+    step_00_bootstrap:
+      generative_entity: "${models.qwen35}"
+      prompt: |
+        Bootstrapping SW4 (yaml-substructure-translation). Output "READY".
+      model_overrides:
+        temperature: 0.0
+        max_tokens: 10
+      when:
+        before_step_starts:
+          - shell:
+              command: "mkdir -p ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/{sw4,logs,input} && head -30 ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/categories.md"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+          - bookmark:
+              path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw4/00-bootstrap.txt"
+        after_step_succeeds:
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw4.log"
+              event_fields: [step_name, duration_ms]
+              level: info
+
+    step_01_load_categories:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_00_bootstrap]
+      prompt: |
+        You are loading the agentic categorization for YAML translation.
+
+        CATEGORIES DOC:
+        {{bookmarks.shell_output.stdout}}
+
+        Extract a flat list of tasks with their primary category. One per line:
+
+        T1 - <name> | CATEGORY: <cat> | BUDGET: <n>
+        T1.1 - <name> | CATEGORY: <cat> | BUDGET: <n>
+        ...
+
+        Output ONLY the flat list.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 1000
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/categories.md"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - sw4_task_cats
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw4/01-task-cats.txt"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw4.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+
+    step_02_emit_substructures:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_01_load_categories]
+      prompt: |
+        You are translating categorized tasks into YAML agentic substructures.
+
+        TASK-CATEGORY LIST:
+        {{step.step_01_load_categories.output}}
+
+        FULL CATEGORIES DOC (for reasoning/substructure hints):
+        {{bookmarks.shell_output.stdout}}
+
+        For EACH task, emit a YAML substructure snippet showing how it becomes a workflow step.
+
+        ## Category → YAML Pattern Reference
+
+        SEQUENTIAL_PROCESSOR:
+        ```yaml
+        step_<id>_<name>:
+          generative_entity: "${models.qwen35}"
+          depends_on: [step_<prior>]
+          prompt: |
+            <prompt text>
+          model_overrides: {max_tokens: <N>, temperature: <T>}
+          when:
+            after_step_succeeds:
+              - save_to: [<var>, "<path>"]
+              - log: {to_file_path: "<log>", event_fields: [step_name, duration_ms]}
+        ```
+
+        ITERATIVE_REFINER:
+        ```yaml
+        step_<id>_<name>_generate:
+          generative_entity: "${models.qwen35}"
+          prompt: |
+            <generation prompt>
+          when:
+            after_step_succeeds:
+              - save_to: [<var>, "<path>"]
+
+        step_<id>_<name>_evaluate:
+          generative_entity: "${models.qwen35}"
+          depends_on: [step_<id>_<name>_generate]
+          prompt: |
+            <eval prompt ending with VERDICT: PASS or FAIL>
+          when:
+            after_step_succeeds:
+              - save_to: [<var>, "<eval_file>"]
+              - shell:
+                  command: "grep -qi 'PASS' '<eval_file>' && printf '%s' PASS || printf '%s' FAIL"
+                  fail_on_error: false
+              - gwt:
+                  - given: '"{{bookmarks.shell_output.stdout}}" == "PASS"'
+                    then: step_<id>_<name>_finalize
+                  - given: "true"
+                    then: step_<id>_<name>_fix
+
+        step_<id>_<name>_fix:
+          generative_entity: "${models.qwen35}"
+          prompt: |
+            <fix prompt>
+        ```
+
+        CONDITIONAL_ROUTER:
+        ```yaml
+        step_<id>_<name>_route:
+          generative_entity: "${models.qwen35}"
+          prompt: |
+            <eval prompt>
+          when:
+            after_step_succeeds:
+              - gwt:
+                  - given: "<condition>"
+                    then: [<target_a>]
+                  - given: "<condition>"
+                    then: [<target_b>]
+        ```
+
+        DATA_TRANSFORMER:
+        ```yaml
+        step_<id>_<name>:
+          generative_entity: "${models.qwen35}"
+          prompt: |
+            <transform prompt>
+          when:
+            after_step_succeeds:
+              - save_to: [<var>, "<path>"]
+        ```
+
+        PARALLEL_FAN_OUT:
+        ```yaml
+        step_<id>_<name>_branch_a:
+          generative_entity: "${models.qwen35}"
+          prompt: |
+            <branch A prompt>
+        step_<id>_<name>_branch_b:
+          generative_entity: "${models.qwen35}"
+          prompt: |
+            <branch B prompt>
+        step_<id>_<name>_merge:
+          depends_on: [step_<id>_<name>_branch_a, step_<id>_<name>_branch_b]
+          generative_entity: "${models.qwen35}"
+          prompt: |
+            Merge: {{step.step_<id>_<name>_branch_a.output}} + {{step.step_<id>_<name>_branch_b.output}}
+        ```
+
+        ACCUMULATOR:
+        ```yaml
+        step_<id>_<name>_loop:
+          generative_entity: "${models.qwen35}"
+          prompt: |
+            Process item: {{loop.current_item}}
+          when:
+            before_step_starts:
+              - iterate_values:
+                  current_item: [<item1>, <item2>, <item3>]
+            after_step_succeeds:
+              - append_to: [<accumulated_var>, "<path>"]
+        ```
+
+        For EACH task from the list, output (COMPACT FORMAT — keep each block under 15 lines):
+
+        ### T<id> - <name> (<category>)
+        Intent: <ONE sentence>
+        ```yaml
+        <YAML snippet — keep prompts as <placeholder>, only structural fields matter>
+        ```
+        Fit: <ONE sentence>
+
+        Rules (STRICT):
+        - Output ONLY ```yaml code blocks for the substructure snippets (no other code block types)
+        - Every YAML block must be valid YAML (correct indentation, quoting)
+        - Use `step_<id>_<name>` as step IDs (snake_case, no hyphens)
+        - Reference models as `${models.qwen35}`
+        - Reference prior outputs as `{{step.<step_id>.output}}`
+        - Every step must have `generative_entity`, `prompt`, `model_overrides`, AND `when.after_step_succeeds` with at least save_to + log hooks
+        - Keep prompts SHORT but meaningful (use <placeholder text> for actual content)
+        - Cover EVERY task from the task-category list — process in chunks of 5-7 tasks at a time mentally, then emit all blocks
+        - COMPACT: Intent + Fit are each ONE sentence max. Avoid multi-paragraph explanations.
+        - Every step needs a log hook:
+          ```yaml
+          - log:
+              to_file_path: "./logs/<step_id>.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+          ```
+
+        Output ONLY the task substructure blocks.
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 8192
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/categories.md"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - sw4_substructures
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw4/02-substructures.md"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw4.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+
+    step_03_evaluate:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_02_emit_substructures]
+      prompt: |
+        You are reviewing YAML substructures from MULTIPLE PERSPECTIVES. Each perspective is a different lens.
+
+        TASK-CATEGORY LIST:
+        {{step.step_01_load_categories.output}}
+
+        SUBSTRUCTURES:
+        {{step.step_02_emit_substructures.output}}
+
+        Evaluate from EACH perspective. For each, output PASS/FAIL with one-sentence reason:
+
+        ## Perspective 1: COVERAGE SCOPE
+        - COVERAGE: Every task from the list has a substructure block
+        - NO_ORPHANS: No substructure exists for a task not in the list
+        - DEPENDS_CHAIN: depends_on references resolve to actual step IDs
+
+        ## Perspective 2: SCHEMA COMPLIANCE SCOPE
+        - YAML_ONLY: All code blocks are ```yaml (no other types)
+        - VALID_YAML: Each YAML snippet is syntactically valid (correct indentation/quotes)
+        - CORRECT_PATTERN: The YAML matches the category pattern (e.g., ITERATIVE_REFINER has generate+evaluate+fix)
+        - GENERATIVE_ENTITY: Every step YAML has `generative_entity: "${models.qwen35}"`
+        - MODEL_OVERRIDES: Every step has model_overrides with max_tokens and temperature
+
+        ## Perspective 3: HOOK COMPLETENESS SCOPE
+        - SAVE_TO_PRESENT: Every step has save_to hook (indented list format, NOT inline array)
+        - LOG_HOOK_PRESENT: Every step has log hook with to_file_path, event_fields, level
+        - GWT_USES_TEMPLATE: GWT given conditions use {{bookmarks.shell_output.stdout}} (not literal text)
+        - NO_INLINE_ARRAYS: save_to uses `- bookmark_name` then `- "path"` (not `[name, path]`)
+
+        ## Perspective 4: INTEGRATION SCOPE
+        - INTEGRATION_TEXT: Each block has "Fit:" describing workflow integration
+        - INTENT_TEXT: Each block has "Intent:" describing substructure purpose
+        - STEP_ID_NAMING: All step IDs are snake_case, reference parent task ID
+
+        End with:
+        VERDICT: PASS  (only if ALL perspectives PASS)
+        VERDICT: FAIL  (any perspective FAIL)
+
+        Output ONLY the evaluation.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 1500
+      when:
+        after_step_succeeds:
+          - save_to:
+              - sw4_eval
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw4/03-eval.txt"
+          - shell:
+              command: "grep -qi 'PASS' './docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw4/03-eval.txt' && printf '%s' PASS || printf '%s' FAIL"
+              args: []
+              fail_on_error: false
+          - gwt:
+              - given: '"{{bookmarks.shell_output.stdout}}" == "PASS"'
+                then: step_05_assemble_final
+              - given: "true"
+                then: step_04_fix
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw4.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+
+    step_04_fix:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_03_evaluate]
+      prompt: |
+        You are fixing YAML substructure issues identified by multi-perspective review.
+
+        TASK-CATEGORY LIST:
+        {{step.step_01_load_categories.output}}
+
+        CURRENT SUBSTRUCTURES:
+        {{step.step_02_emit_substructures.output}}
+
+        EVALUATION FAILURES (from multi-perspective review):
+        {{step.step_03_evaluate.output}}
+
+        Fix EVERY FAIL identified across ALL perspectives:
+        - COVERAGE fails → add missing task substructures
+        - SCHEMA fails → fix YAML syntax (quotes, indentation, generative_entity, model_overrides)
+        - HOOK fails → add missing save_to (indented list), log hooks, fix GWT templates
+        - INTEGRATION fails → add Fit/Intent text, fix step ID naming
+
+        Output CORRECTED substructure blocks (same compact format). Address EVERY FAIL.
+        Output ONLY the corrected blocks (all of them, not just the failing ones).
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 4096
+      when:
+        after_step_succeeds:
+          - save_to:
+              - sw4_corrected
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw4/04-corrected.md"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw4.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+
+    step_05_assemble_final:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_03_evaluate]
+      prompt: |
+        You are assembling the final YAML substructures document.
+
+        CATEGORIES SOURCE:
+        {{bookmarks.shell_output.stdout}}
+
+        SUBSTRUCTURES (initial):
+        {{step.step_02_emit_substructures.output}}
+
+        CORRECTED (if any):
+        {{step.step_04_fix.output}}
+
+        EVALUATION:
+        {{step.step_03_evaluate.output}}
+
+        Assemble a SINGLE markdown document:
+
+        # YAML Substructures
+
+        **Source:** <first 150 chars of categories doc>
+        **Total substructures:** <N>
+        **Verdict:** <PASS/FAIL>
+
+        ---
+
+        ## Pattern Summary
+
+        | Category | Step Count | Hooks Used |
+        |----------|-----------|------------|
+        | SEQUENTIAL_PROCESSOR | <n> | save_to, log |
+        | ITERATIVE_REFINER | <n> | gwt, route_to |
+        ...
+
+        ---
+
+        ## T1 - <name> (<category>)
+
+        Intent: <what this does>
+
+        ```yaml
+        <substructure YAML>
+        ```
+
+        Fit analysis: <integration description>
+
+        ---
+
+        (continue for ALL tasks)
+
+        Rules:
+        - ONLY ```yaml code blocks (no ```rust, ```python, etc.)
+        - Cover EVERY task
+        - Include intent + fit analysis for each
+
+        Output ONLY the final document.
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 4096
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/categories.md | head -20"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - sw4_final
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw4/structs.md"
+          - bookmark: true
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw4.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info

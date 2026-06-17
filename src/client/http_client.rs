@@ -49,7 +49,7 @@ impl LlamaHttpClient {
     pub fn new(base_url: impl Into<String>) -> Result<Self> {
         let client = ClientBuilder::new()
             .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(600))
+            .timeout(Duration::from_secs(3600))
             .pool_idle_timeout(Duration::from_secs(60))
             .pool_max_idle_per_host(10)
             .build()
@@ -143,7 +143,7 @@ impl LlamaHttpClient {
             anyhow::bail!("Load model rejected: {:?}", result.error);
         }
         eprintln!("[MODEL] load accepted, waiting for ready...");
-        self.wait_for_model_status(&model_id, "loaded", Duration::from_secs(300)).await
+        self.wait_for_model_status(&model_id, "loaded", Duration::from_secs(3600)).await
     }
 
     pub async fn unload_model(&self, model_id: impl Into<String>) -> Result<()> {

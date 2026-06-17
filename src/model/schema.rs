@@ -86,6 +86,17 @@ pub struct ModelSpec {
     #[serde(default)]
     #[garde(skip)]
     pub guardrails: GuardrailsConfig,
+
+    /// LLM server load parameters (context size, cache types, GPU layers, etc.).
+    /// Maps directly to llama.cpp server startup flags.
+    #[serde(default)]
+    #[garde(skip)]
+    pub load_params: LoadParams,
+
+    /// Default sampling parameters for inference.
+    #[serde(default)]
+    #[garde(skip)]
+    pub sampling: SamplingConfig,
 }
 
 // ============================================================================
@@ -877,6 +888,150 @@ fn default_strict() -> bool {
 
 fn default_on_match_error() -> String {
     "error".into()
+}
+
+// ============================================================================
+// Load parameters (llama.cpp server startup flags)
+// ============================================================================
+
+/// LLM server load parameters mapped to llama.cpp startup flags.
+/// These control how the model is loaded into memory on the server side.
+///
+/// Vulkan-specific constraints (enforced by AGENTS.md):
+/// - `flash_attn: true` is safe and recommended
+/// - `no_cache_prompt: true` MUST be used (Vulkan cannot serialize KV cache)
+/// - `cont_batching: false` MUST NOT be enabled (triggers KV cache serialization)
+/// - `cache_type_k/v`: Q8_0 enabled for larger context (test with your Vulkan build)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct LoadParams {
+    /// Context window size in tokens (maps to `--ctx-size`).
+    #[serde(default = "default_context_size")]
+    pub context_size: usize,
+
+    /// Logical batch size for prompt processing (maps to `--batch-size`).
+    #[serde(default = "default_batch_size")]
+    pub batch_size: usize,
+
+    /// Physical batch size for prompt processing (maps to `--ubatch-size`).
+    #[serde(default = "default_ubatch_size")]
+    pub ubatch_size: usize,
+
+    /// KV cache type for K tensor (maps to `--cache-type-k`).
+    /// Q8_0 by default; test with your Vulkan build.
+    #[serde(default = "default_cache_type_k")]
+    pub cache_type_k: String,
+
+    /// KV cache type for V tensor (maps to `--cache-type-v`).
+    /// Q8_0 by default; test with your Vulkan build.
+    #[serde(default = "default_cache_type_v")]
+    pub cache_type_v: String,
+
+    /// Number of GPU layers to offload (maps to `--n-gpu-layers`).
+    /// Use 99 or higher for full offload.
+    #[serde(default = "default_gpu_layers")]
+    pub gpu_layers: usize,
+
+    /// CPU threads for inference (maps to `--threads`, 0 = auto-detect).
+    #[serde(default = "default_threads")]
+    pub threads: usize,
+
+    /// Use memory-mapped files for faster loading (maps to `--mmap`).
+    #[serde(default = "default_use_mmap")]
+    pub use_mmap: bool,
+
+    /// Enable flash attention (maps to `--flash-attn`).
+    /// Safe and recommended for Vulkan.
+    #[serde(default = "default_flash_attn")]
+    pub flash_attn: bool,
+
+    /// Enable continuous batching (maps to `--cont-batching`).
+    /// MUST be `false` for Vulkan (triggers KV cache serialization on slot release).
+    #[serde(default)]
+    pub cont_batching: bool,
+
+    /// Disable prompt caching (maps to `--no-cache-prompt`).
+    /// MUST be `true` for Vulkan (cannot serialize KV cache state).
+    #[serde(default = "default_no_cache_prompt")]
+    pub no_cache_prompt: bool,
+}
+
+fn default_context_size() -> usize {
+    102400
+}
+
+fn default_batch_size() -> usize {
+    2048
+}
+
+fn default_ubatch_size() -> usize {
+    512
+}
+
+fn default_cache_type_k() -> String {
+    "q8_0".into()
+}
+
+fn default_cache_type_v() -> String {
+    "q8_0".into()
+}
+
+fn default_gpu_layers() -> usize {
+    99
+}
+
+fn default_threads() -> usize {
+    6
+}
+
+fn default_use_mmap() -> bool {
+    true
+}
+
+fn default_flash_attn() -> bool {
+    true
+}
+
+fn default_no_cache_prompt() -> bool {
+    true
+}
+
+// ============================================================================
+// Sampling config (per-model inference defaults)
+// ============================================================================
+
+/// Per-model default sampling parameters for inference.
+/// All fields are optional — unset fields fall back to server defaults.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SamplingConfig {
+    /// Sampling temperature (0.0–2.0).
+    #[serde(default)]
+    pub temperature: Option<f32>,
+
+    /// Nucleus sampling probability (0.0–1.0).
+    #[serde(default)]
+    pub top_p: Option<f32>,
+
+    /// Top-k sampling (0 = disabled).
+    #[serde(default)]
+    pub top_k: Option<usize>,
+
+    /// Minimum probability threshold (0.0–1.0).
+    #[serde(default)]
+    pub min_p: Option<f32>,
+
+    /// Maximum tokens to generate.
+    #[serde(default)]
+    pub max_tokens: Option<usize>,
+
+    /// Repetition penalty (1.0 = no penalty).
+    #[serde(default)]
+    pub repeat_penalty: Option<f32>,
+
+    /// Random seed (0 = random).
+    #[serde(default)]
+    pub seed: Option<u32>,
 }
 
 // ============================================================================

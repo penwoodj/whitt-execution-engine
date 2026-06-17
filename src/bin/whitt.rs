@@ -1323,8 +1323,8 @@ async fn workflow_command(workflow_file: &Path, show_config: bool) -> Result<()>
                 Ok(resolved) => {
                     println!("  Model: {}", model_name);
                     println!("    Host: {}:{}", resolved.host, resolved.port);
-                    println!("    Temperature: {:?}", resolved.temperature);
-                    println!("    Max Tokens: {:?}", resolved.max_tokens);
+                    println!("    Temperature: {:?}", resolved.sampling.temperature);
+                    println!("    Max Tokens: {:?}", resolved.sampling.max_tokens);
                     println!("    Timeout: {}s", resolved.timeout_secs);
                     println!("    Max Retries: {}", resolved.max_retries);
                 }
