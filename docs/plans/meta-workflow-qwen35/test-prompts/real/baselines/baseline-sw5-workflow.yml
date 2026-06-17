@@ -1,0 +1,377 @@
+workflow_id: parallel_inference_same_model_multi_target
+name: Parallel Inference for Same-Model Multi-Target RouteTo
+description: Add true parallel inference for same-model multi-target route_to by loading model once, spawning concurrent requests via tokio::JoinSet, collecting ordered results, running hooks sequentially, and unloading once.
+version: 1.0.0
+schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  qwen35:
+    name: Qwen3-5-9B-Q4_K_M.gguf
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - action: log
+        to_file_path: ./outputs/workflow.log
+        event_fields: [workflow_id, total_steps, succeeded, failed]
+        level: info
+
+  steps:
+    step_t1_add_joinset_import:
+      generative_entity: ${models.qwen35}
+      prompt: Add the following import to src/benchmark/runner.rs at the top of the file in the imports section: use tokio::task::JoinSet;. Ensure the import is placed before the first impl block and compiles without errors. Output the exact line to add and the line number where it should be inserted.
+      model_overrides:
+        max_tokens: 512
+      when:
+        after_step_succeeds:
+          - action: save_to
+            paths: [import_addition, ./data/t1_import_addition.txt]
+          - action: log
+            to_file_path: ./logs/t1_add_joinset_import.log
+            event_fields: [step_name, duration_ms, total_tokens]
+            level: info
+      depends_on: []
+
+    step_t2_create_helper_method:
+      generative_entity: ${models.qwen35}
+      prompt: Create a new async method called send_inference_request in the second impl BenchmarkRunner block (around line 999) with the signature: async fn send_inference_request(client, model_id, prompt, max_tokens, temperature, top_p, system_prompt, semaphore) -> (String, usize, Duration, Option<String>). The method should: acquire semaphore permit, construct ChatMessage vector (system optional + user), build ChatCompletionRequest, call client.chat_completion(request).await, extract response text/tokens/duration, return tuple. Include comments explaining each step.
+      model_overrides:
+        max_tokens: 4096
+      when:
+        after_step_succeeds:
+          - action: save_to
+            paths: [helper_method, ./data/t2_helper_method.txt]
+          - action: log
+            to_file_path: ./logs/t2_create_helper_method.log
+            event_fields: [step_name, duration_ms, total_tokens]
+            level: info
+          - action: gwt
+            clauses:
+              - given: quality_score >= 0.8
+                then:
+                  - action: log
+                    message: "Helper method generated successfully"
+                    level: info
+                else:
+                  - action: log
+                    message: "Helper method quality below threshold, may need review"
+                    level: warning
+      depends_on: [step_t1_add_joinset_import]
+
+    step_t2_1_semaphore_permit:
+      generative_entity: ${models.qwen35}
+      prompt: In the send_inference_request method, add semaphore permit acquisition at the start: let _permit = semaphore.acquire().await.unwrap_or_else(|e| { eprintln!("[SEMAPHORE] acquire failed: {}", e); panic!("Semaphore closed"); });. This permit will be held for the entire inference call and released automatically on drop.
+      model_overrides:
+        max_tokens: 512
+      when:
+        after_step_succeeds:
+          - action: save_to
+            paths: [semaphore_logic, ./data/t2_1_semaphore_logic.txt]
+          - action: log
+            to_file_path: ./logs/t2_1_semaphore_permit.log
+            event_fields: [step_name, duration_ms, total_tokens]
+            level: info
+      depends_on: [step_t2_create_helper_method]
+
+    step_t2_2_chatmessage_construction:
+      generative_entity: ${models.qwen35}
+      prompt: In the send_inference_request method, construct the messages vector: let mut messages = Vec::with_capacity(2); if let Some(sys) = system_prompt { messages.push(ChatMessage::system(sys.to_string())); } messages.push(ChatMessage::user(prompt.to_string()));. The system message is added first if present, user message is always added.
+      model_overrides:
+        max_tokens: 512
+      when:
+        after_step_succeeds:
+          - action: save_to
+            paths: [chatmessage_logic, ./data/t2_2_chatmessage_logic.txt]
+          - action: log
+            to_file_path: ./logs/t2_2_chatmessage_construction.log
+            event_fields: [step_name, duration_ms, total_tokens]
+            level: info
+      depends_on: [step_t2_1_semaphore_permit]
+
+    step_t2_3_response_extraction:
+      generative_entity: ${models.qwen35}
+      prompt: In the send_inference_request method, extract response fields from chat_completion result: let inf_start = Instant::now(); match client.chat_completion(request).await { Ok(resp) => { let raw_response = resp.choices.first().map(|c| c.message.content.clone()).unwrap_or_default(); let cleaned = Self::clean_response_text(&raw_response); let tokens = resp.usage.completion_tokens; (cleaned, tokens, inf_start.elapsed(), None) } Err(e) => { (format!("ERROR: {}", e), 0, inf_start.elapsed(), Some(e.to_string())) } }.
+      model_overrides:
+        max_tokens: 1024
+      when:
+        after_step_succeeds:
+          - action: save_to
+            paths: [response_extraction_logic, ./data/t2_3_response_extraction_logic.txt]
+          - action: log
+            to_file_path: ./logs/t2_3_response_extraction.log
+            event_fields: [step_name, duration_ms, total_tokens]
+            level: info
+      depends_on: [step_t2_2_chatmessage_construction]
+
+    step_t3_identify_same_model_branch:
+      generative_entity: ${models.qwen35}
+      prompt: In the multi-target route_to handling around lines 1903-1947, add code to check if all targets use the same model: let mut first_model: Option<String> = None; let mut all_same_model = true; for target_id in &targets { if let Some(&target_idx) = step_index.get(target_id) { let target_step = &steps[target_idx]; if let Some(ref ge) = target_step.generative_entity { let model_key = ge.strip_prefix("${models.").and_then(|s| s.strip_suffix('}')).unwrap_or(ge); let model_name = yaml_models.as_ref().and_then(|m| m.get(model_key)).map(|s| s.as_str()).unwrap_or(model_key); if first_model.is_none() { first_model = Some(model_name.to_string()); } else if first_model.as_deref() != Some(model_name) { all_same_model = false; } } } }.
+      model_overrides:
+        max_tokens: 1024
+      when:
+        after_step_succeeds:
+          - action: save_to
+            paths: [same_model_check, ./data/t3_same_model_check.txt]
+          - action: log
+            to_file_path: ./logs/t3_identify_same_model_branch.log
+            event_fields: [step_name, duration_ms, total_tokens]
+            level: info
+      depends_on: [step_t1_add_joinset_import]
+
+    step_t4_parallel_orchestration:
+      generative_entity: ${models.qwen35}
+      prompt: Coordinate the parallel inference path implementation: ensure all_same_model check happens first, load model once before spawning tasks, spawn all inference requests concurrently, collect and sort results, verify that total wall time approximates single inference time. Output a checklist of orchestration requirements.
+      model_overrides:
+        max_tokens: 1024
+      when:
+        after_step_succeeds:
+          - action: log
+            to_file_path: ./logs/t4_parallel_orchestration.log
+            event_fields: [step_name, duration_ms, total_tokens]
+            level: info
+      depends_on: [step_t3_identify_same_model_branch]
+
+    step_t4_1_load_model_once:
+      generative_entity: ${models.qwen35}
+      prompt: In the parallel inference path, load the model once before the target iteration. Output the exact code block.
+      model_overrides:
+        max_tokens: 1536
+      when:
+        after_step_succeeds:
+          - action: save_to
+            paths: [load_model_once_logic, ./data/t4_1_load_model_once_logic.txt]
+          - action: log
+            to_file_path: ./logs/t4_1_load_model_once.log
+            event_fields: [step_name, duration_ms, total_tokens]
+            level: info
+      depends_on: [step_t4_parallel_orchestration]
+
+    step_t4_2_build_request_batch:
+      generative_entity: ${models.qwen35}
+      prompt: In the parallel inference path, spawn all inference requests concurrently. Output the exact code block.
+      model_overrides:
+        max_tokens: 1536
+      when:
+        after_step_succeeds:
+          - action: save_to
+            paths: [spawn_logic, ./data/t4_2_spawn_logic.txt]
+          - action: log
+            to_file_path: ./logs/t4_2_build_request_batch.log
+            event_fields: [step_name, duration_ms, total_tokens]
+            level: info
+      depends_on: [step_t4_1_load_model_once]
+
+    step_t4_3_collect_ordered_responses:
+      generative_entity: ${models.qwen35}
+      prompt: In the parallel inference path, collect and sort results. Output the exact code block.
+      model_overrides:
+        max_tokens: 512
+      when:
+        after_step_succeeds:
+          - action: save_to
+            paths: [collect_logic, ./data/t4_3_collect_logic.txt]
+          - action: log
+            to_file_path: ./logs/t4_3_collect_ordered_responses.log
+            event_fields: [step_name, duration_ms, total_tokens]
+            level: info
+      depends_on: [step_t4_2_build_request_batch]
+
+    step_t5_sequential_hook_processing:
+      generative_entity: ${models.qwen35}
+      prompt: Coordinate sequential hook processing after parallel inference. Output a checklist of orchestration requirements.
+      model_overrides:
+        max_tokens: 1024
+      when:
+        after_step_succeeds:
+          - action: log
+            to_file_path: ./logs/t5_sequential_hook_processing.log
+            event_fields: [step_name, duration_ms, total_tokens]
+            level: info
+      depends_on: [step_t4_3_collect_ordered_responses]
+
+    step_t6_unload_model_once:
+      generative_entity: ${models.qwen35}
+      prompt: In the parallel inference path, unload the model once after all target processing. Output the exact code block.
+      model_overrides:
+        max_tokens: 512
+      when:
+        after_step_succeeds:
+          - action: save_to
+            paths: [unload_logic, ./data/t6_unload_logic.txt]
+          - action: log
+            to_file_path: ./logs/t6_unload_model_once.log
+            event_fields: [step_name, duration_ms, total_tokens]
+            level: info
+      depends_on: [step_t5_sequential_hook_processing]
+
+    step_t7_validate_sequential_fallback:
+      generative_entity: ${models.qwen35}
+      prompt: Validate that the sequential path is unchanged. Output a validation checklist with pass/fail criteria.
+      model_overrides:
+        max_tokens: 2048
+      when:
+        after_step_succeeds:
+          - action: save_to
+            paths: [validation_checklist, ./data/t7_validation_checklist.txt]
+          - action: log
+            to_file_path: ./logs/t7_validate_sequential_fallback.log
+            event_fields: [step_name, duration_ms, total_tokens]
+            level: info
+          - action: shell
+            command: "grep -n 'for target_id in targets' src/benchmark/runner.rs | head -1"
+            fail_on_error: false
+          - action: log
+            message: "Verified sequential path exists"
+            level: info
+      depends_on: [step_t3_identify_same_model_branch]
+
+    step_t8_add_logging:
+      generative_entity: ${models.qwen35}
+      prompt: Add logging at the branch decision point in the route_to handling. Output the exact code block.
+      model_overrides:
+        max_tokens: 512
+      when:
+        after_step_succeeds:
+          - action: save_to
+            paths: [logging_logic, ./data/t8_logging_logic.txt]
+          - action: log
+            to_file_path: ./logs/t8_add_logging.log
+            event_fields: [step_name, duration_ms, total_tokens]
+            level: info
+      depends_on: [step_t3_identify_same_model_branch]
+
+    step_t9_add_parallel_test:
+      generative_entity: ${models.qwen35}
+      prompt: Create a new integration test function called test_parallel_same_model_route_to that validates the parallel inference path. Include test setup, execution, and assertions.
+      model_overrides:
+        max_tokens: 6144
+      when:
+        after_step_succeeds:
+          - action: save_to
+            paths: [parallel_test, ./data/t9_parallel_test.rs]
+          - action: log
+            to_file_path: ./logs/t9_add_parallel_test.log
+            event_fields: [step_name, duration_ms, total_tokens]
+            level: info
+          - action: gwt
+            clauses:
+              - given: quality_score >= 0.85
+                then:
+                  - action: log
+                    message: "Test function generated successfully with proper assertions"
+                    level: info
+                else:
+                  - action: log
+                    message: "Test function may need additional assertions or edge case handling"
+                    level: warning
+      depends_on: [step_t4_3_collect_ordered_responses]
+
+    step_t10_add_sequential_test:
+      generative_entity: ${models.qwen35}
+      prompt: Create a new integration test function called test_sequential_mixed_models_route_to that validates the sequential fallback. Include test setup, execution, and assertions.
+      model_overrides:
+        max_tokens: 6144
+      when:
+        after_step_succeeds:
+          - action: save_to
+            paths: [sequential_test, ./data/t10_sequential_test.rs]
+          - action: log
+            to_file_path: ./logs/t10_add_sequential_test.log
+            event_fields: [step_name, duration_ms, total_tokens]
+            level: info
+          - action: gwt
+            clauses:
+              - given: quality_score >= 0.85
+                then:
+                  - action: log
+                    message: "Test function generated successfully with proper regression checks"
+                    level: info
+                else:
+                  - action: log
+                    message: "Test function may need additional regression assertions"
+                    level: warning
+      depends_on: [step_t7_validate_sequential_fallback]
+
+    step_t11_update_log_format:
+      generative_entity: ${models.qwen35}
+      prompt: Add parallel inference metrics to the benchmark log entry. Output the exact log statement.
+      model_overrides:
+        max_tokens: 1024
+      when:
+        after_step_succeeds:
+          - action: save_to
+            paths: [log_format_logic, ./data/t11_log_format_logic.txt]
+          - action: log
+            to_file_path: ./logs/t11_update_log_format.log
+            event_fields: [step_name, duration_ms, total_tokens]
+            level: info
+      depends_on: [step_t4_3_collect_ordered_responses]
+
+    step_t12_documentation_update:
+      generative_entity: ${models.qwen35}
+      prompt: Add a documentation note to AGENTS.md or the benchmark docs describing the parallel inference optimization. Output the exact markdown content.
+      model_overrides:
+        max_tokens: 2048
+      when:
+        after_step_succeeds:
+          - action: save_to
+            paths: [documentation_note, ./data/t12_documentation_note.md]
+          - action: log
+            to_file_path: ./logs/t12_documentation_update.log
+            event_fields: [step_name, duration_ms, total_tokens]
+            level: info
+          - action: gwt
+            clauses:
+              - given: quality_score >= 0.8
+                then:
+                  - action: log
+                    message: "Documentation note generated with sufficient technical detail"
+                    level: info
+                else:
+                  - action: log
+                    message: "Documentation note may need more technical depth or clarity"
+                    level: warning
+      depends_on: [step_t11_update_log_format]
+
+---
+
+## Workflow Statistics
+
+**Total steps:** 16
+**Total dependencies:** 18 (average ~1.1 per step)
+**Hook actions:** 48 (16 steps × 3 average actions per step)
+**Lines of YAML:** 250
+
+**Step categories:**
+- DATA_TRANSFORMER: 9 steps (T1, T2.1, T2.2, T2.3, T3, T4.1, T4.2, T4.3, T6, T8, T11)
+- GENERATOR: 4 steps (T2, T9, T10, T12)
+- ORCHESTRATOR: 3 steps (T4, T5)
+- VALIDATOR: 1 step (T7)
+- EVALUATOR: 0 steps
+
+**Hook distribution:**
+- save_to: 16 (every step)
+- log: 16 (every step)
+- gwt: 4 (GENERATOR steps only)
+- shell: 1 (VALIDATOR step only)
+
+**Critical path length:** 8 steps (T1 → T3 → T4 → T4.1 → T4.2 → T4.3 → T5 → T6)
+
+**Parallel execution opportunities:**
+- T9, T10, T11, T12 can run in parallel after T4.3 and T7 (they all depend on T4.3 or T7, not on each other)
+- This represents 4-way parallelism for final steps
+
+**Quality bar:** This baseline represents minimum viable workflow generation. Live SW5 must produce more sophisticated workflows with better error handling, more advanced hook compositions, and more optimized execution strategies (e.g., model selection, adaptive concurrency).

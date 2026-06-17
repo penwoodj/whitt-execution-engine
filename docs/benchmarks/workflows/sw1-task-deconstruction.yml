@@ -166,7 +166,7 @@ agentic_workflow:
          - T<id>.2 - <subtask_name> (2pts): <action under 100 chars> | Given: <precondition> When: <trigger> Then: <result>
 
          Rules (STRICT — violations cause rejection):
-         - Subtask points MUST be one of: 1, 2, or 3 — NEVER 5, 8, or 13
+         - **RULE 1 (CRITICAL):** Subtask points MUST be 1, 2, or 3 ONLY. NEVER output 5, 8, or 13 for any subtask. IF a subtask would naturally be >=5pts, you MUST break it into multiple 1-2pt pieces. This is non-negotiable.
          - Each parent task scoring >= 3 MUST have at least 2 subtasks
          - For analysis/modification tasks: ALWAYS split into phases:
            (1) READ input file/source
@@ -238,30 +238,42 @@ agentic_workflow:
         SUBTASK EXPANSIONS:
         {{step.step_02_expand_high_complexity.output}}
 
-        Evaluate against EACH criterion. For each, output PASS or FAIL with a one-sentence reason:
+        MACHINE-CHECKED VIOLATIONS (from automated grep — these are GROUND TRUTH):
+        {{bookmarks.shell_output.stdout}}
 
-        1. ATOMIC: Every leaf task is a single, well-scoped action
-        2. COMPLETE: Every part of the original prompt is covered by some task
-        3. NON_REDUNDANT: No two tasks duplicate work
-        4. GWT_READY: Each task can be expressed as Given/When/Then (we will fill these next)
-        5. NO_HIGH_COMPLEXITY_LEAVES: No leaf task scores >= 5 pts (all expanded)
-        6. CONCISE: Each task action < 100 chars
-        7. ANALYSIS_PHASE_PRESENT: Tasks involving file/modification work have read→analyze→execute→verify subtask sequence (not collapsed)
-        8. COVERAGE_DEPTH: Parent task count >= 10 (analysis requires decomposing into discrete phases)
-        9. SUBTASK_EXPANSION: Every parent task scoring >= 3 pts has >= 2 leaf subtasks
-        10. COMPLEXITY_RATING_VALID: For each parent task, dynamic_complexity = (leaf_count × avg_leaf_points). Verify rating is consistent with assigned story points (e.g., 3 leaves × 2pts avg = 6 dynamic, justifies ≥5pt parent)
-        11. GROUP_CHUNKING: Tasks were processed in GROUPS OF 5 with explicit group boundaries (GROUP A: T1-T5, GROUP B: T6-T10, etc.) and each group has a complexity summary
-        12. GROUP_COMPLEXITY_CONSISTENT: Each group's complexity rating (LOW/MEDIUM/HIGH) matches actual subtask counts (LOW=0-5 subtasks, MEDIUM=6-10, HIGH=11+)
+        Evaluate against EACH criterion. For PASS, cite the specific task IDs you checked.
+        For FAIL, cite the specific task ID that violates the criterion.
+
+        1. ATOMIC: Every leaf task is a single, well-scoped action. Check T____ and T____.
+        2. COMPLETE: Every part of the original prompt is covered. List any gaps.
+        3. NON_REDUNDANT: No two tasks duplicate work. Check pairs.
+        4. GWT_READY: Each task has Given/When/Then.
+        5. NO_HIGH_COMPLEXITY_LEAVES: No leaf task scores >= 5 pts. CHECK THE MACHINE VIOLATIONS ABOVE — if any leaf has >=5pts, this is FAIL.
+        6. CONCISE: Each task action < 100 chars.
+        7. ANALYSIS_PHASE_PRESENT: File/modification tasks have read→analyze→execute→verify sequence.
+        8. COVERAGE_DEPTH: Parent task count >= 10.
+        9. SUBTASK_EXPANSION: Every parent >= 3 pts has >= 2 leaf subtasks.
+        10. COMPLEXITY_RATING_VALID: Dynamic complexity matches assigned points.
+        11. GROUP_CHUNKING: CHECK THE MACHINE OUTPUT — if "GROUP markers found: 0" this is FAIL.
+        12. GROUP_COMPLEXITY_CONSISTENT: Each group's rating matches subtask counts.
+
+        CRITICAL: The MACHINE-CHECKED VIOLATIONS are ground truth. If the machine found violations, you MUST output FAIL for the relevant criteria. Do NOT rubber-stamp PASS without checking.
 
         End with EXACTLY one of these two lines on the last line:
         VERDICT: PASS
         VERDICT: FAIL
 
-        Output ONLY the evaluation, no preamble.
+        Output ONLY the evaluation with evidence citations. No preamble.
       model_overrides:
         temperature: 0.1
-        max_tokens: 1200
+        max_tokens: 2500
       when:
+        before_step_starts:
+          - shell:
+              command: "EXPANDED='./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw1/02-expanded.md' && echo '=== MACHINE VIOLATIONS CHECK ===' && echo 'Leaf tasks with >=5pts:' && grep -o '([0-9]*pts)' \"$EXPANDED\" 2>/dev/null | grep -o '[0-9]*' | awk '$1>=5{print \"  VIOLATION: leaf with \"$1\"pts\"}' && echo 'GROUP markers found:' && grep -c 'GROUP [ABC]' \"$EXPANDED\" 2>/dev/null && echo 'Total parent tasks:' && grep -c '^## T[0-9]' \"$EXPANDED\" 2>/dev/null && echo '=== END MACHINE CHECK ==='"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: false
         after_step_succeeds:
           - save_to:
               - sw1_eval
