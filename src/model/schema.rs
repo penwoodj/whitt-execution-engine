@@ -1335,4 +1335,149 @@ test-model:
         assert_eq!(timeout.time_to_first_response, "10s");
         assert_eq!(timeout.total_time_to_response, "120s");
     }
+
+    #[test]
+    fn load_params_to_env_vars_produces_all_llama_args() {
+        let lp = LoadParams {
+            context_size: 262144,
+            batch_size: 2048,
+            ubatch_size: 512,
+            cache_type_k: "q8_0".into(),
+            cache_type_v: "q8_0".into(),
+            gpu_layers: 0,
+            threads: 5,
+            use_mmap: true,
+            flash_attn: true,
+            cont_batching: false,
+            no_cache_prompt: true,
+            parallel: 1,
+        };
+        let vars = lp.to_env_vars();
+        let map: std::collections::HashMap<String, String> = vars.into_iter().collect();
+        assert_eq!(map.get("LLAMA_ARG_CTX_SIZE"), Some(&"262144".into()));
+        assert_eq!(map.get("LLAMA_ARG_BATCH_SIZE"), Some(&"2048".into()));
+        assert_eq!(map.get("LLAMA_ARG_UBATCH_SIZE"), Some(&"512".into()));
+        assert_eq!(map.get("LLAMA_ARG_CACHE_TYPE_K"), Some(&"q8_0".into()));
+        assert_eq!(map.get("LLAMA_ARG_CACHE_TYPE_V"), Some(&"q8_0".into()));
+        assert_eq!(map.get("LLAMA_ARG_N_GPU_LAYERS"), Some(&"0".into()));
+        assert_eq!(map.get("LLAMA_ARG_N_THREADS"), Some(&"5".into()));
+        assert_eq!(map.get("LLAMA_ARG_USE_MMAP"), Some(&"1".into()));
+        assert_eq!(map.get("LLAMA_ARG_FLASH_ATTN"), Some(&"1".into()));
+        assert_eq!(map.get("LLAMA_ARG_CONT_BATCHING"), Some(&"0".into()));
+        assert_eq!(map.get("LLAMA_ARG_NO_CACHE_PROMPT"), Some(&"1".into()));
+        assert_eq!(map.get("LLAMA_ARG_PARALLEL"), Some(&"1".into()));
+    }
+
+    #[test]
+    fn load_params_serde_defaults_match_qwen35_cpu_config() {
+        let yaml = r#"
+test-model:
+  name: "Test"
+  host:
+    type: "llama_cpp_with_vulkan"
+  load_params: {}
+"#;
+        let config: ModelsConfig = serde_saphyr::from_str(yaml).expect("parse");
+        let lp = &config.models["test-model"].load_params;
+        assert_eq!(lp.context_size, 262144);
+        assert_eq!(lp.gpu_layers, 0);
+        assert_eq!(lp.threads, 5);
+        assert_eq!(lp.parallel, 1);
+        assert_eq!(lp.cache_type_k, "q8_0");
+        assert_eq!(lp.cache_type_v, "q8_0");
+        assert!(lp.use_mmap);
+        assert!(lp.flash_attn);
+        assert!(!lp.cont_batching);
+        assert!(lp.no_cache_prompt);
+    }
+
+    #[test]
+    fn load_params_parallel_field_deserializes_from_yaml() {
+        let yaml = r#"
+test-model:
+  name: "Test"
+  host:
+    type: "llama_cpp_with_vulkan"
+  load_params:
+    context_size: 8192
+    parallel: 4
+"#;
+        let config: ModelsConfig = serde_saphyr::from_str(yaml).expect("parse");
+        let lp = &config.models["test-model"].load_params;
+        assert_eq!(lp.context_size, 8192);
+        assert_eq!(lp.parallel, 4);
+    }
+
+    #[test]
+    fn load_params_absent_uses_rust_default() {
+        let yaml = r#"
+test-model:
+  name: "Test"
+  host:
+    type: "llama_cpp_with_vulkan"
+"#;
+        let config: ModelsConfig = serde_saphyr::from_str(yaml).expect("parse");
+        let lp = &config.models["test-model"].load_params;
+        assert_eq!(lp.context_size, 0);
+        assert_eq!(lp.parallel, 0);
+    }
+
+    #[test]
+    fn sampling_config_defaults_to_none() {
+        let sc = SamplingConfig::default();
+        assert!(sc.temperature.is_none());
+        assert!(sc.top_p.is_none());
+        assert!(sc.top_k.is_none());
+        assert!(sc.min_p.is_none());
+        assert!(sc.max_tokens.is_none());
+        assert!(sc.repeat_penalty.is_none());
+        assert!(sc.seed.is_none());
+    }
+
+    #[test]
+    fn sampling_config_deserializes_from_yaml() {
+        let yaml = r#"
+test-model:
+  name: "Test"
+  host:
+    type: "llama_cpp_with_vulkan"
+  sampling:
+    temperature: 0.3
+    max_tokens: 2048
+    top_p: 0.9
+"#;
+        let config: ModelsConfig = serde_saphyr::from_str(yaml).expect("parse");
+        let sc = &config.models["test-model"].sampling;
+        assert_eq!(sc.temperature, Some(0.3));
+        assert_eq!(sc.max_tokens, Some(2048));
+        assert_eq!(sc.top_p, Some(0.9));
+        assert!(sc.top_k.is_none());
+    }
+
+    #[test]
+    fn full_model_spec_with_load_params_and_sampling_parses() {
+        let yaml = r#"
+qwen35:
+  name: "Qwen3-5-9B.gguf"
+  host:
+    type: "llama_cpp_with_vulkan"
+  load_params:
+    context_size: 262144
+    gpu_layers: 0
+    threads: 5
+    parallel: 1
+    cache_type_k: "q8_0"
+    cache_type_v: "q8_0"
+  sampling:
+    temperature: 0.2
+    max_tokens: 4096
+"#;
+        let config: ModelsConfig = serde_saphyr::from_str(yaml).expect("parse");
+        let spec = &config.models["qwen35"];
+        assert_eq!(spec.name, "Qwen3-5-9B.gguf");
+        assert_eq!(spec.load_params.context_size, 262144);
+        assert_eq!(spec.load_params.parallel, 1);
+        assert_eq!(spec.sampling.temperature, Some(0.2));
+        assert_eq!(spec.sampling.max_tokens, Some(4096));
+    }
 }
