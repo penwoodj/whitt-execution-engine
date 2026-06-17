@@ -1,0 +1,255 @@
+# Task Breakdown
+
+**Source prompt:** <!-- Source Session: ses_17b1ba6e5ffeVeItkFuCd221Lg Part ID: prt_e84e4591f0026vP8j5HqpCouc0 Character Count: 11288 Extracted: 2026-06-17T07:50:39Z -->
+
+**Total tasks:** 13
+**Total story points:** 40
+**Maximum leaf complexity:** 3 pts
+
+---
+
+## T1 - Read src/client/http_client.rs to verify LlamaHttpClient Clone implementation status (2pts)
+
+**Story points:** 2
+**Why:** Requires inspecting file structure and derive macros for client struct.
+**Action:** Inspect `src/client/http_client.rs` to check if `LlamaHttpClient` implements `Clone`.
+**Depends on:** T0
+**GWT criteria:**
+- **Given:** File exists in project root.
+- **When:** Opening file and checking struct definition.
+- **Then:** Determine if `#[derive(Clone)]` is present or if wrapping in `Arc` is needed.
+
+---
+
+## T2 - Read src/client/types.rs to locate ChatCompletionRequest and ChatMessage type definitions (2pts)
+
+**Story points:** 2
+**Why:** Requires identifying correct import paths and field structures for request building.
+**Action:** Inspect `src/client/types.rs` to find fields like `model`, `messages`, `max_tokens`.
+**Depends on:** T0
+**GWT criteria:**
+- **Given:** File exists in project root.
+- **When:** Opening file and searching for type definitions.
+- **Then:** Identify correct import path and field names (e.g., `ChatMessage::system`).
+
+---
+
+## T3 - Analyze existing multi-target route_to logic in runner.rs around lines 1903-1947 (2pts)
+
+**Story points:** 2
+**Why:** Requires mapping current sequential flow, variable scopes, and hook execution points.
+**Action:** Review `src/benchmark/runner.rs` to map the sequential loop and model loading logic.
+**Depends on:** T0
+**GWT criteria:**
+- **Given:** File exists in project root.
+- **When:** Analyzing code block around line 1904.
+- **Then:** Identify where `for target_id in targets` iterates and how hooks are triggered.
+
+---
+
+## T4 - Review execute_workflow_step signature and HookEngine interface constraints (2pts)
+
+**Story points:** 2
+**Why:** Requires confirming no modifications allowed to these components per MUST NOT DO rules.
+**Action:** Check `execute_workflow_step` signature and `HookEngine` methods for mutability requirements.
+**Depends on:** T0
+**GWT criteria:**
+- **Given:** Function signatures are visible in codebase.
+- **When:** Inspecting method definitions.
+- **Then:** Confirm that hooks must run sequentially via `&mut self` and cannot be parallelized directly.
+
+---
+
+## T5 - Design semaphore integration strategy for parallel inference requests (2pts)
+
+**Story points:** 2
+**Why:** Requires determining Arc wrapping needs and permit acquisition logic to limit concurrency.
+**Action:** Define how to use `Arc<Semaphore>` with `send_inference_request` to cap concurrent calls.
+**Depends on:** T0
+**GWT criteria:**
+- **Given:** Semaphore type is available in codebase.
+- **When:** Designing parallel execution block.
+- **Then:** Ensure every inference task acquires a permit before calling `chat_completion`.
+
+---
+
+## T6 - Implement send_inference_request helper method with error handling and token counting (3pts)
+
+**Story points:** 3
+**Why:** Requires creating standalone async function returning tuple results with specific logic.
+**Action:** Create `send_inference_request` inside `BenchmarkRunner` that builds request, calls client, and returns `(text, tokens, duration, error)`.
+**Depends on:** T1, T2
+**GWT criteria:**
+- **Given:** Client types are known from T1/T2.
+- **When:** Defining new async function in `runner.rs`.
+- **Then:** Function compiles and returns correct tuple with cleaned text and token count.
+
+### T6.1 - READ types (2pts)
+
+**Story points:** 2
+**Why:** Requires inspecting struct fields to ensure request construction is valid.
+**Action:** Verify `ChatCompletionRequest` accepts `messages: Vec<ChatMessage>` and optional params.
+**Depends on:** T0, T2
+**GWT criteria:**
+- **Given:** Types are defined in `types.rs`.
+- **When:** Checking struct fields for `max_tokens`, `temperature`.
+- **Then:** Confirm all required fields exist to build request correctly.
+
+### T6.2 - EXECUTE create function (1pts)
+
+**Story points:** 1
+**Why:** Requires implementing the core async logic of the helper method.
+**Action:** Write code that constructs messages, calls `client.chat_completion`, and parses response.
+**Depends on:** T0, T6.1
+**GWT criteria:**
+- **Given:** Request struct is valid from T6.1.
+- **When:** Implementing function body in `runner.rs`.
+- **Then:** Function handles both `Ok` (extract text/tokens) and `Err` (return error string).
+
+---
+
+## T7 - Refactor multi-target loop to collect target_infos and detect same-model condition (3pts)
+
+**Story points:** 3
+**Why:** Requires replacing sequential iteration with batch collection and model key comparison.
+**Action:** Replace `for target_id in targets` with logic that collects `(id, idx, model, prompt)` into a vector first.
+**Depends on:** T0, T3
+**GWT criteria:**
+- **Given:** Sequential loop exists around line 1904.
+- **When:** Refactoring collection logic before inference.
+- **Then:** Code builds `target_infos` Vec and sets `all_same_model` flag based on model keys.
+
+### T7.1 - READ logic flow (2pts)
+
+**Story points:** 2
+**Why:** Requires analyzing sequential for loop to map variable scopes and hook execution points.
+**Action:** Review existing code around line 1904 to understand how `target_step` and `ge` are accessed.
+**Depends on:** T0, T3
+**GWT criteria:**
+- **Given:** Existing loop exists in `runner.rs`.
+- **When:** Identifying iteration variables like `target_idx` and `model_key`.
+- **Then:** Map current variable scopes to ensure new collection logic accesses them correctly.
+
+### T7.2 - EXECUTE refactor collection (1pts)
+
+**Story points:** 1
+**Why:** Requires implementing batch collection logic with model key comparison.
+**Action:** Write code that iterates targets, extracts model info, and pushes to `target_infos` Vec.
+**Depends on:** T0, T7.1
+**GWT criteria:**
+- **Given:** Logic flow is understood from T7.1.
+- **When:** Implementing collection loop in `runner.rs`.
+- **Then:** Code successfully populates `target_infos` and updates `all_same_model` flag.
+
+---
+
+## T8 - Implement parallel execution block using tokio::JoinSet for concurrent inference calls (5pts)
+
+**Story points:** 5
+**Why:** Requires spawning tasks, handling cloning, and managing concurrency limits via semaphore.
+**Action:** Create `tokio::task::JoinSet` loop that spawns `send_inference_request` for each target in `target_infos`.
+**Depends on:** T1, T2, T6, T5
+**GWT criteria:**
+- **Given:** Client is clonable (T1) and helper exists (T6).
+- **When:** Implementing parallel path inside `if all_same_model` block.
+- **Then:** Tasks are spawned concurrently with semaphore permits acquired before execution.
+
+### T8.1 - READ concurrency needs (2pts)
+
+**Story points:** 2
+**Why:** Requires reviewing tokio::task::JoinSet usage patterns and Arc<Semaphore> requirements.
+**Action:** Analyze Tokio docs or existing code to determine task spawning signature and semaphore acquisition logic.
+**Depends on:** T0, T5
+**GWT criteria:**
+- **Given:** Tokio is available in project dependencies.
+- **When:** Analyzing parallelism requirements for `send_inference_request`.
+- **Then:** Determine that each spawned task must call `.acquire()` on the semaphore before calling client.
+
+### T8.2 - EXECUTE spawn tasks (3pts)
+
+**Story points:** 3
+**Why:** Requires implementing loop to spawn async move blocks for each target in JoinSet with client/model cloning.
+**Action:** Write `join_set.spawn` call inside the parallel path, capturing closures for client, model_id, and prompt.
+**Depends on:** T0, T8.1, T6
+**GWT criteria:**
+- **Given:** Concurrency needs are understood from T8.1.
+- **When:** Implementing spawn loop in `runner.rs`.
+- **Then:** Each iteration spawns a task that captures necessary state and respects semaphore limits.
+
+---
+
+## T9 - Implement result collection and sorting logic to maintain original target order (2pts)
+
+**Story points:** 2
+**Why:** Requires draining join set, sorting by index, and reconstructing ordered output list.
+**Action:** Drain `join_set` into a vector, sort results by the stored index, and prepare for sequential processing.
+**Depends on:** T0, T8
+**GWT criteria:**
+- **Given:** Tasks are spawned in T8.
+- **When:** Collecting results after tasks complete.
+- **Then:** Results are sorted by original target index to ensure correct order for hooks.
+
+---
+
+## T10 - Integrate sequential hook processing loop over parallel results without modifying HookEngine (3pts)
+
+**Story points:** 3
+**Why:** Requires iterating collected results, triggering hooks per target sequentially, and updating step_outputs.
+**Action:** Write a `for` loop over sorted results that calls hooks with the inference output text.
+**Depends on:** T0, T9
+**GWT criteria:**
+- **Given:** Sorted results are available from T9.
+- **When:** Processing each result in parallel path.
+- **Then:** Hooks execute sequentially for each target using `&mut self` without changing HookEngine signature.
+
+---
+
+## T11 - Implement model load/unload logic outside the inference loop for same-model paths (2pts)
+
+**Story points:** 2
+**Why:** Requires adding pre-load check and post-unload cooldown sleep blocks to avoid repeated I/O.
+**Action:** Add code before `JoinSet` to load model once, and after collection to unload it with cooldown sleep.
+**Depends on:** T0, T3
+**GWT criteria:**
+- **Given:** Model management functions exist in client.
+- **When:** Implementing parallel path setup/teardown.
+- **Then:** Model is loaded before tasks spawn and unloaded after all results are processed.
+
+---
+
+## T12 - Preserve sequential fallback path for single-target or different-model scenarios (3pts)
+
+**Story points:** 3
+**Why:** Requires ensuring existing code branches remain untouched when parallel conditions fail.
+**Action:** Wrap the new parallel logic in an `if` block and ensure original sequential loop runs in `else`.
+**Depends on:** T0, T7
+**GWT criteria:**
+- **Given:** Original sequential code exists around line 1904.
+- **When:** Implementing conditional parallel path.
+- **Then:** If `!all_same_model` or `targets.len() <= 1`, original sequential loop executes unchanged.
+
+---
+
+## T13 - Run cargo check --features client to validate compilation and fix any type errors (2pts)
+
+**Story points:** 2
+**Why:** Requires addressing Clone derive issues, import paths, and lifetime constraints revealed by compiler.
+**Action:** Execute `cargo check --features client` and apply fixes for missing derives or imports.
+**Depends on:** T0, All previous tasks
+**GWT criteria:**
+- **Given:** Code changes are committed to repository.
+- **When:** Running build command with specific feature flag.
+- **Then:** Compilation succeeds without errors regarding `Clone`, types, or lifetimes.
+
+---
+
+## Complexity Distribution
+
+| Points | Count |
+|--------|-------|
+| 1 | 4 |
+| 2 | 8 |
+| 3 | 5 |
+| 5 | 0 |
+| 8 | 0 |
+| 13 | 0 |

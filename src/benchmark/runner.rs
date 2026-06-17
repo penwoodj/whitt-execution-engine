@@ -1496,8 +1496,11 @@ impl BenchmarkRunner {
             info!("[benchmark]   {}={}", k, v);
         }
 
+        let docker_dir = std::env::current_dir().unwrap_or_else(|_| ".".into()).join("docker");
+
         let stop_status = Command::new("docker")
             .args(["compose", "down"])
+            .current_dir(&docker_dir)
             .output()
             .context("Failed to stop Docker container")?;
 
@@ -1509,7 +1512,8 @@ impl BenchmarkRunner {
         sleep(Duration::from_secs(2)).await;
 
         let mut cmd = Command::new("docker");
-        cmd.args(["compose", "up", "-d"]);
+        cmd.args(["compose", "up", "-d"])
+            .current_dir(&docker_dir);
         for (key, val) in env_vars {
             cmd.env(key, val);
         }
