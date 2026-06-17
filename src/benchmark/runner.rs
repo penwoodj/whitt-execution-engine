@@ -82,6 +82,7 @@ struct BenchmarkWorkflowConfig {
     compare_modes: bool,
     model_list: Vec<String>,
     gpu_layers: usize,
+    load_params_env_vars: Vec<(String, String)>,
 }
 
 #[derive(Clone)]
@@ -507,7 +508,7 @@ impl BenchmarkRunner {
             return Ok(None);
         };
 
-        // Read max_tokens with priority: step model_overrides > model-level > default (4096)
+        // Read max_tokens with priority: step model_overrides > model sampling config > default (4096)
         let max_tokens_from_step = first_step
             .get("model_overrides")
             .and_then(|mo| mo.get("max_tokens"))
@@ -519,7 +520,8 @@ impl BenchmarkRunner {
             .and_then(|models| models.as_object())
             .and_then(|models_map| {
                 models_map.values().find_map(|model_config| {
-                    model_config.get("max_tokens")
+                    model_config.get("sampling")
+                        .and_then(|s| s.get("max_tokens"))
                         .and_then(|v| v.as_u64())
                         .map(|v| v as usize)
                 })
@@ -529,13 +531,40 @@ impl BenchmarkRunner {
             .or(max_tokens_from_model)
             .unwrap_or(4096);
 
+        // Read temperature with priority: step model_overrides > model sampling config > default (0.7)
         let temperature = first_step
-            .get("temperature")
+            .get("model_overrides")
+            .and_then(|mo| mo.get("temperature"))
             .and_then(|v| v.as_f64())
+            .or_else(|| {
+                yaml_value.get("models")
+                    .and_then(|models| models.as_object())
+                    .and_then(|models_map| {
+                        models_map.values().find_map(|mc| {
+                            mc.get("sampling")
+                                .and_then(|s| s.get("temperature"))
+                                .and_then(|v| v.as_f64())
+                        })
+                    })
+            })
             .unwrap_or(0.7);
+
+        // Read top_p with priority: step model_overrides > model sampling config > default (0.95)
         let top_p = first_step
-            .get("top_p")
+            .get("model_overrides")
+            .and_then(|mo| mo.get("top_p"))
             .and_then(|v| v.as_f64())
+            .or_else(|| {
+                yaml_value.get("models")
+                    .and_then(|models| models.as_object())
+                    .and_then(|models_map| {
+                        models_map.values().find_map(|mc| {
+                            mc.get("sampling")
+                                .and_then(|s| s.get("top_p"))
+                                .and_then(|v| v.as_f64())
+                        })
+                    })
+            })
             .unwrap_or(0.95);
 
         // Read gpu_layers from provider hosting config
@@ -562,6 +591,23 @@ impl BenchmarkRunner {
             })
             .unwrap_or_default();
 
+        // Extract load_params from first model spec → env vars for Docker
+        let load_params_env_vars: Vec<(String, String)> = yaml_value
+            .get("models")
+            .and_then(|models| models.as_object())
+            .and_then(|models_map| {
+                models_map.values().find_map(|mc| {
+                    mc.get("load_params")
+                        .and_then(|lp| serde_json::from_value::<crate::model::schema::LoadParams>(lp.clone()).ok())
+                })
+            })
+            .map(|lp| lp.to_env_vars())
+            .unwrap_or_default();
+
+        if !load_params_env_vars.is_empty() {
+            info!("[benchmark] extracted load_params: {} env vars", load_params_env_vars.len());
+        }
+
         info!("[benchmark] extracted workflow config: prompts={}, max_tokens={}, temperature={}, top_p={}, gpu_layers={}, model_list={}",
             prompts.len(), max_tokens, temperature, top_p, gpu_layers, model_list.len());
 
@@ -573,6 +619,7 @@ impl BenchmarkRunner {
             compare_modes: false,
             model_list,
             gpu_layers,
+            load_params_env_vars,
         }))
     }
 
@@ -1440,9 +1487,15 @@ impl BenchmarkRunner {
     ///
     /// `n_gpu_layers`: 0 for CPU-only, high value (e.g., 999) for GPU mode
     async fn restart_docker_with_gpu_layers(&self, n_gpu_layers: u32) -> Result<()> {
-        info!("[benchmark] restarting Docker with n-gpu-layers={}", n_gpu_layers);
+        self.restart_docker_with_env_vars(&[("LLAMA_ARG_N_GPU_LAYERS".into(), n_gpu_layers.to_string())]).await
+    }
 
-        // Stop the container
+    async fn restart_docker_with_env_vars(&self, env_vars: &[(String, String)]) -> Result<()> {
+        info!("[benchmark] restarting Docker with {} env vars", env_vars.len());
+        for (k, v) in env_vars {
+            info!("[benchmark]   {}={}", k, v);
+        }
+
         let stop_status = Command::new("docker")
             .args(["compose", "down"])
             .output()
@@ -1453,13 +1506,15 @@ impl BenchmarkRunner {
             anyhow::bail!("docker compose down failed: {}", stderr);
         }
 
-        // Wait for container to stop
         sleep(Duration::from_secs(2)).await;
 
-        // Start with GPU layers override
-        let start_status = Command::new("docker")
-            .args(["compose", "up", "-d"])
-            .env("LLAMA_ARG_N_GPU_LAYERS", n_gpu_layers.to_string())
+        let mut cmd = Command::new("docker");
+        cmd.args(["compose", "up", "-d"]);
+        for (key, val) in env_vars {
+            cmd.env(key, val);
+        }
+
+        let start_status = cmd
             .output()
             .context("Failed to start Docker container")?;
 
@@ -1468,7 +1523,6 @@ impl BenchmarkRunner {
             anyhow::bail!("docker compose up failed: {}", stderr);
         }
 
-        // Wait for server to be ready
         info!("[benchmark] waiting for server to be ready...");
         let mut retries = 30;
         while retries > 0 {
@@ -1910,12 +1964,12 @@ impl BenchmarkRunner {
             None
         });
 
-        // Apply gpu_layers from workflow config if available
+        // Apply load_params from workflow config (restarts Docker with model spec env vars)
         if let Some(ref ctx) = wf_ctx {
-            if ctx.gpu_layers != 999 {
-                info!("[benchmark] workflow config specifies gpu_layers={}, restarting Docker", ctx.gpu_layers);
-                self.restart_docker_with_gpu_layers(ctx.gpu_layers as u32).await
-                    .context("Failed to restart Docker with workflow gpu_layers")?;
+            if !ctx.load_params_env_vars.is_empty() {
+                info!("[benchmark] workflow config has {} load_params env vars, restarting Docker", ctx.load_params_env_vars.len());
+                self.restart_docker_with_env_vars(&ctx.load_params_env_vars).await
+                    .context("Failed to restart Docker with load_params")?;
             }
         }
 

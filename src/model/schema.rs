@@ -956,6 +956,24 @@ pub struct LoadParams {
     pub no_cache_prompt: bool,
 }
 
+impl LoadParams {
+    pub fn to_env_vars(&self) -> Vec<(String, String)> {
+        vec![
+            ("LLAMA_ARG_CTX_SIZE".into(), self.context_size.to_string()),
+            ("LLAMA_ARG_BATCH_SIZE".into(), self.batch_size.to_string()),
+            ("LLAMA_ARG_UBATCH_SIZE".into(), self.ubatch_size.to_string()),
+            ("LLAMA_ARG_CACHE_TYPE_K".into(), self.cache_type_k.clone()),
+            ("LLAMA_ARG_CACHE_TYPE_V".into(), self.cache_type_v.clone()),
+            ("LLAMA_ARG_N_GPU_LAYERS".into(), self.gpu_layers.to_string()),
+            ("LLAMA_ARG_N_THREADS".into(), self.threads.to_string()),
+            ("LLAMA_ARG_USE_MMAP".into(), if self.use_mmap { "1".into() } else { "0".into() }),
+            ("LLAMA_ARG_FLASH_ATTN".into(), if self.flash_attn { "1".into() } else { "0".into() }),
+            ("LLAMA_ARG_CONT_BATCHING".into(), if self.cont_batching { "1".into() } else { "0".into() }),
+            ("LLAMA_ARG_NO_CACHE_PROMPT".into(), if self.no_cache_prompt { "1".into() } else { "0".into() }),
+        ]
+    }
+}
+
 fn default_context_size() -> usize {
     102400
 }
