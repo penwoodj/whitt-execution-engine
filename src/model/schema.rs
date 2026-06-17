@@ -928,7 +928,7 @@ pub struct LoadParams {
     pub cache_type_v: String,
 
     /// Number of GPU layers to offload (maps to `--n-gpu-layers`).
-    /// Use 99 or higher for full offload.
+    /// Use 0 for CPU-only inference; 99+ for full GPU offload.
     #[serde(default = "default_gpu_layers")]
     pub gpu_layers: usize,
 
@@ -954,6 +954,11 @@ pub struct LoadParams {
     /// MUST be `true` for Vulkan (cannot serialize KV cache state).
     #[serde(default = "default_no_cache_prompt")]
     pub no_cache_prompt: bool,
+
+    /// Number of parallel sequences (slots) to process concurrently (maps to `--parallel`).
+    /// Set to 1 for single-shot deterministic generation.
+    #[serde(default = "default_parallel")]
+    pub parallel: usize,
 }
 
 impl LoadParams {
@@ -970,12 +975,13 @@ impl LoadParams {
             ("LLAMA_ARG_FLASH_ATTN".into(), if self.flash_attn { "1".into() } else { "0".into() }),
             ("LLAMA_ARG_CONT_BATCHING".into(), if self.cont_batching { "1".into() } else { "0".into() }),
             ("LLAMA_ARG_NO_CACHE_PROMPT".into(), if self.no_cache_prompt { "1".into() } else { "0".into() }),
+            ("LLAMA_ARG_PARALLEL".into(), self.parallel.to_string()),
         ]
     }
 }
 
 fn default_context_size() -> usize {
-    102400
+    262144
 }
 
 fn default_batch_size() -> usize {
@@ -995,11 +1001,11 @@ fn default_cache_type_v() -> String {
 }
 
 fn default_gpu_layers() -> usize {
-    99
+    0
 }
 
 fn default_threads() -> usize {
-    6
+    5
 }
 
 fn default_use_mmap() -> bool {
@@ -1012,6 +1018,10 @@ fn default_flash_attn() -> bool {
 
 fn default_no_cache_prompt() -> bool {
     true
+}
+
+fn default_parallel() -> usize {
+    1
 }
 
 // ============================================================================
