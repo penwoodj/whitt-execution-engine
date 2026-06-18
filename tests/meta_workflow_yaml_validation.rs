@@ -255,3 +255,29 @@ fn given_sw3_step_02_when_checked_then_has_generative_entity_to_prevent_skip() {
     assert_eq!(max_tokens, Some(1),
         "SW3 step_02 max_tokens should be 1 (shell echo does the actual work)");
 }
+
+/// Regression for iteration cap safety net.
+/// Without cap, evaluator subjective criteria can loop indefinitely.
+/// Cap forces PASS after 3 fix iterations (4 evaluator runs).
+#[test]
+fn given_sw1_through_sw5_when_checked_then_have_iteration_counter_gate() {
+    let sw_files = &SW_FILES[..5];
+    for sw in sw_files {
+        let yaml = load_yaml(sw);
+        let yaml_str = serde_yaml::to_string(&yaml).unwrap();
+
+        // All SWs must have iteration-counter.txt reference (cap mechanism)
+        assert!(
+            yaml_str.contains("iteration-counter.txt"),
+            "{} must reference iteration-counter.txt (safety cap against fix loop storms)",
+            sw
+        );
+
+        // All SWs must have the cap check (ITER >= 4 forces PASS)
+        assert!(
+            yaml_str.contains("\"$ITER\" -ge 4"),
+            "{} must have iteration cap check (ITER -ge 4 forces PASS to prevent infinite fix loops)",
+            sw
+        );
+    }
+}
