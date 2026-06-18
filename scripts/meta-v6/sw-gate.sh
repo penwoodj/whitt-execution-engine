@@ -16,9 +16,7 @@ else
   RESULT=FAIL
 fi
 
-# Debug: capture args + result
-echo "[$(date -u +%T)] args=$* ITER=$ITER RESULT=$RESULT cwd=$(pwd)" >> ./sw-gate-debug.log
-
 printf '%s' "$RESULT"
+
 
 
