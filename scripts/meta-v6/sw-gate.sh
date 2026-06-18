@@ -11,7 +11,14 @@ ITER=$((ITER + 1))
 echo "$ITER" > "$COUNTER_FILE"
 
 if grep -qi 'PASS' "$EVAL_FILE" 2>/dev/null || [ "$ITER" -ge 4 ]; then
-  printf '%s' PASS
+  RESULT=PASS
 else
-  printf '%s' FAIL
+  RESULT=FAIL
 fi
+
+# Debug: capture args + result
+echo "[$(date -u +%T)] args=$* ITER=$ITER RESULT=$RESULT cwd=$(pwd)" >> ./sw-gate-debug.log
+
+printf '%s' "$RESULT"
+
+

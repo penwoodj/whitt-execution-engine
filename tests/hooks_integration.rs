@@ -139,6 +139,65 @@ fn given_gwt_matching_clause_when_executed_then_routes_to_then_target() {
     }
 }
 
+/// Regression: GWT must resolve {{bookmarks.X}} templates before evaluation.
+/// Bug: Without resolution, GWT saw literal `{{bookmarks.shell_output.stdout}}`
+/// which doesn't exist in context.to_json_value(), so always evaluated to Null.
+/// Result: PASS verdict from gate script was ignored, routing always fell through
+/// to fix step. Caused unnecessary fix iterations.
+#[test]
+fn given_gwt_clause_with_bookmark_template_when_executed_then_resolves_and_routes() {
+    let mut engine = HookEngine::new();
+    engine.store_bookmark(
+        "shell_output".to_string(),
+        serde_json::json!({"stdout": "PASS", "stderr": "", "exit_code": 0, "success": true}),
+    );
+
+    let action = HookAction::Gwt(vec![GwtClause {
+        given: Some("\"{{bookmarks.shell_output.stdout}}\" == \"PASS\"".into()),
+        r#when: None,
+        r#then: RouteToAction::Single("assemble_step".into()),
+    }]);
+    let ctx = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+        step_name: "eval".into(),
+        output: "".into(),
+        duration_ms: 0,
+        quality_score: None,
+        token_count: 0,
+        model_name: "m".into(),
+    });
+    match execute_action(&action, &ctx, &mut engine, None) {
+        HookResult::RouteTo { targets } => assert_eq!(targets, vec!["assemble_step"]),
+        r => panic!("Expected RouteTo to assemble_step (template should resolve to PASS), got {:?}", r),
+    }
+}
+
+#[test]
+fn given_gwt_clause_with_bookmark_template_when_value_mismatch_then_continues() {
+    let mut engine = HookEngine::new();
+    engine.store_bookmark(
+        "shell_output".to_string(),
+        serde_json::json!({"stdout": "FAIL", "stderr": "", "exit_code": 0, "success": true}),
+    );
+
+    let action = HookAction::Gwt(vec![GwtClause {
+        given: Some("\"{{bookmarks.shell_output.stdout}}\" == \"PASS\"".into()),
+        r#when: None,
+        r#then: RouteToAction::Single("assemble_step".into()),
+    }]);
+    let ctx = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+        step_name: "eval".into(),
+        output: "".into(),
+        duration_ms: 0,
+        quality_score: None,
+        token_count: 0,
+        model_name: "m".into(),
+    });
+    match execute_action(&action, &ctx, &mut engine, None) {
+        HookResult::Continue => (),
+        r => panic!("Expected Continue (FAIL != PASS), got {:?}", r),
+    }
+}
+
 #[test]
 fn given_gwt_non_matching_clause_when_executed_then_continues() {
     let action = HookAction::Gwt(vec![GwtClause {

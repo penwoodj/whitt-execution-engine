@@ -154,8 +154,40 @@ impl HookEngine {
             let short_placeholder = format!("{{{{{}.output}}}}", key);
             result = result.replace(&short_placeholder, &value_str);
         }
+        result = self.resolve_nested_bookmark_fields(&result);
         if result != template {
             tracing::info!("[resolve_templates] resolved: {} chars → {} chars", template.len(), result.len());
+        }
+        result
+    }
+
+    /// Resolve `{{bookmarks.KEY.field1.field2}}` by navigating JSON object.
+    /// Required for shell hook output which stores `{stdout, stderr, exit_code, success}`.
+    fn resolve_nested_bookmark_fields(&self, template: &str) -> String {
+        let mut result = template.to_string();
+        let re = regex::Regex::new(r"\{\{bookmarks\.([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+)\}\}")
+            .expect("bookmark regex must compile");
+        for caps in re.captures_iter(&template.to_string()) {
+            let full = caps.get(0).map(|m| m.as_str()).unwrap_or("");
+            let path = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let parts: Vec<&str> = path.split('.').collect();
+            if parts.is_empty() { continue; }
+            let key = parts[0];
+            if let Some(value) = self.bookmarks.get(key) {
+                let mut current = value;
+                for field in &parts[1..] {
+                    current = match current {
+                        serde_json::Value::Object(map) => map.get(*field).unwrap_or(&serde_json::Value::Null),
+                        _ => &serde_json::Value::Null,
+                    };
+                }
+                let resolved_str = match current {
+                    serde_json::Value::String(s) => s.clone(),
+                    serde_json::Value::Null => String::new(),
+                    other => other.to_string(),
+                };
+                result = result.replace(full, &resolved_str);
+            }
         }
         result
     }

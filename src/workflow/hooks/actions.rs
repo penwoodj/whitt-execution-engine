@@ -570,7 +570,8 @@ fn execute_gwt(
 
     for clause in clauses {
         if let Some(ref given) = clause.given {
-            if evaluate_gwt_condition(given, &json) {
+            let resolved_given = engine.resolve_templates(given);
+            if evaluate_gwt_condition(&resolved_given, &json) {
                 let target = match &clause.r#then {
                     RouteToAction::Single(t) => t.clone(),
                     RouteToAction::Multiple(ts) => ts.join(","),
