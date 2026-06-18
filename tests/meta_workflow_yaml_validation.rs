@@ -259,6 +259,7 @@ fn given_sw3_step_02_when_checked_then_has_generative_entity_to_prevent_skip() {
 /// Regression for iteration cap safety net.
 /// Without cap, evaluator subjective criteria can loop indefinitely.
 /// Cap forces PASS after 3 fix iterations (4 evaluator runs).
+/// Uses external script to avoid YAML escaping issues with nested quotes.
 #[test]
 fn given_sw1_through_sw5_when_checked_then_have_iteration_counter_gate() {
     let sw_files = &SW_FILES[..5];
@@ -266,17 +267,17 @@ fn given_sw1_through_sw5_when_checked_then_have_iteration_counter_gate() {
         let yaml = load_yaml(sw);
         let yaml_str = serde_yaml::to_string(&yaml).unwrap();
 
-        // All SWs must have iteration-counter.txt reference (cap mechanism)
+        // All SWs must call sw-gate.sh (extracted to script for robust quoting)
         assert!(
-            yaml_str.contains("iteration-counter.txt"),
-            "{} must reference iteration-counter.txt (safety cap against fix loop storms)",
+            yaml_str.contains("sw-gate.sh"),
+            "{} must call sw-gate.sh (safety cap against fix loop storms)",
             sw
         );
 
-        // All SWs must have the cap check (ITER >= 4 forces PASS)
+        // All SWs must reference iteration-counter.txt (counter persistence)
         assert!(
-            yaml_str.contains("\"$ITER\" -ge 4"),
-            "{} must have iteration cap check (ITER -ge 4 forces PASS to prevent infinite fix loops)",
+            yaml_str.contains("iteration-counter.txt"),
+            "{} must reference iteration-counter.txt (cap state file)",
             sw
         );
     }
