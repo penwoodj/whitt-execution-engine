@@ -438,3 +438,198 @@ fn given_shell_verdict_fail_when_gwt_checks_string_equality_then_falls_through()
         "GWT should fall through to fix on FAIL verdict"
     );
 }
+
+/// Regression test: SW2/SW3 lenient coverage gate pattern (≥80% = PASS).
+///
+/// Confirmed behavior in live testing (commit f44aa2f):
+/// 1. Shell computes coverage percentage and outputs COVERAGE_GATE: PASS or FAIL
+/// 2. Bookmark stores shell_output.stdout
+/// 3. GWT clause compares stdout to "PASS"
+/// 4. Routes to assemble_final or fix based on shell output
+///
+/// Without this pattern, evaluator triggered infinite fix loops because
+/// any missing task caused auto-FAIL even when 80%+ were covered.
+#[test]
+fn given_shell_coverage_gate_pass_at_threshold_when_gwt_routes_then_goes_to_assemble() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    // Simulate a categorized.md with 8 of 10 tasks covered (80% threshold)
+    let task_list = tmp.path().join("tasks.txt");
+    let categorized = tmp.path().join("categorized.md");
+    fs::write(&task_list, "T1\nT2\nT3\nT4\nT5\nT6\nT7\nT8\nT9\nT10\n").unwrap();
+    fs::write(&categorized, "### T1 x\n### T2 x\n### T3 x\n### T4 x\n### T5 x\n### T6 x\n### T7 x\n### T8 x\n").unwrap();
+
+    // Mirror the actual SW3 evaluator shell command (coverage % + COVERAGE_GATE)
+    let shell_cmd = format!(
+        "TOTAL=$(grep -o 'T[0-9]*' '{tasks}' | sort -u | wc -l) && \
+         COVERED=$(grep -o '### T[0-9]*' '{cat}' | grep -o 'T[0-9]*' | sort -u | wc -l) && \
+         PCT=$((TOTAL > 0 ? COVERED * 100 / TOTAL : 0)) && \
+         if [ \"$PCT\" -ge 80 ]; then printf '%s' PASS; else printf '%s' FAIL; fi",
+        tasks = task_list.to_string_lossy(),
+        cat = categorized.to_string_lossy()
+    );
+
+    let shell_action = HookAction::Shell(ShellAction {
+        command: shell_cmd,
+        args: Some(vec![]),
+        working_dir: Some(tmp.path().to_string_lossy().into_owned()),
+        env: Some(HashMap::new()),
+        fail_on_error: Some(false),
+    });
+
+    let mut engine = HookEngine::new();
+    let ctx = before_ctx("evaluate");
+
+    execute_action(&shell_action, &ctx, &mut engine, None);
+
+    let bookmark = engine.get_bookmark("shell_output").expect("shell_output should exist");
+    let stdout = bookmark.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
+    assert_eq!(stdout, "PASS", "80% coverage should produce PASS");
+
+    // GWT routes to assemble on PASS
+    let gwt_clauses = vec![
+        GwtClause {
+            given: Some(r#""PASS" == "PASS""#.to_string()),
+            when: None,
+            then: RouteToAction::Multiple(vec!["step_06_assemble_final".to_string()]),
+        },
+        GwtClause {
+            given: Some("true".to_string()),
+            when: None,
+            then: RouteToAction::Multiple(vec!["step_05_fix".to_string()]),
+        },
+    ];
+    let result = execute_action(&HookAction::Gwt(gwt_clauses), &ctx, &mut engine, None);
+    assert!(
+        matches!(&result, HookResult::RouteTo { targets } if targets == &vec!["step_06_assemble_final".to_string()]),
+        "80% coverage should route to assemble_final"
+    );
+}
+
+/// Regression test: Below-threshold coverage (e.g., 70%) produces FAIL
+/// and routes to fix step.
+#[test]
+fn given_shell_coverage_gate_below_threshold_when_gwt_routes_then_goes_to_fix() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    // 7 of 10 tasks covered = 70% < 80% threshold → FAIL
+    let task_list = tmp.path().join("tasks.txt");
+    let categorized = tmp.path().join("categorized.md");
+    fs::write(&task_list, "T1\nT2\nT3\nT4\nT5\nT6\nT7\nT8\nT9\nT10\n").unwrap();
+    fs::write(&categorized, "### T1 x\n### T2 x\n### T3 x\n### T4 x\n### T5 x\n### T6 x\n### T7 x\n").unwrap();
+
+    let shell_cmd = format!(
+        "TOTAL=$(grep -o 'T[0-9]*' '{tasks}' | sort -u | wc -l) && \
+         COVERED=$(grep -o '### T[0-9]*' '{cat}' | grep -o 'T[0-9]*' | sort -u | wc -l) && \
+         PCT=$((TOTAL > 0 ? COVERED * 100 / TOTAL : 0)) && \
+         if [ \"$PCT\" -ge 80 ]; then printf '%s' PASS; else printf '%s' FAIL; fi",
+        tasks = task_list.to_string_lossy(),
+        cat = categorized.to_string_lossy()
+    );
+
+    let shell_action = HookAction::Shell(ShellAction {
+        command: shell_cmd,
+        args: Some(vec![]),
+        working_dir: Some(tmp.path().to_string_lossy().into_owned()),
+        env: Some(HashMap::new()),
+        fail_on_error: Some(false),
+    });
+
+    let mut engine = HookEngine::new();
+    let ctx = before_ctx("evaluate");
+
+    execute_action(&shell_action, &ctx, &mut engine, None);
+
+    let bookmark = engine.get_bookmark("shell_output").expect("shell_output should exist");
+    let stdout = bookmark.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
+    assert_eq!(stdout, "FAIL", "70% coverage should produce FAIL");
+
+    let gwt_clauses = vec![
+        GwtClause {
+            given: Some(r#""FAIL" == "PASS""#.to_string()),
+            when: None,
+            then: RouteToAction::Multiple(vec!["step_06_assemble_final".to_string()]),
+        },
+        GwtClause {
+            given: Some("true".to_string()),
+            when: None,
+            then: RouteToAction::Multiple(vec!["step_05_fix".to_string()]),
+        },
+    ];
+    let result = execute_action(&HookAction::Gwt(gwt_clauses), &ctx, &mut engine, None);
+    assert!(
+        matches!(&result, HookResult::RouteTo { targets } if targets == &vec!["step_05_fix".to_string()]),
+        "70% coverage should route to fix"
+    );
+}
+
+/// Regression test: Shell action with multiline stdout properly captures
+/// the COVERAGE_GATE field for downstream GWT evaluation.
+///
+/// Confirmed behavior: SW2/SW3 shell hooks output multiple lines including
+/// "COVERAGE_GATE: PASS" or "COVERAGE_GATE: FAIL". This test verifies the
+/// shell bookmark captures the full multiline output.
+#[test]
+fn given_shell_multiline_output_when_captured_then_full_stdout_in_bookmark() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    let shell_action = HookAction::Shell(ShellAction {
+        command: r#"echo '=== MACHINE CHECK ==='; echo 'Tasks total: 10'; echo 'Tasks categorized: 9'; echo 'Coverage pct: 90'; echo 'COVERAGE_GATE: PASS'; echo '=== END CHECK ==='"#.to_string(),
+        args: Some(vec![]),
+        working_dir: Some(tmp.path().to_string_lossy().into_owned()),
+        env: Some(HashMap::new()),
+        fail_on_error: Some(false),
+    });
+
+    let mut engine = HookEngine::new();
+    let ctx = before_ctx("evaluate");
+
+    let result = execute_action(&shell_action, &ctx, &mut engine, None);
+    assert!(matches!(result, HookResult::Continue), "Shell should return Continue");
+
+    let bookmark = engine.get_bookmark("shell_output").expect("shell_output should exist");
+    let stdout = bookmark.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
+    assert!(stdout.contains("COVERAGE_GATE: PASS"), "Multiline output should contain gate field");
+    assert!(stdout.contains("Coverage pct: 90"), "Multiline output should contain percentage");
+    assert!(stdout.lines().count() >= 5, "Should capture all lines");
+}
+
+/// Regression test: Shell action with empty output (no tasks) doesn't crash
+/// and produces a defined gate value.
+#[test]
+fn given_shell_empty_input_when_coverage_computed_then_no_div_by_zero() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    let empty_tasks = tmp.path().join("tasks.txt");
+    let empty_cat = tmp.path().join("categorized.md");
+    fs::write(&empty_tasks, "").unwrap();
+    fs::write(&empty_cat, "").unwrap();
+
+    // Use same pattern as SW2/SW3 evaluator — must not divide by zero
+    let shell_cmd = format!(
+        "TOTAL=$(grep -o 'T[0-9]*' '{tasks}' 2>/dev/null | sort -u | wc -l) && \
+         COVERED=$(grep -o '### T[0-9]*' '{cat}' 2>/dev/null | grep -o 'T[0-9]*' | sort -u | wc -l) && \
+         PCT=$((TOTAL > 0 ? COVERED * 100 / TOTAL : 0)) && \
+         printf '%s' \"$PCT\"",
+        tasks = empty_tasks.to_string_lossy(),
+        cat = empty_cat.to_string_lossy()
+    );
+
+    let shell_action = HookAction::Shell(ShellAction {
+        command: shell_cmd,
+        args: Some(vec![]),
+        working_dir: Some(tmp.path().to_string_lossy().into_owned()),
+        env: Some(HashMap::new()),
+        fail_on_error: Some(false),
+    });
+
+    let mut engine = HookEngine::new();
+    let ctx = before_ctx("evaluate");
+
+    let result = execute_action(&shell_action, &ctx, &mut engine, None);
+    assert!(matches!(result, HookResult::Continue), "Shell with empty input should not fail");
+
+    let bookmark = engine.get_bookmark("shell_output").expect("shell_output should exist");
+    let stdout = bookmark.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
+    assert_eq!(stdout, "0", "Empty input should produce 0% not divide-by-zero error");
+}
