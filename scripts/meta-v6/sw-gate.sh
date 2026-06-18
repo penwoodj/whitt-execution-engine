@@ -10,7 +10,7 @@ ITER=$(cat "$COUNTER_FILE" 2>/dev/null || echo 0)
 ITER=$((ITER + 1))
 echo "$ITER" > "$COUNTER_FILE"
 
-if grep -qi 'PASS' "$EVAL_FILE" 2>/dev/null || [ "$ITER" -ge 4 ]; then
+if grep -qE '^[[:space:]]*VERDICT:[[:space:]]*PASS' "$EVAL_FILE" 2>/dev/null || [ "$ITER" -ge 4 ]; then
   RESULT=PASS
 else
   RESULT=FAIL

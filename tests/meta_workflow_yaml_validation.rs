@@ -282,3 +282,34 @@ fn given_sw1_through_sw5_when_checked_then_have_iteration_counter_gate() {
         );
     }
 }
+
+/// Regression for sw-gate.sh VERDICT line check.
+/// Bug: `grep -qi 'PASS'` matched ANY 'PASS' in eval text, not just VERDICT.
+/// When eval said "1. PASS - criterion X" but "VERDICT: FAIL", gate
+/// incorrectly returned PASS, skipping fix step on failed output.
+/// Fix: regex anchored to VERDICT line.
+#[test]
+fn given_sw_gate_when_eval_text_has_pass_but_verdict_fail_then_returns_fail() {
+    use std::process::Command;
+    use std::fs;
+    let temp_dir = std::env::temp_dir();
+    let eval_file = temp_dir.join("sw-gate-eval-test.txt");
+    let counter_file = temp_dir.join("sw-gate-counter-test.txt");
+
+    fs::write(&eval_file, "1. PASS - criterion X\n2. FAIL - criterion Y\nVERDICT: FAIL").unwrap();
+    fs::write(&counter_file, "0").unwrap();
+
+    let output = Command::new("bash")
+        .arg("scripts/meta-v6/sw-gate.sh")
+        .arg(&eval_file)
+        .arg(&counter_file)
+        .output()
+        .expect("sw-gate.sh must execute");
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    assert_eq!(stdout.trim(), "FAIL",
+        "Gate must return FAIL when VERDICT: FAIL even if other criteria say PASS");
+
+    let _ = fs::remove_file(&eval_file);
+    let _ = fs::remove_file(&counter_file);
+}
