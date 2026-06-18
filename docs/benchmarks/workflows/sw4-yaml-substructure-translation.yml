@@ -272,7 +272,7 @@ agentic_workflow:
         - Reference prior outputs as `{{step.<step_id>.output}}`
         - Every step must have `generative_entity`, `prompt`, `model_overrides`, AND `when.after_step_succeeds` with at least save_to + log hooks
         - WRITE ACTUAL PROMPT TEXT inside each `prompt: |` block. NEVER use literal "<placeholder>" — write 2-5 sentences of real instructions describing what the LLM should do, what inputs to read, what outputs to produce. Example: "Read {{step.prior_step.output}} and extract the configuration values. Write them as YAML to ./outputs/config.yml. Validate that all required keys are present."
-        - Cover EVERY task from the task-category list — process in chunks of 5-7 tasks at a time mentally, then emit all blocks
+        - Cover EVERY task from the task-category list (BOTH parents AND leaf subtasks) — process in chunks of 5-7 tasks at a time mentally, then emit all blocks. If input has T1 with subtasks T1.1, T1.2, output blocks for ALL of: step_t1_*, step_t1_1_*, step_t1_2_*
         - COMPACT: Intent + Fit are each ONE sentence max. Avoid multi-paragraph explanations.
         - Every step needs a log hook:
           ```yaml
@@ -325,9 +325,10 @@ agentic_workflow:
         Evaluate from EACH perspective. For each, output PASS/FAIL with one-sentence reason:
 
         ## Perspective 1: COVERAGE SCOPE
-        - COVERAGE: CHECK THE MACHINE OUTPUT. If task count mismatch, this is FAIL.
+        - COVERAGE: CHECK COVERAGE_GATE in machine output. If PASS, this criterion PASSES. If FAIL, this criterion FAILS.
         - NO_ORPHANS: No substructure exists for a task not in the list
         - DEPENDS_CHAIN: depends_on references resolve to actual step IDs
+        - NO_PLACEHOLDERS: CHECK Placeholder leak in machine output. If > 0, this is FAIL.
 
         ## Perspective 2: SCHEMA COMPLIANCE SCOPE
         - YAML_ONLY: CHECK THE MACHINE OUTPUT. If non-YAML blocks > 0, this is FAIL.
@@ -335,6 +336,7 @@ agentic_workflow:
         - CORRECT_PATTERN: The YAML matches the category pattern
         - GENERATIVE_ENTITY: CHECK THE MACHINE OUTPUT. If missing count > 0, this is FAIL.
         - MODEL_OVERRIDES: Every step has model_overrides
+        - PROMPTS_ARE_REAL: Every prompt block has actual instruction text (not empty, not just a variable reference)
 
         ## Perspective 3: HOOK COMPLETENESS SCOPE
         - SAVE_TO_PRESENT: CHECK THE MACHINE OUTPUT. If inline arrays > 0, this is FAIL.
@@ -358,7 +360,7 @@ agentic_workflow:
       when:
         before_step_starts:
           - shell:
-              command: "STRUCTS='./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw4/02-substructures.md' && echo '=== MACHINE YAML CHECK ===' && echo 'YAML blocks:' && grep -c '```yaml' \"$STRUCTS\" 2>/dev/null && echo 'Non-YAML blocks (MUST be 0):' && (grep -c -e '```rust' -e '```python' -e '```bash' -e '```json' \"$STRUCTS\" 2>/dev/null || echo 0) && echo 'generative_entity count:' && grep -c 'generative_entity' \"$STRUCTS\" 2>/dev/null && echo 'Inline arrays (save_to: [...]):' && (grep -c 'save_to: .' \"$STRUCTS\" 2>/dev/null || echo 0) && echo 'Intent/Fit blocks:' && grep -c 'Intent:' \"$STRUCTS\" 2>/dev/null && echo '=== END CHECK ==='"
+              command: "STRUCTS='./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw4/02-substructures.md' && CATS='./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/categories.md' && TOTAL_TASKS=$(grep -cE '^(##|###) T[0-9]' \"$CATS\" 2>/dev/null || echo 0) && STEPS_FOUND=$(grep -cE 'step_t[0-9]' \"$STRUCTS\" 2>/dev/null || echo 0) && COVERAGE_PCT=$((TOTAL_TASKS > 0 ? STEPS_FOUND * 100 / TOTAL_TASKS : 0)) && echo '=== MACHINE YAML CHECK ===' && echo \"Input tasks: $TOTAL_TASKS\" && echo \"Steps in output: $STEPS_FOUND\" && echo \"Coverage pct: $COVERAGE_PCT\" && if [ \"$COVERAGE_PCT\" -ge 90 ]; then echo 'COVERAGE_GATE: PASS'; else echo 'COVERAGE_GATE: FAIL'; fi && echo 'YAML blocks:' && grep -c '```yaml' \"$STRUCTS\" 2>/dev/null && echo 'Non-YAML blocks (MUST be 0):' && (grep -c -e '```rust' -e '```python' -e '```bash' -e '```json' \"$STRUCTS\" 2>/dev/null || echo 0) && echo 'generative_entity count:' && grep -c 'generative_entity' \"$STRUCTS\" 2>/dev/null && echo 'Inline arrays (save_to: [...]):' && (grep -c 'save_to: .' \"$STRUCTS\" 2>/dev/null || echo 0) && echo 'Intent/Fit blocks:' && grep -c 'Intent:' \"$STRUCTS\" 2>/dev/null && echo 'Placeholder leak (MUST be 0):' && (grep -c '<placeholder>' \"$STRUCTS\" 2>/dev/null || echo 0) && echo '=== END CHECK ==='"
               args: []
               working_dir: "/home/jon/code/whitt-execution-engine"
               fail_on_error: false
