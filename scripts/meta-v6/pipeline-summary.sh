@@ -44,9 +44,9 @@ for SW in sw1 sw2 sw3 sw4 sw5; do
     TPS=0
   fi
 
-  # Iterations (count evaluator runs)
-  EVALS=$(grep -c 'step_0[34]_evaluate\|step_04_evaluate\|step_03_evaluate' "${LOG}" 2>/dev/null || echo 0)
-  FIXES=$(grep -c 'routing from step.*to step_0[45]_fix\|routing from step.*to step_05_fix' "${LOG}" 2>/dev/null || echo 0)
+  # Iterations: count unique evaluator invocations (executing line, not just mentions)
+  EVALS=$(grep -c 'executing step step_0[34]_evaluate\|executing step step_04_evaluate\|executing step step_03_evaluate' "${LOG}" 2>/dev/null || echo 0)
+  FIXES=$(grep -c 'executing step step_0[45]_fix\|executing step step_05_fix\|executing step step_04_fix' "${LOG}" 2>/dev/null || echo 0)
 
   # Output file size
   case $SW in
