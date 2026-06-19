@@ -96,11 +96,11 @@ fn given_all_sw_yamls_when_checked_then_have_load_params_with_q8_0_kv_cache() {
             .and_then(|q| q.get("load_params"))
             .unwrap_or_else(|| panic!("{} models.qwen35.load_params missing", sw));
 
-        // User directive: ctx=262144, gpu=0, threads=5, parallel=1
+        // User directive: ctx=262144, gpu=99 (full RX580 offload, confirmed fastest), threads=5, parallel=1
         assert_eq!(load_params.get("context_size").and_then(|v| v.as_i64()), Some(262144),
             "{} context_size MUST be 262144", sw);
-        assert_eq!(load_params.get("gpu_layers").and_then(|v| v.as_i64()), Some(0),
-            "{} gpu_layers MUST be 0 (CPU-only)", sw);
+        assert_eq!(load_params.get("gpu_layers").and_then(|v| v.as_i64()), Some(99),
+            "{} gpu_layers MUST be 99 (full RX580 offload, server config wins)", sw);
         assert_eq!(load_params.get("threads").and_then(|v| v.as_i64()), Some(5),
             "{} threads MUST be 5", sw);
         assert_eq!(load_params.get("parallel").and_then(|v| v.as_i64()), Some(1),
