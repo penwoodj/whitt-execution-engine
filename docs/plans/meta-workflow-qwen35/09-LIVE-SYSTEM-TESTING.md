@@ -111,7 +111,7 @@ docker compose config | grep "depends_on"
 **Validation Criteria:**
 
 - `CONTEXT_SIZE` is `262144` (262K tokens)
-- `N_GPU_LAYERS` is `0` (CPU-only with Vulkan)
+- `N_GPU_LAYERS` is `99` (full GPU offload on RX580)
 - `CACHE_TYPE_K` and `CACHE_TYPE_V` are `q8_0` (quantized KV cache)
 - `CONT_BATCHING` is `false` (Vulkan limitation)
 - `NO_CACHE_PROMPT` is `true` (Vulkan limitation)
@@ -802,7 +802,7 @@ cat > docs/benchmarks/outputs/meta-workflow-qwen35/test-report.md <<'EOF'
 ### Configuration Check
 
 - ✅ CONTEXT_SIZE: 262144 (262K tokens)
-- ✅ N_GPU_LAYERS: 0 (CPU-only with Vulkan)
+- ✅ N_GPU_LAYERS: 99 (full GPU offload on RX580)
 - ✅ CACHE_TYPE_K: q8_0 (quantized KV cache)
 - ✅ CACHE_TYPE_V: q8_0 (quantized KV cache)
 - ✅ CONT_BATCHING: false (Vulkan limitation)

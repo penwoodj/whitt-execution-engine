@@ -37,7 +37,7 @@ models:
       ubatch_size: 512
       cache_type_k: "q8_0"
       cache_type_v: "q8_0"
-      gpu_layers: 0
+      gpu_layers: 99
       threads: 5
       use_mmap: true
       flash_attn: true
@@ -1091,7 +1091,7 @@ models:
       ubatch_size: 512
       cache_type_k: "q8_0"
       cache_type_v: "q8_0"
-      gpu_layers: 0
+      gpu_layers: 99
       threads: 5
       use_mmap: true
       flash_attn: true

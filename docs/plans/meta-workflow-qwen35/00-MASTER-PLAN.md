@@ -2,13 +2,13 @@
 
 > **Status:** Planning Phase — Documentation Only
 > **Phase:** Meta-Workflow Generator Development (Qwen 3.5-9B)
-> **Approach:** Plan-driven development with live validation on llama.cpp (CPU-only)
+> **Approach:** Plan-driven development with live validation on llama.cpp (Vulkan GPU on RX580)
 
 ## Executive Overview
 
 The Qwen 3.5-9B Meta-Workflow Generator is a sophisticated agentic system that transforms high-complexity natural language prompts into executable YAML workflow files. The system achieves this through a five-stage pipeline (SW1-SW5) where each sub-workflow produces a single markdown artifact that accumulates and iterates toward a final output. This architectural approach compensates for the limitations of smaller local models (≤ 9B parameters) by decomposing the complex task of prompt-to-workflow translation into focused, scoped stages with internal iteration loops, GWT-based quality gates, and deterministic fix cycles.
 
-The execution engine is a Rust-based workflow runner located at `src/benchmark/runner.rs` with a YAML-driven hook system defined in `src/workflow/hooks/mod.rs`. The model backend is llama.cpp with Vulkan in Docker (CPU-only execution with Q8_0 KV cache acceleration). The target model is Qwen 3.5-9B-UD-Q4_K_XL.gguf, a quantized model optimized for local inference with 262,144 token context window, 5 CPU threads, Q8_0 KV cache, and 1 parallel processing slot.
+The execution engine is a Rust-based workflow runner located at `src/benchmark/runner.rs` with a YAML-driven hook system defined in `src/workflow/hooks/mod.rs`. The model backend is llama.cpp with Vulkan in Docker (full GPU offload with Q8_0 KV cache). The target model is Qwen 3.5-9B-UD-Q4_K_XL.gguf, a quantized model optimized for local inference with 262,144 token context window, 5 CPU threads, Q8_0 KV cache, and 1 parallel processing slot.
 
 ## Primary Objectives
 
@@ -125,7 +125,7 @@ This master plan references 11 detailed documents that together form a complete 
 
 7. **07-HOOKS-STRATEGY.md** — Which hooks to use in each sub-workflow, when: triggers (before_step_starts, after_step_succeeds, after_step_fails, after_all_retries_exhausted), actions (log for state capture, save_to for artifact persistence, shell for inter-SW communication, bookmark for state transfer, gwt for conditional routing, append_to for accumulation), hook chains for evaluation-fix loops (log → evaluate → route_to → fix → bookmark), and logging strategy for quality tracking (structured logs with JSON events).
 
-8. **08-CONFIG-AND-INFRASTRUCTURE.md** — Qwen 3.5-9B configuration details: context 262144 tokens, gpu_layers 0 (CPU-only), threads 5, parallel 1 slot, cache Q8_0 for both K and V tensors. Docker compose setup details, llama.cpp server flags mapping, LoadParams::to_env_vars() wiring at `src/model/schema.rs:964-980`, sampling config flow from schema to runtime, and model download commands from HuggingFace.
+8. **08-CONFIG-AND-INFRASTRUCTURE.md** — Qwen 3.5-9B configuration details: context 262144 tokens, gpu_layers 99 (full GPU offload on RX580), threads 5, parallel 1 slot, cache Q8_0 for both K and V tensors. Docker compose setup details, llama.cpp server flags mapping, LoadParams::to_env_vars() wiring at `src/model/schema.rs:964-980`, sampling config flow from schema to runtime, and model download commands from HuggingFace.
 
 9. **09-LIVE-SYSTEM-TESTING.md** — Protocol for live Docker testing: start llama.cpp server container, verify model loaded via `whitt model list`, run sub-workflow via `whitt benchmark --workflow`, inspect logs using `./scripts/analyze-run.sh LOG OUTPUT`, validate output .md files for proper structure and content, iterate based on failures identified in logs, and all testing MUST be live system first with unit tests only after live validation confirms behavior.
 
@@ -139,10 +139,10 @@ The project operates under several hard constraints derived from the codebase, i
 
 ### Model Constraint: Qwen 3.5-9B CPU-Only Only
 
-The model specification is locked to Qwen 3.5-9B-UD-Q4_K_XL.gguf with CPU-only execution. This constraint comes from the LoadParams struct defaults at `src/model/schema.rs`:
+The model specification is locked to Qwen 3.5-9B-UD-Q4_K_XL.gguf with full RX580 GPU offload. This constraint comes from the LoadParams struct defaults at `src/model/schema.rs`:
 
 - `context_size: 262144` (line 983-985) — Full context window requires ≥ 32 GB RAM
-- `gpu_layers: 0` (line 1003-1005) — CPU-only inference, no GPU layer offload
+- `gpu_layers: 99` (line 1003-1005) — full RX580 GPU offload, benchmark-proven fastest
 - `threads: 5` (line 1007-1009) — 5 CPU threads for inference
 - `cache_type_k: "q8_0"` and `cache_type_v: "q8_0"` (lines 995-1001) — Q8_0 KV cache acceleration
 - `parallel: 1` (line 1023-1025) — Single parallel processing slot
@@ -540,7 +540,7 @@ The project faces several categories of risk, each with specific mitigation stra
 
 1. Pre-validate Docker compose configuration with base `docker/docker-compose.yml` (not AMD/NVIDIA variants).
 2. Verify host has ≥ 32 GB RAM for Qwen 3.5-9B with 262144 context.
-3. Set `gpu_layers: 0` for CPU-only execution (no GPU dependency).
+3. Set `gpu_layers: 99` for full GPU offload (RX580, confirmed 37% faster than gpu_layers=32).
 4. Implement health check in orchestrator: poll port 8080 for server readiness.
 5. Implement timeout in model load (30 minutes) to prevent hangs.
 6. Implement cleanup in failure paths (container stop, port release).

@@ -4,7 +4,7 @@
 # Usage: launch-meta-v6.sh [PROMPT_FILE]
 set -euo pipefail
 REPO="/home/jon/code/whitt-execution-engine"
-PROMPT_FILE="${1:-docs/plans/meta-workflow-generator/artifacts/dataset/prompt-05.txt}"
+PROMPT_FILE="${1:-docs/plans/meta-workflow-qwen35/test-prompts/real/prompt-14-task-add-true-parallel-inference-for-same-model-multi-target.md}"
 RUN_ID="meta-v6-e2e-$(date +%Y%m%d-%H%M%S)"
 OUT_DIR="${REPO}/docs/benchmarks/outputs/meta-workflow/${RUN_ID}"
 mkdir -p "${OUT_DIR}/logs"

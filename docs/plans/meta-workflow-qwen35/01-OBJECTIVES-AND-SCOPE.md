@@ -12,7 +12,7 @@ This document defines the complete objectives, scope boundaries, acceptance crit
 
 The generator achieves this by routing the input prompt through five sequential sub-workflows (SW1 → SW5), each producing a single well-formatted Markdown artifact. The meta-workflow orchestrator (`docs/benchmarks/workflows/meta-workflow-v6.yml`) chains these sub-workflows via shell-based delegation.
 
-**Model**: Qwen 3.5-9B (Q4_K_M quantization) running in llama.cpp with CPU-only inference.
+**Model**: Qwen 3.5-9B (Q4_K_M quantization) running in llama.cpp with full RX580 GPU offload.
 
 ---
 
@@ -205,7 +205,7 @@ For each sub-workflow:
 
 ### 4.1 In Scope
 
-- Meta-workflow generator using Qwen 3.5-9B in llama.cpp (CPU-only)
+- Meta-workflow generator using Qwen 3.5-9B in llama.cpp (full RX580 GPU offload)
 - Five sub-workflows (SW1-SW5) with iterative evaluation/fix loops
 - YAML-driven workflow definitions following unified schema
 - Hook-driven execution (all behavior from YAML, not hardcoded)
@@ -217,7 +217,7 @@ For each sub-workflow:
 
 ### 4.2 Out of Scope
 
-- GPU inference (CPU-only with gpu_layers: 0)
+- Full GPU offload (gpu_layers: 99, RX580)
 - Non-Qwen models (single model focus)
 - Workflow generation for simple prompts (target: complex agentic prompts only)
 - Real-time/streaming workflow generation (batch processing)
@@ -244,7 +244,7 @@ For each sub-workflow:
 |-----------|-------|--------|
 | Model | Qwen 3.5-9B Q4_K_M | User specification |
 | Context window | 262,144 tokens | Full Qwen 3.5 context |
-| GPU layers | 0 | CPU-only inference |
+| GPU layers | 99 | Full GPU offload on RX580 |
 | CPU threads | 5 | User specification |
 | Parallel slots | 1 | Single-shot deterministic |
 | KV cache | Q8_0 | Larger context support |

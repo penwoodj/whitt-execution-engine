@@ -18,6 +18,22 @@ Archived implementation plans from earlier development phases.
   - model-management-poc.md — Model management + hot-swap
   - phase-03-task0-verifier.md — Verifier interface system
 
+- `meta-workflow-generator/` — Original meta-workflow plan suite (Jun 13-14)
+  - Predecessor to meta-v6 and meta-workflow-qwen35
+  - Replaced by qwen35-specific suite when model was finalized
+
+- `meta-v6/` — Intermediate meta-workflow plan suite (Jun 14-16)
+  - Iteration reports (iter1-4), baselines, quality reports
+  - Superseded by meta-workflow-qwen35 which subsumed its learnings
+
+- `meta-workflow-qwen35-early-prompts/` — Initial prompt dataset (Jun 17)
+  - 15 prompts with INDEX.md, extracted from OpenCode sessions
+  - Replaced by `meta-workflow-qwen35/test-prompts/real/` (curated, deduplicated, baselines included)
+  - 4 prompts excluded as context dumps, 11 active
+
 ## Active Plans
 
-Current active plans are in `docs/plans/` (phases 00-07).
+Current active plans are in `docs/plans/`:
+- Phases 00-07 (engine implementation)
+- `meta-workflow-qwen35/` — current meta-workflow generator plan suite (active)
+  - `test-prompts/real/` — curated active prompt dataset with baselines

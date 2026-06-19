@@ -192,8 +192,9 @@ docs/qa/
 ### Vulkan Backend
 - `--no-cache-prompt` MUST be used (Vulkan cannot serialize KV cache state)
 - `--cont-batching` MUST NOT be used (triggers KV cache serialization on slot release)
-- KV cache MUST use `f16` (quantized types crash with Vulkan)
+- KV cache uses `q8_0` (works on Vulkan/RADV with Qwen3.5-9B; f16 also safe)
 - `--flash-attn on` is safe and recommended
+- `--gpu-layers 99` (full offload) confirmed fastest on AMD RX 580 8GB; CPU-only unusable
 
 ### Docker
 - Use base `docker/docker-compose.yml` (not AMD or NVIDIA variants) for AMD GPU

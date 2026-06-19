@@ -285,7 +285,7 @@ mod tests {
                     load_params:
                       path: "/models/Qwen3.5-9B-UD-Q4_K_XL.gguf"
                       context_size: 262144
-                      gpu_layers: 0
+                      gpu_layers: 99
                       threads: 5
                       parallel: 1
                       cache_type_k: "q8_0"
@@ -337,7 +337,7 @@ mod tests {
         let load_params = LoadParams {
             path: "/models/Qwen3.5-9B-UD-Q4_K_XL.gguf".to_string(),
             context_size: 262144,
-            gpu_layers: 0,
+            gpu_layers: 99,
             threads: 5,
             parallel: 1,
             cache_type_k: "q8_0".to_string(),

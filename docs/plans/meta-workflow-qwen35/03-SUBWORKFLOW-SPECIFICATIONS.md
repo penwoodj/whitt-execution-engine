@@ -467,7 +467,7 @@ load_params:
   ubatch_size: 512               # Default micro-batch size
   cache_type_k: "q8_0"           # Q8_0 KV cache K
   cache_type_v: "q8_0"           # Q8_0 KV cache V
-  gpu_layers: 0                  # CPU-only inference
+  gpu_layers: 99                  # full GPU offload (benchmark-proven fastest on RX580)
   threads: 5                     # 5 CPU threads
   use_mmap: true                 # Memory-mapped file loading
   flash_attn: true               # Flash attention (safe for Vulkan)
@@ -1045,7 +1045,7 @@ load_params:
   ubatch_size: 512               # Default micro-batch size
   cache_type_k: "q8_0"           # Q8_0 KV cache K
   cache_type_v: "q8_0"           # Q8_0 KV cache V
-  gpu_layers: 0                  # CPU-only inference
+  gpu_layers: 99                  # full GPU offload (benchmark-proven fastest on RX580)
   threads: 5                     # 5 CPU threads
   use_mmap: true                 # Memory-mapped file loading
   flash_attn: true               # Flash attention (safe for Vulkan)
@@ -1547,7 +1547,7 @@ load_params:
   ubatch_size: 512               # Default micro-batch size
   cache_type_k: "q8_0"           # Q8_0 KV cache K
   cache_type_v: "q8_0"           # Q8_0 KV cache V
-  gpu_layers: 0                  # CPU-only inference
+  gpu_layers: 99                  # full GPU offload (benchmark-proven fastest on RX580)
   threads: 5                     # 5 CPU threads
   use_mmap: true                 # Memory-mapped file loading
   flash_attn: true               # Flash attention (safe for Vulkan)
@@ -2171,7 +2171,7 @@ load_params:
   ubatch_size: 512               # Default micro-batch size
   cache_type_k: "q8_0"           # Q8_0 KV cache K
   cache_type_v: "q8_0"           # Q8_0 KV cache V
-  gpu_layers: 0                  # CPU-only inference
+  gpu_layers: 99                  # full GPU offload (benchmark-proven fastest on RX580)
   threads: 5                     # 5 CPU threads
   use_mmap: true                 # Memory-mapped file loading
   flash_attn: true               # Flash attention (safe for Vulkan)
@@ -2292,7 +2292,7 @@ models:
       ubatch_size: 512
       cache_type_k: "q8_0"
       cache_type_v: "q8_0"
-      gpu_layers: 0
+      gpu_layers: 99
       threads: 5
       use_mmap: true
       flash_attn: true
@@ -2471,7 +2471,7 @@ when:
    - ubatch_size: 512
    - cache_type_k: q8_0
    - cache_type_v: q8_0
-   - gpu_layers: 0
+   - gpu_layers: 99
    - threads: 5
    - use_mmap: true
    - flash_attn: true
@@ -2504,7 +2504,7 @@ when:
          ubatch_size: 512
          cache_type_k: "q8_0"
          cache_type_v: "q8_0"
-         gpu_layers: 0
+         gpu_layers: 99
          threads: 5
          use_mmap: true
          flash_attn: true
@@ -2881,7 +2881,7 @@ load_params:
   ubatch_size: 512               # Default micro-batch size
   cache_type_k: "q8_0"           # Q8_0 KV cache K
   cache_type_v: "q8_0"           # Q8_0 KV cache V
-  gpu_layers: 0                  # CPU-only inference
+  gpu_layers: 99                  # full GPU offload (benchmark-proven fastest on RX580)
   threads: 5                     # 5 CPU threads
   use_mmap: true                 # Memory-mapped file loading
   flash_attn: true               # Flash attention (safe for Vulkan)
