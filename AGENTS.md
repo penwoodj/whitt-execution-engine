@@ -651,3 +651,35 @@ When context grows large, write handoff to `.opencode-handoff.md`:
 - Pending Todos (remaining work with priorities)
 - Key Context (files modified, patterns followed, constraints)
 - How to Continue (specific next steps)
+
+---
+
+## Active Objective: Meta-Workflow Parity (2026-06-21)
+
+**Goal:** Meta-workflow-v6 generator + execution engine MUST produce workflows that accomplish prompt objectives at quality ≥ opencode baseline (single-shot with max tool usage).
+
+**Plan suite:** `docs/plans/meta-workflow-parity/`
+- `00-MASTER-PLAN.md` — overview, exit criteria
+- `01-BASELINE-METHODOLOGY.md` — how baselines established
+- `02-VALIDATION-CRITERIA.md` — strict pass/fail criteria
+- `03-GAP-ANALYSIS.md` — brutally honest current state
+- `04-ITERATION-STRATEGY.md` — cycle plan
+- `05-RESOURCE-CONSTRAINTS.md` — hardware/safety limits
+- `06-EVALUATION-FRAMEWORK.md` — critical evaluation
+- `07-WEB-RESEARCH-LOG.md` — assumption testing log
+
+**Known critical gap (2026-06-21):** Engine lacks tool access from workflow steps. Only 6 tools registered (`model_list`, `model_load`, `model_unload`, `chat`, `file_read`, `final_answer`); `file_read` only accessible to ReAct agent, not workflow steps. Schema declares `shell_exec`/`file_write`/`web_fetch`/`grep` but NEVER IMPLEMENTED in `src/agent/tools.rs`. Result: workflows ask model "Read src/foo.rs" → model outputs refusal text → output artifacts are garbage.
+
+**Iteration cycle (max 3):**
+1. **Cycle 1:** Template rewrite (shell hooks for file content injection)
+2. **Cycle 2:** Engine `ShellTool` implementation (if Cycle 1 insufficient)
+3. **Cycle 3:** Engine `FileWriteTool`/`GrepTool` implementation (last resort)
+
+**Parity threshold:** 8/11 prompts achieve objective = acceptable. Escalate to user if <8/11 after Cycle 3.
+
+**Operating principles for this objective:**
+- **Caveman mode active** for all plan files + iteration logs (token efficiency)
+- **Live system testing required** — every claim backed by actual workflow execution
+- **Brutal honesty** — refusal text = HARD FAIL, not "partial pass"
+- **No new dependencies without user approval**
+- **Hardware safety** — Docker restart per prompt, RAM <80%, GPU <7GB
