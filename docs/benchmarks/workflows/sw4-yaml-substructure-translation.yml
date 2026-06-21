@@ -246,14 +246,15 @@ agentic_workflow:
           - NEVER write prompts like "Run cargo check" — model CANNOT run commands
           - NEVER write prompts like "Save updated file to..." — model CANNOT write files directly
           - NEVER write prompts like "Modify the function at line X" — model CANNOT edit files
-        - USE SHELL HOOKS for file I/O instead. Pattern:
+        - USE SHELL HOOKS for file I/O instead. The shell hook ALWAYS stores its output in `bookmarks.shell_output` (the engine does NOT support custom bookmark names for shell hooks). Pattern:
           ```yaml
           step_<id>_<name>:
             generative_entity: "${models.qwen35}"
             prompt: |
-              Analyze this file content:
-              {{bookmarks.<task_id>_file_content.stdout}}
-              Generate the updated version with <modification>. Output the COMPLETE new file content.
+              Analyze this file content (LANGUAGE: Rust):
+              {{bookmarks.shell_output.stdout}}
+              
+              Generate the updated version with <modification>. Output the COMPLETE new file content as Rust code.
             model_overrides:
               max_tokens: 4096
               temperature: 0.2
@@ -265,16 +266,19 @@ agentic_workflow:
                     working_dir: "."
                     fail_on_error: true
               after_step_succeeds:
-                - shell:
-                    command: "echo"
-                    args: ["{{step.<step_id>.output}}"]
-                    working_dir: "."
-                    fail_on_error: false
                 - save_to:
                     - <bookmark_name>
                     - "./outputs/<filename>"
           ```
-          The before_step_starts shell hook loads file content into `bookmarks.shell_output.stdout`. The prompt references it. The after_step_succeeds shell hook writes the model's output to a file.
+          CRITICAL RULES for shell hooks:
+          - The shell output bookmark is ALWAYS named `shell_output` — NEVER use names like `t1_file_content`, `step_X_output`, etc.
+          - In prompts, ALWAYS use the LITERAL TEMPLATE SYNTAX `{{bookmarks.shell_output.stdout}}` to inject file content. NEVER write the bare word "shell_output" in prose — that's just text, not a template variable. Examples:
+            CORRECT: "Analyze this Rust code:\n{{bookmarks.shell_output.stdout}}\nDetermine if..."
+            WRONG: "Analyze the file content provided in shell_output"
+            WRONG: "Read the content from shell_output bookmark"
+            WRONG: "Parse the file content in shell_output"
+          - The shell output is OVERWRITTEN by each shell hook in the same step. If you need multiple files, use a single shell command like `cat file1.rs file2.rs` or chain with `;`
+          - When the prompt asks for code, ALWAYS specify the target programming language explicitly (e.g., "Output Rust code", "Generate YAML")
         - USE {{step.X.output}} when content comes from a PRIOR STEP (not a file)
         - USE {{bookmarks.shell_output.stdout}} when content comes from a SHELL HOOK in the SAME step
         - Cover EVERY task from the task-category list (BOTH parents AND leaf subtasks) — process in chunks of 5-7 tasks at a time mentally, then emit all blocks. If input has T1 with subtasks T1.1, T1.2, output blocks for ALL of: step_t1_*, step_t1_1_*, step_t1_2_*
