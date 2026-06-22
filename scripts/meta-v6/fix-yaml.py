@@ -635,7 +635,7 @@ def fix_unindented_markdown_in_prompt(content: str) -> str:
 def fix_save_to_extra_keys(content: str) -> str:
     """Remove line_range/description keys misplaced in save_to items."""
     content = re.sub(
-        r'(\s+)(line_range|description):\s*[^\n]+\n',
+        r'([ \t]+)(line_range|description):\s*[^\n]+\n',
         '',
         content,
     )
