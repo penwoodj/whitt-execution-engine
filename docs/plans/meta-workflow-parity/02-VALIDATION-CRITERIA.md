@@ -1,5 +1,9 @@
 # 02 - VALIDATION CRITERIA (STRICT)
 
+## REVISED 2026-06-21 — User clarified parity = info + code equivalence
+
+Parity is NOT just analysis. Workflow must produce ACTUAL FILE CHANGES equivalent to what opencode would do. Resilient across varying prompts. Sustainable (no crashes).
+
 ## PARITY PASS = ALL CRITERIA MET
 
 For meta-v6 to "pass" on a prompt, ALL of:
@@ -7,32 +11,28 @@ For meta-v6 to "pass" on a prompt, ALL of:
 ### Criterion 1: Workflow Parses
 - [ ] SW5 output `workflow.yml` is valid YAML
 - [ ] Passes `whitt validate` (or schema check)
-- [ ] No fix-yaml.py post-processing needed (or minimal)
+- [ ] fix-yaml.py post-processor clean (no fixes needed OR fixes documented)
 
-### Criterion 2: Workflow Executes
+### Criterion 2: Workflow Executes Resiliently
 - [ ] `whitt benchmark --workflow workflow.yml` completes exit 0
 - [ ] All steps succeed OR documented graceful failures
 - [ ] No Docker crashes mid-execution
+- [ ] Survives varying prompt complexity (simple → complex)
 
 ### Criterion 3: Output Real (Not Refusals)
 - [ ] Output artifacts contain SUBSTANTIVE content (not "I cannot access...")
-- [ ] Refusal indicator strings absent from ≥95% of outputs:
-      - "I cannot access"
-      - "I don't have access"
-      - "As an AI"
-      - "I'm unable to"
-      - "However, I can suggest"
+- [ ] Refusal indicator strings absent from ≥95% of outputs
 - [ ] Output addresses prompt ask (manual inspection)
 
-### Criterion 4: Objective Addressed
-- [ ] For code prompts: actual code changes/modifications proposed or made
-- [ ] For research prompts: actual analysis/findings documented
-- [ ] For doc prompts: actual structured documentation produced
-- [ ] Output usable as starting point for human reviewer
+### Criterion 4: ACTUAL FILE MODIFICATIONS (USER REQUIREMENT)
+- [ ] For code prompts: workflow WRITES modified files to actual source paths (e.g., src/benchmark/runner.rs)
+- [ ] Workflow includes step that READS source, GENERATES new content, WRITES back to source
+- [ ] Modifications match what opencode would do (functional equivalence)
+- [ ] Verification: cargo check/test runs via shell hook, captures result
 
 ### Criterion 5: Quality Bar (vs Baseline)
-- [ ] Meta-v6 output quality ≥ opencode baseline (scored 0-5)
-- [ ] Or meta-v6 output SURPASSES baseline on ≥2 dimensions
+- [ ] Workflow output quality ≥ opencode baseline (scored 0-5)
+- [ ] Or workflow output SURPASSES baseline on ≥2 dimensions
 - [ ] No critical information missing vs baseline
 
 ## FAILURE MODES (HARD FAILS)
@@ -43,6 +43,8 @@ For meta-v6 to "pass" on a prompt, ALL of:
 - Workflow crashes Docker → HARD FAIL
 - Same content copy-pasted across steps → HARD FAIL
 - Model outputs template/placeholder instead of content → HARD FAIL
+- **Workflow outputs only analysis text, no file modifications → HARD FAIL** (NEW)
+- **Workflow can't survive 3 consecutive runs without manual intervention → HARD FAIL** (NEW)
 
 ## SCORING RUBRIC
 
@@ -61,6 +63,14 @@ Per prompt, per criterion, score 0-5:
 - 11/11 prompts pass = FULL PARITY ✅
 - 8-10/11 prompts pass = ACCEPTABLE PARITY ⚠️ (with documented reasons)
 - <8/11 prompts pass = NO PARITY ❌ (iterate or escalate)
+
+## RESILIENCE REQUIREMENT (NEW)
+
+Pipeline must be RESILIENT:
+- Per-prompt Docker restart (current approach, stable)
+- Recovery from model timeout/OOM
+- No manual intervention mid-batch
+- Varying prompt complexity handled gracefully
 
 ## AUTOMATION
 

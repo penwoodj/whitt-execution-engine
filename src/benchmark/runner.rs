@@ -1811,7 +1811,30 @@ impl BenchmarkRunner {
             }
         }
 
-        let resolved_prompt = Self::resolve_bookmark_templates(prompt, &self.hook_engine.lock().unwrap().bookmarks);
+        let resolved_prompt = {
+            let bookmarks_map = &self.hook_engine.lock().unwrap().bookmarks;
+            let mut resolved = Self::resolve_bookmark_templates(prompt, bookmarks_map);
+            if let Some(shell_output) = bookmarks_map.get("shell_output") {
+                let shell_stdout = shell_output.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
+                let shell_stderr = shell_output.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
+                let exit_code = shell_output.get("exit_code").and_then(|v| v.as_i64()).unwrap_or(0);
+                let used_template_var = prompt.contains("{{bookmarks.shell_output");
+                let mentions_shell_output = resolved.contains("shell_output") && !used_template_var;
+                if !shell_stdout.is_empty() && mentions_shell_output {
+                    let mut injection = String::new();
+                    injection.push_str("\n\n=== SHELL OUTPUT (auto-injected by engine) ===\n");
+                    injection.push_str(shell_stdout);
+                    if !shell_stderr.is_empty() {
+                        injection.push_str("\n\n=== SHELL STDERR ===\n");
+                        injection.push_str(shell_stderr);
+                    }
+                    injection.push_str(&format!("\n=== EXIT CODE: {} ===\n", exit_code));
+                    resolved.push_str(&injection);
+                    info!("[benchmark] auto-injected shell_output ({} bytes) into step {} prompt (model did not use template var)", shell_stdout.len(), step.step_id);
+                }
+            }
+            resolved
+        };
 
         let system_prompt = if let Some(vars) = variables {
             let model_name = vars.get("step.model_name")

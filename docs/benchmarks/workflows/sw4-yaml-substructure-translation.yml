@@ -279,6 +279,61 @@ agentic_workflow:
             WRONG: "Parse the file content in shell_output"
           - The shell output is OVERWRITTEN by each shell hook in the same step. If you need multiple files, use a single shell command like `cat file1.rs file2.rs` or chain with `;`
           - When the prompt asks for code, ALWAYS specify the target programming language explicitly (e.g., "Output Rust code", "Generate YAML")
+          - FOR FILE MODIFICATIONS (user requirement — actual file writes, not just analysis):
+            Pattern for code-change steps:
+            ```yaml
+            step_<id>_<name>:
+              generative_entity: "${models.qwen35}"
+              prompt: |
+                Modify this Rust file (LANGUAGE: Rust):
+                {{bookmarks.shell_output.stdout}}
+
+                Change required: <specific modification>
+                Output the COMPLETE UPDATED FILE CONTENT. Do not output analysis, output the actual file with changes applied.
+              model_overrides:
+                max_tokens: 16384
+                temperature: 0.1
+              when:
+                before_step_starts:
+                  - shell:
+                      command: "cat"
+                      args: ["src/path/to/file.rs"]
+                      working_dir: "."
+                      fail_on_error: true
+                after_step_succeeds:
+                  - save_to:
+                      - <id>_modified_file
+                      - "./outputs/<id>_modified.rs"
+                  - log:
+                      to_file_path: "./outputs/logs/<step_id>.log"
+                      event_fields: [step_name, duration_ms, total_tokens]
+                      level: info
+
+            step_<id>_<name>_apply:
+              generative_entity: "${models.qwen35}"
+              prompt: |
+                Verify the modified file content is valid Rust. Output "VALID" or "INVALID: <reason>".
+              model_overrides:
+                max_tokens: 100
+                temperature: 0.1
+              when:
+                before_step_starts:
+                  - shell:
+                      command: "sh"
+                      args: ["-c", "cp ./outputs/<id>_modified.rs src/path/to/file.rs && cargo check 2>&1 | head -20"]
+                      working_dir: "."
+                      fail_on_error: false
+                after_step_succeeds:
+                  - save_to:
+                      - <id>_apply_status
+                      - "./outputs/<id>_apply_status.txt"
+            ```
+            Key rules:
+            - Step outputs COMPLETE FILE CONTENT (not analysis)
+            - save_to writes to ./outputs/
+            - FOLLOWUP step uses shell hook to `cp` file to actual src/ location + run `cargo check`
+            - Verification: cargo check output captured via shell_output.stdout
+          - For verification-only steps (no code change), pattern is simpler — just shell hook + analysis prompt
         - USE {{step.X.output}} when content comes from a PRIOR STEP (not a file)
         - USE {{bookmarks.shell_output.stdout}} when content comes from a SHELL HOOK in the SAME step
         - Cover EVERY task from the task-category list (BOTH parents AND leaf subtasks) — process in chunks of 5-7 tasks at a time mentally, then emit all blocks. If input has T1 with subtasks T1.1, T1.2, output blocks for ALL of: step_t1_*, step_t1_1_*, step_t1_2_*
