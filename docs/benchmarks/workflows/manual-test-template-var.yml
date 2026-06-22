@@ -1,0 +1,59 @@
+workflow_id: manual_test_template_var_resolution
+name: "Manual Test - Template Variable Resolution"
+description: "Proves engine resolves {{bookmarks.shell_output.stdout}} correctly when workflow uses right syntax"
+version: "1.0.0"
+schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  qwen35:
+    name: "Qwen3-5-9B-Q4_K_M.gguf"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "./outputs/logs/workflow.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+    step_t1_analyze_file:
+      generative_entity: "${models.qwen35}"
+      prompt: |
+        Analyze this Rust code (LANGUAGE: Rust):
+
+        {{bookmarks.shell_output.stdout}}
+
+        Determine: Does the struct `LlamaHttpClient` derive `Clone`?
+        Output: One line stating CLONABLE or NOT_CLONABLE, then quote the relevant attribute line if found.
+      model_overrides:
+        max_tokens: 200
+        temperature: 0.1
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat"
+              args: ["src/client/http_client.rs"]
+              working_dir: "."
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - t1_clone_verdict
+              - "./outputs/t1_clone_verdict.txt"
+          - log:
+              to_file_path: "./outputs/logs/step_t1_analyze_file.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info

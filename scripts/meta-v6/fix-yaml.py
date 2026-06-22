@@ -596,6 +596,68 @@ def fix_save_to_unwritable_paths(content: str) -> str:
     return '\n'.join(out)
 
 
+def inject_shell_output_template_var(content: str) -> str:
+    lines = content.split('\n')
+    out = []
+    in_step = False
+    in_prompt = False
+    prompt_indent = 0
+    has_shell_hook = False
+    has_template_var = False
+    step_lines = []
+    step_indent = 0
+
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        cur_indent = len(line) - len(stripped)
+
+        if re.match(r'^[ ]+step_[a-z_0-9]+:', line):
+            if in_step and has_shell_hook and not has_template_var:
+                inject_line = ' ' * (prompt_indent + 2) + '{{bookmarks.shell_output.stdout}}'
+                for j, sl in enumerate(step_lines):
+                    if re.match(r'^[ ]+prompt:', sl):
+                        step_lines.insert(j + 1, inject_line)
+                        break
+            out.extend(step_lines)
+            step_lines = []
+            has_shell_hook = False
+            has_template_var = False
+            in_step = True
+            step_indent = cur_indent
+            step_lines.append(line)
+            continue
+
+        if in_step:
+            if stripped.startswith('- shell:') and 'before_step_starts' in '\n'.join(step_lines[-10:]):
+                has_shell_hook = True
+            if '{{bookmarks.shell_output' in line:
+                has_template_var = True
+            if 'prompt: |' in line or 'prompt: |\n' in line:
+                prompt_indent = cur_indent
+            step_lines.append(line)
+            continue
+
+        out.append(line)
+
+    if in_step and has_shell_hook and not has_template_var:
+        inject_line = ' ' * (prompt_indent + 2) + '{{bookmarks.shell_output.stdout}}'
+        for j, sl in enumerate(step_lines):
+            if re.match(r'^[ ]+prompt:', sl):
+                step_lines.insert(j + 1, inject_line)
+                break
+    out.extend(step_lines)
+
+    return '\n'.join(out)
+
+
+def fix_prose_shell_output(content: str) -> str:
+    return re.sub(
+        r'(in|from|provided in|via|the|using)\s+shell_output\b(?!\.stdout|\}\})',
+        r'{{bookmarks.shell_output.stdout}}',
+        content,
+    )
+
+
 def main():
     if len(sys.argv) != 2:
         print("Usage: fix-yaml.py <workflow.yml>", file=sys.stderr)
@@ -609,7 +671,6 @@ def main():
     content = path.read_text()
     original = content
 
-    content = fix_save_to_null_map_pattern(content)
     content = strip_markdown_fences(content)
     content = fix_gwt_unquoted_equals(content)
     content = fix_inline_save_to(content)
@@ -619,6 +680,8 @@ def main():
     content = fix_log_after_save_to_indent(content)
     content = fix_steps_list_to_map(content)
     content = fix_save_to_unwritable_paths(content)
+    content = fix_prose_shell_output(content)
+    content = inject_shell_output_template_var(content)
 
     if content != original:
         backup = path.with_suffix('.yml.bak')
@@ -628,7 +691,6 @@ def main():
     else:
         print(f"No changes needed in {path}")
 
-    # Validate
     import yaml
     try:
         yaml.safe_load(content)
