@@ -551,16 +551,13 @@ def fix_save_to_unwritable_paths(content: str) -> str:
                 m_path = re.match(r'^- (.+)$', stripped)
                 if m_path:
                     raw_path = m_path.group(1).strip()
-                    # Strip quotes if present
                     if (raw_path.startswith('"') and raw_path.endswith('"')) or \
                        (raw_path.startswith("'") and raw_path.endswith("'")):
                         unquoted = raw_path[1:-1]
                     else:
                         unquoted = raw_path
-                    # Rewrite problematic paths
                     new_path = None
                     if unquoted.startswith('~/') or unquoted.startswith('/'):
-                        # Absolute/home path — relocate to ./outputs/
                         basename = unquoted.split('/')[-1]
                         if not basename:
                             basename = 'output.txt'
@@ -571,7 +568,6 @@ def fix_save_to_unwritable_paths(content: str) -> str:
                             basename = 'output.rs'
                         new_path = f'./outputs/{basename}'
                     elif unquoted.startswith('./logs/') or unquoted in ['./logs', './outputs']:
-                        # Log paths shouldn't be save_to targets
                         basename = unquoted.split('/')[-1]
                         new_path = f'./outputs/{basename}.txt'
                     if new_path:
@@ -594,6 +590,65 @@ def fix_save_to_unwritable_paths(content: str) -> str:
         else:
             out.append(line)
     return '\n'.join(out)
+
+
+def fix_unindented_markdown_in_prompt(content: str) -> str:
+    """Re-indent lines after 'prompt: |' that lost their indentation.
+
+    YAML literal blocks require consistent indentation. Model output sometimes
+    has markdown lines starting at column 1 (e.g. '**bold**' or '# heading')
+    which breaks the block scalar.
+    """
+    lines = content.split('\n')
+    out = []
+    in_prompt_block = False
+    block_indent = 0
+    yaml_keys = ('workflow_id', 'name:', 'version:', 'schema_version:', 'providers:',
+                 'models:', 'steps:', 'description:', 'hook_config:', 'load_params:',
+                 'context_size:', 'gpu_layers:', 'threads:', 'parallel:', 'cache_type_')
+    for line in lines:
+        stripped = line.lstrip()
+        if stripped.startswith('prompt: |'):
+            in_prompt_block = True
+            block_indent = len(line) - len(stripped) + 8
+            out.append(line)
+            continue
+        if in_prompt_block:
+            current_indent = len(line) - len(stripped)
+            is_yaml_key = any(stripped.startswith(k) for k in yaml_keys) and current_indent <= 8
+            if stripped == '':
+                out.append(line)
+                continue
+            if is_yaml_key:
+                in_prompt_block = False
+                out.append(line)
+                continue
+            if current_indent < block_indent:
+                out.append(' ' * block_indent + stripped)
+            else:
+                out.append(line)
+        else:
+            out.append(line)
+    return '\n'.join(out)
+
+
+def fix_save_to_extra_keys(content: str) -> str:
+    """Remove line_range/description keys misplaced in save_to items."""
+    content = re.sub(
+        r'(\s+)(line_range|description):\s*[^\n]+\n',
+        '',
+        content,
+    )
+    return content
+
+
+def fix_missing_newline_after_quote(content: str) -> str:
+    """Insert newline between closing quote + next key on same line."""
+    return re.sub(
+        r'("[^"]*")((?:version|workflow_id|name|schema_version|description|models|steps|provider|config|host|port|when|prompt|load_params|context_size|gpu_layers|threads|parallel|cache_type_k|cache_type_v|temperature|max_tokens|top_p|generative_entity|requires|step_id|step_name|route_to|hook|hooks|shell|command|args|log|level|message|to_file_path|event_fields|step_[a-z_0-9]+):)',
+        r'\1\n\2',
+        content,
+    )
 
 
 def inject_shell_output_template_var(content: str) -> str:
@@ -672,6 +727,7 @@ def main():
     original = content
 
     content = strip_markdown_fences(content)
+    content = fix_missing_newline_after_quote(content)
     content = fix_gwt_unquoted_equals(content)
     content = fix_inline_save_to(content)
     content = fix_save_to_map_to_list(content)
@@ -680,6 +736,8 @@ def main():
     content = fix_log_after_save_to_indent(content)
     content = fix_steps_list_to_map(content)
     content = fix_save_to_unwritable_paths(content)
+    content = fix_save_to_extra_keys(content)
+    content = fix_unindented_markdown_in_prompt(content)
     content = fix_prose_shell_output(content)
     content = inject_shell_output_template_var(content)
 
