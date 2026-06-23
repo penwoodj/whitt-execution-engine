@@ -463,23 +463,34 @@ impl BenchmarkRunner {
         };
 
         if let Err(e) = crate::workflow::WorkflowFile::from_yaml(&content) {
-            warn!("[benchmark] workflow YAML validation failed for {}: {}", wf_path, e);
-            return Ok(None);
+            return Err(anyhow::anyhow!(
+                "[benchmark] workflow YAML validation failed for {}: {} — \
+                 engine now requires valid workflow YAML when --workflow is provided \
+                 (cycle-3 hardening: silent fallback removed)",
+                wf_path,
+                e
+            ));
         }
 
         let yaml_value: serde_json::Value = match serde_saphyr::from_str(&content) {
             Ok(v) => v,
             Err(e) => {
-                warn!("[benchmark] failed to parse workflow YAML for config extraction: {}", e);
-                return Ok(None);
+                return Err(anyhow::anyhow!(
+                    "[benchmark] failed to parse workflow YAML for config extraction: {} — \
+                     invalid YAML structure (cycle-3 hardening)",
+                    e
+                ));
             }
         };
 
         let agentic_workflow = match yaml_value.get("agentic_workflow") {
             Some(aw) => aw,
             None => {
-                warn!("[benchmark] no agentic_workflow section in YAML");
-                return Ok(None);
+                return Err(anyhow::anyhow!(
+                    "[benchmark] no agentic_workflow section in YAML {} — \
+                     workflow must have agentic_workflow.steps (cycle-3 hardening)",
+                    wf_path
+                ));
             }
         };
 
@@ -1986,10 +1997,13 @@ impl BenchmarkRunner {
             format!("unix_epoch_{}s", dur.as_secs())
         };
 
-        let wf_ctx = self.load_workflow_config().unwrap_or_else(|e| {
-            warn!("[benchmark] workflow config extraction failed: {}", e);
-            None
-        });
+        let wf_ctx = match self.load_workflow_config() {
+            Ok(Some(ctx)) => Some(ctx),
+            Ok(None) => None,
+            Err(e) => {
+                return Err(e);
+            }
+        };
 
         // Apply load_params from workflow config (restarts Docker with model spec env vars)
         if let Some(ref ctx) = wf_ctx {
