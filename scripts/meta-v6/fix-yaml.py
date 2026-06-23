@@ -525,20 +525,6 @@ def fix_save_to_null_map_pattern(content: str) -> str:
 
 
 def fix_save_to_split_pair(content: str) -> str:
-    r"""Repair generator output where save_to template + real pair got split.
-
-    Pattern emitted by model:
-        - save_to:
-            - step_output_null
-            - null
-        - real_bookmark
-        - ./outputs/real_path.txt
-
-    Becomes:
-        - save_to:
-            - real_bookmark
-            - ./outputs/real_path.txt
-    """
     pattern = re.compile(
         r'([ \t]+)- save_to:\n'
         r'[ \t]+- step_output_null\n'
@@ -550,6 +536,52 @@ def fix_save_to_split_pair(content: str) -> str:
         lambda m: f"{m.group(1)}- save_to:\n{m.group(1)}    - {m.group(2)}\n{m.group(1)}    - {m.group(3)}",
         content,
     )
+
+
+def fix_log_null_with_siblings(content: str) -> str:
+    r"""Convert `- <action>: null` + sibling keys to `- <action>:` with nested keys.
+
+    Handles log, shell, save_to, bookmark, notify, fail actions where model
+    emitted `<action>: null` then sibling keys (command, args, to_file_path,
+    event_fields, etc.) at same indent. Serde rejects: 'expected end of
+    mapping after enum variant value' or 'missing field'.
+
+    Pattern: `- log: null\n  to_file_path: X\n  event_fields: [...]`
+    Fix: `- log:\n      to_file_path: X\n      event_fields: [...]`
+    """
+    lines = content.split('\n')
+    out = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = re.match(r'^([ \t]+)- (log|shell|save_to|bookmark|notify|fail|route_to|skip_step|skip_remaining|append_to): null\s*$', line)
+        if m:
+            base_indent = m.group(1)
+            action = m.group(2)
+            item_indent = base_indent + '  '
+            nested_indent = base_indent + '      '
+            out.append(f"{base_indent}- {action}:")
+            i += 1
+            while i < len(lines):
+                cur = lines[i]
+                if cur.strip() == '':
+                    out.append(cur)
+                    i += 1
+                    continue
+                cur_stripped = cur.lstrip()
+                cur_indent = len(cur) - len(cur_stripped)
+                if cur_indent <= len(base_indent):
+                    break
+                if cur_indent == len(item_indent):
+                    out.append(f"{nested_indent}{cur_stripped}")
+                else:
+                    delta = cur_indent - len(item_indent)
+                    out.append(f"{nested_indent}{(' ' * (delta if delta > 0 else 0))}{cur_stripped}")
+                i += 1
+            continue
+        out.append(line)
+        i += 1
+    return '\n'.join(out)
 
 
 def fix_save_to_unwritable_paths(content: str) -> str:
@@ -775,6 +807,7 @@ def main():
     content = fix_save_to_outside_when(content)
     content = fix_save_to_null_map_pattern(content)
     content = fix_save_to_split_pair(content)
+    content = fix_log_null_with_siblings(content)
     content = fix_log_after_save_to_indent(content)
     content = fix_steps_list_to_map(content)
     content = fix_save_to_unwritable_paths(content)
