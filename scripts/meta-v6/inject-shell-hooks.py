@@ -21,13 +21,49 @@ import yaml
 from pathlib import Path
 
 READ_PATTERNS = [
-    r'(?:Read|Inspect|Open|Examine|Check|Locate|Find|Look at|View)\s+(?:the\s+)?(?:file\s+)?(src/[a-zA-Z0-9_./-]+\.(?:rs|toml|md|yml|yaml|sh|py))',
-    r'(?:in|at|from)\s+(src/[a-zA-Z0-9_./-]+\.(?:rs|toml|md|yml|yaml|sh|py))',
+    r'(?:Read|Inspect|Open|Examine|Check|Locate|Find|Look at|View|Trace)\s+(?:the\s+)?(?:file\s+)?(src/[a-zA-Z0-9_./-]+\.(?:rs|toml|md|yml|yaml|sh|py))',
+    r'(?:in|at|from|of)\s+(src/[a-zA-Z0-9_./-]+\.(?:rs|toml|md|yml|yaml|sh|py))',
 ]
+
+LARGE_FILE_THRESHOLD = 20_000
+LINE_RANGE_PATTERN = re.compile(
+    r'(?:lines?|line(?:s)?\s+numbers?)\s*(?:~|around|approximately)?\s*(\d{2,5})\s*[-\u2013]\s*(\d{2,5})',
+    re.IGNORECASE,
+)
+
+
+def extract_line_range(prompt: str) -> tuple[int, int] | None:
+    for m in LINE_RANGE_PATTERN.finditer(prompt):
+        start, end = int(m.group(1)), int(m.group(2))
+        if 1 <= start < end <= 100000 and (end - start) <= 500:
+            padding = max(20, (end - start) // 4)
+            return max(1, start - padding), end + padding
+    return None
+
+
+def build_shell_spec(file_path: str, prompt: str) -> dict:
+    """For large files, use sed line-range; otherwise cat entire file."""
+    try:
+        size = Path(file_path).stat().st_size
+    except OSError:
+        size = 0
+
+    if size > LARGE_FILE_THRESHOLD:
+        line_range = extract_line_range(prompt)
+        if line_range:
+            start, end = line_range
+            return {
+                'command': 'bash',
+                'args': ['-c', f"sed -n '{start},{end}p' {file_path}"],
+            }
+        return {
+            'command': 'bash',
+            'args': ['-c', f"head -n 250 {file_path}"],
+        }
+    return {'command': 'cat', 'args': [file_path]}
 
 
 def extract_referenced_files(prompt: str) -> list[str]:
-    """Find src/ file references in prompt text."""
     files = set()
     for pattern in READ_PATTERNS:
         for match in re.finditer(pattern, prompt, re.IGNORECASE):
@@ -92,11 +128,10 @@ def inject_shell_hooks(workflow_path: str) -> bool:
         if 'before_step_starts' not in step['when']:
             step['when']['before_step_starts'] = []
 
+        shell_spec = build_shell_spec(first_file, prompt)
+
         step['when']['before_step_starts'].append({
-            'shell': {
-                'command': 'cat',
-                'args': [first_file],
-            }
+            'shell': shell_spec,
         })
 
         # Also: rewrite prompt to use template var

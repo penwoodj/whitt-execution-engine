@@ -33,6 +33,7 @@ if [ -z "$SW5_FILE" ]; then
   docker restart whitt-llama-server > /dev/null 2>&1
   sleep 8
   cd "$REPO"
+  RUN_START_TS=$(date +%s)
   timeout 3600 ./target/release/whitt benchmark \
     --workflow ./docs/benchmarks/workflows/meta-workflow-v6.yml \
     --output-dir "${OUT}/meta-out" \
@@ -44,11 +45,11 @@ if [ -z "$SW5_FILE" ]; then
     exit 2
   }
 
-  # Locate latest SW5 03-assembled.yml (raw model output, pre-finalize)
-  SW5_FILE=$(find "${REPO}/docs/benchmarks/outputs/meta-workflow" -maxdepth 1 -type d -name "meta-meta-v6-*-sw5-*" -newer "${OUT}/meta.log" 2>/dev/null | sort | tail -1 | xargs -I{} find "{}" -name "03-assembled.yml" 2>/dev/null | head -1)
+  # Locate SW5 03-assembled.yml from latest SW5 dir (by timestamp in dirname, not mtime which is unreliable)
+  SW5_FILE=$(find "${REPO}/docs/benchmarks/outputs/meta-workflow" -maxdepth 1 -type d -name "meta-meta-v6-*-sw5-*" 2>/dev/null | sort | tail -1 | xargs -I{} find "{}" -name "03-assembled.yml" 2>/dev/null | head -1)
   [ -z "$SW5_FILE" ] && {
     # Fallback to workflow.yml
-    SW5_FILE=$(find "${REPO}/docs/benchmarks/outputs/meta-workflow" -maxdepth 1 -type d -name "meta-meta-v6-*-sw5-*" -newer "${OUT}/meta.log" 2>/dev/null | sort | tail -1 | xargs -I{} find "{}" -name "workflow.yml" 2>/dev/null | head -1)
+    SW5_FILE=$(find "${REPO}/docs/benchmarks/outputs/meta-workflow" -maxdepth 1 -type d -name "meta-meta-v6-*-sw5-*" 2>/dev/null | sort | tail -1 | xargs -I{} find "{}" -name "workflow.yml" 2>/dev/null | head -1)
   }
   [ -z "$SW5_FILE" ] && { echo "[P${N}] FAIL: no SW5 output"; exit 3; }
 
