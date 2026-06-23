@@ -482,19 +482,31 @@ def fix_save_to_null_map_pattern(content: str) -> str:
             # Check if pattern matches: contains `- null` or `: null` or `: true`
             # indicating malformed save_to from prompt-12 generator output
             is_broken = (
-                len(args) >= 3 and
+                len(args) >= 2 and
                 any(a[2] == '- null' or ': null' in a[2] or ': true' in a[2] for a in args)
             )
             if is_broken:
+                # 4-arg pattern: [step_output_null, null, real_bookmark, real_path]
+                # → keep only the real pair (args[2], args[3])
+                if (
+                    len(args) == 4 and
+                    args[0][2].startswith('- step_output') and
+                    args[1][2] == '- null' and
+                    not args[2][2].startswith('- null') and
+                    not args[3][2].startswith('- null')
+                ):
+                    inner_indent = ' ' * (save_to_indent + 4)
+                    out.append(f"{inner_indent}{args[2][2]}")
+                    out.append(f"{inner_indent}{args[3][2]}")
+                    continue
+                # Generic: keep first bookmark + extract first path
                 bookmark = args[0][2].lstrip('- ').strip()
-                # Find first path string (quoted) — last resort: derive from any string arg
                 path = None
                 for a_line, _, a_stripped in args[1:]:
                     m_path = re.match(r'^("[^"]+"|\'[^\']+\')', a_stripped)
                     if m_path:
                         path = m_path.group(1)
                         break
-                    # Try extracting path from `path: true` pattern
                     m_kv = re.match(r'^("[^"]+"|\'[^\']+\')\s*:\s*true\s*$', a_stripped)
                     if m_kv:
                         path = m_kv.group(1)
@@ -510,6 +522,34 @@ def fix_save_to_null_map_pattern(content: str) -> str:
         out.append(line)
         i += 1
     return '\n'.join(out)
+
+
+def fix_save_to_split_pair(content: str) -> str:
+    r"""Repair generator output where save_to template + real pair got split.
+
+    Pattern emitted by model:
+        - save_to:
+            - step_output_null
+            - null
+        - real_bookmark
+        - ./outputs/real_path.txt
+
+    Becomes:
+        - save_to:
+            - real_bookmark
+            - ./outputs/real_path.txt
+    """
+    pattern = re.compile(
+        r'([ \t]+)- save_to:\n'
+        r'[ \t]+- step_output_null\n'
+        r'[ \t]+- null\n'
+        r'\1- ([A-Za-z_][A-Za-z0-9_]*)\n'
+        r'\1- (\.[^\n]+)',
+    )
+    return pattern.sub(
+        lambda m: f"{m.group(1)}- save_to:\n{m.group(1)}    - {m.group(2)}\n{m.group(1)}    - {m.group(3)}",
+        content,
+    )
 
 
 def fix_save_to_unwritable_paths(content: str) -> str:
@@ -733,6 +773,8 @@ def main():
     content = fix_save_to_map_to_list(content)
     content = fix_save_to_string_form(content)
     content = fix_save_to_outside_when(content)
+    content = fix_save_to_null_map_pattern(content)
+    content = fix_save_to_split_pair(content)
     content = fix_log_after_save_to_indent(content)
     content = fix_steps_list_to_map(content)
     content = fix_save_to_unwritable_paths(content)
