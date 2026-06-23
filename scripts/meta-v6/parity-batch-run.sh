@@ -64,9 +64,9 @@ run_prompt() {
     return
   fi
 
-  # 3. Find SW5 output (search any timestamp)
+  # 3. Find SW5 output (search all possible locations)
   local sw5_yml
-  sw5_yml=$(find "${meta_out}" -path "*sw5*" -name "workflow.yml" -o -path "*sw5*" -name "03-assembled.yml" 2>/dev/null | head -1)
+  sw5_yml=$(find "${REPO}/docs/benchmarks/outputs/meta-workflow" "${meta_out}" -path "*sw5*" \( -name "workflow.yml" -o -name "03-assembled.yml" \) 2>/dev/null | head -1)
   if [ -z "$sw5_yml" ]; then
     echo "[P${n}] FAIL: no SW5 workflow output"
     SUMMARY+=("P${n}|SW5_MISSING|no workflow.yml|-|-|-")

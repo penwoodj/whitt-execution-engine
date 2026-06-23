@@ -52,9 +52,11 @@ if [ -z "$SW5_FILE" ]; then
   }
   rm -f "$ORCHESTRATOR_TMP"
 
-  # Locate latest SW5 output by timestamp sort (avoid find -newer bug)
-  SW5_FILE=$(find "${REPO}/docs/benchmarks/outputs/meta-workflow" -maxdepth 2 -type d -name "meta-meta-v6-*-sw5-*" 2>/dev/null | sort | tail -1 | xargs -I{} find "{}" -maxdepth 2 -name "03-assembled.yml" 2>/dev/null | head -1)
-  [ -z "$SW5_FILE" ] && SW5_FILE=$(find "${REPO}/docs/benchmarks/outputs/meta-workflow" -maxdepth 2 -type d -name "meta-meta-v6-*-sw5-*" 2>/dev/null | sort | tail -1 | xargs -I{} find "{}" -maxdepth 2 -name "workflow.yml" 2>/dev/null | head -1)
+  # Locate latest SW5 output by timestamp sort (avoid find -newer bug + sort bug)
+  # Pattern requires digits after meta-v6- to exclude old "iter5", "sw2-fix", "q8" named dirs
+  # that sort AFTER digit-only timestamps due to ASCII order (letters > digits)
+  SW5_FILE=$(find "${REPO}/docs/benchmarks/outputs/meta-workflow" -maxdepth 1 -type d -name "meta-meta-v6-20260[0-9][0-9][0-9]-*-sw5-*" 2>/dev/null | sort | tail -1 | xargs -I{} find "{}" -maxdepth 2 -name "03-assembled.yml" 2>/dev/null | head -1)
+  [ -z "$SW5_FILE" ] && SW5_FILE=$(find "${REPO}/docs/benchmarks/outputs/meta-workflow" -maxdepth 1 -type d -name "meta-meta-v6-20260[0-9][0-9][0-9]-*-sw5-*" 2>/dev/null | sort | tail -1 | xargs -I{} find "{}" -maxdepth 2 -name "workflow.yml" 2>/dev/null | head -1)
   [ -z "$SW5_FILE" ] && { echo "[P${N}] FAIL: no SW5 output"; exit 3; }
 
   cp "$SW5_FILE" "${OUT}/workflow-raw.yml"
@@ -75,11 +77,11 @@ print('stripped')
 
 # Phase 3: Canonicalize indent (optional, may fail gracefully)
 echo "[P${N}] Phase 3: canonicalize (skip if crashes)"
-python3 "${REPO}/scripts/meta-v6/canonicalize-workflow.py" "${OUT}/workflow-stripped.yml" > "${OUT}/canonicalize.log" 2>&1 || {
-  echo "[P${N}] canonicalize crashed, using stripped file as-is"
+python3 "${REPO}/scripts/meta-v6/canonicalize-workflow.py" "${OUT}/workflow-stripped.yml" > "${OUT}/canonicalize.log" 2>&1
+if [ ! -f "${OUT}/workflow-canonical.yml" ]; then
+  echo "[P${N}] canonicalize produced no output, using stripped file as-is"
   cp "${OUT}/workflow-stripped.yml" "${OUT}/workflow-canonical.yml"
-}
-[ ! -f "${OUT}/workflow-stripped.yml" ] && cp "${OUT}/workflow-stripped.yml" "${OUT}/workflow-canonical.yml"
+fi
 
 # Phase 4: Inject shell hooks
 echo "[P${N}] Phase 4: inject shell hooks"
@@ -88,8 +90,13 @@ python3 "${REPO}/scripts/meta-v6/inject-shell-hooks.py" "${OUT}/workflow-fixed.y
 
 # Validate
 python3 -c "import yaml; yaml.safe_load(open('${OUT}/workflow-fixed.yml'))" 2>&1 || {
-  echo "[P${N}] FAIL: workflow-fixed.yml does not parse"
-  exit 4
+  echo "[P${N}] FAIL: workflow-fixed.yml does not parse, retrying with stripped file"
+  cp "${OUT}/workflow-stripped.yml" "${OUT}/workflow-fixed.yml"
+  python3 "${REPO}/scripts/meta-v6/inject-shell-hooks.py" "${OUT}/workflow-fixed.yml" > "${OUT}/inject.log" 2>&1 || true
+  python3 -c "import yaml; yaml.safe_load(open('${OUT}/workflow-fixed.yml'))" 2>&1 || {
+    echo "[P${N}] FAIL: workflow-fixed.yml STILL does not parse"
+    exit 4
+  }
 }
 echo "[P${N}] workflow-valid: YES"
 

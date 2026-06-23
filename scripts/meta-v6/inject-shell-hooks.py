@@ -105,7 +105,6 @@ def inject_shell_hooks(workflow_path: str) -> bool:
         prompt = step.get('prompt', '')
         if not prompt:
             continue
-
         files = extract_referenced_files(prompt)
         if not files:
             continue
