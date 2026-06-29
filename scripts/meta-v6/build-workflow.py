@@ -490,25 +490,21 @@ def main() -> int:
         stripped = block.strip()
         if stripped.startswith('step_00_bootstrap') or stripped.startswith('step_final_synthesize'):
             continue
-        if 'save_to' in block:
+        if re.search(r'^\s*-\s*save_to:', block, re.MULTILINE):
             continue
         step_id_match = re.match(r'^(\S+):', stripped)
         if not step_id_match:
             continue
         step_id = step_id_match.group(1)
         save_to_injection = (
-            f"      after_step_succeeds:\n"
-            f"        - save_to:\n"
-            f"            - ${step_id}_output\n"
-            f"            - ./outputs/{step_id}.txt\n"
+            f"  when:\n"
+            f"    after_step_succeeds:\n"
+            f"      - save_to:\n"
+            f"          - ${step_id}_output\n"
+            f"          - ./outputs/{step_id}.txt"
         )
         block_lines = block.split('\n')
-        insert_idx = len(block_lines)
-        for j, line in enumerate(block_lines[1:], 1):
-            if line.strip() and not line.startswith(' ' * 4):
-                insert_idx = j
-                break
-        block_lines.insert(insert_idx, save_to_injection.rstrip())
+        block_lines.insert(1, save_to_injection)
         blocks_clean[i] = '\n'.join(block_lines)
 
     # Ensure all execution steps have max_tokens >= 8192.
@@ -531,6 +527,10 @@ def main() -> int:
                 'model_overrides:\n        max_tokens: 8192',
                 1
             )
+        else:
+            block_lines = block.split('\n')
+            block_lines.insert(1, '  model_overrides:\n    max_tokens: 8192\n    temperature: 0.3')
+            blocks_clean[i] = '\n'.join(block_lines)
 
     # Rewrite `cat ./outputs/` to `cat $WHITT_OUTPUT_DIR/outputs/` in shell commands.
     # Engine sets WHITT_OUTPUT_DIR env var to output_dir. save_to resolves relative
