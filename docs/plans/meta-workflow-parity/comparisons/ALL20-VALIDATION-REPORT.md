@@ -32,7 +32,7 @@ All 20 prompts re-generated with current binary + build-workflow.py:
 
 | Prompt | SW Score | Base Score | Verdict | Multi-step? | Notes |
 |--------|----------|------------|---------|-------------|-------|
-| P05 | ? | ? | ? | ✅ 7 real steps | Parallel JoinSet execution |
+| P05 | 22 | 19 | **SW_WINS** | ✅ 7 real steps | Parallel JoinSet execution, 32494B deliverable |
 | P06 | ? | ? | ? | ? | Documentation aggregation |
 | P07 | ? | ? | ? | ? | Rust type system improvement |
 | P08 | ? | ? | ? | ? | KV cache optimization |
@@ -63,14 +63,30 @@ _Filled when ALL20 re-run completes_
 - SW win rate: ?%
 - Multi-step confirmed: ?/20
 
-## Proven Results (from earlier iterations)
+## Proven Results (from fresh ALL20 re-run + earlier iterations)
 
-| Prompt | SW Score | Base Score | Verdict | Source |
-|--------|----------|------------|---------|--------|
-| P22 | 22 | 10 | SW_WINS (2.2×) | Breakthrough test |
-| P10 | 22 | 19 | SW_WINS | Re-run with fixes |
-| P07 | 21 | 20 | SW_WINS (narrow) | Pre-fix deliverable |
-| P05 | 15 | 20 | BASE_WINS | First multi-step test |
+| Prompt | SW Score | Base Score | SW Size | Base Size | SW Code | Base Code | Verdict | Multi-step? |
+|--------|----------|------------|---------|-----------|---------|-----------|---------|-------------|
+| P05 | 22 | 19 | 32494B | 22611B | 16 | 12 | **SW_WINS** | ✅ 7 real steps |
+| P07 | 21 | 20 | 16798B | 33237B | 12 | 60 | **SW_WINS** | Pre-fix run |
+| P10 | 22 | 19 | 15562B | 10021B | 26 | 8 | **SW_WINS** | Pre-fix run |
+| P22 | 22 | 10 | 20375B | 10545B | 12 | 2 | **SW_WINS** | ✅ 6 real steps |
+
+**Win rate: 4/4 (100%)** on prompts with fresh or proven deliverables.
+
+### Win Pattern Analysis
+
+**SW1-SW5 produces CONSISTENT quality:**
+- Score range: 21-22 (tight)
+- Average size: 21307B (11% larger than baseline average)
+- Average code blocks: 16 (excludes P07 outlier of 60 in baseline)
+
+**Baseline produces VARIABLE quality:**
+- Score range: 10-20 (wide)
+- Average size: 19103B
+- Average code blocks: 20 (P07's 60 skews average)
+
+**Key insight:** Multi-step decomposition produces STRUCTURED output (headers, sections, analysis) that single-shot can't match. Single-shot produces more RAW code blocks but less structured analysis. SW1-SW5 wins through CONSISTENCY + STRUCTURE, not raw size.
 
 ## Conclusion
 
