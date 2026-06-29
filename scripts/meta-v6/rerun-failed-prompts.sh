@@ -25,8 +25,8 @@ echo "[rerun] Restarting Docker..."
 docker restart whitt-llama-server >/dev/null 2>&1 || true
 sleep 10
 
-# Re-run each failed prompt
-for p_num in 16 17 18 19; do
+# Re-run each failed prompt (P10: old binary pre-topo-sort, P16-P19: old binary pre-save_to fix)
+for p_num in 10 16 17 18 19; do
   PROMPT=$(ls $PROMPT_DIR/prompt-${p_num}-*.md 2>/dev/null | head -1)
   if [ -z "$PROMPT" ]; then
     echo "[rerun] P${p_num}: SKIP (no prompt file)"

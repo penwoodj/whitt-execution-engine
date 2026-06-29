@@ -518,3 +518,50 @@ Remaining untested: P10, P11, P15. P05 cancelled (too slow with 240KB file injec
 - 1.5: Logging enhancement + analysis script
 
 ### P10 v2 pipeline running (will validate SW4 filename fix)
+
+---
+
+## Iteration 40+ — Ralph Loop Reliability Session (2026-06-29)
+
+### Engine Reliability Fixes Deployed
+
+| Fix | Commit | Gap Addressed | Impact |
+|-----|--------|---------------|--------|
+| fail_on_error: false | `d0d4b89` | Gap 1 (error feedback) | Steps run even when shell hooks fail — no more cascade-skip |
+| Refusal detection | `0e7b8fd` | Gap 6 (quality gate) | quality_score=0.0 on refusal patterns, enables GWT routing |
+| Synthesis path fix | `8d5660c` | — | Deliverable writes to correct path automatically |
+| Docker health check | `7457ac4` | Gap 3 (Docker recovery) | 30s pause + diagnostic on 500/connection errors |
+| Smart retry | `07d8bed` | Gap 2 (blind retry) | Final retry uses truncated prompt + higher temperature |
+
+### Prompt Validation Status (2026-06-29 03:30 CDT)
+
+| Prompt | Score | Status |
+|--------|-------|--------|
+| P05 | 50/50 | ✅ PASS |
+| P06 | 50/50 | ✅ PASS (.html deliverable) |
+| P07 | 50/50 | ✅ PASS |
+| P08 | 50/50 | ✅ PASS |
+| P09 | 50/50 | ✅ PASS |
+| P10 | — | ❌ OLD RUN (needs re-run with new binary) |
+| P11 | 50/50 | ✅ PASS |
+| P12 | 50/50 | ✅ PASS |
+| P13 | 45/50 | ✅ PASS |
+| P14 | 45/50 | ✅ PASS |
+| P15 | 45/50 | ✅ PASS |
+| P16-P19 | — | ❌ FAILED (old binary, re-run queued) |
+| P20 | 50/50 | ✅ PASS (first new prompt, perfect score) |
+| P21 | — | 🔄 EXECUTING (step 11 of 17) |
+| P22-P24 | — | ⏳ QUEUED |
+
+**Totals: 10/20 PASS, 1 executing, 5 need re-run, 3 queued**
+
+### Remaining Reliability Gaps (not yet implemented)
+
+| Gap | Effort | Description |
+|-----|--------|-------------|
+| Gap 4 | HIGH | Context window management (compression/pruning) |
+| Gap 5 | HIGH | Streaming error detection (during_step_streaming not wired) |
+| Gap 7 | HIGH | Checkpoint/resume after crash |
+| Gap 9 | VERY HIGH | Tool feedback loop (model can't call tools during inference) |
+| Gap 11 | HIGH | Sub-workflow execution (parsed but not invoked) |
+| Gap 12 | HIGH | Loop execution (parsed but not iterated) |
