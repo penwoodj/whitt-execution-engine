@@ -13,6 +13,7 @@ Usage:
 """
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -109,6 +110,22 @@ def rewrite_sw4_paths(block: str, meta_run_id: str) -> str:
     """
     pattern = re.compile(r'meta-' + re.escape(meta_run_id) + r'-sw\d+-[\d-]+')
     return pattern.sub(meta_run_id, block)
+
+
+def cap_large_cat(block: str) -> str:
+    MAX_BYTES = 50000
+    cat_pattern = re.compile(r'cat\s+(\.{0,2}/?[^\s|&;]+)')
+    def replacer(m):
+        filepath = m.group(1).strip().strip("'\"")
+        try:
+            if os.path.exists(filepath):
+                size = os.path.getsize(filepath)
+                if size > MAX_BYTES:
+                    return f'cat {m.group(1)} | head -c {MAX_BYTES}'
+        except OSError:
+            pass
+        return m.group(0)
+    return cat_pattern.sub(replacer, block)
 
 
 def strip_save_to_templates(block: str) -> str:
@@ -347,6 +364,10 @@ def main() -> int:
 
     # Dedup save_to paths: SW4 sometimes shares paths across steps, causing data loss.
     blocks_clean = dedup_save_to_paths(blocks_clean)
+
+    # Cap large file cat commands: if cat references a file >50KB, wrap with head -c 50000.
+    # Prevents context overflow when SW4 LLM doesn't follow file-slicing prompt rule.
+    blocks_clean = [cap_large_cat(b) for b in blocks_clean]
 
     # Derive depends_on from cat targets: if step_B cats ./outputs/<step_A>.txt,
     # step_B depends_on step_A. Without this, runner executes in hash-map order
