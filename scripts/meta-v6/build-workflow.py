@@ -435,6 +435,27 @@ def main() -> int:
             j += 1
         blocks_clean[i] = '\n'.join(new_lines)
 
+    # Inject fail_on_error: false into all generated step shell hooks.
+    # WITHOUT this: shell hook fails (cat missing file, sed error) → step skipped → cascade.
+    # WITH this: shell hook fails → step STILL RUNS → model gets empty context but tries.
+    # Bootstrap and synthesis steps keep fail_on_error: true (set in their templates).
+    for i, block in enumerate(blocks_clean):
+        if 'shell:' not in block:
+            continue
+        stripped = block.strip()
+        if stripped.startswith('step_00_bootstrap') or stripped.startswith('step_final_synthesize'):
+            continue
+        if 'fail_on_error' in block:
+            continue
+        lines = block.split('\n')
+        new_lines = []
+        for line in lines:
+            new_lines.append(line)
+            if line.strip().startswith('working_dir:'):
+                indent = len(line) - len(line.lstrip())
+                new_lines.append(' ' * indent + 'fail_on_error: false')
+        blocks_clean[i] = '\n'.join(new_lines)
+
     # Rewrite `cat ./outputs/` to `cat $WHITT_OUTPUT_DIR/outputs/` in shell commands.
     # Engine sets WHITT_OUTPUT_DIR env var to output_dir. save_to resolves relative
     # paths against output_dir too. This keeps cat and save_to consistent while
