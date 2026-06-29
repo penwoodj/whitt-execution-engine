@@ -114,7 +114,7 @@ def rewrite_sw4_paths(block: str, meta_run_id: str) -> str:
 
 def cap_large_cat(block: str) -> str:
     MAX_BYTES = 50000
-    cat_pattern = re.compile(r'cat\s+(\.{0,2}/?[^\s|&;]+)')
+    cat_pattern = re.compile(r'cat\s+(\.{0,2}/?[^\s|&;"\']+)')
     def replacer(m):
         filepath = m.group(1).strip().strip("'\"")
         try:
