@@ -25,6 +25,10 @@ if [ -z "$DELIVERABLE_PATH" ]; then
   exit 1
 fi
 
+# Recreate logs/ (Docker creates it as root, causing permission denied)
+rm -rf "$REPO/logs" 2>/dev/null || true
+mkdir -p "$REPO/logs" 2>/dev/null || true
+
 META_DIR="${REPO}/docs/benchmarks/outputs/meta-workflow/${META_RUN_ID}"
 mkdir -p "${META_DIR}"/{input,meta,logs,deliverables}
 cp "${PROMPT_FILE}" "${META_DIR}/input/prompt.txt"
