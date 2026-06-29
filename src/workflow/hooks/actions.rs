@@ -255,15 +255,17 @@ fn execute_save_to(
                 engine.store_bookmark(var_key.to_string(), json_value);
             } else {
                 let resolved_path = resolve_context_templates(var_name, context, engine);
-                if let Err(e) = save_to_file(&resolved_path, &output) {
-                    eprintln!("Failed to save to {}: {}", resolved_path, e);
+                let final_path = resolve_save_path(&resolved_path, engine);
+                if let Err(e) = save_to_file(&final_path, &output) {
+                    eprintln!("Failed to save to {}: {}", final_path, e);
                 }
             }
         }
         SaveToAction::FilePath(path) => {
             let resolved_path = resolve_context_templates(path, context, engine);
-            if let Err(e) = save_to_file(&resolved_path, &output) {
-                eprintln!("Failed to save to {}: {}", resolved_path, e);
+            let final_path = resolve_save_path(&resolved_path, engine);
+            if let Err(e) = save_to_file(&final_path, &output) {
+                eprintln!("Failed to save to {}: {}", final_path, e);
             }
         }
         SaveToAction::Both(targets) => {
@@ -272,8 +274,9 @@ fn execute_save_to(
                     engine.store_bookmark(var_name.to_string(), json_value.clone());
                 } else {
                     let resolved_path = resolve_context_templates(target, context, engine);
-                    if let Err(e) = save_to_file(&resolved_path, &output) {
-                        eprintln!("Failed to save to {}: {}", resolved_path, e);
+                    let final_path = resolve_save_path(&resolved_path, engine);
+                    if let Err(e) = save_to_file(&final_path, &output) {
+                        eprintln!("Failed to save to {}: {}", final_path, e);
                     }
                 }
             }
@@ -292,6 +295,22 @@ fn save_to_file(path: &str, content: &str) -> std::io::Result<()> {
 
     fs::write(path, content)?;
     Ok(())
+}
+
+/// Resolve a relative save_to path against engine.output_dir.
+/// Only redirects SHORT relative paths (./outputs/...) used by generated workflows.
+/// Long paths (./docs/...) used by SW1-SW4 YAMLs stay relative to CWD.
+fn resolve_save_path(path: &str, engine: &HookEngine) -> String {
+    let p = Path::new(path);
+    if p.is_absolute() {
+        return path.to_string();
+    }
+    if path.starts_with("./outputs/") || path.starts_with("outputs/") {
+        if let Some(ref base) = engine.output_dir {
+            return base.join(path).to_string_lossy().to_string();
+        }
+    }
+    path.to_string()
 }
 
 /// Execute route to action.
@@ -498,6 +517,9 @@ fn execute_shell(
     };
     if let Some(ref dir) = action.working_dir {
         cmd.current_dir(dir);
+    }
+    if let Some(ref output_dir) = engine.output_dir {
+        cmd.env("WHITT_OUTPUT_DIR", output_dir);
     }
     if let Some(ref env_vars) = action.env {
         for (k, v) in env_vars {

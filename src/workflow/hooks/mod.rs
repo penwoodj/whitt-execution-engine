@@ -109,6 +109,8 @@ pub struct HookEngine {
     pub bookmarks: HashMap<String, serde_json::Value>,
     /// Channel for sub-workflow notifications.
     pub notify_tx: Option<tokio::sync::mpsc::Sender<NotifyMessage>>,
+    /// Output directory for resolving relative save_to paths (user directive: keep repo root clean).
+    pub output_dir: Option<std::path::PathBuf>,
 }
 
 impl HookEngine {
@@ -117,6 +119,7 @@ impl HookEngine {
         HookEngine {
             bookmarks: HashMap::new(),
             notify_tx: None,
+            output_dir: None,
         }
     }
 
@@ -125,7 +128,14 @@ impl HookEngine {
         HookEngine {
             bookmarks: HashMap::new(),
             notify_tx: Some(tx),
+            output_dir: None,
         }
+    }
+
+    /// Set the output directory for relative path resolution in save_to actions.
+    pub fn with_output_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
+        self.output_dir = Some(dir.into());
+        self
     }
 
     /// Get a bookmark value by name.

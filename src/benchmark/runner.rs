@@ -2041,6 +2041,12 @@ impl BenchmarkRunner {
 
         self.ensure_output_dirs()
             .context("Failed to ensure output directories")?;
+
+        if let Some(ref output_dir) = self.config.output_dir {
+            self.hook_engine.lock().unwrap().output_dir = Some(std::path::PathBuf::from(output_dir));
+            info!("[benchmark] hook engine output_dir set to {}", output_dir);
+        }
+
         if let Err(e) = self.copy_workflow_yaml() {
             warn!("[benchmark] failed to archive workflow YAML to output dir: {}", e);
         }

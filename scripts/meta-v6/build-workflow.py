@@ -435,6 +435,15 @@ def main() -> int:
             j += 1
         blocks_clean[i] = '\n'.join(new_lines)
 
+    # Rewrite `cat ./outputs/` to `cat $WHITT_OUTPUT_DIR/outputs/` in shell commands.
+    # Engine sets WHITT_OUTPUT_DIR env var to output_dir. save_to resolves relative
+    # paths against output_dir too. This keeps cat and save_to consistent while
+    # working_dir stays at repo root for source code access.
+    for i, block in enumerate(blocks_clean):
+        if 'cat ./outputs/' not in block:
+            continue
+        blocks_clean[i] = block.replace('cat ./outputs/', 'cat $WHITT_OUTPUT_DIR/outputs/')
+
     indented_blocks = [normalize_indent(b) for b in blocks_clean]
     body = '\n\n'.join(indented_blocks)
 

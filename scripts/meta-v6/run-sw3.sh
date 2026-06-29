@@ -9,6 +9,7 @@ SW3_RUN_ID="meta-${META_RUN_ID}-sw3-$(date +%Y%m%d-%H%M%S)"
 SW3_DIR="${REPO}/docs/benchmarks/outputs/meta-workflow/${SW3_RUN_ID}"
 mkdir -p "${SW3_DIR}"/{sw3,logs,input}
 cp "${REPO}/docs/benchmarks/outputs/meta-workflow/${META_RUN_ID}/input/outputs.md" "${SW3_DIR}/input/outputs.md"
+cp "${REPO}/docs/benchmarks/outputs/meta-workflow/${META_RUN_ID}/input/tasks.md" "${SW3_DIR}/input/tasks.md"
 sed "s/__RUN_ID__/${SW3_RUN_ID}/g" "${REPO}/docs/benchmarks/workflows/sw3-agentic-categorization.yml" > "${SW3_DIR}/sw3-runtime.yml"
 cd "${REPO}"
 ./target/release/whitt benchmark --workflow "${SW3_DIR}/sw3-runtime.yml" --output-dir "${SW3_DIR}" --models-dir "${REPO}/models" --filter-name "Qwen3-5-9B" --load-timeout 1800 > "${SW3_DIR}/benchmark.log" 2>&1
