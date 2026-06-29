@@ -3327,8 +3327,26 @@ impl BenchmarkRunner {
                     }
                     Err(e) => {
                         last_error = Some(e.to_string());
+                        let err_str = e.to_string();
                         warn!("[benchmark] inference attempt {}/{} failed for {}: {}",
                             attempt + 1, MAX_RETRIES, model_id, e);
+
+                        if err_str.contains("500") || err_str.contains("Could not establish") || err_str.contains("connection refused") {
+                            warn!("[benchmark] Docker error detected, checking health...");
+                            if let Ok(health_client) = LlamaHttpClient::new(&self.config.server_url) {
+                                match health_client.health().await {
+                                    Ok(h) => {
+                                        info!("[benchmark] Docker health: status={}, idle={}, processing={}",
+                                            h.status, h.slots_idle, h.slots_processing);
+                                    }
+                                    Err(he) => {
+                                        warn!("[benchmark] Docker health FAILED: {}. Waiting 30s...", he);
+                                        sleep(Duration::from_secs(30)).await;
+                                    }
+                                }
+                            }
+                        }
+
                         if attempt + 1 < MAX_RETRIES {
                             sleep(Duration::from_secs(2u64.pow(attempt))).await;
                         }
