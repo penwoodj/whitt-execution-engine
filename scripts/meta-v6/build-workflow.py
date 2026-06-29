@@ -475,19 +475,20 @@ def main() -> int:
         if stripped.startswith('step_00_bootstrap') or stripped.startswith('step_final_synthesize'):
             continue
         lines = block.split('\n')
+        block_has_foe = 'fail_on_error' in block
         new_lines = []
-        has_fail_on_error = False
         for line in lines:
-            if line.strip().startswith('fail_on_error:'):
-                indent = len(line) - len(line.lstrip())
-                new_lines.append(' ' * indent + 'fail_on_error: false')
-                has_fail_on_error = True
-            else:
-                new_lines.append(line)
-                if not has_fail_on_error and line.strip().startswith('working_dir:'):
+            if block_has_foe:
+                if line.strip().startswith('fail_on_error:'):
                     indent = len(line) - len(line.lstrip())
                     new_lines.append(' ' * indent + 'fail_on_error: false')
-                    has_fail_on_error = True
+                else:
+                    new_lines.append(line)
+            else:
+                new_lines.append(line)
+                if line.strip().startswith('working_dir:'):
+                    indent = len(line) - len(line.lstrip())
+                    new_lines.append(' ' * indent + 'fail_on_error: false')
         blocks_clean[i] = '\n'.join(new_lines)
 
     # CRITICAL: Ensure every non-bootstrap, non-synthesis step has a save_to hook.
