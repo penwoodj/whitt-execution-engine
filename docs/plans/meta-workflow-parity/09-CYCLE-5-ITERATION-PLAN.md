@@ -66,8 +66,10 @@ Fix SW4 source file map, validate 20 complex prompts agentically surpass opencod
 20 prompts × ~60 min each = ~20 hours of pipeline time. Plus 20 × 5 min baselines = ~2 hours. Total: ~22 hours of live system testing. This MUST be done sequentially due to single-GPU constraint.
 
 ## Exit Criteria
-- [ ] P15 PASS (≥45/50)
-- [ ] All 11 original prompts PASS (≥45/50)
-- [ ] 9 new complex prompts created + validated
-- [ ] 20/20 prompts: SW1-SW5 ≥ opencode baseline
-- [ ] No refusals, no meta-commentary, no MISSING files
+- [x] P15 PASS (≥45/50) — **50/50 PERFECT** (2026-06-29)
+- [x] All 11 original prompts PASS (≥45/50) — **11/11 PASS**
+- [x] 9 new complex prompts created (P16-P24) — **DONE** (2026-06-29)
+- [x] Baselines generated for all 9 new prompts — **DONE** (2026-06-29)
+- [ ] 9 new prompts validated via SW1-SW5 pipeline — **IN PROGRESS** (batch runner PID 452133)
+- [ ] 20/20 prompts: SW1-SW5 ≥ opencode baseline — **PENDING** (waiting for batch)
+- [ ] No refusals, no meta-commentary, no MISSING files — **VERIFIED on P15**
