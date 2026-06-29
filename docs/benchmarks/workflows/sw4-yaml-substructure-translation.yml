@@ -19,7 +19,7 @@ models:
     host:
       type: llama_cpp_with_vulkan
     load_params:
-      context_size: 262144
+      context_size: 32768                 # 2x buffer of 16k max response; bump to 262144 if input+response >= 131072
       batch_size: 2048
       ubatch_size: 512
       cache_type_k: "q8_0"
@@ -104,7 +104,7 @@ agentic_workflow:
               fail_on_error: true
         after_step_succeeds:
           - save_to:
-              - sw4_task_cats
+              - $sw4_task_cats
               - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw4/01-task-cats.txt"
           - log:
               to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw4.log"
@@ -130,9 +130,104 @@ agentic_workflow:
 
         For EACH task, emit a YAML substructure snippet showing how it becomes a workflow step.
 
+        ## CRITICAL: Bootstrap Step Pattern (REQUIRED as first step)
+
+        Every generated workflow MUST start with step_00_bootstrap that injects the user's original prompt into bookmarks via shell cat:
+
+        ```yaml
+        step_00_bootstrap:
+          generative_entity: "${models.qwen35}"
+          prompt: "Respond with the single word OK."
+          model_overrides:
+            max_tokens: 4
+            temperature: 0.0
+          when:
+            before_step_starts:
+              - shell:
+                  command: "cat ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/input/prompt.txt"
+                  args: []
+                  working_dir: "/home/jon/code/whitt-execution-engine"
+                  fail_on_error: true
+            after_step_succeeds:
+              - save_to:
+                  - prompt_injected
+                  - "./outputs/bootstrap_done.txt"
+              - log:
+                  to_file_path: "./logs/step_00_bootstrap.log"
+                  event_fields: [step_name, duration_ms, total_tokens]
+                  level: info
+        ```
+
+        After step_00_bootstrap, downstream steps can access user prompt via `{{bookmarks.shell_output.stdout}}` in their prompts.
+
+        ## CRITICAL: File Injection Pattern (REQUIRED for any step that needs to read external content)
+
+        If a step needs to read SOURCE FILE CONTENT (the prompt, source code, configs, etc.), add `before_step_starts: shell: cat <file>` hook:
+
+        ```yaml
+        step_<id>_<name>:
+          generative_entity: "${models.qwen35}"
+          prompt: |
+            Source content from injected file:
+            {{bookmarks.shell_output.stdout}}
+
+            <task description>
+          model_overrides:
+            max_tokens: 5120
+            temperature: 0.2
+          when:
+            before_step_starts:
+              - shell:
+                  command: "cat <path/to/source/file>"
+                  args: []
+                  working_dir: "/home/jon/code/whitt-execution-engine"
+                  fail_on_error: true
+            after_step_succeeds:
+              - save_to:
+                  - <bookmark_var>
+                  - "<output_path>"
+              - log:
+                  to_file_path: "<log_path>"
+                  event_fields: [step_name, duration_ms, total_tokens]
+                  level: info
+        ```
+
+        ## CRITICAL: Final Synthesis Step Pattern (REQUIRED as last step)
+
+        Every workflow MUST end with a final synthesis step that aggregates prior step outputs into the DELIVERABLE file:
+
+        ```yaml
+        step_final_synthesize:
+          generative_entity: "${models.qwen35}"
+          prompt: |
+            Aggregate the prior step outputs into the final deliverable.
+            Prior outputs:
+            {{step.<prior_step_id>.output}}
+
+            Write the final deliverable content as the response.
+          model_overrides:
+            max_tokens: 8192
+            temperature: 0.3
+          when:
+            before_step_starts:
+              - shell:
+                  command: "cat ./outputs/<prior_output>.txt"
+                  args: []
+                  working_dir: "/home/jon/code/whitt-execution-engine"
+                  fail_on_error: true
+            after_step_succeeds:
+              - save_to:
+                  - final_deliverable
+                  - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/deliverables/<deliverable_filename>"
+              - log:
+                  to_file_path: "./logs/step_final_synthesize.log"
+                  event_fields: [step_name, duration_ms, total_tokens]
+                  level: info
+        ```
+
         ## Category → YAML Pattern Reference
 
-        IMPORTANT: Use FULL block format (NOT compact). Each step MUST include: generative_entity, depends_on, prompt, model_overrides (block format with temperature AND max_tokens), when block with after_step_succeeds AND after_step_fails hooks. Add "Intent:" and "Fit:" markdown descriptions before each YAML block.
+        IMPORTANT: Use FULL block format (NOT compact). Each step MUST include: generative_entity, prompt, model_overrides (block format with temperature AND max_tokens), when block with after_step_succeeds AND after_step_fails hooks. Add "Intent:" and "Fit:" markdown descriptions before each YAML block.
 
         SEQUENTIAL_PROCESSOR:
         Intent: <what this step accomplishes>
@@ -144,10 +239,18 @@ agentic_workflow:
           depends_on: [step_<prior>]
           prompt: |
             <full prompt text describing what the LLM should do>
+            If reading prior step output, reference: {{step.<prior_step_id>.output}}
+            If reading injected file content, reference: {{bookmarks.shell_output.stdout}}
           model_overrides:
             max_tokens: 5120
             temperature: 0.2
           when:
+            before_step_starts:
+              - shell:
+                  command: "cat <path/to/file/this/step/needs>"
+                  args: []
+                  working_dir: "/home/jon/code/whitt-execution-engine"
+                  fail_on_error: true
             after_step_succeeds:
               - save_to:
                   - <bookmark_var>
@@ -239,7 +342,14 @@ agentic_workflow:
         - Use `step_<id>_<name>` as step IDs (snake_case, no hyphens)
         - Reference models as `${models.qwen35}`
         - Reference prior outputs as `{{step.<step_id>.output}}`
+        - Reference injected file content as `{{bookmarks.shell_output.stdout}}`
         - Every step must have `generative_entity`, `prompt`, `model_overrides`, AND `when.after_step_succeeds` with at least save_to + log hooks
+        - **MANDATORY FIRST STEP**: Always emit `step_00_bootstrap` that injects prompt.txt via `before_step_starts: shell: cat`. Subsequent steps reference `{{bookmarks.shell_output.stdout}}` to access user prompt content.
+        - **MANDATORY LAST STEP**: Always emit `step_final_synthesize` that aggregates prior step outputs into the final deliverable file at `./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/deliverables/<filename>`.
+        - **MANDATORY FILE INJECTION**: Any step that needs to read external content (prompt.txt, source files, configs) MUST include `before_step_starts: shell: cat <file>` hook. The shell output goes to `{{bookmarks.shell_output.stdout}}` and the prompt should reference it.
+        - **MANDATORY UNIQUE SAVE_TO PATHS**: Each step's `save_to` file path MUST be unique and follow the pattern `./outputs/<step_id>.txt` (e.g., `./outputs/step_t1_analyze_docs.txt`, NOT generic paths like `./docs/reports/initial-thoughts.md`). NEVER reuse the same file path across multiple steps. Downstream steps that need this step's output MUST `cat ./outputs/<step_id>.txt` to read it.
+        - **MANDATORY FILENAME CONSISTENCY**: When a downstream step references an upstream step's output via `cat`, the path MUST exactly match the upstream step's `save_to` path. Example: if step_t1 saves to `./outputs/step_t1_analyze_docs.txt`, then step_t2 must `cat ./outputs/step_t1_analyze_docs.txt` (not `./outputs/t1_output.txt` or any other name).
+        - **MANDATORY FILE SLICING FOR LARGE FILES**: When a step needs to read a source file >50KB (e.g., `src/benchmark/runner.rs` at 240KB), the `before_step_starts` shell hook MUST use `sed -n '<start>,<end>p'` to extract ONLY the line range relevant to the step's task. Injecting full large files per step wastes context and time. Example: `command: "sed -n '1800,2200p' src/benchmark/runner.rs"` (extracts only lines 1800-2200 relevant to the step's focus). Pick a 200-500 line window around the code the step needs. Full-file `cat` of large files is FORBIDDEN. All shell hooks MUST include `working_dir: "/home/jon/code/whitt-execution-engine"` so relative paths resolve from repo root (execution CWD may differ).
         - WRITE ACTUAL PROMPT TEXT inside each `prompt: |` block. NEVER use literal "<placeholder>" — write 2-5 sentences of real instructions describing what the LLM should do, what inputs to read, what outputs to produce. Example: "Read {{step.prior_step.output}} and extract the configuration values. Write them as YAML to ./outputs/config.yml. Validate that all required keys are present."
         - Cover EVERY task from the task-category list (BOTH parents AND leaf subtasks) — process in chunks of 5-7 tasks at a time mentally, then emit all blocks. If input has T1 with subtasks T1.1, T1.2, output blocks for ALL of: step_t1_*, step_t1_1_*, step_t1_2_*
         - COMPACT: Intent + Fit are each ONE sentence max. Avoid multi-paragraph explanations.
@@ -264,7 +374,7 @@ agentic_workflow:
               fail_on_error: true
         after_step_succeeds:
           - save_to:
-              - sw4_substructures
+              - $sw4_substructures
               - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw4/02-substructures.md"
           - log:
               to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw4.log"
@@ -335,7 +445,7 @@ agentic_workflow:
               fail_on_error: false
         after_step_succeeds:
           - save_to:
-              - sw4_eval
+              - $sw4_eval
               - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw4/03-eval.txt"
           - shell:
               command: "bash ./scripts/meta-v6/sw-gate.sh ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw4/03-eval.txt ./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw4/iteration-counter.txt"
@@ -381,11 +491,11 @@ agentic_workflow:
         Output ONLY the corrected blocks (all of them, not just the failing ones).
       model_overrides:
         temperature: 0.2
-        max_tokens: 4096
+        max_tokens: 8192
       when:
         after_step_succeeds:
           - save_to:
-              - sw4_corrected
+              - $sw4_corrected
               - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw4/04-corrected.md"
           - log:
               to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/sw4.log"
@@ -457,7 +567,7 @@ agentic_workflow:
         Output ONLY the final document.
       model_overrides:
         temperature: 0.1
-        max_tokens: 4096
+        max_tokens: 12288
       when:
         before_step_starts:
           - shell:
@@ -467,7 +577,7 @@ agentic_workflow:
               fail_on_error: true
         after_step_succeeds:
           - save_to:
-              - sw4_final
+              - $sw4_final
               - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/sw4/structs.md"
           - bookmark: true
           - log:

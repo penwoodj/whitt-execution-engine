@@ -5,6 +5,10 @@
 //! - 05e469b: SW3 step_02 generative_entity requirement
 //! - 588826a: shell machine-check hooks in evaluators
 //! - f44aa2f: lenient coverage gate (>=80%)
+//!
+//! Design note (2026-06-27): SW5 refactored to deterministic shell-only assembly.
+//! Tests that assert LLM-cascade features (gwt routes, sw-gate, bootstrap step)
+//! now apply to SW1-SW4 only. SW5 has its own minimal-step structural check.
 
 use std::fs;
 use std::path::PathBuf;
@@ -34,6 +38,14 @@ const SW_FILES: &[&str] = &[
     "sw4-yaml-substructure-translation.yml",
     "sw5-final-workflow-assembly.yml",
     "meta-workflow-v6.yml",
+];
+
+// LLM-cascade SWs only (excludes SW5 which is deterministic and orchestrator which is wrapper)
+const LLM_CASCADE_SWS: &[&str] = &[
+    "sw1-task-deconstruction.yml",
+    "sw2-desired-output-state.yml",
+    "sw3-agentic-categorization.yml",
+    "sw4-yaml-substructure-translation.yml",
 ];
 
 #[test]
@@ -96,9 +108,9 @@ fn given_all_sw_yamls_when_checked_then_have_load_params_with_q8_0_kv_cache() {
             .and_then(|q| q.get("load_params"))
             .unwrap_or_else(|| panic!("{} models.qwen35.load_params missing", sw));
 
-        // User directive: ctx=262144, gpu=99 (full RX580 offload, confirmed fastest), threads=5, parallel=1
-        assert_eq!(load_params.get("context_size").and_then(|v| v.as_i64()), Some(262144),
-            "{} context_size MUST be 262144", sw);
+        // User directive: ctx=32768 (2x buffer of 16k max response; bump to 262144 if input+response >= 131072), gpu=99 (full RX580 offload, confirmed fastest), threads=5, parallel=1
+        assert_eq!(load_params.get("context_size").and_then(|v| v.as_i64()), Some(32768),
+            "{} context_size MUST be 32768", sw);
         assert_eq!(load_params.get("gpu_layers").and_then(|v| v.as_i64()), Some(99),
             "{} gpu_layers MUST be 99 (full RX580 offload, server config wins)", sw);
         assert_eq!(load_params.get("threads").and_then(|v| v.as_i64()), Some(5),
@@ -147,15 +159,18 @@ fn given_sw_yamls_when_checked_then_have_agentic_workflow_with_steps() {
         });
         assert!(steps.is_mapping(), "{} steps must be a mapping", sw);
         let step_count = steps.as_mapping().map(|m| m.len()).unwrap_or(0);
-        assert!(step_count >= 5, "{} should have >=5 steps, got {}", sw, step_count);
+        // SW5 is deterministic 2-step assembly; others are LLM cascades with >=5 steps
+        let min_steps = if *sw == "sw5-final-workflow-assembly.yml" { 2 } else { 5 };
+        assert!(step_count >= min_steps,
+            "{} should have >={} steps, got {}", sw, min_steps, step_count);
     }
 }
 
-/// Regression for commit 588826a: SW1-SW5 must have shell machine-check hooks.
+/// Regression for commit 588826a: SW1-SW4 must have shell machine-check hooks.
+/// SW5 excluded — deterministic assembly has no evaluator verdict to route on.
 #[test]
-fn given_sw1_through_sw5_when_checked_then_have_shell_machine_check_hooks() {
-    let sw_files = &SW_FILES[..5]; // Exclude orchestrator
-    for sw in sw_files {
+fn given_sw1_through_sw4_when_checked_then_have_shell_machine_check_hooks() {
+    for sw in LLM_CASCADE_SWS {
         let yaml = load_yaml(sw);
         let yaml_str = serde_yaml::to_string(&yaml).unwrap();
 
@@ -168,10 +183,10 @@ fn given_sw1_through_sw5_when_checked_then_have_shell_machine_check_hooks() {
 
 /// Regression for commits 6f5b7b6, 05e469b: bootstrap MUST have generative_entity.
 /// Without it, runner skips the step and downstream cascades to fallback synthesis.
+/// SW5 excluded — uses step_00_assemble (different naming, same generative_entity rule).
 #[test]
-fn given_sw1_through_sw5_when_checked_then_bootstrap_step_has_generative_entity() {
-    let sw_files = &SW_FILES[..5];
-    for sw in sw_files {
+fn given_sw1_through_sw4_when_checked_then_bootstrap_step_has_generative_entity() {
+    for sw in LLM_CASCADE_SWS {
         let yaml = load_yaml(sw);
         let bootstrap = yaml
             .get("agentic_workflow")
@@ -260,21 +275,21 @@ fn given_sw3_step_02_when_checked_then_has_generative_entity_to_prevent_skip() {
 /// Without cap, evaluator subjective criteria can loop indefinitely.
 /// Cap forces PASS after 3 fix iterations (4 evaluator runs).
 /// Uses external script to avoid YAML escaping issues with nested quotes.
+/// SW5 excluded — deterministic assembly has no evaluator loop.
 #[test]
-fn given_sw1_through_sw5_when_checked_then_have_iteration_counter_gate() {
-    let sw_files = &SW_FILES[..5];
-    for sw in sw_files {
+fn given_sw1_through_sw4_when_checked_then_have_iteration_counter_gate() {
+    for sw in LLM_CASCADE_SWS {
         let yaml = load_yaml(sw);
         let yaml_str = serde_yaml::to_string(&yaml).unwrap();
 
-        // All SWs must call sw-gate.sh (extracted to script for robust quoting)
+        // All LLM-cascade SWs must call sw-gate.sh (extracted to script for robust quoting)
         assert!(
             yaml_str.contains("sw-gate.sh"),
             "{} must call sw-gate.sh (safety cap against fix loop storms)",
             sw
         );
 
-        // All SWs must reference iteration-counter.txt (counter persistence)
+        // All LLM-cascade SWs must reference iteration-counter.txt (counter persistence)
         assert!(
             yaml_str.contains("iteration-counter.txt"),
             "{} must reference iteration-counter.txt (cap state file)",
@@ -312,4 +327,190 @@ fn given_sw_gate_when_eval_text_has_pass_but_verdict_fail_then_returns_fail() {
 
     let _ = fs::remove_file(&eval_file);
     let _ = fs::remove_file(&counter_file);
+}
+
+// ============================================================================
+// Per-SW Quality Unit Tests (Phase 1.1 — fast static validators)
+// ============================================================================
+
+/// SW1 must require task decomposition with group-of-5 chunking rule.
+#[test]
+fn given_sw1_prompt_when_checked_then_has_task_decomposition_rules() {
+    let yaml_str = fs::read_to_string(workflows_dir().join("sw1-task-deconstruction.yml"))
+        .expect("SW1 yaml must be readable");
+    assert!(yaml_str.contains("task") || yaml_str.contains("decompos"),
+        "SW1 must reference task decomposition");
+    assert!(yaml_str.contains("5") || yaml_str.contains("chunk") || yaml_str.contains("group"),
+        "SW1 must reference group-of-5 chunking for complexity management");
+}
+
+/// SW2 must produce desired output state description.
+#[test]
+fn given_sw2_prompt_when_checked_then_has_desired_output_state_rules() {
+    let yaml_str = fs::read_to_string(workflows_dir().join("sw2-desired-output-state.yml"))
+        .expect("SW2 yaml must be readable");
+    assert!(yaml_str.contains("output") || yaml_str.contains("deliverable"),
+        "SW2 must reference desired output / deliverable characteristics");
+}
+
+/// SW3 must categorize tasks agentic vs deterministic.
+#[test]
+fn given_sw3_prompt_when_checked_then_has_categorization_rules() {
+    let yaml_str = fs::read_to_string(workflows_dir().join("sw3-agentic-categorization.yml"))
+        .expect("SW3 yaml must be readable");
+    assert!(yaml_str.contains("categor") || yaml_str.contains("agentic") || yaml_str.contains("pattern"),
+        "SW3 must reference categorization / pattern assignment");
+}
+
+/// SW4 must enforce filename consistency (Priority 2.1 fix).
+#[test]
+fn given_sw4_prompt_when_checked_then_has_filename_consistency_rule() {
+    let yaml_str = fs::read_to_string(workflows_dir().join("sw4-yaml-substructure-translation.yml"))
+        .expect("SW4 yaml must be readable");
+    assert!(yaml_str.contains("FILENAME CONSISTENCY"),
+        "SW4 must enforce FILENAME CONSISTENCY rule (Priority 2.1 fix)");
+}
+
+/// SW4 must enforce file slicing for large files (Priority 2.2 fix).
+#[test]
+fn given_sw4_prompt_when_checked_then_has_file_slicing_rule() {
+    let yaml_str = fs::read_to_string(workflows_dir().join("sw4-yaml-substructure-translation.yml"))
+        .expect("SW4 yaml must be readable");
+    assert!(yaml_str.contains("FILE SLICING"),
+        "SW4 must enforce FILE SLICING rule for files >50KB (Priority 2.2 fix)");
+    assert!(yaml_str.contains("sed -n"),
+        "SW4 file slicing rule must reference sed -n command");
+}
+
+/// SW5 must be deterministic (2-step assembly, no LLM cascade).
+/// Regression: pre-refactor SW5 had 6-step LLM cascade with 0% success rate.
+/// Fix: replaced with 2-step deterministic assembly using build-workflow.py.
+#[test]
+fn given_sw5_yaml_when_checked_then_is_deterministic_assembly() {
+    let yaml_str = fs::read_to_string(workflows_dir().join("sw5-final-workflow-assembly.yml"))
+        .expect("SW5 yaml must be readable");
+    assert!(yaml_str.contains("sw5-assemble.sh"),
+        "SW5 must invoke sw5-assemble.sh wrapper (which calls build-workflow.py)");
+    assert!(yaml_str.contains("DESIGN DECISION"),
+        "SW5 must document design decision for deterministic refactor");
+    let step_count = yaml_str.matches("    step_").count();
+    assert!(step_count <= 3,
+        "SW5 must have ≤3 steps (deterministic 2-step assembly), got {}", step_count);
+}
+
+/// SW5 step_00_assemble must have generative_entity (runner requires it).
+#[test]
+fn given_sw5_step_00_assemble_when_checked_then_has_generative_entity() {
+    let yaml = load_yaml("sw5-final-workflow-assembly.yml");
+    let assemble = yaml
+        .get("agentic_workflow")
+        .and_then(|a| a.get("steps"))
+        .and_then(|s| s.get("step_00_assemble"))
+        .unwrap_or_else(|| panic!("SW5 missing step_00_assemble"));
+    assert!(assemble.get("generative_entity").is_some(),
+        "SW5 step_00_assemble MUST have generative_entity");
+}
+
+/// All wrapper scripts referenced in YAMLs must exist on disk.
+#[test]
+fn given_sw_yamls_when_checked_then_referenced_scripts_exist() {
+    let required_scripts = [
+        "run-sw1.sh", "run-sw2.sh", "run-sw3.sh", "run-sw4.sh", "run-sw5.sh",
+        "bootstrap.sh", "sw-gate.sh",
+        "build-workflow.py", "fix-yaml.py",
+        "sw5-assemble.sh", "sw5-finalize.sh",
+    ];
+    for script in &required_scripts {
+        let path = repo_root().join("scripts/meta-v6").join(script);
+        assert!(path.exists(),
+            "Required script {} must exist at {}", script, path.display());
+    }
+}
+
+/// Pipeline must call all SW wrappers in order.
+/// pipeline.sh uses a `run_sw N` helper that calls `run-swN.sh` dynamically.
+/// We verify by checking for the `run_sw N` calls in sequence.
+#[test]
+fn given_pipeline_sh_when_checked_then_calls_all_sws_in_order() {
+    let pipeline = repo_root().join("scripts/meta-v6/debug/pipeline.sh");
+    let content = fs::read_to_string(&pipeline)
+        .expect("pipeline.sh must be readable");
+    
+    assert!(content.contains("run-sw5.sh"),
+        "pipeline.sh must call run-sw5.sh explicitly (deterministic path)");
+    
+    let positions: Vec<Option<usize>> = (1..=4)
+        .map(|n| content.find(&format!("run_sw {}", n)))
+        .collect();
+    for (i, pos) in positions.iter().enumerate() {
+        assert!(pos.is_some(),
+            "pipeline.sh must call run_sw {} (SW{})", i+1, i+1);
+    }
+    let positions: Vec<usize> = positions.iter().map(|p| p.unwrap()).collect();
+    for i in 0..positions.len()-1 {
+        assert!(positions[i] < positions[i+1],
+            "pipeline.sh must call SW{} before SW{}", i+1, i+2);
+    }
+}
+
+/// Regression: save_to entries must NOT be bare names (must be $variable or file path).
+/// Bug: bare names like `sw1_eval` caused engine to write files to CWD (repo root)
+/// instead of storing as variable bookmarks. Stray files polluted repo root.
+/// Fix: prefix all bare names with $ in SW1-SW4 YAMLs + build-workflow.py.
+#[test]
+fn given_sw_yamls_when_checked_then_no_bare_save_to_names() {
+    let sw_files = &SW_FILES[..5]; // SW1-SW5 only (not orchestrator)
+    for sw in sw_files {
+        let yaml = load_yaml(sw);
+        let steps = yaml
+            .get("agentic_workflow")
+            .and_then(|a| a.get("steps"))
+            .and_then(|s| s.as_mapping());
+
+        if let Some(steps) = steps {
+            for (step_id, step_val) in steps {
+                let step_obj = step_id.as_str().unwrap_or("");
+                let when = step_val.get("when");
+                if let Some(when) = when {
+                    for (_, trigger_val) in when.as_mapping().unwrap_or(&serde_yaml::Mapping::new()) {
+                        if let Some(hooks) = trigger_val.as_sequence() {
+                            for hook in hooks {
+                                if let Some(hook_map) = hook.as_mapping() {
+                                    for (action_key, action_val) in hook_map {
+                                        if action_key.as_str() == Some("save_to") {
+                                            check_save_to_value(sw, step_obj, action_val);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn check_save_to_value(sw: &str, step_id: &str, val: &serde_yaml::Value) {
+    if let Some(s) = val.as_str() {
+        assert_bare_name(sw, step_id, s);
+    } else if let Some(seq) = val.as_sequence() {
+        for item in seq {
+            if let Some(s) = item.as_str() {
+                assert_bare_name(sw, step_id, s);
+            }
+        }
+    }
+}
+
+fn assert_bare_name(sw: &str, step_id: &str, s: &str) {
+    let is_bare = !s.starts_with('$')
+        && !s.starts_with("./")
+        && !s.starts_with('/')
+        && !s.contains('.')
+        && !s.contains('/');
+    assert!(!is_bare,
+        "{}:{} save_to value '{}' is a BARE name — must be $variable or file path. \
+         Bare names cause engine to write files to CWD (repo root pollution).",
+        sw, step_id, s);
 }

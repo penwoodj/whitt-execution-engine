@@ -670,32 +670,49 @@ def fix_unindented_markdown_in_prompt(content: str) -> str:
     YAML literal blocks require consistent indentation. Model output sometimes
     has markdown lines starting at column 1 (e.g. '**bold**' or '# heading')
     which breaks the block scalar.
+
+    Detection of end-of-prompt-body: a line whose indent is LESS THAN OR EQUAL TO
+    the prompt's indent AND starts with a known step-block field name (model_overrides,
+    when, generative_entity, etc.). Without this, the function would re-indent
+    model_overrides/when/etc. as if they were prompt body content, breaking the YAML.
     """
     lines = content.split('\n')
     out = []
     in_prompt_block = False
+    prompt_indent = 0
     block_indent = 0
-    yaml_keys = ('workflow_id', 'name:', 'version:', 'schema_version:', 'providers:',
-                 'models:', 'steps:', 'description:', 'hook_config:', 'load_params:',
-                 'context_size:', 'gpu_layers:', 'threads:', 'parallel:', 'cache_type_')
+    # Step-block sibling field names (siblings of `prompt:` under a step). Lines
+    # at <= prompt_indent starting with any of these END the prompt body.
+    step_field_names = (
+        'model_overrides:', 'when:', 'generative_entity:', 'requires:',
+        'depends_on:', 'step_id:', 'step_name:', 'r#loop:', 'loop:',
+        'temperature:', 'max_tokens:', 'top_p:',
+    )
     for line in lines:
         stripped = line.lstrip()
+        cur_indent = len(line) - len(stripped)
         if stripped.startswith('prompt: |'):
             in_prompt_block = True
-            block_indent = len(line) - len(stripped) + 8
+            prompt_indent = cur_indent
+            block_indent = cur_indent + 2
             out.append(line)
             continue
         if in_prompt_block:
-            current_indent = len(line) - len(stripped)
-            is_yaml_key = any(stripped.startswith(k) for k in yaml_keys) and current_indent <= 8
             if stripped == '':
                 out.append(line)
                 continue
-            if is_yaml_key:
+            # End of prompt body: indented at or below prompt's indent AND is a known sibling field
+            if cur_indent <= prompt_indent and any(stripped.startswith(k) for k in step_field_names):
                 in_prompt_block = False
                 out.append(line)
                 continue
-            if current_indent < block_indent:
+            # End of prompt body: indented at or below prompt's indent AND starts a new step
+            if cur_indent <= prompt_indent and re.match(r'^step_[a-z_0-9]+:', stripped):
+                in_prompt_block = False
+                out.append(line)
+                continue
+            # Re-indent only TRULY unindented lines (col 0 or 1)
+            if cur_indent < 2:
                 out.append(' ' * block_indent + stripped)
             else:
                 out.append(line)
@@ -724,55 +741,61 @@ def fix_missing_newline_after_quote(content: str) -> str:
 
 
 def inject_shell_output_template_var(content: str) -> str:
+    # Inject {{bookmarks.shell_output.stdout}} into prompt bodies of steps that
+    # have before_step_starts: shell hooks but no template var yet.
+    #
+    # Only injects into MULTI-LINE prompts (`prompt: |`). Single-line prompts
+    # (`prompt: "..."`) are skipped — template var cannot be appended to a quoted
+    # string without converting to multi-line, which would change semantics.
     lines = content.split('\n')
     out = []
     in_step = False
-    in_prompt = False
+    has_multiline_prompt = False
+    prompt_line_idx = -1
     prompt_indent = 0
     has_shell_hook = False
     has_template_var = False
     step_lines = []
-    step_indent = 0
 
-    for i, line in enumerate(lines):
-        stripped = line.lstrip()
-        cur_indent = len(line) - len(stripped)
+    def flush_step():
+        nonlocal has_multiline_prompt, prompt_line_idx, prompt_indent, has_shell_hook, has_template_var, step_lines
+        if has_shell_hook and not has_template_var and has_multiline_prompt and prompt_line_idx >= 0:
+            inject_line = ' ' * (prompt_indent + 2) + '{{bookmarks.shell_output.stdout}}'
+            step_lines.insert(prompt_line_idx + 1, inject_line)
+        out.extend(step_lines)
+        has_multiline_prompt = False
+        prompt_line_idx = -1
+        prompt_indent = 0
+        has_shell_hook = False
+        has_template_var = False
+        step_lines = []
 
+    for line in lines:
         if re.match(r'^[ ]+step_[a-z_0-9]+:', line):
-            if in_step and has_shell_hook and not has_template_var:
-                inject_line = ' ' * (prompt_indent + 2) + '{{bookmarks.shell_output.stdout}}'
-                for j, sl in enumerate(step_lines):
-                    if re.match(r'^[ ]+prompt:', sl):
-                        step_lines.insert(j + 1, inject_line)
-                        break
-            out.extend(step_lines)
-            step_lines = []
-            has_shell_hook = False
-            has_template_var = False
+            if in_step:
+                flush_step()
             in_step = True
-            step_indent = cur_indent
-            step_lines.append(line)
+            step_lines = [line]
             continue
 
         if in_step:
-            if stripped.startswith('- shell:') and 'before_step_starts' in '\n'.join(step_lines[-10:]):
+            stripped = line.lstrip()
+            cur_indent = len(line) - len(stripped)
+            if '- shell:' in line and any('before_step_starts' in sl for sl in step_lines[-10:]):
                 has_shell_hook = True
             if '{{bookmarks.shell_output' in line:
                 has_template_var = True
-            if 'prompt: |' in line or 'prompt: |\n' in line:
+            if re.match(r'^[ ]+prompt:\s*\|', line):
+                has_multiline_prompt = True
                 prompt_indent = cur_indent
+                prompt_line_idx = len(step_lines)
             step_lines.append(line)
             continue
 
         out.append(line)
 
-    if in_step and has_shell_hook and not has_template_var:
-        inject_line = ' ' * (prompt_indent + 2) + '{{bookmarks.shell_output.stdout}}'
-        for j, sl in enumerate(step_lines):
-            if re.match(r'^[ ]+prompt:', sl):
-                step_lines.insert(j + 1, inject_line)
-                break
-    out.extend(step_lines)
+    if in_step:
+        flush_step()
 
     return '\n'.join(out)
 

@@ -22,9 +22,14 @@ use regex::Regex;
 ///
 /// Replaces placeholders like {{step.step_name}}, {{step.model_name}} with actual values
 /// extracted from the context via get_field().
-fn resolve_context_templates(template: &str, context: &WorkflowHookContext) -> String {
-    let re = Regex::new(r"\{\{step\.([^}]+)\}\}").unwrap();
+fn resolve_context_templates(template: &str, context: &WorkflowHookContext, engine: &HookEngine) -> String {
     let mut result = template.to_string();
+    // First, use engine.resolve_templates which handles {{step.X.output}} and {{bookmarks.KEY}}
+    // via the engine's bookmark store (populated by runner on each step completion).
+    result = engine.resolve_templates(&result);
+    // Then, fall back to context.get_field for trigger-specific fields
+    // (quality_score, duration_ms, error_message, etc.) that aren't in bookmarks.
+    let re = Regex::new(r"\{\{step\.([^}]+)\}\}").unwrap();
     for cap in re.captures_iter(template) {
         if let Some(field_name) = cap.get(1) {
             let placeholder = cap.get(0).unwrap().as_str();
@@ -73,7 +78,7 @@ pub fn execute_action(
 fn execute_log(
     action: &LogAction,
     context: &WorkflowHookContext,
-    _engine: &mut HookEngine,
+    engine: &mut HookEngine,
 ) -> HookResult {
     let level = action.level.unwrap_or_default();
     let json = context.to_json_value();
@@ -83,7 +88,7 @@ fn execute_log(
 
     // Write to file if path specified
     if let Some(ref path) = action.to_file_path {
-        let resolved_path = resolve_context_templates(path, context);
+        let resolved_path = resolve_context_templates(path, context, engine);
         if let Err(e) = write_log_to_file(&resolved_path, &log_content) {
             eprintln!("Failed to write log to {}: {}", resolved_path, e);
         }
@@ -175,14 +180,14 @@ fn execute_append_to(
                 };
                 engine.store_bookmark(var_key.to_string(), serde_json::Value::String(combined));
             } else {
-                let resolved_path = resolve_context_templates(var_name, context);
+                let resolved_path = resolve_context_templates(var_name, context, engine);
                 if let Err(e) = append_to_file(&resolved_path, &output) {
                     eprintln!("Failed to append to {}: {}", resolved_path, e);
                 }
             }
         }
         AppendToAction::FilePath(path) => {
-            let resolved_path = resolve_context_templates(path, context);
+            let resolved_path = resolve_context_templates(path, context, engine);
             if let Err(e) = append_to_file(&resolved_path, &output) {
                 eprintln!("Failed to append to {}: {}", resolved_path, e);
             }
@@ -200,7 +205,7 @@ fn execute_append_to(
                     };
                     engine.store_bookmark(var_name.to_string(), serde_json::Value::String(combined));
                 } else {
-                    let resolved_path = resolve_context_templates(target, context);
+                    let resolved_path = resolve_context_templates(target, context, engine);
                     if let Err(e) = append_to_file(&resolved_path, &output) {
                         eprintln!("Failed to append to {}: {}", resolved_path, e);
                     }
@@ -249,14 +254,14 @@ fn execute_save_to(
             if let Some(var_key) = var_name.strip_prefix('$') {
                 engine.store_bookmark(var_key.to_string(), json_value);
             } else {
-                let resolved_path = resolve_context_templates(var_name, context);
+                let resolved_path = resolve_context_templates(var_name, context, engine);
                 if let Err(e) = save_to_file(&resolved_path, &output) {
                     eprintln!("Failed to save to {}: {}", resolved_path, e);
                 }
             }
         }
         SaveToAction::FilePath(path) => {
-            let resolved_path = resolve_context_templates(path, context);
+            let resolved_path = resolve_context_templates(path, context, engine);
             if let Err(e) = save_to_file(&resolved_path, &output) {
                 eprintln!("Failed to save to {}: {}", resolved_path, e);
             }
@@ -266,7 +271,7 @@ fn execute_save_to(
                 if let Some(var_name) = target.strip_prefix('$') {
                     engine.store_bookmark(var_name.to_string(), json_value.clone());
                 } else {
-                    let resolved_path = resolve_context_templates(target, context);
+                    let resolved_path = resolve_context_templates(target, context, engine);
                     if let Err(e) = save_to_file(&resolved_path, &output) {
                         eprintln!("Failed to save to {}: {}", resolved_path, e);
                     }
@@ -326,8 +331,8 @@ fn execute_bookmark(
 
     let file_path: Option<String> = match action {
         BookmarkAction::Flag(_) => None,
-        BookmarkAction::Path(path) => Some(resolve_context_templates(path, context)),
-        BookmarkAction::Detailed(detail) => detail.path.as_ref().map(|p| resolve_context_templates(p, context)),
+        BookmarkAction::Path(path) => Some(resolve_context_templates(path, context, engine)),
+        BookmarkAction::Detailed(detail) => detail.path.as_ref().map(|p| resolve_context_templates(p, context, engine)),
     };
 
     if let Some(ref path) = file_path {
@@ -671,6 +676,67 @@ mod tests {
     };
     use std::collections::HashMap;
     use tempfile::TempDir;
+
+    #[test]
+    fn given_resolve_context_templates_with_cross_step_ref_when_engine_has_bookmark_then_resolved() {
+        let mut engine = HookEngine::new();
+        engine.store_bookmark(
+            "other_step".to_string(),
+            serde_json::Value::String("prior output content".to_string()),
+        );
+        let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+            step_name: "current_step".to_string(),
+            output: "current output".to_string(),
+            duration_ms: 100,
+            quality_score: None,
+            token_count: 50,
+            model_name: "model".to_string(),
+        });
+        let template = "save_to: ./outputs/{{step.other_step.output}}.txt";
+        let resolved = resolve_context_templates(template, &context, &engine);
+        assert_eq!(resolved, "save_to: ./outputs/prior output content.txt");
+    }
+
+    #[test]
+    fn given_resolve_context_templates_with_bookmarks_ref_when_engine_has_bookmark_then_resolved() {
+        let mut engine = HookEngine::new();
+        engine.store_bookmark(
+            "shell_output".to_string(),
+            serde_json::json!({"stdout": "injected file content", "exit_code": 0}),
+        );
+        let context = WorkflowHookContext::BeforeStepStarts(BeforeStepStartsContext {
+            step_name: "test".to_string(),
+            step_type: StepType::Generative,
+            model_name: "model".to_string(),
+            prompt_preview: "".to_string(),
+            workflow_variables: HashMap::new(),
+        });
+        let template = "Context: {{bookmarks.shell_output.stdout}}";
+        let resolved = resolve_context_templates(template, &context, &engine);
+        assert_eq!(resolved, "Context: injected file content");
+    }
+
+    #[test]
+    fn given_resolve_context_templates_with_current_step_output_when_context_has_field_then_resolved() {
+        let mut engine = HookEngine::new();
+        // Runner stores each step's output in bookmarks keyed by step_id.
+        // Simulate this so the engine can resolve {{step.<step_id>.output}}.
+        engine.store_bookmark(
+            "current_step".to_string(),
+            serde_json::Value::String("current result".to_string()),
+        );
+        let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+            step_name: "current_step".to_string(),
+            output: "current result".to_string(),
+            duration_ms: 100,
+            quality_score: None,
+            token_count: 50,
+            model_name: "model".to_string(),
+        });
+        let template = "Result: {{step.current_step.output}}";
+        let resolved = resolve_context_templates(template, &context, &engine);
+        assert_eq!(resolved, "Result: current result");
+    }
 
     #[test]
     fn given_log_action_with_file_path_when_execute_log_then_file_created() {

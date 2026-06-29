@@ -1,0 +1,74 @@
+# Workflow for testing cross-step template resolution in hook arg paths.
+# Step 1 produces output, step 2 save_to path references step 1's output.
+# Engine must resolve `{{step.step_01_producer.output}}` to step 1's actual output.
+#
+# Test runner: tests/cross_step_template.rs
+
+workflow_id: "cross-step-template-test"
+name: 'Cross-step template test'
+description: |
+  Integration test for engine's resolve_context_templates function.
+  Verifies that {{step.X.output}} in hook arg paths resolves correctly
+  via engine.bookmarks after step X completes.
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: "localhost"
+      port: 8080
+
+models:
+  - name: "mock-model"
+    host:
+      type: llama_cpp_with_vulkan
+      config:
+        host: "localhost"
+        port: 8080
+    file_size_gb: 1.0
+    quantization: "Q4_K_M"
+    gpu_layers: 1
+
+models_root: "./models"
+workflow_execution_strategy:
+  load_unload: false
+
+benchmark:
+  prompts:
+    - "OK"
+  max_tokens: 4
+  temperature: 0.0
+
+steps:
+  step_01_producer:
+    generative_entity: "${models.mock-model}"
+    prompt: "Respond with: PRODUCER_OUTPUT_MARKER_12345"
+    model_overrides:
+      max_tokens: 10
+      temperature: 0.0
+    when:
+      after_step_succeeds:
+        - save_to:
+            - producer_result
+            - "./outputs/step_01_producer.txt"
+        - log:
+            to_file_path: "./logs/step_01_producer.log"
+            event_fields: [step_name, output]
+            level: info
+
+  step_02_consumer:
+    generative_entity: "${models.mock-model}"
+    depends_on: [step_01_producer]
+    prompt: "OK"
+    model_overrides:
+      max_tokens: 4
+      temperature: 0.0
+    when:
+      after_step_succeeds:
+        # Cross-step template in save_to path — should resolve via engine.bookmarks
+        - save_to:
+            - consumer_result
+            - "./outputs/consumed-{{step.step_01_producer.output}}.txt"
+        - log:
+            to_file_path: "./logs/step_02_consumer.log"
+            event_fields: [step_name, output]
+            level: info

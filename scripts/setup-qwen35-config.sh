@@ -22,7 +22,7 @@ else
   YQ_INPLACE=(-y)
 fi
 
-echo "Updating $CONFIG for Qwen3.5-9B (CPU-only, 256K context, Q8_0 KV cache)..."
+echo "Updating $CONFIG for Qwen3.5-9B (CPU-only, 32K context (2x buffer policy), Q8_0 KV cache)..."
 
 # Model identity
 yq "${YQ_INPLACE[@]}" '.model.path = "/run/media/jon/data/models/lmstudio-community/Qwen3.5-9B-GGUF/Qwen3.5-9B-Q4_K_M.gguf"' "$CONFIG"
@@ -32,8 +32,8 @@ yq "${YQ_INPLACE[@]}" '.model.huggingface.filename = "Qwen3.5-9B-Q4_K_M.gguf"' "
 yq "${YQ_INPLACE[@]}" '.model.quantization = "Q4_K_M"' "$CONFIG"
 yq "${YQ_INPLACE[@]}" '.model.parameter_count = 9000000000' "$CONFIG"
 
-# Context — user spec: 262144
-yq "${YQ_INPLACE[@]}" '.context.size = 262144' "$CONFIG"
+# Context — user spec: 32768 (2x buffer of 16k max response; bump to 262144 if input+response >= 131072)
+yq "${YQ_INPLACE[@]}" '.context.size = 32768' "$CONFIG"
 yq "${YQ_INPLACE[@]}" '.context.batch_size = 512' "$CONFIG"
 yq "${YQ_INPLACE[@]}" '.context.ubatch_size = 512' "$CONFIG"
 
@@ -64,7 +64,7 @@ cat "$CONFIG"
 
 echo
 echo "=== Verification ==="
-echo "context.size:        $(yq -r '.context.size' "$CONFIG")  (target: 262144)"
+echo "context.size:        $(yq -r '.context.size' "$CONFIG")  (target: 32768)"
 echo "hardware.threads:    $(yq -r '.hardware.threads' "$CONFIG")  (target: 5)"
 echo "hardware.gpu_layers: $(yq -r '.hardware.gpu_layers' "$CONFIG")  (target: 0)"
 echo "server.max_slots:    $(yq -r '.server.max_slots' "$CONFIG")  (target: 1)"

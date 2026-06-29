@@ -1,0 +1,121 @@
+workflow_id: "minimal_prompt_13_v4"
+name: "Prompt 13 v4 - cargo-in-loop validate"
+description: "v4: cargo check in shell hook, model sees real errors."
+version: "1.0.0"
+schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  qwen35:
+    name: "Qwen3-5-9B-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v4/workflow.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+    step_2_synthesize:
+      generative_entity: "${models.qwen35}"
+      prompt: |
+        You are producing the final deliverable: a complete, compilable Rust module.
+        
+        === FILE TO PRODUCE ===
+        src/client/model_download.rs
+        
+        === REQUIRED OUTPUT STRUCTURE ===
+        use anyhow::{bail, Context, Result};
+        use futures::StreamExt;
+        use reqwest::Client;
+        use std::path::Path;
+        use std::time::Duration;
+        use tokio::io::AsyncWriteExt;
+        
+        const HF_BASE_URL: &str = "https://huggingface.co";
+        
+        pub async fn download_model_from_hf(repo: &str, filename: &str, dest_path: &str) -> Result<u64> {
+            // body using:
+            //   - Client::builder().timeout(Duration::from_secs(600)).build()
+            //   - response.bytes_stream() stored in `let mut stream`
+            //   - stream.next() loop with StreamExt
+            //   - file.write_all(&chunk).await via AsyncWriteExt
+            //   - tracing::info! for progress + completion
+            //   - last_log_bytes + 10MB interval (NOT modulo)
+            //   - create_dir_all on parent if Some
+            //   - bail! for status errors
+        }
+        
+        === HARD CONSTRAINTS ===
+        - `let mut stream = response.bytes_stream();` (MUT is required)
+        - `use anyhow::{bail, Context, Result};` (bail macro must be imported)
+        - DO NOT use response.chunk().await
+        - DO NOT use modulo arithmetic for progress
+        - Output ONLY Rust source. NO markdown fences.
+        
+        === INVENTORY ===
+        {{bookmarks.shell_output.stdout}}
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 16384
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v4/workspace/inventory.md"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - "docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v4/deliverables/model_download.rs"
+              - "./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v4/workspace/deliverable.md"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v4/logs/step_2.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+
+
+    step_3_validate:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_2_synthesize]
+      prompt: |
+        You are a Rust compiler. Below is the deliverable + actual cargo check errors.
+        
+        Emit a CORRECTED version that fixes EVERY error. Keep all correct code unchanged.
+        Output ONLY the corrected Rust source. No fences. No commentary.
+        
+        === CURRENT DELIVERABLE ===
+        {{bookmarks.shell_output.stdout}}
+      model_overrides:
+        temperature: 0.0
+        max_tokens: 16384
+      when:
+        before_step_starts:
+          - shell:
+              # Combine deliverable + cargo errors in one shell_output
+              command: "echo '=== DELIVERABLE ===' && cat ./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v4/workspace/deliverable.md && echo '=== CARGO ERRORS ===' && (cp ./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v4/workspace/deliverable.md /tmp/p13_test.rs && sed -i 's|pub async fn download_model_from_hf|pub async fn download_model_from_hf|' /tmp/p13_test.rs && cp src/client/model_download.rs /tmp/p13_baseline.rs && cp /tmp/p13_test.rs src/client/model_download.rs && cargo check --release --features client 2>&1 | grep -E '^(error|  -->)' | head -40 ; cp /tmp/p13_baseline.rs src/client/model_download.rs ; rm -f /tmp/p13_test.rs /tmp/p13_baseline.rs)"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: false
+        after_step_succeeds:
+          - save_to:
+              - "docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v4/deliverables/model_download.rs"
+              - "./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v4/workspace/deliverable_final.md"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v4/logs/step_3.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info

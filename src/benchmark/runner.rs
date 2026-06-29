@@ -89,7 +89,6 @@ struct BenchmarkWorkflowConfig {
 struct WorkflowStep {
     step_name: String,
     step_id: String,
-    #[allow(dead_code)]
     requires: Vec<String>,
     when: Option<serde_json::Value>,
     prompt: Option<String>,
@@ -731,6 +730,65 @@ impl BenchmarkRunner {
         }
 
         dependencies
+    }
+
+    /// Topologically sort workflow steps by their dependency graph.
+    /// `requires` field is populated by `extract_dependency_names` which merges
+    /// both YAML `depends_on` and `requires` keys into a single list.
+    /// Steps with no dependencies come first; steps depending on them follow.
+    /// Uses Kahn's algorithm. Steps in cycles are appended at end (logged as warning).
+    fn topological_sort_steps(steps: Vec<WorkflowStep>) -> Vec<WorkflowStep> {
+        use std::collections::{HashMap, HashSet, VecDeque};
+
+        let id_to_idx: HashMap<String, usize> = steps.iter()
+            .enumerate()
+            .map(|(i, s)| (s.step_id.clone(), i))
+            .collect();
+
+        let mut in_degree: Vec<usize> = vec![0; steps.len()];
+        let mut adjacency: Vec<Vec<usize>> = vec![Vec::new(); steps.len()];
+
+        for (i, step) in steps.iter().enumerate() {
+            for dep in &step.requires {
+                if let Some(&dep_idx) = id_to_idx.get(dep) {
+                    if !adjacency[dep_idx].contains(&i) {
+                        adjacency[dep_idx].push(i);
+                        in_degree[i] += 1;
+                    }
+                }
+            }
+        }
+
+        let mut queue: VecDeque<usize> = (0..steps.len())
+            .filter(|&i| in_degree[i] == 0)
+            .collect();
+
+        let mut result_indices: Vec<usize> = Vec::with_capacity(steps.len());
+        while let Some(i) = queue.pop_front() {
+            result_indices.push(i);
+            for &neighbor in &adjacency[i] {
+                in_degree[neighbor] -= 1;
+                if in_degree[neighbor] == 0 {
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+
+        if result_indices.len() == steps.len() {
+            result_indices.into_iter().map(|i| steps[i].clone()).collect()
+        } else {
+            let dropped: HashSet<usize> = result_indices.iter().copied().collect();
+            let mut kept: Vec<WorkflowStep> = result_indices.into_iter()
+                .map(|i| steps[i].clone())
+                .collect();
+            for (i, step) in steps.into_iter().enumerate() {
+                if !dropped.contains(&i) {
+                    warn!("[benchmark] step {} in depends_on cycle, appended at end", step.step_id);
+                    kept.push(step);
+                }
+            }
+            kept
+        }
     }
 
     fn merged_step_hooks(
@@ -2090,6 +2148,16 @@ impl BenchmarkRunner {
 
         if let Some(steps) = &workflow_steps {
             info!("[benchmark] loaded {} workflow steps from YAML", steps.len());
+
+            // Topological sort by depends_on: ensures upstream steps run before downstream.
+            // Without this, runner iterates in YAML order which may not match dep chain.
+            // Bug symptom: step_t1_1 skipped because step_t1 hadn't run yet.
+            let sorted_steps = Self::topological_sort_steps(steps.clone());
+            if sorted_steps.len() != steps.len() {
+                warn!("[benchmark] cycle detected in depends_on graph: {} steps after sort (originally {})",
+                    sorted_steps.len(), steps.len());
+            }
+            let steps: &[WorkflowStep] = &sorted_steps;
 
             let step_index: std::collections::HashMap<String, usize> = steps.iter()
                 .enumerate()
@@ -4102,6 +4170,87 @@ mod tests {
     }
 
     // --- Workflow Step Parser Tests ---
+
+    /// Helper: build a WorkflowStep with given id + dependencies.
+    fn make_step(id: &str, requires: Vec<&str>) -> WorkflowStep {
+        WorkflowStep {
+            step_name: id.to_string(),
+            step_id: id.to_string(),
+            requires: requires.into_iter().map(String::from).collect(),
+            when: None,
+            prompt: None,
+            generative_entity: None,
+            model_overrides: None,
+            r#loop: None,
+        }
+    }
+
+    #[test]
+    fn test_topological_sort_orders_deps_first() {
+        // C depends on B, B depends on A. Input order: C, A, B (wrong order).
+        let steps = vec![
+            make_step("C", vec!["B"]),
+            make_step("A", vec![]),
+            make_step("B", vec!["A"]),
+        ];
+        let sorted = BenchmarkRunner::topological_sort_steps(steps);
+        let ids: Vec<&str> = sorted.iter().map(|s| s.step_id.as_str()).collect();
+        assert_eq!(ids, vec!["A", "B", "C"],
+            "Topological sort must put A before B before C");
+    }
+
+    #[test]
+    fn test_topological_sort_preserves_independent_order() {
+        // A, B have no deps; C depends on A. Original order should be preserved for A,B.
+        let steps = vec![
+            make_step("A", vec![]),
+            make_step("B", vec![]),
+            make_step("C", vec!["A"]),
+        ];
+        let sorted = BenchmarkRunner::topological_sort_steps(steps);
+        let ids: Vec<&str> = sorted.iter().map(|s| s.step_id.as_str()).collect();
+        let a_pos = ids.iter().position(|&x| x == "A").unwrap();
+        let b_pos = ids.iter().position(|&x| x == "B").unwrap();
+        let c_pos = ids.iter().position(|&x| x == "C").unwrap();
+        assert!(a_pos < c_pos, "A must come before C");
+        assert!(a_pos < b_pos, "Original order: A before B (both no deps)");
+    }
+
+    #[test]
+    fn test_topological_sort_handles_cycle_gracefully() {
+        // A → B → A (cycle). Both should still be in output (appended at end).
+        let steps = vec![
+            make_step("A", vec!["B"]),
+            make_step("B", vec!["A"]),
+        ];
+        let sorted = BenchmarkRunner::topological_sort_steps(steps);
+        assert_eq!(sorted.len(), 2,
+            "Cycle steps must still be in output (appended, not dropped)");
+    }
+
+    #[test]
+    fn test_topological_sort_handles_p11_scenario() {
+        // Reproduces P11 bug: step_t1_1 depends on step_t1, but t1_1 came first in YAML.
+        // Without topo sort, t1_1 would be skipped because t1 hadn't run yet.
+        let steps = vec![
+            make_step("step_00_bootstrap", vec![]),
+            make_step("step_t1_1_analyze_immutability", vec!["step_t1_analyze_docs"]),
+            make_step("step_t1_analyze_docs", vec![]),
+            make_step("step_t2_identify_core_files", vec!["step_t1_1_analyze_immutability"]),
+            make_step("step_final_synthesize", vec!["step_t2_identify_core_files"]),
+        ];
+        let sorted = BenchmarkRunner::topological_sort_steps(steps);
+        let ids: Vec<&str> = sorted.iter().map(|s| s.step_id.as_str()).collect();
+        let bootstrap = ids.iter().position(|&x| x == "step_00_bootstrap").unwrap();
+        let t1 = ids.iter().position(|&x| x == "step_t1_analyze_docs").unwrap();
+        let t1_1 = ids.iter().position(|&x| x == "step_t1_1_analyze_immutability").unwrap();
+        let t2 = ids.iter().position(|&x| x == "step_t2_identify_core_files").unwrap();
+        let synthesize = ids.iter().position(|&x| x == "step_final_synthesize").unwrap();
+        assert!(t1 < t1_1, "t1 must come before t1_1 (was bug)");
+        assert!(t1_1 < t2, "t1_1 must come before t2");
+        assert!(t2 < synthesize, "t2 must come before synthesize");
+        assert_eq!(bootstrap, 0, "Bootstrap with no deps should be first");
+    }
 
     #[test]
     fn test_load_workflow_steps_parses_yaml() {

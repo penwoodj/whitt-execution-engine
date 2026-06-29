@@ -1,0 +1,131 @@
+workflow_id: "minimal_prompt_13_v3"
+name: "Prompt 13 v3 - validate fix"
+description: "v3: tighter prompt + validation step. Reuses v1 inventory."
+version: "1.0.0"
+schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  qwen35:
+    name: "Qwen3-5-9B-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v3/workflow.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+    step_2_synthesize:
+      generative_entity: "${models.qwen35}"
+      prompt: |
+        You are producing the final deliverable: a complete, compilable Rust module.
+        
+        === FILE TO PRODUCE ===
+        src/client/model_download.rs
+        
+        === REQUIRED OUTPUT STRUCTURE (lines must appear in this order) ===
+        Line 1-10: use statements (imports). MUST include ALL of:
+          use anyhow::{Context, Result};
+          use futures::StreamExt;
+          use reqwest::Client;
+          use std::path::Path;
+          use std::time::Duration;
+          use tokio::io::AsyncWriteExt;
+        Line 11+: const HF_BASE_URL: &str = "https://huggingface.co";
+        Then: pub async fn download_model_from_hf(repo: &str, filename: &str, dest_path: &str) -> Result<u64>
+        Body MUST:
+          - Build URL: format!("{}/{}/resolve/main/{}", HF_BASE_URL, repo, filename)
+          - Build reqwest::Client with 600s timeout
+          - Send GET request, check status, bail with text on error
+          - Read content_length, create parent dirs (tokio::fs::create_dir_all)
+          - Create dest file (tokio::fs::File::create)
+          - Use response.bytes_stream() + stream.next() loop (NOT response.chunk().await)
+          - Track downloaded bytes, log progress every 10MB via tracing::info!
+          - Use last_log_bytes pattern (NOT modulo arithmetic)
+          - tracing::info!("Download complete: {} bytes", downloaded) at end
+          - Return Ok(downloaded)
+        
+        === HARD CONSTRAINTS ===
+        - DO NOT invent modules/structs/enums/traits (no pin_utils, no DownloadConfig).
+        - DO NOT use unsafe.
+        - DO NOT use response.chunk().await — use response.bytes_stream() + StreamExt.
+        - DO NOT use eprintln! — use tracing::info!.
+        - DO NOT use modulo arithmetic for progress logging.
+        - Output ONLY Rust source code. NO markdown fences. NO preamble. NO closing remarks.
+        
+        === EXTRACTED INVENTORY (from previous step) ===
+        {{bookmarks.shell_output.stdout}}
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 16384
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v3/workspace/inventory.md"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - "docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v3/deliverables/model_download.rs"
+              - "./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v3/workspace/deliverable.md"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v3/logs/step_2_synthesize.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+
+
+    step_3_validate:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_2_synthesize]
+      prompt: |
+        You are a Rust code reviewer. The deliverable below was generated. Compile-check it mentally.
+        
+        If it has ANY of these defects, emit a CORRECTED complete version:
+        - Missing use statements (Context, Result, Duration, StreamExt, Client, Path, AsyncWriteExt)
+        - Uses response.chunk().await instead of bytes_stream() + StreamExt::next
+        - Uses modulo arithmetic for progress (downloaded % chunk_size)
+        - Uses eprintln! instead of tracing::info!
+        - Missing create_dir_all for parent directory
+        - Missing final "Download complete" log line
+        - Uses unsafe or invents new modules
+        
+        Otherwise, emit the file unchanged.
+        
+        Output ONLY the final Rust source. No fences. No commentary.
+        
+        === CURRENT DELIVERABLE ===
+        {{bookmarks.shell_output.stdout}}
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 16384
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v3/workspace/deliverable.md"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - "docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v3/deliverables/model_download.rs"
+              - "./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v3/workspace/deliverable_final.md"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v3/logs/step_3_validate.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info

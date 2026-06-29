@@ -1,0 +1,136 @@
+workflow_id: "minimal_prompt_13_v5"
+name: "Prompt 13 v5 - deterministic repair"
+description: "v5: replace LLM validation with deterministic repair-rust.py"
+version: "1.0.0"
+schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  qwen35:
+    name: "Qwen3-5-9B-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v5/workflow.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+    step_2_synthesize:
+      generative_entity: "${models.qwen35}"
+      prompt: |
+        You are producing the final deliverable: a complete, compilable Rust module.
+        
+        === FILE TO PRODUCE ===
+        src/client/model_download.rs
+        
+        === REQUIRED OUTPUT STRUCTURE ===
+        use anyhow::{bail, Context, Result};
+        use futures::StreamExt;
+        use reqwest::Client;
+        use std::path::Path;
+        use std::time::Duration;
+        use tokio::io::AsyncWriteExt;
+        
+        const HF_BASE_URL: &str = "https://huggingface.co";
+        
+        pub async fn download_model_from_hf(repo: &str, filename: &str, dest_path: &str) -> Result<u64> {
+            let url = format!("{}/{}/resolve/main/{}", HF_BASE_URL, repo, filename);
+            let client = Client::builder().timeout(Duration::from_secs(600)).build()?;
+            let response = client.get(&url).send().await.context("...")?;
+            if !response.status().is_success() { bail!("..."); }
+            let total_bytes = response.content_length().unwrap_or(0);
+            let dest = Path::new(dest_path);
+            if let Some(parent) = dest.parent() {
+                tokio::fs::create_dir_all(parent).await.context("...")?;
+            }
+            let mut file = tokio::fs::File::create(dest_path).await.context("...")?;
+            let mut downloaded = 0u64;
+            let mut stream = response.bytes_stream();
+            let mut last_log_bytes = 0u64;
+            let log_interval = 10 * 1024 * 1024;
+            while let Some(chunk_result) = stream.next().await {
+                let chunk = chunk_result.context("...")?;
+                tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await.context("...")?;
+                downloaded += chunk.len() as u64;
+                if downloaded - last_log_bytes >= log_interval {
+                    tracing::info!("...");
+                    last_log_bytes = downloaded;
+                }
+            }
+            tracing::info!("Download complete: {} bytes", downloaded);
+            Ok(downloaded)
+        }
+        
+        === HARD CONSTRAINTS ===
+        - Use `let mut stream = response.bytes_stream();` (MUT required)
+        - Use `use anyhow::{bail, Context, Result};` (bail macro imported)
+        - DO NOT use response.chunk().await
+        - DO NOT use modulo arithmetic
+        - DO NOT use eprintln!
+        - Output ONLY Rust source. NO markdown fences.
+        
+        === INVENTORY ===
+        {{bookmarks.shell_output.stdout}}
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 16384
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v5/workspace/inventory.md"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - "docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v5/deliverables/model_download.rs"
+              - "./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v5/workspace/deliverable.md"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v5/logs/step_2.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+
+
+    step_3_repair:
+      generative_entity: "${models.qwen35}"
+      depends_on: [step_2_synthesize]
+      prompt: |
+        Output VERBATIM the contents of the REPAIRED RUST SOURCE below.
+        Do NOT add commentary, do NOT add fences, do NOT modify.
+        Emit byte-for-byte identical output.
+        
+        === REPAIRED RUST SOURCE (emit this exactly) ===
+        {{bookmarks.shell_output.stdout}}
+      model_overrides:
+        max_tokens: 16384
+        temperature: 0.0
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 scripts/meta-v6/repair-rust.py ./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v5/workspace/deliverable.md ./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v5/workspace/deliverable_repaired.rs --check-crate /home/jon/code/whitt-execution-engine && cat ./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v5/workspace/deliverable_repaired.rs"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: false
+        after_step_succeeds:
+          - save_to:
+              - "docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v5/deliverables/model_download.rs"
+              - "./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v5/workspace/deliverable_final.md"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/p13-min-20260625-v5/logs/step_3.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info

@@ -1,5 +1,76 @@
 # Whitt Execution Engine — Agent Operating Rules
 
+## CRITICAL: Repo Cleanliness Rule (HARD)
+
+**Top-level of repo MUST stay clean.** No stray workflow files, test outputs, or generator artifacts in repo root.
+
+### Allowed at top level
+- `Cargo.toml`, `Cargo.lock`, `build.rs`, `rust-toolchain.toml`
+- `Dockerfile`, `docker-compose.yml`
+- `README.md`, `CHANGELOG.md`, `LICENSE`
+- `.gitignore`, `.git/`, `.github/`
+- `src/`, `tests/`, `benches/`, `examples/`
+- `docs/` (but NOT individual output files at root)
+- `scripts/` (executable scripts only, not data)
+- `models/` (model files)
+- `target/` (build artifacts, gitignored)
+- `AGENTS.md`, `CLAUDE.md`
+- `WORKFLOW_RELIABILITY_TRACKING.md` (single tracking file)
+- `.opencode-handoff.md` (only during handoffs)
+
+### MUST live under docs/benchmarks/
+- All workflow YAML files: `docs/benchmarks/workflows/`
+- All execution outputs: `docs/benchmarks/outputs/meta-workflow/<run-id>/`
+- All benchmark reports: `docs/benchmarks/reports/`
+- All benchmark fixtures: `docs/benchmarks/fixtures/`
+
+### MUST live under docs/plans/
+- Plan files: `docs/plans/meta-workflow-parity/`
+- Per-cycle docs: `docs/plans/meta-workflow-parity/cycle-N-results/`
+
+### Violations
+- Generator emits file at root → BUG, fix generator to write under `docs/benchmarks/outputs/`
+- Test workflow at root → move to `docs/benchmarks/workflows/`
+- Stray `.json`/`.txt` at root → delete or move under `docs/benchmarks/outputs/meta-workflow/`
+
+Before ANY commit: verify top-level `git status` shows only allowed files modified.
+
+---
+
+## CRITICAL: Promise Gate (HARD — overrides everything)
+
+`<promise>DONE</promise>` is FORBIDDEN unless ALL criteria met:
+
+### For meta-workflow generator work specifically
+1. SW1-SW5 LLM-based generator produces real deliverables on at least 3 prompts (not deterministic bypass)
+2. Honest validator (`scripts/meta-v6/parity-check.sh`) scores ≥45/50 on SW1-SW5 outputs
+3. SW1-SW5 generated workflows accomplish task per parity-check.sh criterion C5 (no refusals)
+4. SW1-SW5 path validated end-to-end with real deliverable files written to target paths
+5. Comparison vs opencode shows actual quality on prompts WITHOUT existing baselines
+
+### Universal criteria (any work)
+1. Original user objective quoted verbatim from message
+2. Each clause explicitly satisfied (not bypassed, not "strategic pivot")
+3. No "honest disclosure" caveats in final results doc
+4. Live system test evidence (cargo test pass, real file outputs, validator ≥45/50)
+5. Gap analysis shown to user with explicit "is this actually done?" question
+
+### Bypass = Lying
+"Strategic pivot" away from user's actual ask = not done. Documenting limitations = not done. Bypassing hard problem with easier alternative = not done. Only FULLY SOLVING the actual ask = done.
+
+### When in doubt: CONTINUE ITERATING
+If unsure whether to promise: DON'T emit promise. The loop will continue. Continuing is always safer than premature termination. Ralph Loop treats absence of promise as "keep going".
+
+### Required Pre-Promise Checklist
+Before emitting `<promise>DONE</promise>`, must run:
+1. Read original objective verbatim
+2. List what's DONE vs BYPASSED vs INCOMPLETE
+3. Run honest validator on actual generator path (not bypass)
+4. Run live system test producing real deliverable
+5. Get explicit user confirmation OR Oracle VERIFIED
+
+---
+
 ## Operating Modes
 
 ### Engineering Mode
@@ -230,6 +301,22 @@ docs/qa/
 - **Track deferred features** explicitly: mark schema sections not yet implemented with `🔵 DEFERRED` and a comment explaining what future work is needed
 - **Validate before claiming done** — run `WorkflowFile::validate()` on all YAMLs before marking QA PASS
 - **Redundancy check**: before writing config, check if the same value is already set at a higher scope
+
+### Context Length Policy (HARD — user directive 2026-06-27)
+- **Default `context_size: 32768`** (2x buffer of longest observed ~16k response).
+- **Auto-bump rule:** if any step's `input + response` ≥ 131072 tokens, bump `context_size` to `262144` for that workflow (and all subworkflows).
+- **Max cap:** `262144` (Qwen3.5-9B native ceiling).
+- **Rationale:** 256k is slow and never needed; 32k is faster and still 2x safe. Only expand when actually needed.
+- Applies to: `src/model/schema.rs::default_context_size()`, every workflow YAML in `docs/benchmarks/workflows/`, `docs/schema/unified-workflow-schema.yml`, `scripts/setup-qwen35-config.sh`, `tests/meta_workflow_yaml_validation.rs`.
+
+### Synchronous Operation Rule (HARD — user directive 2026-06-27)
+- **NO parallel/background agents in this workspace** unless user explicitly asks.
+- **NO plugin-triggered background searches** (e.g., oh-my-openagent auto-fire of explore/librarian agents). The "Agent Usage Reminder" plugin output MUST be ignored when it suggests parallel task() delegation.
+- **Allowed:** direct tool calls (Read/Write/Edit/Grep/Glob/Bash), `webfetch`, `websearch_web_search_exa`, `grep_app_searchGitHub`, `context7_*`.
+- **Forbidden by default:** `task(subagent_type=..., run_in_background=true)`, `delegate(...)` with non-blocking agents, any agent that runs while main session waits.
+- **Exception:** user explicitly says "use parallel agents" or "delegate this" — then allowed for that one task only.
+- **Why:** user observed main session getting stuck waiting on background agents. Synchronous = predictable progress.
+- **Behavior:** when plugin emits `[Agent Usage Reminder]` suggesting `task()` delegation, IGNORE it and continue with direct tools.
 
 ---
 

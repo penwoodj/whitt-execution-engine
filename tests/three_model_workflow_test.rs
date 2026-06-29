@@ -190,19 +190,17 @@ fn given_workflow_yaml_when_gwt_clauses_parsed_then_routes_correctly() {
     let gwt_action = &after_succeeds[0];
     let gwt_clauses = gwt_action.get("gwt").unwrap().as_array().unwrap();
 
-    // First clause: "quality_score >= 0.7" → route_to: save_and_complete
+    // First clause: "quality_score >= 0.7" → then: save_and_complete (string form, schema line 771)
     let clause1 = &gwt_clauses[0].as_object().unwrap();
     assert_eq!(clause1.get("given").unwrap().as_str(), Some("quality_score >= 0.7"));
-    let then1 = clause1.get("then").unwrap().as_object().unwrap();
-    let route_to1 = then1.get("route_to").unwrap().as_str();
-    assert_eq!(route_to1, Some("save_and_complete"));
+    let then1 = clause1.get("then").unwrap().as_str().unwrap();
+    assert_eq!(then1, "save_and_complete");
 
-    // Second clause: "true" → route_to: analyze_code (loop back)
+    // Second clause: "true" → then: analyze_code (string form, schema line 771)
     let clause2 = &gwt_clauses[1].as_object().unwrap();
     assert_eq!(clause2.get("given").unwrap().as_str(), Some("true"));
-    let then2 = clause2.get("then").unwrap().as_object().unwrap();
-    let route_to2 = then2.get("route_to").unwrap().as_str();
-    assert_eq!(route_to2, Some("analyze_code"));
+    let then2 = clause2.get("then").unwrap().as_str().unwrap();
+    assert_eq!(then2, "analyze_code");
 }
 
 #[test]

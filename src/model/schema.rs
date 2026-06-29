@@ -981,7 +981,10 @@ impl LoadParams {
 }
 
 fn default_context_size() -> usize {
-    262144
+    // Policy: 2x buffer of longest observed response (~16k) = 32k.
+    // Auto-bump to 262144 if input+response ever >= 131072 (so 2x buffer <= 256k).
+    // See AGENTS.md "Context Length Policy" for full rules.
+    32768
 }
 
 fn default_batch_size() -> usize {
@@ -1339,7 +1342,7 @@ test-model:
     #[test]
     fn load_params_to_env_vars_produces_all_llama_args() {
         let lp = LoadParams {
-            context_size: 262144,
+            context_size: 32768,
             batch_size: 2048,
             ubatch_size: 512,
             cache_type_k: "q8_0".into(),
@@ -1354,7 +1357,7 @@ test-model:
         };
         let vars = lp.to_env_vars();
         let map: std::collections::HashMap<String, String> = vars.into_iter().collect();
-        assert_eq!(map.get("LLAMA_ARG_CTX_SIZE"), Some(&"262144".into()));
+        assert_eq!(map.get("LLAMA_ARG_CTX_SIZE"), Some(&"32768".into()));
         assert_eq!(map.get("LLAMA_ARG_BATCH_SIZE"), Some(&"2048".into()));
         assert_eq!(map.get("LLAMA_ARG_UBATCH_SIZE"), Some(&"512".into()));
         assert_eq!(map.get("LLAMA_ARG_CACHE_TYPE_K"), Some(&"q8_0".into()));
@@ -1379,7 +1382,7 @@ test-model:
 "#;
         let config: ModelsConfig = serde_saphyr::from_str(yaml).expect("parse");
         let lp = &config.models["test-model"].load_params;
-        assert_eq!(lp.context_size, 262144);
+        assert_eq!(lp.context_size, 32768);
         assert_eq!(lp.gpu_layers, 0);
         assert_eq!(lp.threads, 5);
         assert_eq!(lp.parallel, 1);
@@ -1462,7 +1465,7 @@ qwen35:
   host:
     type: "llama_cpp_with_vulkan"
   load_params:
-    context_size: 262144
+    context_size: 32768
     gpu_layers: 0
     threads: 5
     parallel: 1
@@ -1475,7 +1478,7 @@ qwen35:
         let config: ModelsConfig = serde_saphyr::from_str(yaml).expect("parse");
         let spec = &config.models["qwen35"];
         assert_eq!(spec.name, "Qwen3-5-9B.gguf");
-        assert_eq!(spec.load_params.context_size, 262144);
+        assert_eq!(spec.load_params.context_size, 32768);
         assert_eq!(spec.load_params.parallel, 1);
         assert_eq!(spec.sampling.temperature, Some(0.2));
         assert_eq!(spec.sampling.max_tokens, Some(4096));
