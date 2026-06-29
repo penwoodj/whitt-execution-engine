@@ -422,8 +422,11 @@ def main() -> int:
         if other_ids:
             dep_line = f"  depends_on:\n    - " + "\n    - ".join(other_ids) + "\n"
             old_first_line = "step_final_synthesize:\n"
+            synth_block = blocks_clean[synthesis_idx]
+            if 'depends_on:' in synth_block:
+                synth_block = re.sub(r'\n  depends_on:\n(    - \S+\n)+', '', synth_block, count=1)
             new_first_line = old_first_line + dep_line
-            blocks_clean[synthesis_idx] = blocks_clean[synthesis_idx].replace(
+            blocks_clean[synthesis_idx] = synth_block.replace(
                 old_first_line, new_first_line, 1
             )
 
