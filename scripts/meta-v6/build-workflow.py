@@ -289,6 +289,8 @@ def make_synthesis_step(run_dir: str, deliverable_filename: str, prior_step_ids:
         - For code tasks: produce COMPLETE implementations (not fragments), with error handling and edge cases
         - For diagnostic tasks: produce Root Cause → Evidence → Fix → Verification → Troubleshooting
         - For design tasks: produce Architecture → Implementation → Testing → Deployment sections
+        - CONVERT analysis into code: if prior steps produced design/analysis, SYNTHESIZE that into working code implementations
+        - Every claim must have supporting code. Don't describe — IMPLEMENT.
 
         QUALITY REQUIREMENTS:
         - Minimum 3000 bytes of actual content (not counting markdown formatting)
