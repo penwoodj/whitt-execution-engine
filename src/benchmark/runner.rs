@@ -1797,7 +1797,7 @@ impl BenchmarkRunner {
             step_name: step.step_name.clone(),
             step_type: StepType::Generative,
             model_name: model_id.to_string(),
-            prompt_preview: if prompt.len() > 100 { format!("{}...", &prompt[..100]) } else { prompt.clone() },
+            prompt_preview: if prompt.chars().count() > 100 { let end = prompt.char_indices().nth(100).map(|(i, _)| i).unwrap_or(100); format!("{}...", &prompt[..end]) } else { prompt.clone() },
             workflow_variables,
         });
 
