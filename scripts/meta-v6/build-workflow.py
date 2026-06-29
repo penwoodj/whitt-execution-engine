@@ -55,32 +55,36 @@ agentic_workflow:
 
 
 def extract_step_blocks(md_text: str) -> list[str]:
-    """Extract ```yaml ... ``` blocks from SW4 markdown.
+    """Extract step blocks from SW4 markdown.
 
-    Each block should begin with `step_<id>_<name>:` at column 0.
-    Returns list of raw YAML strings (one per step).
-
-    SW4 sometimes emits ```yaml without matching ``` close fence,
-    causing regex to capture trailing markdown (### T1.1, Intent:, etc.).
-    Trim each block at first non-indented non-empty line (markdown metadata).
+    Scans ENTIRE text for step_ definitions at column 0.
+    Handles code-fenced and bare YAML formats.
+    Multiple consecutive step definitions split into separate blocks.
     """
-    blocks = re.findall(r'```yaml\n(.*?)```', md_text, re.DOTALL)
     step_blocks: list[str] = []
-    for block in blocks:
-        trimmed_lines = []
-        in_step = False
-        for line in block.splitlines():
-            stripped = line.strip()
-            if not in_step:
-                if stripped.startswith('step_'):
-                    in_step = True
-                    trimmed_lines.append(line)
+    current_lines: list[str] = []
+    in_step = False
+    for line in md_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('step_') and not line.startswith(' ') and not line.startswith('\t'):
+            if current_lines:
+                step_blocks.append('\n'.join(current_lines).strip())
+            current_lines = [line]
+            in_step = True
+            continue
+        if not in_step:
+            continue
+        if stripped and not line.startswith(' ') and not line.startswith('\t'):
+            if not stripped.startswith('step_'):
+                if current_lines:
+                    step_blocks.append('\n'.join(current_lines).strip())
+                    current_lines = []
+                    in_step = False
                 continue
-            if stripped and not line.startswith(' ') and not line.startswith('\t'):
-                break
-            trimmed_lines.append(line)
-        if trimmed_lines:
-            step_blocks.append('\n'.join(trimmed_lines).strip())
+        if in_step:
+            current_lines.append(line)
+    if current_lines:
+        step_blocks.append('\n'.join(current_lines).strip())
     return step_blocks
 
 
