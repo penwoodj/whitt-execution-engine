@@ -292,6 +292,7 @@ def make_synthesis_step(run_dir: str, deliverable_filename: str, prior_step_ids:
 
         QUALITY REQUIREMENTS:
         - Minimum 3000 bytes of actual content (not counting markdown formatting)
+        - Minimum 3 code blocks with syntactically valid code (more is better)
         - Every section must have substantive content (no "TODO" or "placeholder")
         - Code blocks must be syntactically valid and complete
         - Use markdown headers (##, ###), code blocks (```), and numbered lists
