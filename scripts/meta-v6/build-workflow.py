@@ -465,6 +465,20 @@ def main() -> int:
             continue
         blocks_clean[i] = block.replace('cat ./outputs/', 'cat $WHITT_OUTPUT_DIR/outputs/')
 
+    # Overwrite synthesis step's save_to FilePath to point to {run_dir}/deliverables/.
+    # SW4-emitted synthesis uses ./outputs/deliverable.md which gets redirected by engine
+    # to <exec_dir>/outputs/ instead of <run_dir>/deliverables/. Force correct path.
+    if run_dir and run_dir != './outputs':
+        deliverable_path = f'{run_dir}/deliverables/deliverable.md'
+        for i, block in enumerate(blocks_clean):
+            if 'step_final_synthesize' not in block:
+                continue
+            blocks_clean[i] = re.sub(
+                r'(\./outputs/deliverable\.md|deliverable\.md)',
+                deliverable_path,
+                block,
+            )
+
     indented_blocks = [normalize_indent(b) for b in blocks_clean]
     body = '\n\n'.join(indented_blocks)
 
