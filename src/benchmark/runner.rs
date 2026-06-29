@@ -1983,9 +1983,23 @@ impl BenchmarkRunner {
 
             let after_context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
                 step_name: step.step_name.clone(),
-                output: output_text,
+                output: output_text.clone(),
                 duration_ms: model_result.total_duration.as_millis() as u64,
-                quality_score: output_ratio, // Measures output length vs max_tokens, not semantic quality
+                quality_score: {
+                    let refusal_patterns = [
+                        "I cannot help", "I can't help", "I am unable to",
+                        "I'm unable to", "As an AI", "I'm not able to",
+                        "I am not able to", "I will not help",
+                    ];
+                    let lower = output_text.to_lowercase();
+                    let is_refusal = refusal_patterns.iter().any(|p| lower.contains(&p.to_lowercase()));
+                    if is_refusal && output_text.len() < 2000 {
+                        warn!("[benchmark] step {} output appears to be a REFUSAL ({} bytes), setting quality_score=0.0", step.step_id, output_text.len());
+                        Some(0.0f32)
+                    } else {
+                        output_ratio
+                    }
+                },
                 token_count: total_tokens as u32,
                 model_name: model_id.to_string(),
             });
