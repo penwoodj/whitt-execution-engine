@@ -172,8 +172,9 @@ impl BenchmarkSuiteResult {
                 table.push('\n');
 
                 for (i, inf) in result.inference_results.iter().enumerate() {
-                    let preview = if inf.prompt.len() > 30 {
-                        format!("{}...", &inf.prompt[..30])
+                    let preview = if inf.prompt.chars().count() > 30 {
+                        let safe_end = inf.prompt.char_indices().nth(30).map(|(i, _)| i).unwrap_or(30);
+                        format!("{}...", &inf.prompt[..safe_end])
                     } else {
                         inf.prompt.clone()
                     };
