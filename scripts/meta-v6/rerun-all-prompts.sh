@@ -8,7 +8,7 @@
 #   - Smart retry (07d8bed)
 # Without these fixes, intermediate steps produce ~4 tokens each and
 # synthesis falls back to single-shot. Re-runs needed for real multi-step quality.
-set -euo pipefail
+set -uo pipefail
 
 REPO=/home/jon/code/whitt-execution-engine
 PROMPT_DIR=$REPO/docs/plans/meta-workflow-qwen35/test-prompts/real

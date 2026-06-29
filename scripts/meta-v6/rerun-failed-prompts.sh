@@ -4,7 +4,7 @@
 #
 # This script should be run AFTER the batch runner (PID 452133) completes P21-P24.
 # Usage: bash scripts/meta-v6/rerun-failed-prompts.sh
-set -euo pipefail
+set -uo pipefail
 
 REPO=/home/jon/code/whitt-execution-engine
 PROMPT_DIR=$REPO/docs/plans/meta-workflow-qwen35/test-prompts/real
