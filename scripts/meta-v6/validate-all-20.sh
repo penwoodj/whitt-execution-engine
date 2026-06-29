@@ -21,7 +21,7 @@ for p in 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do
   SW_DELIV=""
   SW_WF=""
   SW_EXEC=""
-  LATEST_DIR=$(ls -td $META_BASE/p${p}-final-* $META_BASE/p${p}-sw-pipeline-* 2>/dev/null | head -1)
+  LATEST_DIR=$(ls -td $META_BASE/p${p}-fresh-* $META_BASE/p${p}-rerun-* $META_BASE/p${p}-final-* $META_BASE/p${p}-sw-pipeline-* 2>/dev/null | head -1)
   if [ -n "$LATEST_DIR" ] && [ -d "$LATEST_DIR" ]; then
     d="$LATEST_DIR"
     if [ -f "$d/deliverables/deliverable.md" ]; then
