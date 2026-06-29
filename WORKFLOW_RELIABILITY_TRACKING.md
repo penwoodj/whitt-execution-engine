@@ -565,3 +565,20 @@ Remaining untested: P10, P11, P15. P05 cancelled (too slow with 240KB file injec
 | Gap 9 | VERY HIGH | Tool feedback loop (model can't call tools during inference) |
 | Gap 11 | HIGH | Sub-workflow execution (parsed but not invoked) |
 | Gap 12 | HIGH | Loop execution (parsed but not iterated) |
+
+### CRITICAL FINDING — Ralph Loop Iteration 5 (2026-06-29)
+
+**Root cause of quality ceiling identified and fixed.**
+
+ALL existing deliverables (P05-P15, P20) were generated with TWO critical bugs:
+
+1. **max_tokens=4 leak:** Runner extracts max_tokens from bootstrap step (max_tokens=4) as workflow default. All intermediate steps without explicit model_overrides generated only ~4 tokens each. Steps completed in ~0.5s instead of ~60s.
+
+2. **Missing save_to hooks:** SW4 emits steps without save_to hooks. Step output evaporated after execution. Synthesis had nothing to synthesize → fell back to prompt alone → effectively single-shot.
+
+**Fix deployed (commit c97076a):**
+- build-workflow.py now injects `model_overrides: { max_tokens: 8192, temperature: 0.3 }` for steps missing it
+- build-workflow.py now injects `when: { after_step_succeeds: [{ save_to: [$var, ./outputs/file] }] }` for steps missing it
+- Verified on P20 structs: 7/7 intermediate steps now have max_tokens=8192 + save_to=YES
+
+**Impact:** ALL existing 50/50 scores are structurally correct but qualitatively misleading. Multi-step pipeline wasn't contributing. Comprehensive re-run needed (script PID 508075 queued).
