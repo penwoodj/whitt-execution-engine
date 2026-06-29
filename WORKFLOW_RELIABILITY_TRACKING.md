@@ -566,6 +566,48 @@ Remaining untested: P10, P11, P15. P05 cancelled (too slow with 240KB file injec
 | Gap 11 | HIGH | Sub-workflow execution (parsed but not invoked) |
 | Gap 12 | HIGH | Loop execution (parsed but not iterated) |
 
+---
+
+## Iteration 6 — cap_large_cat + sw5-finalize + critical quality analysis (2026-06-29)
+
+### Critical Quality Finding: max_tokens=4 Leak + Missing save_to
+
+**Root cause chain (fully diagnosed):**
+
+1. **max_tokens=4 leak:** Runner's `load_workflow_config()` reads first_step's model_overrides.max_tokens (bootstrap=4) as workflow default. ALL steps without explicit model_overrides inherit 4 tokens → ~0.5s per step → only synthesis produces real content.
+
+2. **Missing save_to:** SW4 emits intermediate steps without save_to hooks. Output evaporates. Synthesis has nothing to synthesize → falls back to prompt alone.
+
+**Result:** ALL existing 50/50 scores (P05-P15, P20) are structurally correct but qualitatively equivalent to single-shot. Multi-step pipeline contributed ZERO value.
+
+### Fixes Deployed (commits in iteration 5-6)
+
+| Fix | Commit | Impact |
+|-----|--------|--------|
+| save_to injection | `c97076a` | Every step gets save_to hook (output persisted) |
+| max_tokens >=8192 enforcement | `c97076a` | Every step gets explicit model_overrides |
+| max_tokens <100 filter in runner | `308a33b` | Engine ignores bootstrap max_tokens for default |
+| cap_large_cat quote regex | `44bf3b8` | `\| head -c 50000` stays inside YAML quoted string |
+| sw5-finalize non-fatal validation | `44bf3b8` | Copies workflow even if Python YAML rejects |
+| fail_on_error: false | `d0d4b89` | Steps run even when shell hooks fail |
+| Docker health check | `7457ac4` | 30s pause on 500/connection errors |
+| Smart retry | `07d8bed` | Truncated prompt + higher temp on final attempt |
+| Refusal detection | `0e7b8fd` | quality_score=0.0 on refusal patterns |
+| Topological sort | (b2) | Steps execute in dependency order |
+| save_to output_dir fix | (b8) | Files write to exec dir, not repo root |
+| WHITT_OUTPUT_DIR env var | (b8) | Shell hooks resolve relative output paths |
+| Duplicate depends_on removal | `7462cd5` | No YAML duplicate key errors |
+
+### Comprehensive Re-run Queued
+
+PID 508075: Re-runs ALL 20 prompts with all fixes above. Chained after:
+- PID 452133 (batch runner P23-P24)
+- PID 478920 (P10+P16-P19 re-runs)
+- PID 496364 (P21 re-run)
+- PID 505387 (P22 re-run)
+
+Total ETA: ~29 hours for all 20 prompts to complete with actual multi-step quality.
+
 ### CRITICAL FINDING — Ralph Loop Iteration 5 (2026-06-29)
 
 **Root cause of quality ceiling identified and fixed.**
