@@ -483,6 +483,34 @@ def main() -> int:
                 new_lines.append(' ' * indent + 'fail_on_error: false')
         blocks_clean[i] = '\n'.join(new_lines)
 
+    # CRITICAL: Ensure every non-bootstrap, non-synthesis step has a save_to hook.
+    # Without save_to, step output evaporates → synthesis has nothing to synthesize.
+    # This was the root cause of "50/50 but actually single-shot" bug in P20.
+    for i, block in enumerate(blocks_clean):
+        stripped = block.strip()
+        if stripped.startswith('step_00_bootstrap') or stripped.startswith('step_final_synthesize'):
+            continue
+        if 'save_to' in block:
+            continue
+        step_id_match = re.match(r'^(\S+):', stripped)
+        if not step_id_match:
+            continue
+        step_id = step_id_match.group(1)
+        save_to_injection = (
+            f"      after_step_succeeds:\n"
+            f"        - save_to:\n"
+            f"            - ${step_id}_output\n"
+            f"            - ./outputs/{step_id}.txt\n"
+        )
+        block_lines = block.split('\n')
+        insert_idx = len(block_lines)
+        for j, line in enumerate(block_lines[1:], 1):
+            if line.strip() and not line.startswith(' ' * 4):
+                insert_idx = j
+                break
+        block_lines.insert(insert_idx, save_to_injection.rstrip())
+        blocks_clean[i] = '\n'.join(block_lines)
+
     # Ensure all execution steps have max_tokens >= 8192.
     # SW4 LLM sometimes omits model_overrides or sets low max_tokens.
     # Without sufficient max_tokens, steps truncate output, reducing deliverable quality.
