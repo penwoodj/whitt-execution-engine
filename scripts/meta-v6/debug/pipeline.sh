@@ -93,7 +93,7 @@ log "execute:start"
 EXEC_DIR="${META_DIR}/exec"
 mkdir -p "$EXEC_DIR"
 SWEEPT0=$(date +%s)
-timeout 1800 "$REPO/target/release/whitt" benchmark \
+timeout 5400 "$REPO/target/release/whitt" benchmark \
   --workflow "$GENERATED" \
   --output-dir "$EXEC_DIR" \
   --models-dir "$REPO/models" \
