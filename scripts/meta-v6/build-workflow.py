@@ -474,15 +474,20 @@ def main() -> int:
         stripped = block.strip()
         if stripped.startswith('step_00_bootstrap') or stripped.startswith('step_final_synthesize'):
             continue
-        if 'fail_on_error' in block:
-            continue
         lines = block.split('\n')
         new_lines = []
+        has_fail_on_error = False
         for line in lines:
-            new_lines.append(line)
-            if line.strip().startswith('working_dir:'):
+            if line.strip().startswith('fail_on_error:'):
                 indent = len(line) - len(line.lstrip())
                 new_lines.append(' ' * indent + 'fail_on_error: false')
+                has_fail_on_error = True
+            else:
+                new_lines.append(line)
+                if not has_fail_on_error and line.strip().startswith('working_dir:'):
+                    indent = len(line) - len(line.lstrip())
+                    new_lines.append(' ' * indent + 'fail_on_error: false')
+                    has_fail_on_error = True
         blocks_clean[i] = '\n'.join(new_lines)
 
     # CRITICAL: Ensure every non-bootstrap, non-synthesis step has a save_to hook.
@@ -534,6 +539,23 @@ def main() -> int:
             block_lines.insert(1, '  model_overrides:\n    max_tokens: 8192\n    temperature: 0.3')
             blocks_clean[i] = '\n'.join(block_lines)
 
+    # Fix dangling step references: shell hooks that cat files from non-existent steps.
+    # SW4 sometimes emits steps referencing step_t0_environment_setup when only t1+ exist.
+    # Without this fix: cat fails → step skipped → cascade failure → effectively single-shot.
+    all_step_ids = set()
+    for block in blocks_clean:
+        m = re.match(r'^(\S+):', block.strip())
+        if m:
+            all_step_ids.add(m.group(1))
+    for i, block in enumerate(blocks_clean):
+        cat_refs = re.findall(r'cat\s+\S*outputs/([a-z0-9_]+)\.txt', block)
+        for ref_id in cat_refs:
+            if ref_id not in all_step_ids:
+                blocks_clean[i] = blocks_clean[i].replace(
+                    f'outputs/{ref_id}.txt',
+                    f'outputs/{ref_id}.txt 2>/dev/null || true'
+                )
+
     # Rewrite `cat ./outputs/` to `cat $WHITT_OUTPUT_DIR/outputs/` in shell commands.
     # Engine sets WHITT_OUTPUT_DIR env var to output_dir. save_to resolves relative
     # paths against output_dir too. This keeps cat and save_to consistent while
@@ -560,10 +582,13 @@ def main() -> int:
     indented_blocks = [normalize_indent(b) for b in blocks_clean]
     body = '\n\n'.join(indented_blocks)
 
-    # Final synthesis step aggregates prior outputs into deliverable file
+    # Final synthesis step aggregates prior outputs into deliverable file.
+    # ALWAYS add deterministic synthesis — SW4-emitted synthesis is often malformed.
+    # If SW4 emitted one, remove it first, then add ours.
+    if has_synthesis:
+        blocks_clean = [b for b in blocks_clean if not re.match(r'^step_final_synthesize\s*:', b.strip())]
     synthesis = ''
-    if run_dir and run_dir != './outputs' and not has_synthesis:
-        # Extract step IDs from blocks for aggregation reference
+    if run_dir and run_dir != './outputs':
         step_ids = []
         for b in blocks_clean:
             m_id = re.match(r'^(\S+):', b.strip())
@@ -572,8 +597,6 @@ def main() -> int:
         prior_ids = [s for s in step_ids if s != 'step_00_bootstrap']
         deliverable_name = 'deliverable.md'
         synthesis = make_synthesis_step(run_dir, deliverable_name, prior_ids)
-    elif has_synthesis:
-        sys.stderr.write('[build-workflow] SW4 already emitted step_final_synthesize, skipping ours\n')
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(header + bootstrap + body + '\n\n' + synthesis, encoding='utf-8')
