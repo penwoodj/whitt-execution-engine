@@ -519,10 +519,13 @@ impl BenchmarkRunner {
         };
 
         // Read max_tokens with priority: step model_overrides > model sampling config > default (4096)
+        // CRITICAL: Skip bootstrap steps (max_tokens < 100) — they use low values intentionally.
+        // Using bootstrap's max_tokens as workflow default causes ALL steps to generate ~4 tokens.
         let max_tokens_from_step = first_step
             .get("model_overrides")
             .and_then(|mo| mo.get("max_tokens"))
             .and_then(|v| v.as_u64())
+            .filter(|&v| v >= 100)
             .map(|v| v as usize);
 
         let max_tokens_from_model = yaml_value
