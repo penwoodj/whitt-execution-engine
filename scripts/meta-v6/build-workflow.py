@@ -480,6 +480,27 @@ def main() -> int:
                 new_lines.append(' ' * indent + 'fail_on_error: false')
         blocks_clean[i] = '\n'.join(new_lines)
 
+    # Ensure all execution steps have max_tokens >= 8192.
+    # SW4 LLM sometimes omits model_overrides or sets low max_tokens.
+    # Without sufficient max_tokens, steps truncate output, reducing deliverable quality.
+    for i, block in enumerate(blocks_clean):
+        stripped = block.strip()
+        if stripped.startswith('step_00_bootstrap') or stripped.startswith('step_final_synthesize'):
+            continue
+        if 'max_tokens' in block:
+            existing = re.search(r'max_tokens:\s*(\d+)', block)
+            if existing and int(existing.group(1)) < 8192:
+                blocks_clean[i] = block.replace(
+                    existing.group(0),
+                    f'max_tokens: 8192'
+                )
+        elif 'model_overrides:' in block:
+            blocks_clean[i] = block.replace(
+                'model_overrides:',
+                'model_overrides:\n        max_tokens: 8192',
+                1
+            )
+
     # Rewrite `cat ./outputs/` to `cat $WHITT_OUTPUT_DIR/outputs/` in shell commands.
     # Engine sets WHITT_OUTPUT_DIR env var to output_dir. save_to resolves relative
     # paths against output_dir too. This keeps cat and save_to consistent while
