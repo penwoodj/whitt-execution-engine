@@ -292,9 +292,12 @@ def make_synthesis_step(run_dir: str, deliverable_filename: str, prior_step_ids:
         - Do NOT refuse or hedge
         - Do NOT use placeholders like "<your answer here>"
         - Write ACTUAL content directly usable by the user
-        - Target length: 1500-3000 bytes for diagnostics, more for docs/code
+        - INCLUDE all relevant code blocks from prior steps in the final deliverable
+        - Use proper markdown structure with headers (#, ##, ###), code blocks (```), and lists
+        - Produce COMPREHENSIVE output: cover ALL aspects mentioned in prior steps
+        - Do NOT summarize or abbreviate — include FULL implementations
       model_overrides:
-        max_tokens: 8192
+        max_tokens: 16384
         temperature: 0.3
       when:
         before_step_starts:
