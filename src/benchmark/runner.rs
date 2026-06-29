@@ -3276,13 +3276,28 @@ impl BenchmarkRunner {
                 if let Some(ref sys) = system_prompt {
                     messages.push(ChatMessage::system(sys.clone()));
                 }
-                messages.push(ChatMessage::user(prompt));
+
+                let effective_prompt = if attempt == MAX_RETRIES - 1 && prompt.len() > 4000 {
+                    let truncated = &prompt[prompt.len() - 3000..];
+                    warn!("[benchmark] smart retry: truncating prompt to last 3000 chars (was {} chars)", prompt.len());
+                    truncated.to_string()
+                } else {
+                    prompt.clone()
+                };
+
+                let effective_temp = if attempt == MAX_RETRIES - 1 {
+                    (temperature + 0.3).min(1.0)
+                } else {
+                    temperature
+                };
+
+                messages.push(ChatMessage::user(effective_prompt));
 
                 let request = ChatCompletionRequest {
                     model: server_model_id.to_string(),
                     messages,
                     max_tokens: Some(max_tokens),
-                    temperature: Some(temperature as f32),
+                    temperature: Some(effective_temp as f32),
                     top_p: Some(top_p as f32),
                     stream: false,
                     ..Default::default()
