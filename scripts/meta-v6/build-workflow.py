@@ -567,8 +567,7 @@ def main() -> int:
             m_id = re.match(r'^(\S+):', b.strip())
             if m_id:
                 step_ids.append(m_id.group(1))
-        # Use last 3 step IDs as aggregation source (most recent outputs)
-        prior_ids = step_ids[-3:] if len(step_ids) >= 3 else step_ids
+        prior_ids = [s for s in step_ids if s != 'step_00_bootstrap']
         deliverable_name = 'deliverable.md'
         synthesis = make_synthesis_step(run_dir, deliverable_name, prior_ids)
     elif has_synthesis:
