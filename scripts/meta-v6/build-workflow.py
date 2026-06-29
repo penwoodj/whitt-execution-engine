@@ -364,10 +364,14 @@ def main() -> int:
     elif has_bootstrap:
         sys.stderr.write('[build-workflow] SW4 already emitted step_00_bootstrap, skipping ours\n')
 
-    # Optional final synthesis step (skip if SW4 already emitted one)
-    has_synthesis = any(
-        re.match(r'^step_final_synthesize\s*:', b.strip()) for b in blocks
-    )
+    # ALWAYS remove SW4-emitted synthesis step and use deterministic one.
+    # SW4's synthesis often has malformed YAML (e.g., "step_final_synthesize:  generative_entity:" on one line).
+    # The deterministic template guarantees correct formatting + max_tokens + prior step references.
+    blocks = [
+        b for b in blocks
+        if not re.match(r'^step_final_synthesize\s*:', b.strip())
+    ]
+    has_synthesis = False
 
     blocks_clean = [strip_save_to_templates(b) for b in blocks]
 
