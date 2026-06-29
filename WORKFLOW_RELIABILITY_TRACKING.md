@@ -566,6 +566,44 @@ Remaining untested: P10, P11, P15. P05 cancelled (too slow with 240KB file injec
 | Gap 11 | HIGH | Sub-workflow execution (parsed but not invoked) |
 | Gap 12 | HIGH | Loop execution (parsed but not iterated) |
 
+### Iteration 14 — P22 BREAKTHROUGH: First TRUE Multi-Step Success (2026-06-29)
+
+**MILESTONE:** P22 re-run produced FIRST deliverable where multi-step pipeline ACTUALLY contributed.
+
+**Evidence:**
+- 8 steps in generated workflow (bootstrap + 6 intermediate + synthesis)
+- 6 intermediate steps ALL produced real output (55s inference each = real generation)
+- Step outputs saved to exec/outputs/ (61B to 3716B each)
+- Synthesis integrated ALL 6 intermediate outputs into coherent 20KB deliverable
+- Deliverable: complete LoopExecutor implementation with Rust code blocks
+
+**Quality Comparison: SW vs Baseline**
+| Metric | SW1-SW5 | Baseline | Advantage |
+|--------|---------|----------|-----------|
+| Size | 20375B | 10545B | 2× |
+| Code blocks | 6 | 1 | 6× |
+| Headers | 14 | 2 | 7× |
+| Score | 22 | 10 | 2.2× |
+
+**Parity Check: 50/50 PERFECT**
+
+**Fixes That Made This Possible:**
+1. SW4 FORBIDDEN commentary rule → 8 steps emitted (was 2-3)
+2. fail_on_error override → steps continue past failed shell hooks
+3. save_to injection → outputs preserved for synthesis
+4. max_tokens >=8192 → real generation per step
+5. extract_step_blocks rewrite → all step blocks extracted
+6. Unicode byte boundary fix → no panic on multi-byte chars
+
+**Engine Crash Fixed:**
+- Panic at mod.rs:176: `&inf.prompt[..30]` sliced inside UTF-8 '═' (bytes 28-30)
+- Fix: use `char_indices().nth(30)` for safe boundary
+
+**ALL 20 Comprehensive Re-Run Started:**
+- PID 508075: Re-running ALL 20 prompts with current fixes
+- P05 SW1 done (612s), SW2 running
+- ETA: ~20 hours for all 20 prompts
+
 ---
 
 ## Iteration 6 — cap_large_cat + sw5-finalize + critical quality analysis (2026-06-29)
