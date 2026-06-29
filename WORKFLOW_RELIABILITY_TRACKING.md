@@ -624,3 +624,33 @@ ALL existing deliverables (P05-P15, P20) were generated with TWO critical bugs:
 - Verified on P20 structs: 7/7 intermediate steps now have max_tokens=8192 + save_to=YES
 
 **Impact:** ALL existing 50/50 scores are structurally correct but qualitatively misleading. Multi-step pipeline wasn't contributing. Comprehensive re-run needed (script PID 508075 queued).
+
+### Iteration 7 — Quality Fixes (2026-06-29 06:15 UTC)
+
+**Root cause of quality ceiling fully identified and fixed:**
+
+1. `max_tokens=4` leak from bootstrap step → all intermediate steps produce ~4 tokens
+   - Fix: build-workflow.py enforces max_tokens >=8192 (commit `e1d2540`)
+   - Fix: runner.rs filters max_tokens <100 from first_step (commit `308a33b`)
+
+2. Missing save_to hooks → step output evaporates → synthesis has nothing
+   - Fix: build-workflow.py injects save_to for all missing hooks (commit `69649d5`)
+   - Fix: regex match to avoid false positives in prompt text (commit `c97076a`)
+
+3. Synthesis only referenced LAST 3 steps → earlier outputs lost
+   - Fix: synthesis now references ALL non-bootstrap steps (commit `b1d12f4`)
+
+4. `./logs/` permission denied (Docker creates as root)
+   - Fix: pipeline.sh recreates logs/ dir at start (commit `9292bb4`)
+
+**Verified:** build-workflow.py on P20 structs.md:
+- 9 steps total (bootstrap + 7 intermediate + synthesis) ✅
+- ALL 7 intermediate steps: save_to=YES, max_tokens=8192 ✅
+- Synthesis: max_tokens=16384, references ALL 7 prior steps ✅
+- YAML valid ✅
+- 23/23 Rust tests PASS ✅
+- 6/6 Python regression tests PASS ✅
+
+**Impact:** Comprehensive re-run (PID 508075) will produce ACTUAL multi-step quality.
+Each step will produce ~8K chars of real output. Synthesis will have ALL intermediate
+results to incorporate. Expected deliverable quality: substantially better than single-shot.
