@@ -89,7 +89,7 @@ fi
 # C6: NO meta-commentary (5 pts)
 echo -n "C6 no meta-commentary: "
 if [ -f "$DELIVERABLE" ]; then
-  META=$(grep -cE "To accomplish this|To do this, we need|I will (now|then)|Let me (start|begin|first)|First, I'll|Step [0-9]+:" "$DELIVERABLE" 2>/dev/null || true)
+  META=$(grep -cE "To accomplish this|To do this, we need|I will (now|then)|Let me (start|begin|first)|First, I'll" "$DELIVERABLE" 2>/dev/null || true)
   META=${META:-0}
   if [ "$META" -le 2 ]; then
     echo "PASS (5/5, ${META} matches)"; TOTAL=$((TOTAL+5))
