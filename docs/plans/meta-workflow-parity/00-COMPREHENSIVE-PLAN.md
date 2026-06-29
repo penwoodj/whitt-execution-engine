@@ -12,6 +12,7 @@
 | ------- | ---------- | ------------------------------------------------------------------------------ |
 | 1.0     | 2026-06-27 | Initial draft.                                                                 |
 | 2.0     | 2026-06-27 | Momus review applied: 3 BLOCKING + 6 MAJOR fixes. Phase reorder. Added appendices. |
+| 2.1     | 2026-06-29 | Engine reliability fixes: topological sort, fail_on_error: false, refusal detection, save_to output_dir, synthesis path fix. 10/11 original prompts PASS. P20 50/50. Batch runner P16-P24 in progress. |
 
 ---
 
