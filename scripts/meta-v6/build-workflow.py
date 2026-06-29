@@ -270,32 +270,34 @@ def make_synthesis_step(run_dir: str, deliverable_filename: str, prior_step_ids:
     return f'''    step_final_synthesize:
 {dep_lines}      generative_entity: "${{models.qwen35}}"
       prompt: |
-        You are the FINAL synthesis step. Produce the polished final deliverable.
+        You are the FINAL synthesis step. Your job: INTEGRATE all prior step outputs into ONE polished, comprehensive deliverable.
 
         ORIGINAL USER PROMPT:
         {{{{bookmarks.shell_output.stdout}}}}
 
-        PRIOR STEP OUTPUTS (intermediate findings):
+        PRIOR STEP OUTPUTS (each step's contribution — you MUST incorporate ALL of them):
 {prior_outputs_block}
 
-        Write the final deliverable as a comprehensive, polished document. For diagnostic prompts include:
-        1. Root Cause (one paragraph explaining the actual cause)
-        2. Evidence (cite specific log lines or error messages that prove the diagnosis)
-        3. Fix (numbered actionable steps with exact commands)
-        4. Verification (how to confirm the fix worked)
-        5. Troubleshooting (what to check if the fix fails)
+        SYNTHESIS INSTRUCTIONS:
+        - READ every prior step output carefully
+        - INTEGRATE findings: combine related concepts, eliminate redundancy, build a coherent narrative
+        - EXPAND on prior work: if a step produced a code snippet, include it AND add context/explanation
+        - For code tasks: produce COMPLETE implementations (not fragments), with error handling and edge cases
+        - For diagnostic tasks: produce Root Cause → Evidence → Fix → Verification → Troubleshooting
+        - For design tasks: produce Architecture → Implementation → Testing → Deployment sections
 
-        For documentation/code prompts, produce the full deliverable with proper structure and complete content.
+        QUALITY REQUIREMENTS:
+        - Minimum 3000 bytes of actual content (not counting markdown formatting)
+        - Every section must have substantive content (no "TODO" or "placeholder")
+        - Code blocks must be syntactically valid and complete
+        - Use markdown headers (##, ###), code blocks (```), and numbered lists
+        - Write for a senior engineer who needs to ACT on this deliverable immediately
 
-        Rules:
-        - Do NOT include meta-commentary ("As an AI...", "I would suggest...")
-        - Do NOT refuse or hedge
-        - Do NOT use placeholders like "<your answer here>"
-        - Write ACTUAL content directly usable by the user
-        - INCLUDE all relevant code blocks from prior steps in the final deliverable
-        - Use proper markdown structure with headers (#, ##, ###), code blocks (```), and lists
-        - Produce COMPREHENSIVE output: cover ALL aspects mentioned in prior steps
-        - Do NOT summarize or abbreviate — include FULL implementations
+        FORBIDDEN:
+        - Meta-commentary ("As an AI...", "I would suggest...", "Here is...")
+        - Refusal or hedging ("I cannot...", "It's not possible...")
+        - Abbreviation or summarization ("In short...", "To summarize...")
+        - Placeholders ("<your code here>", "...")
       model_overrides:
         max_tokens: 16384
         temperature: 0.3
