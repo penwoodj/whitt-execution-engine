@@ -4,36 +4,88 @@
 
 **Top-level of repo MUST stay clean.** No stray workflow files, test outputs, or generator artifacts in repo root.
 
-### Allowed at top level
-- `Cargo.toml`, `Cargo.lock`, `build.rs`, `rust-toolchain.toml`
-- `Dockerfile`, `docker-compose.yml`
-- `README.md`, `CHANGELOG.md`, `LICENSE`
-- `.gitignore`, `.git/`, `.github/`
-- `src/`, `tests/`, `benches/`, `examples/`
-- `docs/` (but NOT individual output files at root)
-- `scripts/` (executable scripts only, not data)
-- `models/` (model files)
-- `target/` (build artifacts, gitignored)
-- `AGENTS.md`, `CLAUDE.md`
-- `WORKFLOW_RELIABILITY_TRACKING.md` (single tracking file)
-- `.opencode-handoff.md` (only during handoffs)
+### Folder Map — STRICT (where EVERY file type MUST go)
+
+| File Type | Location | Example |
+|-----------|----------|---------|
+| Rust source | `src/` | `src/benchmark/runner.rs` |
+| Rust tests | `tests/` | `tests/meta_workflow_yaml_validation.rs` |
+| Rust benches | `benches/` | `benches/execution_benchmarks.rs` |
+| Workflow YAMLs (SW1-SW5, meta, test) | `docs/benchmarks/workflows/` | `docs/benchmarks/workflows/sw1-task-deconstruction.yml` |
+| Execution outputs (per-run) | `docs/benchmarks/outputs/meta-workflow/<run-id>/` | `docs/benchmarks/outputs/meta-workflow/p05-final-20260628/` |
+| Baselines (opencode comparison) | `docs/benchmarks/outputs/meta-workflow/baselines-opencode-same-model/` | |
+| Benchmark reports | `docs/benchmarks/reports/` | |
+| Plan files | `docs/plans/meta-workflow-parity/` | `docs/plans/meta-workflow-parity/00-COMPREHENSIVE-PLAN.md` |
+| Per-cycle results | `docs/plans/meta-workflow-parity/cycle-N-results/` | |
+| Comparison analysis | `docs/plans/meta-workflow-parity/comparisons/` | |
+| Schema definitions | `docs/schema/` | `docs/schema/unified-workflow-schema.yml` |
+| QA documentation | `docs/qa/` | `docs/qa/phase-XX/QA-FINDINGS.md` |
+| Shell/Python scripts | `scripts/meta-v6/` | `scripts/meta-v6/build-workflow.py` |
+| Debug/utility scripts | `scripts/meta-v6/debug/` | `scripts/meta-v6/debug/pipeline.sh` |
+| Model files | `models/` | `models/Qwen3-5-9B-Q4_K_M.gguf` |
+| Config templates | `configs/` | `configs/models/` |
+| License files | `LICENSE` (root), `LICENSES/` (multi-license) | |
+
+### Allowed at repo root (COMPLETE LIST — nothing else)
+
+```
+Cargo.toml          Cargo.lock          build.rs            rust-toolchain.toml
+Dockerfile          docker-compose.yml  .dockerignore       .env.example
+README.md           CHANGELOG.md        LICENSE             AUTHORS.md
+CODE_OF_CONDUCT.md  config.yml          .gitignore          .git/
+.github/            AGENTS.md           CLAUDE.md           WORKFLOW_RELIABILITY_TRACKING.md
+.opencode-handoff.md (temp, session only)    .current-meta-run (temp)
+src/                tests/              benches/            examples/
+docs/               scripts/            models/             configs/
+LICENSES/           target/ (gitignored)
+```
+
+**If a file is NOT in this list, it MUST NOT exist at repo root.**
 
 ### MUST live under docs/benchmarks/
 - All workflow YAML files: `docs/benchmarks/workflows/`
 - All execution outputs: `docs/benchmarks/outputs/meta-workflow/<run-id>/`
 - All benchmark reports: `docs/benchmarks/reports/`
 - All benchmark fixtures: `docs/benchmarks/fixtures/`
+- All opencode baselines: `docs/benchmarks/outputs/meta-workflow/baselines-opencode-same-model/`
 
 ### MUST live under docs/plans/
 - Plan files: `docs/plans/meta-workflow-parity/`
 - Per-cycle docs: `docs/plans/meta-workflow-parity/cycle-N-results/`
+- Comparison analysis: `docs/plans/meta-workflow-parity/comparisons/`
+
+### MUST live under scripts/
+- Meta-workflow scripts: `scripts/meta-v6/`
+- Debug scripts: `scripts/meta-v6/debug/`
+- Setup scripts: `scripts/` (root-level setup only)
+
+### Forbidden at repo root (common violations)
+- `sw1_initial_breakdown`, `sw2_outputs`, `sw4_substructures` → bare save_to names writing to CWD
+- `step_t1_output`, `step_t2_eval` → same cause
+- `logs/`, `outputs/`, `workspace/` → workflow execution artifacts
+- `live-system-testing/` → test output directories
+- Any `.txt`, `.json`, `.log` file → execution artifacts
+- Any `sw*_*.yml` or `p*-*.yml` → workflow YAMLs belong in `docs/benchmarks/workflows/`
+
+### Preventive Rules (STOP pollution at source)
+
+1. **ALL `save_to` entries MUST use `$variable` prefix** (not bare names). Bare names cause engine to write files to CWD.
+2. **ALL shell hooks MUST set `working_dir:`** pointing to repo root or relevant source dir.
+3. **Generator (build-workflow.py) MUST prefix bare names with `$`** before writing workflow YAML.
+4. **Validator (validate-workflow.py) MUST run as gate** before workflow execution — aborts if structural defects found.
+5. **`.gitignore` MUST cover**: `sw[1-5]_*`, `step_t[0-9]*`, `/logs/`, `/outputs/`, `/workspace/`, `live-system-testing/`.
 
 ### Violations
 - Generator emits file at root → BUG, fix generator to write under `docs/benchmarks/outputs/`
 - Test workflow at root → move to `docs/benchmarks/workflows/`
 - Stray `.json`/`.txt` at root → delete or move under `docs/benchmarks/outputs/meta-workflow/`
+- `logs/` or `outputs/` dir at root → delete, add to `.gitignore`
 
-Before ANY commit: verify top-level `git status` shows only allowed files modified.
+Before ANY commit: verify top-level `git status` shows only allowed files modified. Run:
+```bash
+ls | grep -vE "^(Cargo|build|rust|Docker|docker|README|CHANGELOG|LICENSE|AUTHORS|CODE|config|\.git|\.github|AGENTS|CLAUDE|WORKFLOW|\.opencode|\.current|src|tests|benches|examples|docs|scripts|models|configs|LICENSES|target|docker)" | head
+# If ANY output: STOP and clean up before committing
+```
 
 ---
 
