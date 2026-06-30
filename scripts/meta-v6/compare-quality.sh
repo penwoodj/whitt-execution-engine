@@ -15,14 +15,18 @@ SW_BYTES=$(wc -c < "$SW_PATH")
 BASE_BYTES=$(wc -c < "$BASE_PATH")
 
 # Code blocks (``` pairs / 2)
-SW_CODE_BLOCKS=$(grep -c '```' "$SW_PATH" 2>/dev/null || echo 0)
+SW_CODE_BLOCKS=$(grep -c '```' "$SW_PATH" 2>/dev/null || true)
+SW_CODE_BLOCKS=${SW_CODE_BLOCKS:-0}
 SW_CODE_BLOCKS=$((SW_CODE_BLOCKS / 2))
-BASE_CODE_BLOCKS=$(grep -c '```' "$BASE_PATH" 2>/dev/null || echo 0)
+BASE_CODE_BLOCKS=$(grep -c '```' "$BASE_PATH" 2>/dev/null || true)
+BASE_CODE_BLOCKS=${BASE_CODE_BLOCKS:-0}
 BASE_CODE_BLOCKS=$((BASE_CODE_BLOCKS / 2))
 
 # Section headers (# or ##)
-SW_HEADERS=$(grep -cE '^#{1,3} ' "$SW_PATH" 2>/dev/null || echo 0)
-BASE_HEADERS=$(grep -cE '^#{1,3} ' "$BASE_PATH" 2>/dev/null || echo 0)
+SW_HEADERS=$(grep -cE '^#{1,3} ' "$SW_PATH" 2>/dev/null || true)
+SW_HEADERS=${SW_HEADERS:-0}
+BASE_HEADERS=$(grep -cE '^#{1,3} ' "$BASE_PATH" 2>/dev/null || true)
+BASE_HEADERS=${BASE_HEADERS:-0}
 
 # Refusal patterns (HEAVY penalty: -5 each)
 SW_REFUSAL=$(grep -ciE 'I cannot|I can.t help|as an ai|I.m unable to|I.m not able to' "$SW_PATH" 2>/dev/null | head -1 || true)
