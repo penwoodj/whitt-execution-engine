@@ -143,7 +143,7 @@ def strip_unknown_step_fields(block: str) -> str:
     skipping = False
     for line in lines:
         # Detect step-level field: exactly 2 spaces, then identifier, then ':'
-        m = re.match(r'^  ([a-z_]+)\s*:', line)
+        m = re.match(r'^  ([a-zA-Z_]+)\s*:', line)
         if m:
             field_name = m.group(1)
             if field_name in VALID_STEP_FIELDS:
