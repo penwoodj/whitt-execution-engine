@@ -88,11 +88,67 @@ def test_max_tokens_threshold():
     real_max_tokens = 8192
     assert_true(real_max_tokens >= 100, "real max_tokens=8192 should be >= 100")
 
+def _load_build_workflow():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "build_workflow",
+        os.path.join(REPO, 'scripts', 'meta-v6', 'build-workflow.py')
+    )
+    assert spec is not None and spec.loader is not None, "failed to load build-workflow.py"
+    bw = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bw)
+    return bw
+
+def test_strip_unknown_step_fields():
+    """SW4 LLM adds intent:/fit: fields that engine rejects — must be stripped."""
+    bw = _load_build_workflow()
+    
+    block_with_extras = """step_t1_test:
+  generative_entity: "${models.qwen35}"
+  intent: "Extract syntax rules from docs."
+  fit: "This step aggregates findings into a summary."
+  prompt: |
+    Read the docs and extract syntax rules.
+  model_overrides:
+    max_tokens: 8192
+  when:
+    after_step_succeeds:
+      - save_to:
+          - $step_t1_test_output"""
+    
+    cleaned = bw.strip_unknown_step_fields(block_with_extras)
+    
+    assert_true('intent:' not in cleaned, "intent: field should be stripped")
+    assert_true('fit:' not in cleaned, "fit: field should be stripped")
+    assert_true('generative_entity:' in cleaned, "generative_entity: should remain")
+    assert_true('prompt:' in cleaned, "prompt: should remain")
+    assert_true('model_overrides:' in cleaned, "model_overrides: should remain")
+    assert_true('when:' in cleaned, "when: should remain")
+    assert_true('save_to:' in cleaned, "save_to: should remain")
+
+def test_strip_unknown_preserves_nested():
+    """Nested fields under valid parents must NOT be stripped."""
+    bw = _load_build_workflow()
+    
+    block = """step_t1_test:
+  generative_entity: "${models.qwen35}"
+  model_overrides:
+    max_tokens: 8192
+    temperature: 0.2
+  prompt: |
+    Do something."""
+    
+    cleaned = bw.strip_unknown_step_fields(block)
+    assert_true('max_tokens:' in cleaned, "nested max_tokens under model_overrides should remain")
+    assert_true('temperature:' in cleaned, "nested temperature under model_overrides should remain")
+
 if __name__ == '__main__':
     test_save_to_injection()
     test_save_to_not_injected_when_exists()
     test_save_to_not_matching_prompt_text()
     test_max_tokens_threshold()
+    test_strip_unknown_step_fields()
+    test_strip_unknown_preserves_nested()
     
     print(f"\n{'='*40}")
     print(f"PASS: {PASS}, FAIL: {FAIL}")

@@ -116,6 +116,59 @@ def rewrite_sw4_paths(block: str, meta_run_id: str) -> str:
     return pattern.sub(meta_run_id, block)
 
 
+def strip_unknown_step_fields(block: str) -> str:
+    """Remove non-schema step-level fields that SW4 LLM tends to add.
+
+    SW4 sometimes emits fields like `intent:`, `fit:`, `description:` at the
+    step level (2-space indent). The engine's strict YAML validator rejects
+    these as unknown fields, causing the entire workflow to fail.
+
+    Valid step-level fields (from engine StepSpec):
+      generative_entity, prompt, model_overrides, tool, input, retry,
+      depends_on, requires, when, loop, sub_workflow, user_input,
+      on_requires_failed
+
+    This function walks each line of the step block. When it finds a field
+    at exactly 2-space indent that is NOT in the valid set, it removes that
+    line AND all subsequent lines with deeper indentation (the field's value).
+    """
+    VALID_STEP_FIELDS = {
+        'generative_entity', 'prompt', 'model_overrides', 'tool', 'input',
+        'retry', 'depends_on', 'requires', 'when', 'loop', 'sub_workflow',
+        'user_input', 'on_requires_failed',
+    }
+
+    lines = block.split('\n')
+    out: list[str] = []
+    skipping = False
+    for line in lines:
+        # Detect step-level field: exactly 2 spaces, then identifier, then ':'
+        m = re.match(r'^  ([a-z_]+)\s*:', line)
+        if m:
+            field_name = m.group(1)
+            if field_name in VALID_STEP_FIELDS:
+                skipping = False
+                out.append(line)
+            else:
+                # Unknown field — skip this line and all deeper-indented continuation
+                skipping = True
+                continue
+        elif skipping:
+            # Check if this line is a continuation (deeper indent than 2 spaces)
+            if line.startswith('    ') or (line.strip() == ''):
+                # Deeper indent or blank — still inside the skipped field
+                # But if blank, check if NEXT line returns to step level
+                continue
+            else:
+                # Back to step level or step name — stop skipping
+                skipping = False
+                out.append(line)
+        else:
+            out.append(line)
+
+    return '\n'.join(out)
+
+
 def cap_large_cat(block: str) -> str:
     MAX_BYTES = 50000
     cat_pattern = re.compile(r'cat\s+(\.{0,2}/?[^\s|&;"\']+)')
@@ -384,6 +437,10 @@ def main() -> int:
     # Cap large file cat commands: if cat references a file >50KB, wrap with head -c 50000.
     # Prevents context overflow when SW4 LLM doesn't follow file-slicing prompt rule.
     blocks_clean = [cap_large_cat(b) for b in blocks_clean]
+
+    # Strip non-schema step-level fields (intent:, fit:, description:, etc.)
+    # that SW4 LLM adds. Engine's strict YAML validator rejects them.
+    blocks_clean = [strip_unknown_step_fields(b) for b in blocks_clean]
 
     # Derive depends_on from cat targets: if step_B cats ./outputs/<step_A>.txt,
     # step_B depends_on step_A. Without this, runner executes in hash-map order
