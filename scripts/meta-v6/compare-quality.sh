@@ -29,9 +29,11 @@ BASE_HEADERS=$(grep -cE '^#{1,3} ' "$BASE_PATH" 2>/dev/null || true)
 BASE_HEADERS=${BASE_HEADERS:-0}
 
 # Refusal patterns (HEAVY penalty: -5 each)
-SW_REFUSAL=$(grep -ciE 'I cannot|I can.t help|as an ai|I.m unable to|I.m not able to' "$SW_PATH" 2>/dev/null | head -1 || true)
+# Only count refusals at start of line (actual model refusals start sentences).
+# Exclude code blocks and documentation examples like '(e.g., "I cannot")'.
+SW_REFUSAL=$(awk '/^```/{in_block=!in_block; next} !in_block && /^[[:space:]]*(I cannot|I can.t help|as an ai|I.m unable to|I.m not able to)/{count++} END{print count+0}' "$SW_PATH" 2>/dev/null || true)
 SW_REFUSAL=${SW_REFUSAL:-0}
-BASE_REFUSAL=$(grep -ciE 'I cannot|I can.t help|as an ai|I.m unable to|I.m not able to' "$BASE_PATH" 2>/dev/null | head -1 || true)
+BASE_REFUSAL=$(awk '/^```/{in_block=!in_block; next} !in_block && /^[[:space:]]*(I cannot|I can.t help|as an ai|I.m unable to|I.m not able to)/{count++} END{print count+0}' "$BASE_PATH" 2>/dev/null || true)
 BASE_REFUSAL=${BASE_REFUSAL:-0}
 
 # Substantive check (>500B)
