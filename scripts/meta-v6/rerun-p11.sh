@@ -35,7 +35,6 @@ cd "$REPO"
 timeout 5400 bash scripts/meta-v6/debug/pipeline.sh \
   "$PROMPT_FILE" \
   "$OUTPUT_DIR/deliverables/deliverable.md" \
-  "$OUTPUT_DIR" \
   "$RUN_ID" 2>&1 | tee "$OUTPUT_DIR/pipeline.log"
 
 DELIV="$OUTPUT_DIR/deliverables/deliverable.md"
