@@ -460,7 +460,7 @@ def main() -> int:
             continue
         if 'depends_on:' in block:
             continue
-        cat_targets = re.findall(r'cat\s+\./outputs/(step_\w+)\.txt', block)
+        cat_targets = re.findall(r'cat\s+(?:\$WHITT_OUTPUT_DIR/outputs/|\./outputs/)(step_\w+)\.', block)
         deps = [t for t in cat_targets if t in all_step_ids and t != sid]
         if deps:
             unique_deps = list(dict.fromkeys(deps))
