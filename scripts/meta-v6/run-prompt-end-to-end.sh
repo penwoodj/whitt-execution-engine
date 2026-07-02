@@ -102,8 +102,12 @@ echo "[P${N}] workflow-valid: YES"
 
 # Phase 5: Execute workflow
 echo "[P${N}] Phase 5: execute workflow (~15min)"
-docker restart whitt-llama-server > /dev/null 2>&1
-sleep 8
+# Optimization (C1): skip docker restart when running batch (saves ~25s per prompt).
+# Set SKIP_DOCKER_RESTART=1 to enable. Default behavior unchanged for single-prompt runs.
+if [ "${SKIP_DOCKER_RESTART:-0}" != "1" ]; then
+  docker restart whitt-llama-server > /dev/null 2>&1
+  sleep 8
+fi
 cd "$REPO"
 
 # Backup src/

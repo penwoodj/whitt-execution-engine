@@ -67,6 +67,63 @@ if [ -d "$DELIVERABLES_DIR" ]; then
   done
 fi
 
+# CRITICAL: Also extract per-step outputs from benchmark.log "Hook log:" entries.
+# Each step's model output is JSON-encoded inside the log line:
+#   Hook log: [...] step_name=X duration_ms=Y {"output": "...", "quality_score": Z, ...}
+# Without parsing these, refusals in step outputs go undetected (deliverable.md
+# is just the final synthesis — refusals happen mid-pipeline).
+LOG_FILE="${EXEC_DIR}/benchmark.log"
+[ ! -f "$LOG_FILE" ] && LOG_FILE="${EXEC_DIR}/exec-final/benchmark.log"
+[ ! -f "$LOG_FILE" ] && LOG_FILE="${EXEC_DIR}/../exec.log"
+if [ -f "$LOG_FILE" ]; then
+  python3 -c "
+import json, re, sys, os
+log = open('$LOG_FILE').read()
+# Match Hook log lines with JSON payload
+pattern = re.compile(r'Hook log:.*step_name=(\S+).*?(\{[^{}]*\"output\".*?\})\s*$', re.MULTILINE)
+extracted = []
+for line in log.splitlines():
+    if 'Hook log:' not in line or '\"output\"' not in line:
+        continue
+    # Find step_name
+    m_name = re.search(r'step_name=(\S+)', line)
+    if not m_name: continue
+    step_name = m_name.group(1)
+    # Find JSON object containing output field
+    json_start = line.find('{')
+    if json_start < 0: continue
+    # Find balanced JSON
+    depth = 0
+    json_end = -1
+    for i in range(json_start, len(line)):
+        if line[i] == '{': depth += 1
+        elif line[i] == '}':
+            depth -= 1
+            if depth == 0:
+                json_end = i + 1
+                break
+    if json_end < 0: continue
+    try:
+        obj = json.loads(line[json_start:json_end])
+        out = obj.get('output', '')
+        if out:
+            # Write to temp file for scanning
+            tmp = f'/tmp/step-log-{step_name}.txt'
+            open(tmp, 'w').write(out)
+            extracted.append((step_name, tmp))
+    except json.JSONDecodeError:
+        pass
+print(' '.join(f'{s}={p}' for s, p in extracted))
+" > /tmp/step-log-files.txt 2>/dev/null
+  for entry in $(cat /tmp/step-log-files.txt 2>/dev/null); do
+    STEP_NAME="${entry%=*}"
+    STEP_PATH="${entry#*=}"
+    if [ -f "$STEP_PATH" ]; then
+      STEP_FILES+=("$STEP_PATH")
+    fi
+  done
+fi
+
 if [ ${#STEP_FILES[@]} -eq 0 ]; then
   echo "{\"error\": \"no step_* files in $OUTPUT_DIR or $DELIVERABLES_DIR\", \"steps\": []}"
   exit 0

@@ -359,7 +359,7 @@ def make_synthesis_step(run_dir: str, deliverable_filename: str, prior_step_ids:
 {prior_outputs_block}
 
         SYNTHESIS INSTRUCTIONS:
-        - READ every prior step output carefully
+        - REVIEW every prior step output carefully (content is already in your context above — do NOT say you cannot read files)
         - INTEGRATE findings: combine related concepts, eliminate redundancy, build a coherent narrative
         - EXPAND on prior work: if a step produced a code snippet, include it AND add context/explanation
         - For code tasks: produce COMPLETE implementations (not fragments), with error handling and edge cases

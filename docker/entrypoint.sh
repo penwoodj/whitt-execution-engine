@@ -607,6 +607,19 @@ start_server() {
         server_args="$server_args --slots"
     fi
 
+    # Speculative decoding via draft model (Vulkan-supported per llama.cpp issues #23126, #24492)
+    # --draft-p-min 0.75 default is already optimal for AMD/RADV (issue #23544)
+    # Flag names differ across llama.cpp versions:
+    #   older (this image): -md / --model-draft / --draft-p-min / --draft-max / --draft-min
+    #   newer (main branch): --spec-draft-model / --spec-draft-p-min / etc.
+    if [ -n "${LLAMA_SPEC_DRAFT_MODEL:-}" ]; then
+        server_args="$server_args --model-draft ${LLAMA_SPEC_DRAFT_MODEL}"
+        server_args="$server_args --draft-p-min ${LLAMA_SPEC_DRAFT_P_MIN:-0.75}"
+        server_args="$server_args --draft-max ${LLAMA_SPEC_DRAFT_N_MAX:-16}"
+        server_args="$server_args --draft-min ${LLAMA_SPEC_DRAFT_N_MIN:-3}"
+        log_info "Speculative decoding enabled with draft: ${LLAMA_SPEC_DRAFT_MODEL}"
+    fi
+
     log_info "Server arguments: $server_args"
     log_debug "Full command: /usr/local/bin/llama-server $server_args"
 

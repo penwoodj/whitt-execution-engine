@@ -1993,11 +1993,18 @@ impl BenchmarkRunner {
                         "I cannot help", "I can't help", "I am unable to",
                         "I'm unable to", "As an AI", "I'm not able to",
                         "I am not able to", "I will not help",
+                        "I cannot directly", "I can't directly",
+                        "I cannot read", "I can't read",
+                        "I cannot access", "I can't access",
+                        "do not have access", "don't have access",
+                        "cannot access your local", "can't access your local",
+                        "I do not have", "I don't have",
+                        "I'm not able to read", "I am not able to read",
                     ];
                     let lower = output_text.to_lowercase();
-                    let is_refusal = refusal_patterns.iter().any(|p| lower.contains(&p.to_lowercase()));
-                    if is_refusal && output_text.len() < 2000 {
-                        warn!("[benchmark] step {} output appears to be a REFUSAL ({} bytes), setting quality_score=0.0", step.step_id, output_text.len());
+                    let matched_pattern = refusal_patterns.iter().find(|p| lower.contains(&p.to_lowercase()));
+                    if let Some(pattern) = matched_pattern {
+                        warn!("[benchmark] step {} output is a REFUSAL (matched '{}', {} bytes), setting quality_score=0.0", step.step_id, pattern, output_text.len());
                         Some(0.0f32)
                     } else {
                         output_ratio
