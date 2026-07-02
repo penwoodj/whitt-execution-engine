@@ -119,13 +119,20 @@ def rewrite_sw4_paths(block: str, meta_run_id: str) -> str:
 def rewrite_bare_cat_paths(block: str) -> str:
     """Prefix bare step output filenames in cat commands with $WHITT_OUTPUT_DIR/outputs/.
 
-    SW4 LLM sometimes generates cat commands with bare filenames:
-        cat step_t10_implement_recursive_loop.txt
-    These resolve to CWD (repo root) where the files don't exist.
-    Rewrite to: cat $WHITT_OUTPUT_DIR/outputs/step_t10_implement_recursive_loop.txt
+    SW4 LLM generates three patterns that resolve to wrong directory:
+    1. Bare:   cat step_t10_implement_recursive_loop.txt
+    2. ./outs: cat ./outputs/step_t10_implement_recursive_loop.txt
+    Both resolve to CWD (repo root). Rewrite to $WHITT_OUTPUT_DIR/outputs/.
     """
+    # Bare names (no path prefix)
     block = re.sub(
         r'(cat\s+)(step_t\d[\w]*\.(?:txt|rs|json|md))(?=["\s\n]|$)',
+        r'\1$WHITT_OUTPUT_DIR/outputs/\2',
+        block,
+    )
+    # ./outputs/ prefix → $WHITT_OUTPUT_DIR/outputs/
+    block = re.sub(
+        r'(cat\s+)\./outputs/(step_t\d[\w]*\.(?:txt|rs|json|md))',
         r'\1$WHITT_OUTPUT_DIR/outputs/\2',
         block,
     )
