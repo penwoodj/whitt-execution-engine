@@ -319,6 +319,37 @@ docs/qa/
 - `--flash-attn on` is safe and recommended
 - `--gpu-layers 99` (full offload) confirmed fastest on AMD RX 580 8GB; CPU-only unusable
 
+### Model Loading Safety Rules (HARD — verified 2026-07-02 after multiple crashes)
+
+**CRITICAL: Wrong gpu_layers setting WILL crash the machine.**
+
+Verified configurations on RX 580 8GB (RADV/Vulkan) + 16GB RAM:
+
+| Model Size | Q4_K_M Size | Safe `gpu_layers` | CPU-only viable? | Notes |
+|------------|-------------|-------------------|------------------|-------|
+| ≤3B params | ≤3.5GB      | 0 OR 99           | YES (~30 tok/s)  | Either mode works; CPU fine for quick tests |
+| 7B params  | ~4.4GB      | **99 ONLY**       | **NO** (~0.5 tok/s) | CPU crashes via thermal overload after ~30 min sustained |
+| 9B params  | ~5.6GB      | **99 ONLY**       | **NO** (~0.3 tok/s) | Same as 7B — CPU is unusable, will crash |
+| Multi-model| varies      | N/A                | N/A              | NEVER load 2+ models simultaneously (VRAM exceeded) |
+
+**Forbidden configurations:**
+- `gpu_layers` between 1 and 98 (PCIe thrash, performance collapse)
+- `gpu_layers=0` on any 7B+ model (CPU inference = crash vector)
+- Speculative decoding with draft model on RX 580 8GB (vk::DeviceLostError)
+- Loading 9B + any second model simultaneously (VRAM exceeded)
+
+**Mandatory pre-flight checks before ANY model load:**
+1. Check model file size: if >4GB, gpu_layers MUST be 99 (not 0)
+2. Check available RAM: if <4GB free, ABORT (OOM risk)
+3. Check Docker server health: if `curl /health` fails, ABORT
+4. Check `docker logs whitt-llama-server | tail -50` for `vk::|DeviceLost|Vulkan.*Error` — if present, RESTART docker first
+
+**Batch testing policy (e.g. compare-models scripts):**
+- BETWEEN each model test, run `free -h` and verify ≥3GB available RAM
+- If RAM <3GB available: `docker restart whitt-llama-server` + `sleep 30` before next model
+- Cap consecutive model tests at 5 — then mandatory 60s cooldown + RAM check
+- Never run >5 models back-to-back without explicit user approval
+
 ### Docker
 - Use base `docker/docker-compose.yml` (not AMD or NVIDIA variants) for AMD GPU
 - Mount entrypoint.sh at `/entrypoint.sh:ro` (not `/app/entrypoint.sh`)
