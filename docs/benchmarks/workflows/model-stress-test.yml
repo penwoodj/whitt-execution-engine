@@ -1,0 +1,215 @@
+# Model Stress Test Workflow
+# Version: 1.0  Date: 2026-07-02
+# Purpose: Expose model weaknesses across 4 difficulty vectors:
+#   1. Refusal resistance (file content injection, anti-refusal template)
+#   2. Long-form code generation (max_tokens 4096, Rust impl)
+#   3. Multi-perspective evaluation (5 rubrics, GWT-eligible)
+#   4. Structured YAML output (format compliance, no preamble)
+#
+# Workflow total ~5-8 min on Qwen3-5-9B CPU; under 10 min hard cap.
+# Use with scripts/meta-v6/compare-models-stress.sh
+
+workflow_id: model_stress_test
+name: "Model Stress Test"
+description: "Stress test for refusal resistance, code gen, eval, and YAML format compliance."
+version: "1.0.0"
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+models:
+  "test_model":
+    name: "Qwen3-5-9B-Q4_K_M.gguf"
+    host:
+      type: llama_cpp_with_vulkan
+    load_params:
+      context_size: 32768
+      batch_size: 2048
+      ubatch_size: 512
+      cache_type_k: "q8_0"
+      cache_type_v: "q8_0"
+      gpu_layers: 0
+      threads: 6
+      use_mmap: true
+      flash_attn: true
+      cont_batching: false
+      no_cache_prompt: true
+      parallel: 1
+    sampling:
+      temperature: 0.3
+      max_tokens: 4096
+
+agentic_workflow:
+  description: "Stress test for refusal resistance, code gen, eval, and YAML format compliance."
+
+  steps:
+
+    step_00_bootstrap:
+      generative_entity: "${models.test_model}"
+      prompt: "READY"
+      model_overrides:
+        temperature: 0.0
+        max_tokens: 1
+
+    # ============================================================
+    # VECTOR 1: Refusal Resistance
+    # Injects file content via shell. Model must USE the content
+    # without saying "I cannot read files". Anti-refusal framing.
+    # ============================================================
+    step_01_refusal_resistance:
+      generative_entity: "${models.test_model}"
+      depends_on: [step_00_bootstrap]
+      prompt: |
+        Content provided below (injected via shell):
+        {{bookmarks.shell_output.stdout}}
+
+        Analyze this Rust code for the following concerns:
+        1. Is the `route_to` parallel branch safe against race conditions?
+        2. Does the `JoinSet` spawn correctly clone all necessary resources?
+        3. Are there any obvious ownership or lifetime bugs?
+
+        Output a 3-paragraph technical analysis. The content above is already in your context — do NOT say you cannot read files. Use the provided content to accomplish the task.
+      model_overrides:
+        temperature: 0.3
+        max_tokens: 1500
+      when:
+        before_step_starts:
+          - shell:
+              command: "sed -n '1850,1950p' src/benchmark/runner.rs"
+              args: []
+              working_dir: "/home/jon/code/whitt-execution-engine"
+              fail_on_error: false
+        after_step_succeeds:
+          - save_to:
+              - $step_01_output
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/stress/01-refusal.txt"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/stress.log"
+              event_fields: [step_name, duration_ms, total_tokens, quality_score]
+              level: info
+
+    # ============================================================
+    # VECTOR 2: Long-form Code Generation
+    # Asks for substantial Rust impl with max_tokens 4096.
+    # Verbose models hit max_tokens; concise models finish early.
+    # ============================================================
+    step_02_code_generation:
+      generative_entity: "${models.test_model}"
+      depends_on: [step_01_refusal_resistance]
+      prompt: |
+        Implement an async Rust function `parallel_route_to_targets` that:
+        1. Takes `&self`, `targets: &[String]`, `step_index: &HashMap<String, usize>`
+        2. Returns `Option<usize>` (Some(last_idx) if parallel ran, None if should fall through)
+        3. Early returns None if targets.len() <= 1
+        4. Collects target info: model name, prompt, max_tokens for each target
+        5. Detects if all targets use the same model (parallel eligible)
+        6. Loads the shared model once via `client.load_model(model_id)`
+        7. Spawns JoinSet tasks calling `send_inference_request` for each target
+        8. Collects results, sorts by target index, updates `step_outputs`
+        9. Unloads model, sleeps `config.cooldown_after_unload`
+        10. Returns Some(last_idx)
+
+        Output the complete Rust function in a single ```rust block. No prose. No explanation. Code only.
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 4096
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $step_02_output
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/stress/02-codegen.txt"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/stress.log"
+              event_fields: [step_name, duration_ms, total_tokens, quality_score]
+              level: info
+
+    # ============================================================
+    # VECTOR 3: Multi-perspective Evaluation
+    # 5 distinct rubrics. Tests reasoning + structure.
+    # ============================================================
+    step_03_multi_perspective_eval:
+      generative_entity: "${models.test_model}"
+      depends_on: [step_02_code_generation]
+      prompt: |
+        Evaluate the following code against 5 perspectives. Output ONLY the evaluation in the exact format shown.
+
+        Code:
+        {{step.step_02_code_generation.output}}
+
+        Format (use EXACTLY this structure):
+        ## Perspective 1: OWNERSHIP
+        - **BORROW_CHECK**: [PASS/FAIL] [1 sentence reason]
+        - **LIFETIME**: [PASS/FAIL] [1 sentence reason]
+        ## Perspective 2: CONCURRENCY
+        - **TASK_SPAWN**: [PASS/FAIL] [1 sentence reason]
+        - **RESOURCE_LEAK**: [PASS/FAIL] [1 sentence reason]
+        ## Perspective 3: ERROR_HANDLING
+        - **PROPAGATION**: [PASS/FAIL] [1 sentence reason]
+        ## Perspective 4: PERFORMANCE
+        - **REDUNDANT_WORK**: [PASS/FAIL] [1 sentence reason]
+        ## Perspective 5: IDIOMATIC
+        - **RUST_STYLE**: [PASS/FAIL] [1 sentence reason]
+
+        VERDICT: [PASS/FAIL]
+      model_overrides:
+        temperature: 0.1
+        max_tokens: 1500
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $step_03_output
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/stress/03-eval.txt"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/stress.log"
+              event_fields: [step_name, duration_ms, total_tokens, quality_score]
+              level: info
+
+    # ============================================================
+    # VECTOR 4: Structured YAML Output
+    # Strict format compliance. Hallucination-prone.
+    # ============================================================
+    step_04_yaml_output:
+      generative_entity: "${models.test_model}"
+      depends_on: [step_03_multi_perspective_eval]
+      prompt: |
+        Generate a YAML workflow step that uses the parallel_route_to_targets function. Output ONLY the YAML. No preamble. No explanation. No markdown fences.
+
+        step_use_parallel:
+          generative_entity: "${models.qwen35}"
+          depends_on: [step_prior]
+          prompt: |
+            Call the parallel helper with the targets list.
+          model_overrides:
+            temperature: 0.2
+            max_tokens: 1000
+          when:
+            after_step_succeeds:
+              - save_to:
+                  - $parallel_output
+                  - "./outputs/parallel.txt"
+              - log:
+                  to_file_path: "./logs/workflow.log"
+                  event_fields: [step_name, duration_ms]
+                  level: info
+      model_overrides:
+        temperature: 0.0
+        max_tokens: 600
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $step_04_output
+              - "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/stress/04-yaml.txt"
+          - log:
+              to_file_path: "./docs/benchmarks/outputs/meta-workflow/__RUN_ID__/logs/stress.log"
+              event_fields: [step_name, duration_ms, total_tokens, quality_score]
+              level: info
