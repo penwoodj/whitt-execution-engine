@@ -121,7 +121,7 @@ timeout 1800 ./target/release/whitt benchmark \
   --workflow "${OUT}/workflow-fixed.yml" \
   --output-dir "${OUT}/exec" \
   --models-dir "${REPO}/models" \
-  --filter-name "Qwen3-5-9B" \
+  --filter-name "Qwen3-[45]" \
   --load-timeout 60 \
   > "${OUT}/exec.log" 2>&1
 EXEC_RC=$?

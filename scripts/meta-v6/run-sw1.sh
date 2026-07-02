@@ -19,7 +19,7 @@ cd "${REPO}"
   --workflow "${SW1_DIR}/sw1-runtime.yml" \
   --output-dir "${SW1_DIR}" \
   --models-dir "${REPO}/models" \
-  --filter-name "Qwen3-5-9B" \
+  --filter-name "Qwen3-[45]" \
   --load-timeout 1800 \
   > "${SW1_DIR}/benchmark.log" 2>&1
 SW_EXIT=$?

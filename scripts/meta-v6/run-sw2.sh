@@ -11,7 +11,7 @@ mkdir -p "${SW2_DIR}"/{sw2,logs,input}
 cp "${REPO}/docs/benchmarks/outputs/meta-workflow/${META_RUN_ID}/input/tasks.md" "${SW2_DIR}/input/tasks.md"
 sed "s/__RUN_ID__/${SW2_RUN_ID}/g" "${REPO}/docs/benchmarks/workflows/sw2-desired-output-state.yml" > "${SW2_DIR}/sw2-runtime.yml"
 cd "${REPO}"
-./target/release/whitt benchmark --workflow "${SW2_DIR}/sw2-runtime.yml" --output-dir "${SW2_DIR}" --models-dir "${REPO}/models" --filter-name "Qwen3-5-9B" --load-timeout 1800 > "${SW2_DIR}/benchmark.log" 2>&1
+./target/release/whitt benchmark --workflow "${SW2_DIR}/sw2-runtime.yml" --output-dir "${SW2_DIR}" --models-dir "${REPO}/models" --filter-name "Qwen3-[45]" --load-timeout 1800 > "${SW2_DIR}/benchmark.log" 2>&1
 SW_EXIT=$?
 
 OUT_FILE="${SW2_DIR}/sw2/outputs.md"

@@ -12,7 +12,7 @@ cp "${REPO}/docs/benchmarks/outputs/meta-workflow/${META_RUN_ID}/input/outputs.m
 cp "${REPO}/docs/benchmarks/outputs/meta-workflow/${META_RUN_ID}/input/tasks.md" "${SW3_DIR}/input/tasks.md"
 sed "s/__RUN_ID__/${SW3_RUN_ID}/g" "${REPO}/docs/benchmarks/workflows/sw3-agentic-categorization.yml" > "${SW3_DIR}/sw3-runtime.yml"
 cd "${REPO}"
-./target/release/whitt benchmark --workflow "${SW3_DIR}/sw3-runtime.yml" --output-dir "${SW3_DIR}" --models-dir "${REPO}/models" --filter-name "Qwen3-5-9B" --load-timeout 1800 > "${SW3_DIR}/benchmark.log" 2>&1
+./target/release/whitt benchmark --workflow "${SW3_DIR}/sw3-runtime.yml" --output-dir "${SW3_DIR}" --models-dir "${REPO}/models" --filter-name "Qwen3-[45]" --load-timeout 1800 > "${SW3_DIR}/benchmark.log" 2>&1
 SW_EXIT=$?
 
 OUT_FILE="${SW3_DIR}/sw3/categories.md"
