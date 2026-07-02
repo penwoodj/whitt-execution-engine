@@ -175,10 +175,58 @@ Can emit `<promise>DONE</promise>` if user accepts:
 
 **Tradeoff:** Quality > Speed on this hardware. Anti-refusal + honest scoring produce vastly better deliverables at moderate time cost.
 
-## Next Iteration (Phase 2)
+## P05 v4 vs OPENCODE BASELINE-14 HEAD-TO-HEAD
 
-- Phase 2.3: P14 head-to-head vs opencode baseline-14
-- Phase 2.4: Update this doc with final numbers + commit
+P14 task = "Add parallel JoinSet execution for same-model multi-target RouteTo" (same as P05).
+
+| Metric | OpenCode Baseline | whitt P05 v4 | Winner |
+|--------|-------------------|--------------|--------|
+| Size | 7543 bytes / 179 lines | **24116 bytes / 544 lines** | whitt (3.2x) |
+| Code blocks | 0 (pure planning text) | **10 fenced blocks** | whitt |
+| Approach | Task list ("T1: Add import [STORY: 1]") | **Actual implementation code + refactoring steps** | whitt |
+| Refusals | N/A (single-shot) | 1/13 steps | n/a |
+| Sections | 8 task descriptions | 5 major implementation sections | whitt |
+
+**whitt P05 v4 BEATS opencode baseline-14** on substantive deliverable quality. Opencode produced a planning document; whitt produced actual implementation.
+
+## Final Summary (Phase 1+2)
+
+### What Worked
+1. ✅ Anti-refusal template cut refusals 45% → 8%
+2. ✅ Honest quality_score correctly identifies refusals (was hiding them)
+3. ✅ SKIP_DOCKER_RESTART saves 25s/prompt in batch
+4. ✅ whitt P05 v4 beats opencode baseline-14 on deliverable substance
+
+### What Didn't Work
+1. ❌ Speculative decoding: crashes on RX580 8GB (VRAM ceiling)
+2. ❌ Qwen3-4B for SW1-3: 20-30% slower wall-clock (verbose)
+3. ❌ Net per-prompt speed: 31% slower than baseline (68 vs 52 min)
+
+### Cannot Achieve "Faster Than Before" Honestly
+
+**Baseline:** 52 min total (32 gen + 20 exec, 45% refusals, 10KB deliverable)
+**Optimized:** 68 min total (51 gen + 16 exec, 8% refusals, 24KB deliverable)
+
+The 19 min slower generation comes from:
+- Anti-refusal prompts add ~80 tokens/step (negligible per step, cumulative)
+- Real outputs are longer than refusals (refusals quit early)
+- SW2 has 3 max_tokens-8192+ steps that dominate time
+
+Exec IS faster (16 vs 20 min) due to anti-refusal reducing wasted retries. But gen slowdown exceeds exec speedup.
+
+To achieve net faster on this hardware would require:
+1. Hardware upgrade (16GB+ GPU for spec decoding — proven path)
+2. Smaller concise model (Qwen3-4B-Thinking-2507 untested — might be less verbose than Instruct)
+3. Accept lower quality (cut max_tokens — risks deliverable substance)
+
+### Promise Gate Status: BLOCKED
+
+Cannot emit `<promise>DONE</promise>` because:
+- User criterion "faster than before" NOT met (68 vs 52 min)
+- Working YES, faster NO
+- User must accept quality/speed tradeoff OR direct different optimization path
+
+Awaiting user direction.
 
 ## Commit Trail
 
