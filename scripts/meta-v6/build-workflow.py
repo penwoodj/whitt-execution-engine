@@ -116,6 +116,22 @@ def rewrite_sw4_paths(block: str, meta_run_id: str) -> str:
     return pattern.sub(meta_run_id, block)
 
 
+def rewrite_bare_cat_paths(block: str) -> str:
+    """Prefix bare step output filenames in cat commands with $WHITT_OUTPUT_DIR/outputs/.
+
+    SW4 LLM sometimes generates cat commands with bare filenames:
+        cat step_t10_implement_recursive_loop.txt
+    These resolve to CWD (repo root) where the files don't exist.
+    Rewrite to: cat $WHITT_OUTPUT_DIR/outputs/step_t10_implement_recursive_loop.txt
+    """
+    block = re.sub(
+        r'(cat\s+)(step_t\d[\w]*\.(?:txt|rs|json|md))(?=["\s\n]|$)',
+        r'\1$WHITT_OUTPUT_DIR/outputs/\2',
+        block,
+    )
+    return block
+
+
 def strip_unknown_step_fields(block: str) -> str:
     """Remove non-schema step-level fields that SW4 LLM tends to add.
 
@@ -475,6 +491,9 @@ def main() -> int:
     # SW4 emits paths pointing to its own run dir; final execution uses META run dir.
     if meta_run_id:
         blocks_clean = [rewrite_sw4_paths(b, meta_run_id) for b in blocks_clean]
+
+    # Rewrite bare step output names in cat commands to full $WHITT_OUTPUT_DIR paths
+    blocks_clean = [rewrite_bare_cat_paths(b) for b in blocks_clean]
 
     # Force step_final_synthesize to run LAST by injecting depends_on: [all other step IDs].
     # SW4 emits synthesis without depends_on, causing it to run before prior steps complete.
