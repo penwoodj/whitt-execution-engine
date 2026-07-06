@@ -119,13 +119,13 @@ fi
 
 # ── phase 1: generate workflow.yml from the prompt (SW1-SW5) ───────
 if [[ -n "${FROM_WORKFLOW}" ]]; then
-  banner "phase 1/3 · generate workflow — skipped (--from)"
+  banner "phase 1/4 · generate workflow — skipped (--from)"
   cd "${REPO}"
   META_RUN_ID="$(cat "${REPO}/.current-meta-run" 2>/dev/null || true)"
   cp "${FROM_WORKFLOW}" "${RUN_DIR}/workflow-raw.yml"
   ok "using existing workflow: ${FROM_WORKFLOW}"
 else
-banner "phase 1/3 · generate workflow from prompt (SW1→SW5)"
+banner "phase 1/4 · generate workflow from prompt (SW1→SW5)"
 
 ORCH="${RUN_DIR}/meta-orchestrator.yml"
 localize_workflow "${REPO}/docs/benchmarks/workflows/meta-workflow-v6.yml" "${ORCH}"
@@ -194,7 +194,7 @@ ok "workflow generated: $(wc -c < "${GENERATED}" | tr -d ' ') bytes (engine exit
 fi  # end --from / generation branch
 
 # ── phase 2: post-process into runnable workflow.yml ────────────────
-banner "phase 2/3 · repair + finalize workflow.yml"
+banner "phase 2/4 · repair + finalize workflow.yml"
 
 WF="${RUN_DIR}/workflow.yml"
 python3 - "${RUN_DIR}/workflow-raw.yml" "${WF}" <<'PYEOF'
@@ -225,7 +225,7 @@ TOTAL_STEPS=$(grep -cE '^    step_[A-Za-z0-9_]+:' "${WF}" 2>/dev/null || echo 0)
 info "workflow.yml ready: ${C_BOLD}${TOTAL_STEPS} steps${C_RESET} → ${RUN_DIR#${REPO}/}/workflow.yml"
 
 # ── phase 3: execute the generated workflow ────────────────────────
-banner "phase 3/3 · execute generated workflow (${TOTAL_STEPS} steps)"
+banner "phase 3/4 · execute generated workflow (${TOTAL_STEPS} steps)"
 
 EXEC_DIR="${RUN_DIR}/exec"
 rm -rf "${EXEC_DIR}" && mkdir -p "${EXEC_DIR}"
@@ -257,28 +257,62 @@ status_end
 
 SUCCEEDED=$(grep -a "^Successful:" "${RUN_DIR}/execute.log" | tail -1 | grep -oE '[0-9]+' || echo "?")
 FAILED=$(grep -a "^Failed:" "${RUN_DIR}/execute.log" | tail -1 | grep -oE '[0-9]+' || echo "?")
-
-# ── summary ─────────────────────────────────────────────────────────
-banner "summary"
 if [[ "$EXEC_EXIT" == "0" ]]; then
-  ok "execution finished: ${C_BOLD}${SUCCEEDED} succeeded, ${FAILED} failed${C_RESET} (exit=0, total $(elapsed))"
+  ok "execution finished: ${C_BOLD}${SUCCEEDED} succeeded, ${FAILED} failed${C_RESET}"
 else
   err "execution exited ${EXEC_EXIT}: ${SUCCEEDED} succeeded, ${FAILED} failed — see ${RUN_DIR#${REPO}/}/execute.log"
 fi
-info "workflow.yml    ${RUN_DIR#${REPO}/}/workflow.yml"
 
+# locate deliverables (largest markdown/html output = primary)
 SEARCH_DIRS=("${EXEC_DIR}")
-[[ -n "${FROM_WORKFLOW}" ]] || SEARCH_DIRS+=("${REPO}/docs/benchmarks/outputs/meta-workflow/${META_RUN_ID}")
+[[ -n "${FROM_WORKFLOW}" || -z "${META_RUN_ID}" ]] || SEARCH_DIRS+=("${REPO}/docs/benchmarks/outputs/meta-workflow/${META_RUN_ID}")
 DELIVERABLES=$(find "${SEARCH_DIRS[@]}" \
   -type f \( -path '*deliverable*' -o -path '*outputs/*.md' -o -path '*outputs/*.html' \) 2>/dev/null | sort -u | head -10)
+PRIMARY=""
+if [[ -n "$DELIVERABLES" ]]; then
+  PRIMARY=$(while IFS= read -r f; do printf '%s %s\n' "$(wc -c < "$f" | tr -d ' ')" "$f"; done <<< "$DELIVERABLES" | sort -rn | head -1 | cut -d' ' -f2-)
+fi
+
+# ── phase 4: verify the deliverable achieves the prompt ────────────
+banner "phase 4/4 · verify deliverable against prompt"
+VERIFY_EXIT=0
+if [[ -z "$PRIMARY" ]]; then
+  err "no deliverable produced — nothing to verify"
+  VERIFY_EXIT=1
+elif [[ ! -s "${PROMPT_FILE}" ]]; then
+  warn "no prompt available (--from mode) — running machine gates + code checks only"
+  printf 'unknown request\n' > "${RUN_DIR}/prompt.md"
+  python3 "${REPO}/scripts/meta-v6/verify-deliverable.py" "${RUN_DIR}/prompt.md" "$PRIMARY" \
+    --skip-judge --report "${RUN_DIR}/verify.json" 2>&1 | sed 's/^/  /' >&2
+  VERIFY_EXIT=${PIPESTATUS[0]}
+else
+  info "judging ${PRIMARY#${REPO}/} with ${WHITT_LMSTUDIO_MODEL}"
+  python3 "${REPO}/scripts/meta-v6/verify-deliverable.py" "${PROMPT_FILE}" "$PRIMARY" \
+    --report "${RUN_DIR}/verify.json" 2>&1 | sed 's/^/  /' >&2
+  VERIFY_EXIT=${PIPESTATUS[0]}
+fi
+
+# ── summary ─────────────────────────────────────────────────────────
+banner "summary"
+if [[ "$EXEC_EXIT" == "0" && "$VERIFY_EXIT" == "0" ]]; then
+  ok "${C_BOLD}VERIFIED${C_RESET} — workflow executed and deliverable achieves the prompt (total $(elapsed))"
+elif [[ "$EXEC_EXIT" == "0" ]]; then
+  err "executed but ${C_BOLD}NOT VERIFIED${C_RESET} (verify exit=${VERIFY_EXIT}) — see verify output above / verify.json"
+else
+  err "execution failed (exit=${EXEC_EXIT})"
+fi
+info "workflow.yml    ${RUN_DIR#${REPO}/}/workflow.yml"
 if [[ -n "$DELIVERABLES" ]]; then
   info "deliverables:"
   while IFS= read -r f; do
-    echo "    ${C_GREEN}→${C_RESET} ${f#${REPO}/} ${C_DIM}($(wc -c < "$f" | tr -d ' ') bytes)${C_RESET}" >&2
+    MARK=""
+    [[ "$f" == "$PRIMARY" ]] && MARK=" ${C_BOLD}(primary)${C_RESET}"
+    echo "    ${C_GREEN}→${C_RESET} ${f#${REPO}/} ${C_DIM}($(wc -c < "$f" | tr -d ' ') bytes)${C_RESET}${MARK}" >&2
   done <<< "$DELIVERABLES"
 else
   warn "no deliverable files found — inspect ${RUN_DIR#${REPO}/}/exec/"
 fi
-info "logs            generate.log · execute.log · fix-yaml.log · inject.log in ${RUN_DIR#${REPO}/}"
+info "logs            generate.log · execute.log · fix-yaml.log · inject.log · verify.json in ${RUN_DIR#${REPO}/}"
 
-exit "${EXEC_EXIT}"
+[[ "$EXEC_EXIT" != "0" ]] && exit "${EXEC_EXIT}"
+exit "${VERIFY_EXIT}"
