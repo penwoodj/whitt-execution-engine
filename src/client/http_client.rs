@@ -37,16 +37,37 @@ fn is_retryable(err: &anyhow::Error) -> bool {
     false
 }
 
+/// Which kind of OpenAI-compatible server the client is talking to.
+///
+/// - `LlamaCpp`: llama.cpp server (router mode) — has `/health`,
+///   `models/load`, `models/unload`, and per-model status in `/v1/models`.
+/// - `LmStudio`: LM Studio local server — OpenAI-compatible
+///   (`/v1/models`, `/v1/chat/completions`) but no `/health` and no explicit
+///   load/unload endpoints; models are loaded just-in-time when named in a
+///   chat completion request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BackendKind {
+    #[default]
+    LlamaCpp,
+    LmStudio,
+}
+
 /// HTTP client for llama-server.
 #[derive(Clone)]
 pub struct LlamaHttpClient {
     client: Client,
     base_url: String,
+    kind: BackendKind,
 }
 
 impl LlamaHttpClient {
-    /// Create a new HTTP client.
+    /// Create a new HTTP client (llama.cpp semantics).
     pub fn new(base_url: impl Into<String>) -> Result<Self> {
+        Self::new_with_kind(base_url, BackendKind::LlamaCpp)
+    }
+
+    /// Create a new HTTP client for a specific backend kind.
+    pub fn new_with_kind(base_url: impl Into<String>, kind: BackendKind) -> Result<Self> {
         let client = ClientBuilder::new()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(3600))
@@ -58,7 +79,13 @@ impl LlamaHttpClient {
         Ok(Self {
             client,
             base_url: base_url.into(),
+            kind,
         })
+    }
+
+    /// The backend kind this client targets.
+    pub fn kind(&self) -> BackendKind {
+        self.kind
     }
 
     fn url(&self, endpoint: &str) -> String {
@@ -70,7 +97,26 @@ impl LlamaHttpClient {
     // -----------------------------------------------------------------------
 
     /// Health check.
+    ///
+    /// LM Studio has no `/health` endpoint, so reachability of `/v1/models`
+    /// is used as the health signal and a synthetic response is returned.
     pub async fn health(&self) -> Result<HealthResponse> {
+        if self.kind == BackendKind::LmStudio {
+            let resp = self
+                .client
+                .get(self.url("v1/models"))
+                .send()
+                .await
+                .context("Failed to reach LM Studio server (/v1/models)")?;
+            if !resp.status().is_success() {
+                anyhow::bail!("LM Studio health probe failed: HTTP {}", resp.status());
+            }
+            return Ok(HealthResponse {
+                status: "ok".into(),
+                slots_idle: 1,
+                slots_processing: 0,
+            });
+        }
         self.client
             .get(self.url("health"))
             .send()
@@ -115,6 +161,25 @@ impl LlamaHttpClient {
 
     pub async fn load_model(&self, model_id: impl Into<String>) -> Result<()> {
         let model_id = model_id.into();
+        if self.kind == BackendKind::LmStudio {
+            // LM Studio loads models just-in-time when they are named in a
+            // chat completion request. Verify the model is known, then no-op.
+            match self.list_models().await {
+                Ok(models) => {
+                    if models.iter().any(|m| m.id == model_id) {
+                        eprintln!("[MODEL] {} available in LM Studio (JIT load on first request)", model_id);
+                    } else {
+                        eprintln!(
+                            "[MODEL] WARNING: {} not listed by LM Studio /v1/models — \
+                             first request will fail unless JIT loading resolves it",
+                            model_id
+                        );
+                    }
+                }
+                Err(e) => eprintln!("[MODEL] could not list LM Studio models (continuing): {}", e),
+            }
+            return Ok(());
+        }
         eprintln!("[MODEL] loading model: {}", model_id);
         let resp = self
             .client
@@ -148,6 +213,12 @@ impl LlamaHttpClient {
 
     pub async fn unload_model(&self, model_id: impl Into<String>) -> Result<()> {
         let model_id = model_id.into();
+        if self.kind == BackendKind::LmStudio {
+            // LM Studio has no unload endpoint; it evicts models via its own
+            // JIT auto-unload/TTL policy. Treat unload as a successful no-op.
+            eprintln!("[MODEL] skipping unload of {} (LM Studio manages model lifecycle)", model_id);
+            return Ok(());
+        }
         eprintln!("[MODEL] unloading model: {}", model_id);
         let resp = self
             .client
@@ -170,6 +241,10 @@ impl LlamaHttpClient {
         expected_status: &str,
         timeout: Duration,
     ) -> Result<()> {
+        if self.kind == BackendKind::LmStudio {
+            // LM Studio's /v1/models has no per-model status field.
+            return Ok(());
+        }
         let start = std::time::Instant::now();
         let poll_interval = Duration::from_millis(500);
         while start.elapsed() < timeout {

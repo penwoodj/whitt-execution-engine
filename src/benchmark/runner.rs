@@ -1,4 +1,4 @@
-use crate::client::http_client::LlamaHttpClient;
+use crate::client::http_client::{BackendKind, LlamaHttpClient};
 use crate::client::types::{ChatCompletionRequest, ChatMessage};
 use crate::client::disk_monitor;
 use crate::client::memory_monitor;
@@ -72,6 +72,49 @@ pub struct BenchmarkRunner {
     config: BenchmarkConfig,
     hook_engine: Arc<Mutex<HookEngine>>,
     inference_semaphore: Arc<Semaphore>,
+    backend_kind: BackendKind,
+}
+
+/// Inspect a workflow YAML's `providers:` section to determine the backend kind
+/// and (optionally) the server URL declared by the provider config.
+///
+/// Returns `(BackendKind, Option<server_url>)`. Any provider key containing
+/// "lmstudio" selects `BackendKind::LmStudio`. The URL is derived from
+/// `providers.<name>.config.{host,port}` (or `providers.<name>.{host,port}`),
+/// defaulting to port 1234 for LM Studio when only a host is given.
+fn detect_backend_from_workflow(workflow_file: Option<&str>) -> (BackendKind, Option<String>) {
+    let Some(wf_path) = workflow_file else {
+        return (BackendKind::LlamaCpp, None);
+    };
+    let Ok(content) = fs::read_to_string(wf_path) else {
+        return (BackendKind::LlamaCpp, None);
+    };
+    let Ok(yaml_value) = serde_saphyr::from_str::<serde_json::Value>(&content) else {
+        return (BackendKind::LlamaCpp, None);
+    };
+    let Some(providers) = yaml_value.get("providers").and_then(|p| p.as_object()) else {
+        return (BackendKind::LlamaCpp, None);
+    };
+
+    for (name, provider) in providers {
+        if !name.to_lowercase().contains("lmstudio") {
+            continue;
+        }
+        let cfg = provider.get("config").unwrap_or(provider);
+        let host = cfg
+            .get("host")
+            .and_then(|v| v.as_str())
+            .unwrap_or("localhost")
+            .to_string();
+        let port = cfg
+            .get("port")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1234);
+        let url = format!("http://{}:{}", host, port);
+        info!("[benchmark] workflow declares LM Studio provider '{}' → backend=lmstudio, url={}", name, url);
+        return (BackendKind::LmStudio, Some(url));
+    }
+    (BackendKind::LlamaCpp, None)
 }
 
 struct BenchmarkWorkflowConfig {
@@ -218,11 +261,28 @@ fn read_proc_vram_nvidia() -> Option<u64> {
 
 impl BenchmarkRunner {
     pub fn new(config: BenchmarkConfig) -> Self {
+        let mut config = config;
         let max_concurrent = detect_max_concurrent_inferences();
+
+        // Detect provider type from the workflow YAML. If the workflow targets
+        // LM Studio and the CLI URL was left at the llama.cpp default, point
+        // the client at the URL declared in the workflow's provider config.
+        let (backend_kind, provider_url) =
+            detect_backend_from_workflow(config.workflow_file.as_deref());
+        if backend_kind == BackendKind::LmStudio {
+            if let Some(url) = provider_url {
+                if config.server_url == "http://localhost:8080" {
+                    info!("[benchmark] overriding default server URL with LM Studio provider URL: {}", url);
+                    config.server_url = url;
+                }
+            }
+        }
+
         Self {
             config,
             hook_engine: Arc::new(Mutex::new(HookEngine::new())),
             inference_semaphore: Arc::new(Semaphore::new(max_concurrent)),
+            backend_kind,
         }
     }
 
@@ -230,7 +290,7 @@ impl BenchmarkRunner {
     pub async fn preflight_check(&self) -> Result<()> {
         info!("[benchmark] starting preflight checks...");
 
-        let client = LlamaHttpClient::new(&self.config.server_url)
+        let client = LlamaHttpClient::new_with_kind(&self.config.server_url, self.backend_kind)
             .context("Failed to create HTTP client for preflight check")?;
         match client.health().await {
             Ok(health) => {
@@ -325,7 +385,7 @@ impl BenchmarkRunner {
             }
         }
 
-        let client = LlamaHttpClient::new(&self.config.server_url)
+        let client = LlamaHttpClient::new_with_kind(&self.config.server_url, self.backend_kind)
             .context("Failed to create HTTP client for health check")?;
         match client.health().await {
             Ok(health) => {
@@ -1509,11 +1569,13 @@ impl BenchmarkRunner {
             let hook_engine = Arc::clone(&self.hook_engine);
             let config = self.config.clone();
 
+            let backend_kind = self.backend_kind;
             join_set.spawn(async move {
                 let runner = BenchmarkRunner {
                     config,
                     hook_engine,
                     inference_semaphore: Arc::new(Semaphore::new(1)),
+                    backend_kind,
                 };
                 let result = runner.execute_workflow_step(&resolved_step, &client_clone, &model_clone, max_tokens, temperature, top_p, None).await;
                 (step_id_for_task, result)
@@ -1563,6 +1625,10 @@ impl BenchmarkRunner {
     }
 
     async fn restart_docker_with_env_vars(&self, env_vars: &[(String, String)]) -> Result<()> {
+        if self.backend_kind == BackendKind::LmStudio {
+            info!("[benchmark] LM Studio backend — skipping Docker restart ({} env vars ignored; LM Studio manages model loading)", env_vars.len());
+            return Ok(());
+        }
         info!("[benchmark] restarting Docker with {} env vars", env_vars.len());
         for (k, v) in env_vars {
             info!("[benchmark]   {}={}", k, v);
@@ -2075,7 +2141,7 @@ impl BenchmarkRunner {
             warn!("[benchmark] failed to archive workflow YAML to output dir: {}", e);
         }
 
-        let client = LlamaHttpClient::new(&self.config.server_url)
+        let client = LlamaHttpClient::new_with_kind(&self.config.server_url, self.backend_kind)
             .context("Failed to create HTTP client")?;
 
         let run_timestamp = {
