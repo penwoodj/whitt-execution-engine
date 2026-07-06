@@ -90,7 +90,10 @@ fn detect_backend_from_workflow(workflow_file: Option<&str>) -> (BackendKind, Op
         return (BackendKind::LlamaCpp, None);
     };
     let Ok(yaml_value) = serde_saphyr::from_str::<serde_json::Value>(&content) else {
-        return (BackendKind::LlamaCpp, None);
+        // Generated workflows can contain YAML the strict Value parser rejects
+        // (the workflow loader may still repair/accept them). Fall back to a
+        // text scan so backend detection doesn't silently revert to llama.cpp.
+        return detect_backend_text_scan(&content);
     };
     let Some(providers) = yaml_value.get("providers").and_then(|p| p.as_object()) else {
         return (BackendKind::LlamaCpp, None);
@@ -112,6 +115,44 @@ fn detect_backend_from_workflow(workflow_file: Option<&str>) -> (BackendKind, Op
             .unwrap_or(1234);
         let url = format!("http://{}:{}", host, port);
         info!("[benchmark] workflow declares LM Studio provider '{}' → backend=lmstudio, url={}", name, url);
+        return (BackendKind::LmStudio, Some(url));
+    }
+    (BackendKind::LlamaCpp, None)
+}
+
+/// Line-based fallback for `detect_backend_from_workflow` when the YAML does
+/// not survive a strict parse: look for an `lmstudio`-ish provider key line
+/// and a nearby `port:` line.
+fn detect_backend_text_scan(content: &str) -> (BackendKind, Option<String>) {
+    let mut in_providers = false;
+    let mut found_lmstudio = false;
+    let mut port: u64 = 1234;
+    for line in content.lines() {
+        let trimmed = line.trim_end();
+        if trimmed == "providers:" {
+            in_providers = true;
+            continue;
+        }
+        if in_providers {
+            // top-level key ends the providers block
+            if !trimmed.is_empty() && !trimmed.starts_with(' ') && !trimmed.starts_with('#') {
+                break;
+            }
+            if trimmed.trim_start().to_lowercase().starts_with("lmstudio") {
+                found_lmstudio = true;
+            }
+            if found_lmstudio {
+                if let Some(rest) = trimmed.trim_start().strip_prefix("port:") {
+                    if let Ok(p) = rest.trim().parse::<u64>() {
+                        port = p;
+                    }
+                }
+            }
+        }
+    }
+    if found_lmstudio {
+        let url = format!("http://localhost:{}", port);
+        info!("[benchmark] text-scan fallback detected LM Studio provider → backend=lmstudio, url={}", url);
         return (BackendKind::LmStudio, Some(url));
     }
     (BackendKind::LlamaCpp, None)

@@ -73,6 +73,7 @@ content = re.sub(r'\n```\s*$', '', content, flags=re.MULTILINE)
 open(f'{d}/workflow-fixed.yml', 'w').write(content)
 print('stripped')
 PYEOF
+python3 "${REPO}/scripts/meta-v6/fix-yaml.py" "${RESULTS_DIR}/workflow-fixed.yml" > "${RESULTS_DIR}/fix-yaml.log" 2>&1 || echo "WARN: fix-yaml.py reported issues (see fix-yaml.log)"
 python3 "${REPO}/scripts/meta-v6/inject-shell-hooks.py" "${RESULTS_DIR}/workflow-fixed.yml" > "${RESULTS_DIR}/inject.log" 2>&1 || true
 python3 -c "import yaml; yaml.safe_load(open('${RESULTS_DIR}/workflow-fixed.yml'))" || {
   echo "WARN: python yaml parse failed (Rust engine may still accept it)"

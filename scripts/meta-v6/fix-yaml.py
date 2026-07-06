@@ -808,6 +808,27 @@ def fix_prose_shell_output(content: str) -> str:
     )
 
 
+def fix_unescaped_quotes_in_command(content: str) -> str:
+    """Fix `command: "... "inner" ..."` — unescaped double quotes inside a
+    double-quoted command scalar (model emits e.g. json.dumps([{"status": "ok"}])).
+
+    Detection: the line is `command: "<body>"` and <body> contains a bare `"`
+    (not already backslash-escaped). Repair: re-emit with inner quotes escaped.
+    """
+    lines = content.split('\n')
+    fixed = []
+    for line in lines:
+        m = re.match(r'^(\s*command:\s*)"(.*)"\s*$', line)
+        if m:
+            body = m.group(2)
+            # bare quote = " not preceded by a backslash
+            if re.search(r'(?<!\\)"', body):
+                body = re.sub(r'(?<!\\)"', r'\\"', body)
+                line = f'{m.group(1)}"{body}"'
+        fixed.append(line)
+    return '\n'.join(fixed)
+
+
 def main():
     if len(sys.argv) != 2:
         print("Usage: fix-yaml.py <workflow.yml>", file=sys.stderr)
@@ -823,6 +844,7 @@ def main():
 
     content = strip_markdown_fences(content)
     content = fix_missing_newline_after_quote(content)
+    content = fix_unescaped_quotes_in_command(content)
     content = fix_gwt_unquoted_equals(content)
     content = fix_inline_save_to(content)
     content = fix_save_to_map_to_list(content)
