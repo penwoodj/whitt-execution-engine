@@ -289,6 +289,27 @@ impl LlamaHttpClient {
         }
     }
 
+    /// Serialize a request, applying backend-specific extensions.
+    ///
+    /// For LM Studio, injects `reasoning_effort` (default "none") so
+    /// reasoning-capable models (e.g. Qwen3.5) don't burn small
+    /// `max_tokens` budgets on hidden thinking tokens. Override with the
+    /// `WHITT_REASONING_EFFORT` env var; set it to "default" to omit the
+    /// field entirely.
+    fn request_body(&self, request: &ChatCompletionRequest) -> serde_json::Value {
+        let mut body = serde_json::to_value(request).unwrap_or(serde_json::Value::Null);
+        if self.kind == BackendKind::LmStudio {
+            let effort = std::env::var("WHITT_REASONING_EFFORT")
+                .unwrap_or_else(|_| "none".to_string());
+            if effort != "default" {
+                if let Some(obj) = body.as_object_mut() {
+                    obj.insert("reasoning_effort".into(), serde_json::Value::String(effort));
+                }
+            }
+        }
+        body
+    }
+
     async fn chat_completion_inner(
         &self,
         request: ChatCompletionRequest,
@@ -296,7 +317,7 @@ impl LlamaHttpClient {
         let resp = self
             .client
             .post(self.url("v1/chat/completions"))
-            .json(&request)
+            .json(&self.request_body(&request))
             .send()
             .await
             .context("Failed to send completion request")?;
@@ -327,7 +348,7 @@ impl LlamaHttpClient {
         let resp = self
             .client
             .post(self.url("v1/chat/completions"))
-            .json(&req)
+            .json(&self.request_body(&req))
             .send()
             .await
             .context("Failed to send streaming request")?;

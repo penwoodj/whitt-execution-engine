@@ -8,7 +8,7 @@ set -euo pipefail
 
 SW5_RUN_ID="${1:?SW5_RUN_ID required}"
 META_RUN_ID="${2:?META_RUN_ID required}"
-REPO=/home/jon/code/whitt-execution-engine
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/env.sh"
 SW5_DIR="$REPO/docs/benchmarks/outputs/meta-workflow/${SW5_RUN_ID}"
 META_DIR="$REPO/docs/benchmarks/outputs/meta-workflow/${META_RUN_ID}"
 

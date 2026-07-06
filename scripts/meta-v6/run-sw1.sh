@@ -4,7 +4,7 @@
 # Usage: run-sw1.sh [META_RUN_ID] [PROMPT_FILE]
 set -uo pipefail  # NOT -e: we handle errors manually
 
-REPO="/home/jon/code/whitt-execution-engine"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/env.sh"
 META_RUN_ID="${1:-$(cat "${REPO}/.current-meta-run")}"
 PROMPT_FILE="${2:-${REPO}/docs/benchmarks/outputs/meta-workflow/${META_RUN_ID}/input/prompt.txt}"
 SW1_RUN_ID="meta-${META_RUN_ID}-sw1-$(date +%Y%m%d-%H%M%S)"
@@ -13,13 +13,13 @@ SW1_DIR="${REPO}/docs/benchmarks/outputs/meta-workflow/${SW1_RUN_ID}"
 mkdir -p "${SW1_DIR}"/{sw1,logs,input}
 cp "${PROMPT_FILE}" "${SW1_DIR}/input/prompt.txt"
 sed "s/__RUN_ID__/${SW1_RUN_ID}/g" "${REPO}/docs/benchmarks/workflows/sw1-task-deconstruction.yml" > "${SW1_DIR}/sw1-runtime.yml"
+localize_workflow "${SW1_DIR}/sw1-runtime.yml" "${SW1_DIR}/sw1-runtime.yml"
 
 cd "${REPO}"
 ./target/release/whitt benchmark \
   --workflow "${SW1_DIR}/sw1-runtime.yml" \
   --output-dir "${SW1_DIR}" \
-  --models-dir "${REPO}/models" \
-  --filter-name "Qwen3-5-9B" \
+  $(model_flags) \
   --load-timeout 1800 \
   > "${SW1_DIR}/benchmark.log" 2>&1
 SW_EXIT=$?
