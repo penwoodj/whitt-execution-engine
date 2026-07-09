@@ -263,11 +263,14 @@ else
   err "execution exited ${EXEC_EXIT}: ${SUCCEEDED} succeeded, ${FAILED} failed — see ${RUN_DIR#${REPO}/}/execute.log"
 fi
 
-# locate deliverables (largest markdown/html output = primary)
+# locate deliverables (largest markdown/html output = primary).
+# Only look at the exec run's own outputs/deliverables dirs — NOT the whole
+# meta run tree (everything lives under docs/benchmarks/outputs/, so loose
+# '*outputs/*' patterns match pipeline intermediates like structs.md).
 SEARCH_DIRS=("${EXEC_DIR}")
-[[ -n "${FROM_WORKFLOW}" || -z "${META_RUN_ID}" ]] || SEARCH_DIRS+=("${REPO}/docs/benchmarks/outputs/meta-workflow/${META_RUN_ID}")
+[[ -n "${FROM_WORKFLOW}" || -z "${META_RUN_ID}" ]] || SEARCH_DIRS+=("${REPO}/docs/benchmarks/outputs/meta-workflow/${META_RUN_ID}/deliverables")
 DELIVERABLES=$(find "${SEARCH_DIRS[@]}" \
-  -type f \( -path '*deliverable*' -o -path '*outputs/*.md' -o -path '*outputs/*.html' \) 2>/dev/null | sort -u | head -10)
+  -type f \( -path '*/deliverables/*' -o -name 'deliverable*' -o -path "${EXEC_DIR}/outputs/*.md" -o -path "${EXEC_DIR}/outputs/*.html" \) 2>/dev/null | sort -u | head -10)
 PRIMARY=""
 if [[ -n "$DELIVERABLES" ]]; then
   PRIMARY=$(while IFS= read -r f; do printf '%s %s\n' "$(wc -c < "$f" | tr -d ' ')" "$f"; done <<< "$DELIVERABLES" | sort -rn | head -1 | cut -d' ' -f2-)
@@ -288,7 +291,7 @@ elif [[ ! -s "${PROMPT_FILE}" ]]; then
 else
   info "judging ${PRIMARY#${REPO}/} with ${WHITT_LMSTUDIO_MODEL}"
   python3 "${REPO}/scripts/meta-v6/verify-deliverable.py" "${PROMPT_FILE}" "$PRIMARY" \
-    --report "${RUN_DIR}/verify.json" 2>&1 | sed 's/^/  /' >&2
+    --report "${RUN_DIR}/verify.json" --extract-dir "${RUN_DIR}/artifacts" 2>&1 | sed 's/^/  /' >&2
   VERIFY_EXIT=${PIPESTATUS[0]}
 fi
 
@@ -311,6 +314,12 @@ if [[ -n "$DELIVERABLES" ]]; then
   done <<< "$DELIVERABLES"
 else
   warn "no deliverable files found — inspect ${RUN_DIR#${REPO}/}/exec/"
+fi
+if [[ -d "${RUN_DIR}/artifacts" ]]; then
+  info "artifacts (runnable code extracted from deliverable):"
+  for f in "${RUN_DIR}/artifacts"/*; do
+    [[ -f "$f" ]] && echo "    ${C_GREEN}→${C_RESET} ${f#${REPO}/}" >&2
+  done
 fi
 info "logs            generate.log · execute.log · fix-yaml.log · inject.log · verify.json in ${RUN_DIR#${REPO}/}"
 

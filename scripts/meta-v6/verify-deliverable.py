@@ -126,6 +126,8 @@ def main() -> int:
     ap.add_argument("--min-score", type=int, default=6)
     ap.add_argument("--report", default=None)
     ap.add_argument("--skip-judge", action="store_true")
+    ap.add_argument("--extract-dir", default=None,
+                    help="write each fenced code block to this dir as a runnable file")
     args = ap.parse_args()
 
     try:
@@ -162,6 +164,28 @@ def main() -> int:
     print(f"  summary: {len(blocks)} blocks, {checked} checked, {valid} valid")
     if checked > 0 and valid == 0:
         print("  FAIL  no syntactically valid code block")
+
+    if args.extract_dir and blocks:
+        os.makedirs(args.extract_dir, exist_ok=True)
+        ext_map = {"python": ".py", "py": ".py", "bash": ".sh", "sh": ".sh",
+                   "javascript": ".js", "js": ".js", "html": ".html",
+                   "yaml": ".yml", "yml": ".yml", "json": ".json", "rust": ".rs"}
+        # try to name files from a preceding "`filename.ext`" mention; else block-N
+        for i, (lang, code) in enumerate(blocks):
+            name = None
+            window = deliverable[:deliverable.find(code)][-400:]
+            mentions = re.findall(r"`([A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,5})`", window)
+            if mentions:
+                name = mentions[-1]
+            if not name:
+                name = f"block-{i+1}{ext_map.get(lang, '.txt')}"
+            path = os.path.join(args.extract_dir, name)
+            if os.path.exists(path):
+                base, ext = os.path.splitext(name)
+                path = os.path.join(args.extract_dir, f"{base}-{i+1}{ext}")
+            with open(path, "w") as f:
+                f.write(code)
+        print(f"  extracted {len(blocks)} blocks → {args.extract_dir}")
 
     machine_ok = all([g_sub, g_ref, g_meta, g_code])
 
