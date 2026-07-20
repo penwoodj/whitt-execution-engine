@@ -808,6 +808,44 @@ def fix_prose_shell_output(content: str) -> str:
     )
 
 
+def fix_duplicate_step_keys(content: str) -> str:
+    """Drop earlier occurrences of duplicate step keys under `steps:`.
+
+    Python yaml keeps the last duplicate silently; the engine's strict parser
+    rejects the file. Keep the LAST block (usually the refined variant).
+    Step blocks start at 4-space indent: `    step_xxx:`.
+    """
+    lines = content.split('\n')
+    # locate step block boundaries
+    starts = []  # (line_idx, step_name)
+    for i, line in enumerate(lines):
+        m = re.match(r'^    (step_[A-Za-z0-9_]+):\s*$', line)
+        if m:
+            starts.append((i, m.group(1)))
+    names = [n for _, n in starts]
+    dups = {n for n in names if names.count(n) > 1}
+    if not dups:
+        return content
+    # block extent = from its start line to the next start line (or EOF)
+    drop_ranges = []
+    last_idx = {}
+    for pos, (i, n) in enumerate(starts):
+        last_idx[n] = pos
+    for pos, (i, n) in enumerate(starts):
+        if n in dups and last_idx[n] != pos:
+            end = starts[pos + 1][0] if pos + 1 < len(starts) else len(lines)
+            drop_ranges.append((i, end))
+    keep = []
+    j = 0
+    for i, line in enumerate(lines):
+        while j < len(drop_ranges) and i >= drop_ranges[j][1]:
+            j += 1
+        if j < len(drop_ranges) and drop_ranges[j][0] <= i < drop_ranges[j][1]:
+            continue
+        keep.append(line)
+    return '\n'.join(keep)
+
+
 def fix_unescaped_quotes_in_command(content: str) -> str:
     """Fix `command: "... "inner" ..."` — unescaped double quotes inside a
     double-quoted command scalar (model emits e.g. json.dumps([{"status": "ok"}])).
@@ -844,6 +882,7 @@ def main():
 
     content = strip_markdown_fences(content)
     content = fix_missing_newline_after_quote(content)
+    content = fix_duplicate_step_keys(content)
     content = fix_unescaped_quotes_in_command(content)
     content = fix_gwt_unquoted_equals(content)
     content = fix_inline_save_to(content)

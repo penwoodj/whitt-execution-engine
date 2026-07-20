@@ -465,6 +465,22 @@ def main() -> int:
 
     blocks_clean = [strip_save_to_templates(b) for b in blocks]
 
+    # Dedup step ids: SW4 sometimes emits two blocks with the same step name
+    # (e.g. an original and a refined variant). Python yaml silently keeps the
+    # last one, but the engine's strict parser rejects duplicate mapping keys.
+    # Policy: keep the LAST occurrence (usually the refined variant) — later
+    # depends_on/template references by name still resolve.
+    seen_ids: dict[str, int] = {}
+    for i, b in enumerate(blocks_clean):
+        m = re.match(r'^(\S+?):', b.strip())
+        if m:
+            seen_ids[m.group(1)] = i  # last index wins
+    deduped = [b for i, b in enumerate(blocks_clean)
+               if not (m := re.match(r'^(\S+?):', b.strip())) or seen_ids.get(m.group(1)) == i]
+    if len(deduped) != len(blocks_clean):
+        print(f"[build-workflow] dropped {len(blocks_clean) - len(deduped)} duplicate step block(s)")
+    blocks_clean = deduped
+
     # Dedup save_to paths: SW4 sometimes shares paths across steps, causing data loss.
     blocks_clean = dedup_save_to_paths(blocks_clean)
 
