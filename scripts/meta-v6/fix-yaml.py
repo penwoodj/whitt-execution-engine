@@ -847,22 +847,26 @@ def fix_duplicate_step_keys(content: str) -> str:
 
 
 def fix_unescaped_quotes_in_command(content: str) -> str:
-    """Fix `command: "... "inner" ..."` — unescaped double quotes inside a
-    double-quoted command scalar (model emits e.g. json.dumps([{"status": "ok"}])).
+    """Repair `command: "<shell>"` lines that are not valid YAML.
 
-    Detection: the line is `command: "<body>"` and <body> contains a bare `"`
-    (not already backslash-escaped). Repair: re-emit with inner quotes escaped.
+    Models write shell text as if double quotes had no YAML semantics —
+    producing unescaped inner quotes (json.dumps([{"k": "v"}])) or invalid
+    escape sequences (grep 'pub fn\\|pub async fn'). If the line fails a YAML
+    parse, re-emit the raw body as a single-quoted scalar (single-quoted YAML
+    performs no escape processing; only ' needs doubling).
     """
+    import yaml as _yaml
+
     lines = content.split('\n')
     fixed = []
     for line in lines:
         m = re.match(r'^(\s*command:\s*)"(.*)"\s*$', line)
         if m:
-            body = m.group(2)
-            # bare quote = " not preceded by a backslash
-            if re.search(r'(?<!\\)"', body):
-                body = re.sub(r'(?<!\\)"', r'\\"', body)
-                line = f'{m.group(1)}"{body}"'
+            try:
+                _yaml.safe_load(f'k: "{m.group(2)}"')
+            except _yaml.YAMLError:
+                body = m.group(2).replace("'", "''")
+                line = f"{m.group(1)}'{body}'"
         fixed.append(line)
     return '\n'.join(fixed)
 
