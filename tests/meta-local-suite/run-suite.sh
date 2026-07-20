@@ -46,14 +46,25 @@ for P in "${PROMPTS[@]}"; do
 
   RUN_DIR=$(ls -td "${REPO}/docs/benchmarks/outputs/meta-workflow/local-runs/suite-${P}-"* 2>/dev/null | head -1)
   FUNC="SKIPPED"
-  if [ -n "$RUN_DIR" ] && [ -x "$TEST_FILE" ] || [ -f "$TEST_FILE" ]; then
+  if [ -n "$RUN_DIR" ] && { [ -x "$TEST_FILE" ] || [ -f "$TEST_FILE" ]; }; then
     if [ -d "${RUN_DIR}/artifacts" ]; then
-      echo "suite: $P functional test"
-      if bash "$TEST_FILE" "${RUN_DIR}/artifacts" "$REPO"; then
-        FUNC="FUNC_PASS"
-      else
-        FUNC="FUNC_FAIL"
-      fi
+      # functional test with up to 2 model-driven repair rounds
+      FUNC="FUNC_FAIL"
+      for ATTEMPT in 1 2 3; do
+        echo "suite: $P functional test (attempt $ATTEMPT)"
+        if bash "$TEST_FILE" "${RUN_DIR}/artifacts" "$REPO" > "${RUN_DIR}/functest-${ATTEMPT}.log" 2>&1; then
+          cat "${RUN_DIR}/functest-${ATTEMPT}.log"
+          FUNC="FUNC_PASS"
+          [ "$ATTEMPT" -gt 1 ] && FUNC="FUNC_PASS(repaired)"
+          break
+        fi
+        cat "${RUN_DIR}/functest-${ATTEMPT}.log"
+        [ "$ATTEMPT" -eq 3 ] && break
+        echo "suite: $P repair round $ATTEMPT"
+        python3 "${REPO}/scripts/meta-v6/repair-deliverable.py" \
+          "${RUN_DIR}/prompt.md" "${RUN_DIR}/artifacts" "${RUN_DIR}/functest-${ATTEMPT}.log" \
+          || { echo "suite: $P repair produced nothing"; break; }
+      done
     else
       FUNC="FUNC_FAIL(no-artifacts)"
     fi
