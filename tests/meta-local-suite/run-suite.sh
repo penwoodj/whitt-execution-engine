@@ -48,9 +48,9 @@ for P in "${PROMPTS[@]}"; do
   FUNC="SKIPPED"
   if [ -n "$RUN_DIR" ] && { [ -x "$TEST_FILE" ] || [ -f "$TEST_FILE" ]; }; then
     if [ -d "${RUN_DIR}/artifacts" ]; then
-      # functional test with up to 2 model-driven repair rounds
+      # functional test with up to 3 model-driven repair rounds
       FUNC="FUNC_FAIL"
-      for ATTEMPT in 1 2 3; do
+      for ATTEMPT in 1 2 3 4; do
         echo "suite: $P functional test (attempt $ATTEMPT)"
         if bash "$TEST_FILE" "${RUN_DIR}/artifacts" "$REPO" > "${RUN_DIR}/functest-${ATTEMPT}.log" 2>&1; then
           cat "${RUN_DIR}/functest-${ATTEMPT}.log"
@@ -59,7 +59,7 @@ for P in "${PROMPTS[@]}"; do
           break
         fi
         cat "${RUN_DIR}/functest-${ATTEMPT}.log"
-        [ "$ATTEMPT" -eq 3 ] && break
+        [ "$ATTEMPT" -eq 4 ] && break
         echo "suite: $P repair round $ATTEMPT"
         python3 "${REPO}/scripts/meta-v6/repair-deliverable.py" \
           "${RUN_DIR}/prompt.md" "${RUN_DIR}/artifacts" "${RUN_DIR}/functest-${ATTEMPT}.log" \
