@@ -1,0 +1,3 @@
+# Task: Password Generator CLI
+
+Write a Python tool named passgen.py using only the standard library (use the secrets module for randomness, never random). Two modes selected by CLI flags: `--chars N` prints one password of exactly N characters drawn from ASCII letters, digits, and the punctuation set !@#$%^&*; `--words N` prints one passphrase of exactly N lowercase words joined by single hyphens, chosen from a built-in word list of at least 100 common English words embedded in the script. Exactly one mode must be given; if neither or both are given, or N is not a positive integer, print usage to stderr and exit 2. The password/passphrase is printed to stdout as the only output line. Two consecutive runs must (with overwhelming probability) produce different outputs.

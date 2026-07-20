@@ -1,0 +1,3 @@
+# Task: JSONL Log Analyzer
+
+Write a Python tool named jsonlogs.py that reads a JSON-lines log file (path as first CLI argument). Each valid line is a JSON object with at least "level" (string) and "message" (string) fields. The tool must print, in exactly this format: one line per distinct level in alphabetical order as `LEVEL <name>: <count>` (level name lowercased); then one line `ERROR_MSG: <message>` for every entry whose level is "error" (case-insensitive), in file order; then a final line `SKIPPED: <n>` counting lines that are not valid JSON objects. Use only the Python standard library. A missing file must print a clear error to stderr and exit with a nonzero code (no traceback).

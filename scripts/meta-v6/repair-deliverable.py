@@ -35,6 +35,12 @@ Instructions:
 - Diagnose the failure and produce CORRECTED, COMPLETE versions of any file(s) that must change.
 - Keep all required behavior from the original request.
 - If a test and its implementation disagree on unspecified behavior, make them consistent.
+- TARGET ENVIRONMENT: macOS with /bin/bash 3.2 and BSD userland. Shell scripts must NOT use
+  `declare -A`, `ps --sort`, `stat -c`, `readarray/mapfile`, or other bash-4/GNU-only features;
+  prefer `wc -c` for sizes, `ps aux | sort -k3 -rn` for CPU sorting; `vm_stat` numbers end with
+  a period (strip with tr -d '.'). Python is 3.9, standard library only.
+- A script must not abort the whole run because one section fails — degrade gracefully and
+  still produce its required success output line.
 - For EACH corrected file output exactly: the filename in backticks like `name.ext` on its own line, then ONE fenced code block with the full file content.
 - Output nothing else. No explanations."""
 

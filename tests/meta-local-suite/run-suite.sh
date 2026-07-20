@@ -19,7 +19,7 @@ touch "$RESULTS"
 PROMPTS=("$@")
 if [ ${#PROMPTS[@]} -eq 0 ]; then
   PROMPTS=()
-  for f in "${SUITE_DIR}"/p0*-*.md; do
+  for f in "${SUITE_DIR}"/p[0-9][0-9]-*.md; do
     P=$(basename "$f" | cut -d- -f1)
     # skip prompts that already have a FUNC_PASS row
     if ! grep -q "^${P}.*FUNC_PASS" "$RESULTS" 2>/dev/null; then
