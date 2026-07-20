@@ -1,0 +1,3 @@
+# Task: In-Memory Key-Value Store with Unit Tests
+
+Implement a Python module named kvstore.py providing a class KVStore with methods: set(key, value), get(key) returning None for missing keys, delete(key) returning True if deleted and False if the key did not exist, and set_with_ttl(key, value, ttl_seconds) after which get(key) returns None once ttl_seconds have elapsed (use time.monotonic, no background threads — check expiry lazily on get). Also write a second file test_kvstore.py containing unittest test cases covering: basic set/get, get of a missing key, delete existing and missing keys, and TTL expiry (use a short ttl like 0.2s and time.sleep). Both files must be complete and runnable; all tests must pass with: python3 -m unittest test_kvstore -v

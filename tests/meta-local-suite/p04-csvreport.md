@@ -1,0 +1,3 @@
+# Task: CSV Sales Analyzer with Chart
+
+Write a Python tool named salesreport.py that reads a CSV file with header columns date,region,product,units,unit_price (path given as first CLI argument) and produces a markdown report (second CLI argument, default ./salesreport.md) containing: total revenue overall, a markdown table of revenue by region sorted descending, the best-selling product by units, and an ASCII bar chart of revenue by region (one row per region, bar length proportional to revenue, max 40 characters). Handle an empty or missing CSV with a clear error message and nonzero exit code. Use only the Python standard library. Print "REPORT OK" on success.
