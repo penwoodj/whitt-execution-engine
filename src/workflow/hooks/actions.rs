@@ -294,15 +294,19 @@ fn save_to_file(path: &str, content: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Resolve a relative save_to path against engine.output_dir.
-/// Only redirects SHORT relative paths (./outputs/...) used by generated workflows.
-/// Long paths (./docs/...) used by SW1-SW4 YAMLs stay relative to CWD.
+/// Resolve a save_to path. Bare names resolve against engine.output_dir
+/// (prevents accidental CWD pollution). Multi-segment relative paths and
+/// absolute paths are returned as-is — the YAML author is signaling intent.
+/// $variable paths short-circuit (bookmark store).
 fn resolve_save_path(path: &str, engine: &HookEngine) -> String {
     if path.starts_with('$') {
         return path.to_string();
     }
     let p = Path::new(path);
     if p.is_absolute() {
+        return path.to_string();
+    }
+    if path.contains(std::path::MAIN_SEPARATOR) {
         return path.to_string();
     }
     if let Some(ref base) = engine.output_dir {
@@ -1716,7 +1720,7 @@ mod tests {
     }
 
     #[test]
-    fn given_resolve_save_path_when_output_dir_set_then_all_relative_paths_resolved() {
+    fn given_resolve_save_path_when_output_dir_set_then_only_bare_names_resolved() {
         let engine_no_dir = HookEngine::new();
         assert_eq!(resolve_save_path("foo.txt", &engine_no_dir), "foo.txt");
         assert_eq!(resolve_save_path("$variable", &engine_no_dir), "$variable");
@@ -1732,7 +1736,11 @@ mod tests {
         assert_eq!(resolve_save_path("/abs/path.txt", &engine_with_dir), "/abs/path.txt");
         assert_eq!(
             resolve_save_path("outputs/nested/bar.md", &engine_with_dir),
-            "/tmp/test-output-root/outputs/nested/bar.md"
+            "outputs/nested/bar.md"
+        );
+        assert_eq!(
+            resolve_save_path("./docs/benchmarks/outputs/meta-workflow/abc/sw1/tasks.md", &engine_with_dir),
+            "./docs/benchmarks/outputs/meta-workflow/abc/sw1/tasks.md"
         );
     }
 }
