@@ -192,6 +192,43 @@ def strip_unknown_step_fields(block: str) -> str:
     return '\n'.join(out)
 
 
+def fix_depends_on_placement(block: str) -> str:
+    """Move depends_on from inside when: block to step level.
+
+    Some LLMs (Falcon-H1-7B) emit:
+        step_name:
+          when:
+            depends_on: [other_step]
+            before_step_starts: ...
+    Engine rejects this because `depends_on` isn't a valid hook action.
+    Fix: move `depends_on` to before `when:` at step level.
+    """
+    lines = block.split('\n')
+    out: list[str] = []
+    pending_depends: list[str] = []
+
+    for i, line in enumerate(lines):
+        # Detect depends_on inside when: block (6+ spaces indent)
+        if re.match(r'^      depends_on:\s', line):
+            pending_depends.append(line.strip())
+            continue
+        # When we hit `when:` at step level (4 spaces), emit any pending depends_on first
+        if re.match(r'^    when:\s*$', line) and pending_depends:
+            for dep in pending_depends:
+                out.append(f'    {dep}')
+            pending_depends = []
+            out.append(line)
+            continue
+        out.append(line)
+
+    # Flush any remaining (shouldn't happen but safe)
+    if pending_depends:
+        for dep in pending_depends:
+            out.append(f'    {dep}')
+
+    return '\n'.join(out)
+
+
 def cap_large_cat(block: str) -> str:
     MAX_BYTES = 50000
     cat_pattern = re.compile(r'cat\s+(\.{0,2}/?[^\s|&;"\']+)')
@@ -465,6 +502,9 @@ def main() -> int:
     # that SW4 LLM adds. Engine's strict YAML validator rejects them.
     blocks_clean = [strip_unknown_step_fields(b) for b in blocks_clean]
 
+    # Fix depends_on placement: some LLMs put depends_on inside when: block.
+    blocks_clean = [fix_depends_on_placement(b) for b in blocks_clean]
+
     # Derive depends_on from cat targets: if step_B cats ./outputs/<step_A>.txt,
     # step_B depends_on step_A. Without this, runner executes in hash-map order
     # (random), causing cat to fail because upstream step hasn't saved yet.
@@ -609,29 +649,30 @@ def main() -> int:
         block_lines.insert(1, save_to_injection)
         blocks_clean[i] = '\n'.join(block_lines)
 
-    # Ensure all execution steps have max_tokens >= 8192.
+    # Ensure all execution steps have max_tokens >= 16384.
     # SW4 LLM sometimes omits model_overrides or sets low max_tokens.
     # Without sufficient max_tokens, steps truncate output, reducing deliverable quality.
+    # 16384 = decent thinking tokens budget for Qwen3-5-9B reasoning before final answer.
     for i, block in enumerate(blocks_clean):
         stripped = block.strip()
         if stripped.startswith('step_00_bootstrap') or stripped.startswith('step_final_synthesize'):
             continue
         if 'max_tokens' in block:
             existing = re.search(r'max_tokens:\s*(\d+)', block)
-            if existing and int(existing.group(1)) < 8192:
+            if existing and int(existing.group(1)) < 16384:
                 blocks_clean[i] = block.replace(
                     existing.group(0),
-                    f'max_tokens: 8192'
+                    f'max_tokens: 16384'
                 )
         elif 'model_overrides:' in block:
             blocks_clean[i] = block.replace(
                 'model_overrides:',
-                'model_overrides:\n        max_tokens: 8192',
+                'model_overrides:\n        max_tokens: 16384',
                 1
             )
         else:
             block_lines = block.split('\n')
-            block_lines.insert(1, '  model_overrides:\n    max_tokens: 8192\n    temperature: 0.3')
+            block_lines.insert(1, '  model_overrides:\n    max_tokens: 16384\n    temperature: 0.3')
             blocks_clean[i] = '\n'.join(block_lines)
 
     # Fix dangling step references: shell hooks that cat files from non-existent steps.

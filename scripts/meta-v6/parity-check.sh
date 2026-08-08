@@ -6,13 +6,15 @@
 # This script enforces REAL validation: deliverable exists, real content,
 # no refusals, no meta-commentary, live execution evidence.
 #
-# Usage: parity-check.sh <workflow.yml> <deliverable-path> [exec-dir]
+# Usage: parity-check.sh <workflow.yml> <deliverable-path> [exec-dir] [prompt-file]
+#   prompt-file: optional, enables C9 semantic-check cross-validation (Goodhart mitigation)
 
 set -uo pipefail
 
 WORKFLOW="${1:-}"
 DELIVERABLE="${2:-}"
 EXEC_DIR="${3:-}"
+PROMPT_FILE="${4:-}"
 
 if [ -z "$WORKFLOW" ] || [ ! -f "$WORKFLOW" ]; then
   echo "Usage: $0 <workflow.yml> <deliverable-path> [exec-dir]"
@@ -25,7 +27,7 @@ if [ -z "$DELIVERABLE" ]; then
 fi
 
 TOTAL=0
-MAX=50
+MAX=60
 FAILS=()
 
 echo "=== HONEST Parity Check ==="
@@ -125,6 +127,29 @@ else
   echo "SKIP"
 fi
 
+# C9: Semantic alignment cross-check (10 pts — Goodhart mitigation)
+# Invoked only when prompt-file provided. Catches:
+#   - Off-topic non-refusal garbage (parity-check.sh C5 couldn't detect this)
+#   - Refusal paraphrases (broader pattern set than C5)
+#   - Keyword/structure mismatch with prompt objective
+echo -n "C9 semantic alignment: "
+if [ -n "$PROMPT_FILE" ] && [ -f "$PROMPT_FILE" ]; then
+  if [ -f "$DELIVERABLE" ]; then
+    SEM_RESULT=$(python3 "$(dirname "$0")/semantic-check.py" "$PROMPT_FILE" "$DELIVERABLE" 2>&1)
+    SEM_EXIT=$?
+    SEM_SCORE=$(echo "$SEM_RESULT" | python3 -c "import json,sys; print(json.load(sys.stdin).get('score', 0))" 2>/dev/null || echo 0)
+    if [ "$SEM_EXIT" -eq 0 ]; then
+      echo "PASS (10/10, sem_score=${SEM_SCORE}/10)"; TOTAL=$((TOTAL+10))
+    else
+      echo "FAIL (0/10, sem_score=${SEM_SCORE}/10)"; FAILS+=("C9 semantic-fail")
+    fi
+  else
+    echo "SKIP (no deliverable)"; FAILS+=("C9 no-file")
+  fi
+else
+  echo "SKIP (no prompt-file — C9 not invoked)"
+fi
+
 echo ""
 echo "=== Score: ${TOTAL}/${MAX} ==="
 
@@ -138,8 +163,9 @@ if [ ${#FAILS[@]} -gt 0 ]; then
 fi
 
 echo ""
-# Critical gates: C3 (exists), C5 (no refusals), C4 (substantive) MUST pass
-if [ "$TOTAL" -ge 40 ] && [ -f "$DELIVERABLE" ]; then
+# Critical gates: C3 (exists), C5 (no refusals), C4 (substantive), C9 (semantic) MUST pass
+# Threshold raised from 40/50 to 50/60 to maintain ~83% pass rate with new C9 criterion
+if [ "$TOTAL" -ge 50 ] && [ -f "$DELIVERABLE" ]; then
   if grep -qE "I cannot|I'm unable|I don't have access" "$DELIVERABLE"; then
     echo "VERDICT: FAIL (refusals present despite score)"
     exit 1

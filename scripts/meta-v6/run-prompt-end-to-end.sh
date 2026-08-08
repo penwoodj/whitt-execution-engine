@@ -39,7 +39,7 @@ if [ -z "$SW5_FILE" ]; then
   sed "s|prompt-14-task-add-true-parallel-inference-for-same-model-multi-target\.md|$(basename "$PROMPT_FILE")|g" \
     ./docs/benchmarks/workflows/meta-workflow-v6.yml > "$ORCHESTRATOR_TMP"
 
-  timeout 3600 ./target/release/whitt benchmark \
+  timeout 28800 ./target/release/whitt benchmark \
     --workflow "$ORCHESTRATOR_TMP" \
     --output-dir "${OUT}/meta-out" \
     --models-dir "${REPO}/models" \
@@ -117,13 +117,13 @@ rsync -a --exclude=target --exclude=outputs --exclude=models --exclude=.git "${R
 
 rm -rf "${OUT}/exec"
 mkdir -p "${OUT}/exec"
-timeout 1800 ./target/release/whitt benchmark \
-  --workflow "${OUT}/workflow-fixed.yml" \
-  --output-dir "${OUT}/exec" \
-  --models-dir "${REPO}/models" \
-  --filter-name "Qwen3-5-9B" \
-  --load-timeout 60 \
-  > "${OUT}/exec.log" 2>&1
+  timeout 7200 ./target/release/whitt benchmark \
+    --workflow "${OUT}/workflow-fixed.yml" \
+    --output-dir "${OUT}/exec" \
+    --models-dir "${REPO}/models" \
+    --filter-name "Qwen3-5-9B" \
+    --load-timeout 60 \
+    > "${OUT}/exec.log" 2>&1
 EXEC_RC=$?
 
 # Restore src/

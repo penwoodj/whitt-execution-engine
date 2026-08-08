@@ -45,26 +45,24 @@ log "deliverable=${DELIVERABLE_PATH}"
 
 run_sw() {
   local sw_num="$1"
-  local script="$REPO/scripts/meta-v6/run-sw${sw_num}.sh"
+  local script="$REPO/scripts/meta-v6/run-sw.sh"
   log "SW${sw_num}:start"
   local t0=$(date +%s)
-  bash "$script" "${META_RUN_ID}" 2>&1 | tail -5
+  bash "$script" "$sw_num" "${META_RUN_ID}" 2>&1 | tail -5
   local exit_code=$?
   local t1=$(date +%s)
   log "SW${sw_num}:end duration=$((t1-t0))s exit=${exit_code}"
   return $exit_code
 }
 
-# SW1-SW4 use existing wrappers
 run_sw 1 || { log "FATAL: SW1 failed"; exit 1; }
 run_sw 2 || { log "FATAL: SW2 failed"; exit 1; }
 run_sw 3 || { log "FATAL: SW3 failed"; exit 1; }
 run_sw 4 || { log "FATAL: SW4 failed"; exit 1; }
 
-# SW5: deterministic assembly (YAML invokes build-workflow.py via shell hooks)
 log "SW5:start (deterministic)"
-bash "$REPO/scripts/meta-v6/run-sw5.sh" "${META_RUN_ID}" 2>&1 | tee -a "$PIPELINE_LOG" | tail -3
-SW5_EXIT=$?
+run_sw 5 2>&1 | tee -a "$PIPELINE_LOG" | tail -3
+SW5_EXIT=${PIPESTATUS[0]}
 
 GENERATED="${META_DIR}/meta/generated-workflow.yml"
 if [ ! -s "$GENERATED" ]; then

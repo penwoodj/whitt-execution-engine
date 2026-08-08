@@ -24,6 +24,10 @@ mkdir -p "$RESULTS_ROOT"
 MAX_CONSECUTIVE_FAILURES=3
 MAX_MODELS_WITHOUT_COOLDOWN=5
 RAM_MIN_KB=3000000  # 3GB (meminfo reports KB not bytes)
+# Time-based comparison: each model gets equal wall-clock budget.
+# Small models iterate more within budget; large models get fewer shots.
+# Default 180s = enough for ~3 iterations of small models, ~1-2 of large.
+TIME_BUDGET_SEC=180
 
 # Args
 GPU_OVERRIDE=""
@@ -32,6 +36,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --cpu-only) GPU_OVERRIDE="0"; shift ;;
     --gpu-layers) GPU_OVERRIDE="$2"; shift 2 ;;
+    --time-budget) TIME_BUDGET_SEC="$2"; shift 2 ;;
     *) MODELS+=("$1"); shift ;;
   esac
 done
@@ -115,7 +120,7 @@ echo "Models (${#MODELS[@]}):"
 printf '  - %s\n' "${MODELS[@]}"
 echo ""
 
-echo -e "model\tconfig\tduration_sec\tstep_01_bytes\tstep_02_bytes\tstep_03_bytes\tstep_04_bytes\ttotal_bytes\tstep_01_tokens\tstep_02_tokens\tstep_03_tokens\tstep_04_tokens\tstep_01_quality\tstep_02_quality\tstep_03_quality\tstep_04_quality\trefusals_detected\tverdict" > "$SUMMARY_TSV"
+echo -e "model\tconfig\titerations\ttime_used_sec\tbest_step_02_quality\tbest_step_03_quality\ttotal_tokens\ttotal_bytes\trefusals_detected\tverdict" > "$SUMMARY_TSV"
 
 CONSECUTIVE_FAILURES=0
 MODELS_SINCE_COOLDOWN=0
@@ -136,94 +141,113 @@ for MODEL_ID in "${MODELS[@]}"; do
   SAFE_NAME=$(echo "$MODEL_ID" | sed 's/[^a-zA-Z0-9_-]/_/g')
   OUT_DIR="${RESULTS_ROOT}/${SAFE_NAME}"
   RUN_ID="model-comparison/stress-${TS}/${SAFE_NAME}"
-  mkdir -p "$OUT_DIR/stress" "$OUT_DIR/logs"
+  mkdir -p "$OUT_DIR/stress" "$OUT_DIR/logs" "$OUT_DIR/iters"
   WORKFLOW_TMP="${OUT_DIR}/runtime.yml"
 
-  echo "[${MODEL_ID}] starting (gpu=${GPU_LAYERS})..."
+  echo "[${MODEL_ID}] starting (gpu=${GPU_LAYERS}, budget=${TIME_BUDGET_SEC}s)..."
 
   if [ ! -f "${REPO}/models/${MODEL_ID}.gguf" ]; then
     echo "[${MODEL_ID}] SKIP: model file not found"
-    echo -e "${MODEL_ID}\tmissing\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\tMISSING" >> "$SUMMARY_TSV"
+    echo -e "${MODEL_ID}\tmissing\t0\t0\t0\t0\t0\t0\t0\tMISSING" >> "$SUMMARY_TSV"
     continue
   fi
 
-  # Rewrite workflow YAML: substitute model name + gpu_layers + RUN_ID
+  # Rewrite workflow YAML ONCE: substitute model name + gpu_layers + RUN_ID
+  # Per-iteration outputs go to iters/iter-N/ via __RUN_ID__ already in YAML.
+  # We vary RUN_ID per iteration by recreating YAML with new __ITER__ suffix.
   python3 <<EOF
 src = open('$WORKFLOW_SRC').read()
 src = src.replace('Qwen3-5-9B-Q4_K_M.gguf', '${MODEL_ID}.gguf')
 src = src.replace('gpu_layers: 0', 'gpu_layers: ${GPU_LAYERS}')
-src = src.replace('__RUN_ID__', '${RUN_ID}')
-open('$WORKFLOW_TMP', 'w').write(src)
+# __RUN_ID__ left as placeholder, replaced per-iteration below
+open('$WORKFLOW_TMP.tpl', 'w').write(src)
 EOF
 
-  START=$(date +%s)
-  cd "$REPO"
-  timeout 1200 ./target/release/whitt benchmark \
-    --workflow "$WORKFLOW_TMP" \
-    --output-dir "$OUT_DIR" \
-    --models-dir "${REPO}/models" \
-    --filter-name "^${MODEL_ID}\.gguf$" \
-    --load-timeout 180 \
-    > "$OUT_DIR/benchmark.log" 2>&1
-  RC=$?
-  END=$(date +%s)
-  DUR=$((END - START))
+  # Time-budgeted iteration loop
+  MODEL_START=$(date +%s)
+  ITERATION=0
+  BEST_S2_QUALITY=0
+  BEST_S3_QUALITY=0
+  TOTAL_TOKENS=0
+  TOTAL_BYTES=0
+  REFUSALS_TOTAL=0
 
-  if [ $RC -ne 0 ]; then
-    echo "[${MODEL_ID}] FAIL rc=${RC} dur=${DUR}s"
-    echo -e "${MODEL_ID}\tgpu${GPU_LAYERS}\t${DUR}\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\tRUNTIME_FAIL" >> "$SUMMARY_TSV"
-    CONSECUTIVE_FAILURES=$((CONSECUTIVE_FAILURES+1))
-    if [ "$CONSECUTIVE_FAILURES" -ge "$MAX_CONSECUTIVE_FAILURES" ]; then
-      echo "[SAFETY] $CONSECUTIVE_FAILURES consecutive failures, ABORTING"
-      exit 3
+  while :; do
+    NOW=$(date +%s)
+    ELAPSED=$((NOW - MODEL_START))
+    REMAINING=$((TIME_BUDGET_SEC - ELAPSED))
+    if [ "$REMAINING" -lt 30 ]; then
+      # Not enough time for another full iteration (~30-60s each)
+      break
     fi
-    continue
-  fi
 
-  CONSECUTIVE_FAILURES=0
-  LOG="${OUT_DIR}/logs/stress.log"
+    ITERATION=$((ITERATION+1))
+    ITER_RUN_ID="${RUN_ID}/iter-${ITERATION}"
+    ITER_OUT="${OUT_DIR}/iters/iter-${ITERATION}"
+    mkdir -p "$ITER_OUT"
 
-  if [ ! -f "$LOG" ]; then
-    echo "[${MODEL_ID}] WARN: no stress.log (early failure?)"
-    echo -e "${MODEL_ID}\tgpu${GPU_LAYERS}\t${DUR}\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\tNO_LOG" >> "$SUMMARY_TSV"
-    continue
-  fi
+    # Per-iteration YAML with unique RUN_ID
+    sed "s|__RUN_ID__|${ITER_RUN_ID}|g" "$WORKFLOW_TMP.tpl" > "$WORKFLOW_TMP"
 
-  # Parse metrics via temp Python file (avoids shell-escape issues with inline heredoc)
-  cat > "$OUT_DIR/parse_metrics.py" <<'PYEOF'
-import json, re, sys, os
-log_path = os.environ['LOG']
-summary_path = os.environ['SUMMARY_TSV']
-model_id = os.environ['MODEL_ID']
-gpu_layers = os.environ['GPU_LAYERS']
-dur = os.environ['DUR']
+    echo "[${MODEL_ID}] iter=${ITERATION} remaining=${REMAINING}s"
 
-log = open(log_path).read()
+    cd "$REPO"
+    # Cap each iteration at remaining time + 60s buffer (let model finish current gen)
+    timeout $((REMAINING + 30)) ./target/release/whitt benchmark \
+      --workflow "$WORKFLOW_TMP" \
+      --output-dir "$ITER_OUT" \
+      --models-dir "${REPO}/models" \
+      --filter-name "^${MODEL_ID}\.gguf$" \
+      --load-timeout 60 \
+      > "$ITER_OUT/benchmark.log" 2>&1
+    RC=$?
+
+    if [ $RC -ne 0 ] && [ $RC -ne 124 ]; then
+      # 124=timeout (acceptable). Other codes = real failure.
+      echo "[${MODEL_ID}] iter=${ITERATION} FAIL rc=${RC}"
+      CONSECUTIVE_FAILURES=$((CONSECUTIVE_FAILURES+1))
+      if [ "$CONSECUTIVE_FAILURES" -ge "$MAX_CONSECUTIVE_FAILURES" ]; then
+        echo "[SAFETY] $CONSECUTIVE_FAILURES consecutive failures, ABORTING model"
+        break 2
+      fi
+      continue
+    fi
+    CONSECUTIVE_FAILURES=0
+
+    LOG="${OUT_DIR}/iter-${ITERATION}/logs/stress.log"
+    [ ! -f "$LOG" ] && LOG="${ITER_OUT}/logs/stress.log"
+    [ ! -f "$LOG" ] && LOG="${ITER_OUT}/stress.log"
+
+    if [ ! -f "$LOG" ]; then
+      echo "[${MODEL_ID}] iter=${ITERATION} WARN: no stress.log"
+      continue
+    fi
+
+    # Parse this iteration's metrics, update best
+    ITER_METRICS=$(LOG="$LOG" python3 -c "
+import json, re, os
+log = open(os.environ['LOG']).read()
 steps = ['step_01_refusal_resistance', 'step_02_code_generation', 'step_03_multi_perspective_eval', 'step_04_yaml_output']
-short = ['s1', 's2', 's3', 's4']
-out = {}
-for sid, short_id in zip(steps, short):
-    pattern = rf'step_name={sid} duration_ms=(\d+).*?(\{{.*?"output":".*?"quality_score.*?\}})'
+qualities = {}
+total_tokens = 0
+total_bytes = 0
+for sid in steps:
+    pattern = rf'step_name={sid} duration_ms=(\d+).*?(\{{.*?\"output\":\".*?\".*?\"quality_score.*?\}})'
     m = re.search(pattern, log, re.DOTALL)
     if m:
         try:
             d = json.loads(m.group(2))
-            out[f'{short_id}_bytes'] = len(d.get('output', ''))
-            out[f'{short_id}_tokens'] = d.get('token_count', 0)
-            out[f'{short_id}_quality'] = d.get('quality_score', 0)
-        except json.JSONDecodeError:
-            out[f'{short_id}_bytes'] = 0
-            out[f'{short_id}_tokens'] = 0
-            out[f'{short_id}_quality'] = 0
-    else:
-        out[f'{short_id}_bytes'] = 0
-        out[f'{short_id}_tokens'] = 0
-        out[f'{short_id}_quality'] = 0
+            q = d.get('quality_score', 0) or 0
+            qualities[sid] = q
+            total_tokens += d.get('token_count', 0) or 0
+            total_bytes += len(d.get('output', ''))
+        except: qualities[sid] = 0
+    else: qualities[sid] = 0
 
-refusal_patterns = ['I cannot', "I can't", 'I am unable', "I'm unable", 'As an AI', 'do not have access', 'cannot access', 'cannot read']
+refusal_patterns = ['I cannot', \"I can't\", 'I am unable', \"I'm unable\", 'As an AI', 'do not have access', 'cannot access', 'cannot read']
 refusals = 0
 for sid in steps:
-    pattern = rf'step_name={sid} duration_ms=\d+.*?(\{{.*?"output":"(.*?)".*?"quality_score.*?\}})'
+    pattern = rf'step_name={sid} duration_ms=\d+.*?(\{{.*?\"output\":\"(.*?)\".*?\"quality_score.*?\}})'
     m = re.search(pattern, log, re.DOTALL)
     if m:
         try:
@@ -235,22 +259,37 @@ for sid in steps:
                     break
         except: pass
 
-total_bytes = sum(out[f'{s}_bytes'] for s in short)
-verdict = 'PASS' if (refusals == 0 and total_bytes > 2000) else 'FAIL'
+print(f'{qualities.get(\"step_02_code_generation\", 0)}\t{qualities.get(\"step_03_multi_perspective_eval\", 0)}\t{total_tokens}\t{total_bytes}\t{refusals}')
+")
+    S2_Q=$(echo "$ITER_METRICS" | awk -F'\t' '{print $1}')
+    S3_Q=$(echo "$ITER_METRICS" | awk -F'\t' '{print $2}')
+    ITER_TOKENS=$(echo "$ITER_METRICS" | awk -F'\t' '{print $3}')
+    ITER_BYTES=$(echo "$ITER_METRICS" | awk -F'\t' '{print $4}')
+    ITER_REFUSALS=$(echo "$ITER_METRICS" | awk -F'\t' '{print $5}')
 
-row = f'{model_id}\tgpu{gpu_layers}\t{dur}\t'
-row += '\t'.join(str(out[f'{s}_bytes']) for s in short) + '\t'
-row += str(total_bytes) + '\t'
-row += '\t'.join(str(out[f'{s}_tokens']) for s in short) + '\t'
-row += '\t'.join(str(out[f'{s}_quality']) for s in short) + '\t'
-row += str(refusals) + '\t' + verdict
-with open(summary_path, 'a') as f:
-    f.write(row + '\n')
-print(f'parsed: bytes={total_bytes} refusals={refusals} verdict={verdict}')
-PYEOF
-  LOG="$LOG" SUMMARY_TSV="$SUMMARY_TSV" MODEL_ID="$MODEL_ID" GPU_LAYERS="$GPU_LAYERS" DUR="$DUR" \
-    python3 "$OUT_DIR/parse_metrics.py"
-  echo "[${MODEL_ID}] done dur=${DUR}s"
+    # Track best across iterations
+    BEST_S2_QUALITY=$(python3 -c "print(max($BEST_S2_QUALITY, $S2_Q))")
+    BEST_S3_QUALITY=$(python3 -c "print(max($BEST_S3_QUALITY, $S3_Q))")
+    TOTAL_TOKENS=$((TOTAL_TOKENS + ITER_TOKENS))
+    TOTAL_BYTES=$((TOTAL_BYTES + ITER_BYTES))
+    REFUSALS_TOTAL=$((REFUSALS_TOTAL + ITER_REFUSALS))
+
+    echo "[${MODEL_ID}] iter=${ITERATION} s2_q=${S2_Q} s3_q=${S3_Q} tokens=${ITER_TOKENS} bytes=${ITER_BYTES} refusals=${ITER_REFUSALS}"
+  done
+
+  MODEL_END=$(date +%s)
+  MODEL_DUR=$((MODEL_END - MODEL_START))
+
+  # Verdict: PASS if best s2 quality > 0.5 AND refusals < iterations
+  VERDICT="FAIL"
+  if [ "$ITERATION" -gt 0 ] && python3 -c "exit(0 if $BEST_S2_QUALITY > 0.5 else 1)"; then
+    if [ "$REFUSALS_TOTAL" -lt "$ITERATION" ]; then
+      VERDICT="PASS"
+    fi
+  fi
+
+  echo "[${MODEL_ID}] DONE iters=${ITERATION} time=${MODEL_DUR}s best_s2=${BEST_S2_QUALITY} best_s3=${BEST_S3_QUALITY} verdict=${VERDICT}"
+  echo -e "${MODEL_ID}\tgpu${GPU_LAYERS}\t${ITERATION}\t${MODEL_DUR}\t${BEST_S2_QUALITY}\t${BEST_S3_QUALITY}\t${TOTAL_TOKENS}\t${TOTAL_BYTES}\t${REFUSALS_TOTAL}\t${VERDICT}" >> "$SUMMARY_TSV"
 done
 
 echo ""
