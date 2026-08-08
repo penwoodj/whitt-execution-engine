@@ -211,11 +211,10 @@ fn given_meta_workflow_v6_when_checked_then_orchestration_steps_call_wrappers() 
     let yaml = load_yaml("meta-workflow-v6.yml");
     let yaml_str = serde_yaml::to_string(&yaml).unwrap();
 
-    for wrapper in &[
-        "run-sw1.sh", "run-sw2.sh", "run-sw3.sh", "run-sw4.sh", "run-sw5.sh",
-    ] {
-        assert!(yaml_str.contains(wrapper),
-            "meta-workflow-v6.yml must call {} (orchestrator chain)", wrapper);
+    for sw_num in 1..=5u8 {
+        let call = format!("run-sw.sh {}", sw_num);
+        assert!(yaml_str.contains(&call),
+            "meta-workflow-v6.yml must call '{}' (orchestrator chain)", call);
     }
     assert!(yaml_str.contains("bootstrap.sh"), "meta-workflow-v6.yml must call bootstrap.sh");
     assert!(yaml_str.contains("validate.sh"), "meta-workflow-v6.yml must call validate.sh");
@@ -415,7 +414,7 @@ fn given_sw5_step_00_assemble_when_checked_then_has_generative_entity() {
 #[test]
 fn given_sw_yamls_when_checked_then_referenced_scripts_exist() {
     let required_scripts = [
-        "run-sw1.sh", "run-sw2.sh", "run-sw3.sh", "run-sw4.sh", "run-sw5.sh",
+        "run-sw.sh",
         "bootstrap.sh", "sw-gate.sh",
         "build-workflow.py", "fix-yaml.py",
         "sw5-assemble.sh", "sw5-finalize.sh",
@@ -428,18 +427,17 @@ fn given_sw_yamls_when_checked_then_referenced_scripts_exist() {
 }
 
 /// Pipeline must call all SW wrappers in order.
-/// pipeline.sh uses a `run_sw N` helper that calls `run-swN.sh` dynamically.
-/// We verify by checking for the `run_sw N` calls in sequence.
+/// pipeline.sh uses a `run_sw N` helper that calls `run-sw.sh N` dynamically.
 #[test]
 fn given_pipeline_sh_when_checked_then_calls_all_sws_in_order() {
     let pipeline = repo_root().join("scripts/meta-v6/debug/pipeline.sh");
     let content = fs::read_to_string(&pipeline)
         .expect("pipeline.sh must be readable");
-    
-    assert!(content.contains("run-sw5.sh"),
-        "pipeline.sh must call run-sw5.sh explicitly (deterministic path)");
-    
-    let positions: Vec<Option<usize>> = (1..=4)
+
+    assert!(content.contains("run-sw.sh"),
+        "pipeline.sh must call run-sw.sh (generic SW driver)");
+
+    let positions: Vec<Option<usize>> = (1..=5)
         .map(|n| content.find(&format!("run_sw {}", n)))
         .collect();
     for (i, pos) in positions.iter().enumerate() {

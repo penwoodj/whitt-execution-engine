@@ -245,7 +245,7 @@ impl LlamaHttpClient {
     pub async fn chat_completion_stream(
         &self,
         request: ChatCompletionRequest,
-    ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = Result<ChatCompletionChunk>>>>> {
+    ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = Result<ChatCompletionChunk>> + Send>>> {
         let mut req = request.clone();
         req.stream = true;
 

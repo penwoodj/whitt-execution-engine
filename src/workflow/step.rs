@@ -197,7 +197,9 @@ pub enum HookAction {
     SkipStep(bool),
     /// Skip remaining action.
     SkipRemaining(bool),
-    /// Iterate values action — stores iteration mappings for step expansion.
+    /// Configuration carrier for step iteration. Execution handled at runner level
+    /// via `extract_iterate_values` (reads from `before_step_starts.iterate_values`);
+    /// this variant exists for schema/serde compatibility and returns Continue when dispatched.
     IterateValues(std::collections::HashMap<String, Vec<String>>),
 }
 

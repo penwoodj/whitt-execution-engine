@@ -42,6 +42,7 @@ pub use execution::{
     CheckpointingConfig, DependencyResolutionConfig, ErrorHandlingConfig,
     ExecutionMemoryConfig, SubWorkflowExecutionConfig, TimeoutConfig,
     SynchronizationConfig, RetryConfig, StepRetryConfig,
+    QualityConfig, TimingConfig, StreamingConfig,
 };
 
 pub use permissions::{

@@ -20,6 +20,12 @@ pub struct WorkflowExecutionStrategy {
     #[serde(default)]
     pub error_handling: Option<ErrorHandlingConfig>,
     #[serde(default)]
+    pub quality: Option<QualityConfig>,
+    #[serde(default)]
+    pub timing: Option<TimingConfig>,
+    #[serde(default)]
+    pub streaming: Option<StreamingConfig>,
+    #[serde(default)]
     pub sub_workflow: Option<SubWorkflowExecutionConfig>,
     #[serde(default)]
     pub checkpointing: Option<CheckpointingConfig>,
@@ -27,6 +33,36 @@ pub struct WorkflowExecutionStrategy {
     pub synchronization: Option<SynchronizationConfig>,
     #[serde(default)]
     pub dependency_resolution: Option<DependencyResolutionConfig>,
+}
+
+/// Quality/refusal evaluation config (chunk 10 — moves hardcoded patterns to YAML).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct QualityConfig {
+    #[serde(default)]
+    pub refusal_patterns: Vec<String>,
+    #[serde(default)]
+    pub quality_threshold: Option<f32>,
+}
+
+/// Timing config (chunk C — moves hardcoded cooldown/timeout/tmp-space to YAML).
+/// All fields optional; CLI defaults win when YAML omits.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct TimingConfig {
+    #[serde(default)]
+    pub cooldown_after_unload_secs: Option<u64>,
+    #[serde(default)]
+    pub model_load_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub min_tmp_space_mb: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct StreamingConfig {
+    #[serde(default)]
+    pub enabled: Option<bool>,
 }
 
 /// Execution memory configuration.

@@ -64,10 +64,7 @@ pub fn execute_action(
         HookAction::SkipStep(skip) => execute_skip_step(*skip, context, engine),
         HookAction::SkipRemaining(skip) => execute_skip_remaining(*skip, context, engine),
         HookAction::Gwt(clauses) => execute_gwt(clauses, context, engine, hook_config),
-        HookAction::IterateValues(data) => {
-            tracing::warn!("[hooks] IterateValues action is not yet implemented — {} values ignored. This action currently returns Continue without iteration logic.", data.len());
-            HookResult::Continue
-        }
+        HookAction::IterateValues(_) => HookResult::Continue,
     }
 }
 
@@ -301,14 +298,15 @@ fn save_to_file(path: &str, content: &str) -> std::io::Result<()> {
 /// Only redirects SHORT relative paths (./outputs/...) used by generated workflows.
 /// Long paths (./docs/...) used by SW1-SW4 YAMLs stay relative to CWD.
 fn resolve_save_path(path: &str, engine: &HookEngine) -> String {
+    if path.starts_with('$') {
+        return path.to_string();
+    }
     let p = Path::new(path);
     if p.is_absolute() {
         return path.to_string();
     }
-    if path.starts_with("./outputs/") || path.starts_with("outputs/") {
-        if let Some(ref base) = engine.output_dir {
-            return base.join(path).to_string_lossy().to_string();
-        }
+    if let Some(ref base) = engine.output_dir {
+        return base.join(path).to_string_lossy().to_string();
     }
     path.to_string()
 }
@@ -713,6 +711,7 @@ mod tests {
             quality_score: None,
             token_count: 50,
             model_name: "model".to_string(),
+                refusal_detected: false,
         });
         let template = "save_to: ./outputs/{{step.other_step.output}}.txt";
         let resolved = resolve_context_templates(template, &context, &engine);
@@ -754,6 +753,7 @@ mod tests {
             quality_score: None,
             token_count: 50,
             model_name: "model".to_string(),
+                refusal_detected: false,
         });
         let template = "Result: {{step.current_step.output}}";
         let resolved = resolve_context_templates(template, &context, &engine);
@@ -820,6 +820,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+                refusal_detected: false,
         });
         let mut engine = HookEngine::new();
 
@@ -839,6 +840,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+                refusal_detected: false,
         });
         let mut engine = HookEngine::new();
 
@@ -861,6 +863,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+                refusal_detected: false,
         });
         let mut engine = HookEngine::new();
 
@@ -882,6 +885,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+                refusal_detected: false,
         });
         let mut engine = HookEngine::new();
 
@@ -898,6 +902,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+                refusal_detected: false,
         });
         execute_append_to(&action, &context2, &mut engine);
 
@@ -917,6 +922,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+            refusal_detected: false,
         });
         let mut engine = HookEngine::new();
 
@@ -937,6 +943,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+            refusal_detected: false,
         });
         let mut engine = HookEngine::new();
 
@@ -1013,6 +1020,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+            refusal_detected: false,
         });
         let mut engine = HookEngine::new();
 
@@ -1034,6 +1042,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+            refusal_detected: false,
         });
         let mut engine = HookEngine::new();
 
@@ -1054,6 +1063,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+                refusal_detected: false,
         });
         let mut engine = HookEngine::new();
 
@@ -1076,6 +1086,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+                refusal_detected: false,
         });
 
         // Use tokio runtime for async test
@@ -1258,6 +1269,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+            refusal_detected: false,
         });
         let mut engine = HookEngine::new();
 
@@ -1286,6 +1298,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+                refusal_detected: false,
         });
         let mut engine = HookEngine::new();
 
@@ -1311,6 +1324,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+            refusal_detected: false,
         });
         let mut engine = HookEngine::new();
 
@@ -1335,6 +1349,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+            refusal_detected: false,
         });
         let mut engine = HookEngine::new();
 
@@ -1542,7 +1557,6 @@ mod tests {
     fn given_iterate_values_when_execute_then_returns_continue() {
         let mut map = HashMap::new();
         map.insert("key1".to_string(), vec!["value1".to_string(), "value2".to_string()]);
-        map.insert("key2".to_string(), vec!["value3".to_string()]);
         let action = HookAction::IterateValues(map);
         let context = WorkflowHookContext::BeforeStepStarts(BeforeStepStartsContext {
             step_name: "test".to_string(),
@@ -1570,6 +1584,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+                refusal_detected: false,
         });
         let mut engine = HookEngine::new();
 
@@ -1682,6 +1697,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "TestModel.gguf".to_string(),
+            refusal_detected: false,
         });
         let mut engine = HookEngine::new();
 
@@ -1697,5 +1713,26 @@ mod tests {
 
         let content = fs::read_to_string(&expected_path).unwrap();
         assert!(content.contains("success"));
+    }
+
+    #[test]
+    fn given_resolve_save_path_when_output_dir_set_then_all_relative_paths_resolved() {
+        let engine_no_dir = HookEngine::new();
+        assert_eq!(resolve_save_path("foo.txt", &engine_no_dir), "foo.txt");
+        assert_eq!(resolve_save_path("$variable", &engine_no_dir), "$variable");
+        assert_eq!(resolve_save_path("/abs/path.txt", &engine_no_dir), "/abs/path.txt");
+
+        let engine_with_dir = HookEngine::new()
+            .with_output_dir("/tmp/test-output-root");
+        assert_eq!(
+            resolve_save_path("foo.txt", &engine_with_dir),
+            "/tmp/test-output-root/foo.txt"
+        );
+        assert_eq!(resolve_save_path("$variable", &engine_with_dir), "$variable");
+        assert_eq!(resolve_save_path("/abs/path.txt", &engine_with_dir), "/abs/path.txt");
+        assert_eq!(
+            resolve_save_path("outputs/nested/bar.md", &engine_with_dir),
+            "/tmp/test-output-root/outputs/nested/bar.md"
+        );
     }
 }

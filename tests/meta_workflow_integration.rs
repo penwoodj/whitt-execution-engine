@@ -40,6 +40,7 @@ fn after_success_ctx(step: &str, output: &str) -> WorkflowHookContext {
         quality_score: None,
         token_count: 100,
         model_name: "Qwen3-5-9B".into(),
+        refusal_detected: false,
     })
 }
 
@@ -159,6 +160,7 @@ fn given_gwt_with_quality_score_when_above_threshold_then_routes_to_finalize() {
         quality_score: Some(0.85),
         token_count: 100,
         model_name: "Qwen3-5-9B".into(),
+        refusal_detected: false,
     });
     let result = execute_action(&action, &ctx, &mut engine, None);
     match result {
@@ -289,6 +291,7 @@ fn given_workflow_context_when_serialized_then_contains_required_fields() {
         quality_score: Some(0.85),
         token_count: 1500,
         model_name: "Qwen3-5-9B".to_string(),
+        refusal_detected: false,
     };
 
     let json_val = ctx.to_json_value();
@@ -365,6 +368,7 @@ fn given_shell_verdict_pass_when_gwt_checks_string_equality_then_routes_correctl
         quality_score: None,
         token_count: 50,
         model_name: "qwen35".into(),
+        refusal_detected: false,
     });
 
     execute_action(&shell_action, &ctx, &mut engine, None);
@@ -411,6 +415,7 @@ fn given_shell_verdict_fail_when_gwt_checks_string_equality_then_falls_through()
         quality_score: None,
         token_count: 50,
         model_name: "qwen35".into(),
+        refusal_detected: false,
     });
 
     execute_action(&shell_action, &ctx, &mut engine, None);

@@ -90,6 +90,7 @@ pub struct AfterStepSucceedsContext {
     pub quality_score: Option<f32>,
     pub token_count: u32,
     pub model_name: String,
+    pub refusal_detected: bool,
 }
 
 impl AfterStepSucceedsContext {
@@ -102,6 +103,7 @@ impl AfterStepSucceedsContext {
             "token_count": self.token_count,
             "model_name": self.model_name,
             "json_parsable": serde_json::from_str::<serde_json::Value>(&self.output).is_ok(),
+            "refusal_detected": self.refusal_detected,
         })
     }
 
@@ -114,6 +116,7 @@ impl AfterStepSucceedsContext {
             "token_count" => Some(self.token_count.to_string()),
             "model_name" => Some(self.model_name.clone()),
             "json_parsable" => Some(serde_json::from_str::<serde_json::Value>(&self.output).is_ok().to_string()),
+            "refusal_detected" => Some(self.refusal_detected.to_string()),
             _ => None,
         }
     }
@@ -643,6 +646,7 @@ mod tests {
             quality_score: Some(0.95),
             token_count: 500,
             model_name: "llama-3.2".to_string(),
+            refusal_detected: false,
         };
 
         // When: Converting to JSON
@@ -656,6 +660,22 @@ mod tests {
         assert!((qs - 0.95).abs() < 0.01, "quality_score approx 0.95, got {}", qs);
         assert_eq!(json["token_count"], 500);
         assert_eq!(json["model_name"], "llama-3.2");
+        assert_eq!(json["refusal_detected"], false);
+    }
+
+    #[test]
+    fn after_step_succeeds_refusal_detected_round_trip() {
+        let context = AfterStepSucceedsContext {
+            step_name: "s".into(),
+            output: "I cannot help with that".into(),
+            duration_ms: 0,
+            quality_score: Some(0.0),
+            token_count: 0,
+            model_name: "m".into(),
+            refusal_detected: true,
+        };
+        assert_eq!(context.to_json_value()["refusal_detected"], true);
+        assert_eq!(context.get_field("refusal_detected"), Some("true".to_string()));
     }
 
     #[test]
@@ -668,6 +688,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+            refusal_detected: false,
         };
 
         // When: Converting to JSON
@@ -682,6 +703,7 @@ mod tests {
         let ctx_valid = AfterStepSucceedsContext {
             step_name: "s".into(), output: r#"{"key":"value"}"#.into(),
             duration_ms: 100, quality_score: None, token_count: 10, model_name: "m".into(),
+            refusal_detected: false,
         };
         assert_eq!(ctx_valid.get_field("json_parsable").unwrap(), "true");
         let json = ctx_valid.to_json_value();
@@ -690,6 +712,7 @@ mod tests {
         let ctx_invalid = AfterStepSucceedsContext {
             step_name: "s".into(), output: "not json at all".into(),
             duration_ms: 100, quality_score: None, token_count: 10, model_name: "m".into(),
+            refusal_detected: false,
         };
         assert_eq!(ctx_invalid.get_field("json_parsable").unwrap(), "false");
         let json = ctx_invalid.to_json_value();
@@ -913,6 +936,7 @@ mod tests {
             quality_score: None,
             token_count: 0,
             model_name: "m".to_string(),
+            refusal_detected: false,
         });
 
         // When: Getting trigger names
@@ -983,6 +1007,7 @@ mod tests {
                 quality_score: None,
                 token_count: 0,
                 model_name: "m".to_string(),
+                refusal_detected: false,
             }),
             WorkflowHookContext::AfterStepFails(AfterStepFailsContext {
                 step_name: "s".to_string(),
@@ -1062,6 +1087,7 @@ mod tests {
             quality_score: Some(0.85f32),
             token_count: 500,
             model_name: "llama-3.2".to_string(),
+            refusal_detected: false,
         };
 
         // When: Getting all fields
@@ -1093,6 +1119,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+            refusal_detected: false,
         };
 
         // When: Getting quality_score field
@@ -1112,6 +1139,7 @@ mod tests {
             quality_score: None,
             token_count: 10,
             model_name: "model".to_string(),
+            refusal_detected: false,
         };
 
         // When: Getting non-existent field

@@ -185,6 +185,16 @@ pub struct MaxAllowed {
     /// Maximum concurrent requests.
     #[serde(default = "default_concurrent_requests")]
     pub concurrent_requests: u32,
+
+    /// Memory safety margin in bytes (reserved for system after model load).
+    /// Default: 1GB. Override per-model when system has more/less headroom.
+    #[serde(default = "default_memory_safety_margin_bytes")]
+    pub memory_safety_margin_bytes: u64,
+
+    /// Maximum concurrent inferences (overrides auto-detection).
+    /// None = auto-detect from VRAM/RAM. Some(N) = force N (1..=4).
+    #[serde(default)]
+    pub max_concurrent_inferences: Option<u32>,
 }
 
 impl Default for MaxAllowed {
@@ -196,6 +206,8 @@ impl Default for MaxAllowed {
             gpu: default_gpu_limit(),
             attention_tokens: default_attention_tokens(),
             concurrent_requests: default_concurrent_requests(),
+            memory_safety_margin_bytes: default_memory_safety_margin_bytes(),
+            max_concurrent_inferences: None,
         }
     }
 }
@@ -214,6 +226,10 @@ fn default_attention_tokens() -> u64 {
 
 fn default_concurrent_requests() -> u32 {
     5
+}
+
+fn default_memory_safety_margin_bytes() -> u64 {
+    1_073_741_824  // 1GB
 }
 
 // ============================================================================
@@ -1482,5 +1498,26 @@ qwen35:
         assert_eq!(spec.load_params.parallel, 1);
         assert_eq!(spec.sampling.temperature, Some(0.2));
         assert_eq!(spec.sampling.max_tokens, Some(4096));
+    }
+
+    #[test]
+    fn max_allowed_resource_governance_fields_default_and_override() {
+        let default = MaxAllowed::default();
+        assert_eq!(default.memory_safety_margin_bytes, 1_073_741_824);
+        assert_eq!(default.max_concurrent_inferences, None);
+
+        let yaml = r#"
+ram: 80%
+vram: 90%
+cpu: 50%
+gpu: 80%
+attention_tokens: 10000
+concurrent_requests: 5
+memory_safety_margin_bytes: 2147483648
+max_concurrent_inferences: 3
+"#;
+        let parsed: MaxAllowed = serde_yaml::from_str(yaml).expect("parse");
+        assert_eq!(parsed.memory_safety_margin_bytes, 2_147_483_648);
+        assert_eq!(parsed.max_concurrent_inferences, Some(3));
     }
 }

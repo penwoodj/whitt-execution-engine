@@ -42,6 +42,7 @@ fn given_engine_with_step_bookmark_when_save_to_path_uses_cross_step_template_th
         quality_score: None,
         token_count: 4,
         model_name: "mock-model".to_string(),
+        refusal_detected: false,
     });
 
     let result = execute_action(&action, &context, &mut engine, None);
@@ -83,6 +84,7 @@ fn given_engine_with_step_bookmark_when_log_path_uses_cross_step_template_then_r
         quality_score: None,
         token_count: 4,
         model_name: "mock".to_string(),
+        refusal_detected: false,
     });
 
     let result = execute_action(&action, &context, &mut engine, None);
@@ -115,6 +117,7 @@ fn given_engine_empty_when_cross_step_template_used_then_unresolved_silently() {
         quality_score: None,
         token_count: 4,
         model_name: "mock".to_string(),
+        refusal_detected: false,
     });
 
     let result = execute_action(&action, &context, &mut engine, None);
@@ -148,6 +151,7 @@ fn given_engine_with_nested_bookmark_when_dot_path_used_then_resolved() {
         quality_score: None,
         token_count: 4,
         model_name: "mock".to_string(),
+        refusal_detected: false,
     });
 
     let result = execute_action(&action, &context, &mut engine, None);

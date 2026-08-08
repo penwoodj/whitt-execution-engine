@@ -6,7 +6,8 @@ use whitt_execution_engine::workflow::hooks::{
     HookEngine, HookResult,
     context::{WorkflowHookContext, BeforeStepStartsContext, AfterStepSucceedsContext, StepType,
                AfterStepFailsContext, DuringStepStreamingContext, ErrorDetails,
-               AfterAllRetriesExhaustedContext, AfterLoopIterationFailsContext},
+               AfterAllRetriesExhaustedContext, AfterLoopIterationFailsContext,
+               OnRequiresFailedContext},
     actions::execute_action,
     gwt,
 };
@@ -52,6 +53,7 @@ fn given_save_to_action_when_executed_then_file_contains_output() {
     let ctx = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
         step_name: "gen".into(), output: "content".into(), duration_ms: 100,
         quality_score: None, token_count: 0, model_name: "m".into(),
+        refusal_detected: false,
     });
     let mut engine = HookEngine::new();
     assert!(execute_action(&action, &ctx, &mut engine, None).is_continue());
@@ -67,6 +69,7 @@ fn given_append_to_action_when_executed_then_content_appended_to_file() {
     let ctx = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
         step_name: "s2".into(), output: "appended".into(), duration_ms: 50,
         quality_score: None, token_count: 0, model_name: "m".into(),
+        refusal_detected: false,
     });
     let mut engine = HookEngine::new();
     execute_action(&action, &ctx, &mut engine, None);
@@ -82,6 +85,7 @@ fn given_bookmark_action_when_executed_then_file_and_memory_stored() {
     let ctx = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
         step_name: "cp_step".into(), output: "data".into(), duration_ms: 200,
         quality_score: Some(0.95), token_count: 100, model_name: "m".into(),
+        refusal_detected: false,
     });
     let mut engine = HookEngine::new();
     assert!(execute_action(&action, &ctx, &mut engine, None).is_continue());
@@ -164,6 +168,7 @@ fn given_gwt_clause_with_bookmark_template_when_executed_then_resolves_and_route
         quality_score: None,
         token_count: 0,
         model_name: "m".into(),
+        refusal_detected: false,
     });
     match execute_action(&action, &ctx, &mut engine, None) {
         HookResult::RouteTo { targets } => assert_eq!(targets, vec!["assemble_step"]),
@@ -191,6 +196,7 @@ fn given_gwt_clause_with_bookmark_template_when_value_mismatch_then_continues() 
         quality_score: None,
         token_count: 0,
         model_name: "m".into(),
+        refusal_detected: false,
     });
     match execute_action(&action, &ctx, &mut engine, None) {
         HookResult::Continue => (),
@@ -209,6 +215,57 @@ fn given_gwt_non_matching_clause_when_executed_then_continues() {
         model_name: "m".into(), prompt_preview: "".into(), workflow_variables: HashMap::new(),
     });
     assert!(execute_action(&action, &ctx, &mut HookEngine::new(), None).is_continue());
+}
+
+/// Verify before_gwt_evaluates / after_gwt_evaluates triggers fire when configured in hook_config.
+/// Regression: AGENTS.md issue G claimed these were info-log only. They ARE wired via fire_gwt_trigger.
+#[test]
+fn given_gwt_with_hook_config_when_executed_then_before_and_after_triggers_fire() {
+    use serde_json::json;
+    let temp_dir = std::env::temp_dir().join(format!("gwt-trigger-test-{}", std::process::id()));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    let before_path = temp_dir.join("gwt-before.log");
+    let after_path = temp_dir.join("gwt-after.log");
+    let _ = std::fs::remove_file(&before_path);
+    let _ = std::fs::remove_file(&after_path);
+
+    let hook_config = json!({
+        "before_gwt_evaluates": {
+            "log": {
+                "to_file_path": before_path.to_string_lossy().to_string(),
+                "event_fields": ["step_name"]
+            }
+        },
+        "after_gwt_evaluates": {
+            "log": {
+                "to_file_path": after_path.to_string_lossy().to_string(),
+                "event_fields": ["decision", "route_target"]
+            }
+        }
+    });
+
+    let action = HookAction::Gwt(vec![GwtClause {
+        given: Some("step_name == \"test\"".into()),
+        r#when: None,
+        r#then: RouteToAction::Single("routed_target".into()),
+    }]);
+    let ctx = WorkflowHookContext::BeforeStepStarts(BeforeStepStartsContext {
+        step_name: "test".into(), step_type: StepType::ControlFlow,
+        model_name: "m".into(), prompt_preview: "".into(), workflow_variables: HashMap::new(),
+    });
+
+    let mut engine = HookEngine::new();
+    engine.output_dir = Some(temp_dir.clone());
+    let result = execute_action(&action, &ctx, &mut engine, Some(&hook_config));
+    assert!(matches!(result, HookResult::RouteTo { .. }), "expected RouteTo, got {:?}", result);
+
+    assert!(before_path.exists(), "before_gwt_evaluates log must be created");
+    assert!(after_path.exists(), "after_gwt_evaluates log must be created");
+    let after_content = std::fs::read_to_string(&after_path).unwrap();
+    assert!(after_content.contains("routed"), "after log must contain decision=routed, got: {}", after_content);
+    assert!(after_content.contains("routed_target"), "after log must contain route_target, got: {}", after_content);
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
@@ -526,6 +583,7 @@ fn given_save_to_variable_when_executed_then_bookmark_stored_in_engine() {
         quality_score: Some(0.9),
         token_count: 50,
         model_name: "model".into(),
+        refusal_detected: false,
     });
     let mut engine = HookEngine::new();
     assert!(execute_action(&action, &ctx, &mut engine, None).is_continue());
@@ -545,6 +603,7 @@ fn given_save_to_both_when_executed_then_file_written_and_bookmark_stored() {
         quality_score: None,
         token_count: 0,
         model_name: "model".into(),
+        refusal_detected: false,
     });
     let mut engine = HookEngine::new();
     assert!(execute_action(&action, &ctx, &mut engine, None).is_continue());
@@ -566,6 +625,7 @@ fn given_bookmark_flag_when_executed_then_stores_but_no_file() {
         quality_score: None,
         token_count: 0,
         model_name: "model".into(),
+        refusal_detected: false,
     });
     let mut engine = HookEngine::new();
     assert!(execute_action(&action, &ctx, &mut engine, None).is_continue());
@@ -586,6 +646,7 @@ fn given_bookmark_path_when_executed_then_file_and_bookmark_stored() {
         quality_score: None,
         token_count: 0,
         model_name: "model".into(),
+        refusal_detected: false,
     });
     let mut engine = HookEngine::new();
     assert!(execute_action(&action, &ctx, &mut engine, None).is_continue());
@@ -627,6 +688,7 @@ fn given_multi_action_trigger_when_executed_then_merge_results_continue() {
         quality_score: None,
         token_count: 0,
         model_name: "model".into(),
+        refusal_detected: false,
     });
     let mut engine = HookEngine::new();
 
@@ -687,6 +749,7 @@ fn given_append_to_variable_when_executed_then_returns_continue() {
         quality_score: None,
         token_count: 0,
         model_name: "model".into(),
+        refusal_detected: false,
     });
     let mut engine = HookEngine::new();
     // Should not panic, just return Continue (stub implementation)
@@ -703,6 +766,7 @@ fn given_notify_with_message_when_executed_then_returns_continue() {
         quality_score: None,
         token_count: 0,
         model_name: "model".into(),
+        refusal_detected: false,
     });
     let mut engine = HookEngine::new();
     assert!(execute_action(&action, &ctx, &mut engine, None).is_continue());
@@ -795,6 +859,7 @@ fn given_multiple_actions_with_fail_when_merged_then_fail_wins() {
         quality_score: None,
         token_count: 0,
         model_name: "model".into(),
+        refusal_detected: false,
     });
     let mut engine = HookEngine::new();
 
@@ -856,6 +921,7 @@ fn given_yaml_fixture_when_deserialized_and_executed_then_round_trip_works() {
         quality_score: Some(0.85),
         token_count: 50,
         model_name: "test-model".to_string(),
+        refusal_detected: false,
     });
     
     if let Some(mapping) = after_succeeds.as_mapping() {
@@ -1010,4 +1076,29 @@ fn given_shell_fails_then_bookmark_has_error() {
     let bookmark = engine.get_bookmark("shell_output").expect("bookmark stored");
     assert_eq!(bookmark["success"].as_bool().unwrap(), false);
     assert_ne!(bookmark["exit_code"].as_i64().unwrap(), 0);
+}
+
+#[test]
+fn given_on_requires_failed_with_gwt_when_executed_then_routes_conditional() {
+    let action = HookAction::Gwt(vec![
+        GwtClause {
+            given: Some("failed_step == \"fetch_data\"".into()),
+            r#when: None,
+            r#then: RouteToAction::Single("retry_fetch".into()),
+        },
+        GwtClause {
+            given: Some("true".into()),
+            r#when: None,
+            r#then: RouteToAction::Single("abort_workflow".into()),
+        },
+    ]);
+    let ctx = WorkflowHookContext::OnRequiresFailed(OnRequiresFailedContext {
+        failed_step: "fetch_data".into(),
+        reason: "Dependencies not satisfied: [\"api_call\"]".into(),
+        dependency_chain: vec!["api_call".into()],
+    });
+    match execute_action(&action, &ctx, &mut HookEngine::new(), None) {
+        HookResult::RouteTo { targets } => assert_eq!(targets, vec!["retry_fetch"]),
+        r => panic!("Expected RouteTo, got {:?}", r),
+    }
 }

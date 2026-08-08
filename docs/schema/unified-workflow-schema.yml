@@ -104,6 +104,8 @@ models:
       gpu: 74%
       attention_tokens: 150000
       concurrent_requests: 2
+      memory_safety_margin_bytes: 1073741824  # bytes reserved for system after model+KV (default 1GB)
+      max_concurrent_inferences: 3            # null=auto-detect from VRAM/RAM, 1..=4=override
     min_allowed:                          # minimum resource requirements
       ram: 9%
       vram: 2.4GB
@@ -580,6 +582,48 @@ workflow_execution_strategy:
       user_errors: { action: escalate_immediately }
       system_errors: { action: retry_with_fallback }
 
+  quality:                                 # quality/refusal evaluation (chunk 10 — replaces framework regex)
+    refusal_patterns:                      # string[] — overrides DEFAULT_REFUSAL_PATTERS when set
+      - "I cannot help"
+      - "I am unable to"
+    quality_threshold: 0.7                 # min acceptable score (0.0-1.0); below = route to fix step
+    # `refusal_detected` boolean is exposed on AfterStepSucceedsContext.
+    # Use as GWT predicate to declare refusal policy in YAML instead of framework substring:
+    #   when:
+    #     after_step_succeeds:
+    #       gwt:
+    #         - given: "refusal_detected == true"
+    #           then: { fail: "model refused" }
+
+  timing:                                  # chunk C — model lifecycle timing (overrides CLI defaults when set)
+    cooldown_after_unload_secs: 3          # sleep after model unload before next load
+    model_load_timeout_secs: 300           # max seconds to wait for model load
+    min_tmp_space_mb: 1024                 # minimum free /tmp space required
+
+  streaming:                               # chunk G — SSE streaming path (fires during_step_streaming per chunk)
+    enabled: false                         # set true to use chat_completion_stream + fire per-chunk hooks
+
+  # ─── chunk H — dependency/iteration semantics ────────────────────────────
+  # `requires` check is mechanical: engine verifies each dep ran and produced output.
+  # Response to missing deps is YAML-controlled via `on_requires_failed` hook.
+  # Any action (route_to, fail, skip_step, GWT clause) is supported. Example:
+  #   when:
+  #     on_requires_failed:
+  #       gwt:
+  #         - given: "failed_step == \"fetch_data\""
+  #           then: { route_to: [retry_fetch] }
+  #         - given: "true"
+  #           then: { fail: "unrecoverable dep failure" }
+  #
+  # `iterate_values` is a CONFIGURATION CARRIER, not an executed action.
+  # Declared under `before_step_starts`. Runner's `extract_iterate_values`
+  # expands the step into N iterations, one per index. Example:
+  #   when:
+  #     before_step_starts:
+  #       iterate_values:
+  #         step.model_ref: [model_a, model_b, model_c]
+  #         step.temperature: [0.1, 0.5, 0.9]
+
   sub_workflow:
     reference_resolution:
       strategy: local_first               # local_first | hierarchical | registry_only
@@ -733,6 +777,22 @@ workspace:
     backups: "./workspace/backups"
     temp: "./workspace/temp"
     rag_knowledge_base: "./workspace/rag/knowledge_base"
+  model_selection:                          # chunk I — model discovery + diversity selection
+    strategy: all                           # all (default) | diverse_n (use ModelSelector tier-diverse algorithm)
+    diverse_n_count: 5                      # when strategy=diverse_n: number of models to select (tier-balanced)
+    model_filter: "Qwen3-[45]"              # optional regex; overrides CLI --filter-name when set
+  detail_template: |                        # chunk J — per-model detail.md template (optional; default preserves original format)
+    # When set, replaces DetailGenerator's default markdown format. Variables:
+    #   {{model_id}}, {{model_path}}, {{file_size_bytes}}, {{file_size_mb}},
+    #   {{load_duration_secs}}, {{unload_duration_secs}}, {{total_duration_secs}},
+    #   {{tokens_per_second}}, {{avg_latency_ms}}, {{p50_latency_ms}},
+    #   {{p95_latency_ms}}, {{p99_latency_ms}}, {{gpu_mode}},
+    #   {{speedup_factor}} (e.g. "2.50x" or ""), {{error}} (message or ""),
+    #   {{inference_count}}, {{speedup_row}} (full table row or ""), {{error_row}}
+    # Loop block (optional): {{#each inference}} ... {{/each}}
+    #   Inside: {{index}}, {{prompt_preview}}, {{response_preview}}, {{response_full}},
+    #   {{duration_secs}}, {{prompt_tokens}}, {{completion_tokens}}, {{total_tokens}}, {{tokens_per_second}}
+    # When absent, DetailGenerator uses built-in DEFAULT_DETAIL_TEMPLATE.
   permissions:
     # Natural language enum values for permission modes:
     #   owner_full                            = 700

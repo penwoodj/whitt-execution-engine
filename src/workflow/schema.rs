@@ -404,6 +404,22 @@ pub struct WorkspaceConfig {
     pub directories: Option<WorkspaceDirectories>,
     #[serde(default)]
     pub permissions: Option<WorkspacePermissions>,
+    #[serde(default)]
+    pub model_selection: Option<ModelSelectionConfig>,
+    #[serde(default)]
+    pub detail_template: Option<String>,
+}
+
+/// Model discovery + diversity selection strategy.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ModelSelectionConfig {
+    #[serde(default)]
+    pub strategy: Option<String>,
+    #[serde(default)]
+    pub diverse_n_count: Option<u64>,
+    #[serde(default)]
+    pub model_filter: Option<String>,
 }
 
 /// Workspace directories.
