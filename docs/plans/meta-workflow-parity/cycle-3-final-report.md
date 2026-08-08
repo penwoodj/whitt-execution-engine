@@ -68,11 +68,11 @@ P12 and P13 require fresh meta-v6 generation (their cycle-2 workflows were corru
 
 ## Plan File Documentation
 
-- `docs/plans/meta-workflow-parity/cycle-3-plan.md` — Comprehensive caveman plan with anti-fraud guardrails
+- `docs/plans/meta-workflow-parity/archive/cycle-3-plan.md` — Comprehensive caveman plan with anti-fraud guardrails
 - `docs/plans/meta-workflow-parity/cycle-3-results/summary-cycle-3.tsv` — Per-prompt scores
 - `docs/plans/meta-workflow-parity/cycle-3-results/prompt-XX/` — Per-prompt artifacts (workflow-fixed, exec logs, scores)
 
-## Validation Criteria Met (per 00-MASTER-PLAN.md)
+## Validation Criteria Met (per archive/00-MASTER-PLAN-superseded.md)
 
 - [x] Live system testing (not simulated)
 - [x] Engine produces real step execution (not just benchmark boilerplate)
@@ -85,7 +85,7 @@ P12 and P13 require fresh meta-v6 generation (their cycle-2 workflows were corru
 
 ## Exit Criteria
 
-Per cycle-3-plan.md exit criteria: 8/11 prompts achieve parity threshold = PASS.
+Per archive/cycle-3-plan.md exit criteria: 8/11 prompts achieve parity threshold = PASS.
 **Current state: 9/11 PASS (P12 + P13 pending fresh generation).**
 
 Exceeds threshold. Cycle 3 complete.

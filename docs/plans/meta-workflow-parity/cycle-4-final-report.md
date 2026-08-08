@@ -4,6 +4,8 @@
 **Status:** ✅ **SW1-SW5 LLM PATH Promise Gate EXCEEDED + SURPASSES opencode on P08**
 **Supersedes:** cycle-3-final-report.md (which claimed 9/11 PASS via fraudulent score script)
 
+> **⚠️ HISTORICAL NOTE 2026-08-03:** Per promise gate plugin + user directive, `generate-minimal.py` was deleted 2026-08-03. References below to it as "OFFICIAL generator" are SUPERSEDED — SW1-SW5 LLM path is now the canonical generator. Deterministic bypass paths are forbidden. See `STATUS.md`.
+
 ---
 
 ## 1. EXECUTIVE SUMMARY
@@ -391,7 +393,7 @@ The original meta-v6 generator chains 5 sub-workflows. All 5 are benchmark-mode 
 | Artifact | Path |
 |----------|------|
 | Plan | `docs/plans/meta-workflow-parity/08-CYCLE-4-PLAN.md` |
-| Final results | `docs/plans/meta-workflow-parity/CYCLE-4-FINAL-RESULTS.md` (this file) |
+| Final results | `docs/plans/meta-workflow-parity/cycle-4-final-report.md` (this file) |
 | Tracking | `WORKFLOW_RELIABILITY_TRACKING.md` |
 | OFFICIAL generator | `scripts/meta-v6/generate-minimal.py` |
 | Rust repair script | `scripts/meta-v6/repair-rust.py` |

@@ -829,7 +829,8 @@ When context grows large, write handoff to `.opencode-handoff.md`:
 **Goal:** Meta-workflow-v6 generator + execution engine MUST produce workflows that accomplish prompt objectives at quality ≥ opencode baseline (single-shot with max tool usage).
 
 **Plan suite:** `docs/plans/meta-workflow-parity/`
-- `00-MASTER-PLAN.md` — overview, exit criteria
+- `STATUS.md` — overview, current state, exit criteria
+- `00-COMPREHENSIVE-PLAN.md` — v2.2 active master plan (supersedes `archive/00-MASTER-PLAN-superseded.md`)
 - `01-BASELINE-METHODOLOGY.md` — how baselines established
 - `02-VALIDATION-CRITERIA.md` — strict pass/fail criteria
 - `03-GAP-ANALYSIS.md` — brutally honest current state

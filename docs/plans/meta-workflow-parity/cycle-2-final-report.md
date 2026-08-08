@@ -83,6 +83,6 @@ Cycle 3 would only be needed for:
 
 **COMPLETE.** 11/11 prompts achieve parity threshold. Average 45.2/50 (90%).
 
-Exceeds original target of 8/11 per `docs/plans/meta-workflow-parity/00-MASTER-PLAN.md` exit criteria.
+Exceeds original target of 8/11 per `docs/plans/meta-workflow-parity/archive/00-MASTER-PLAN-superseded.md` exit criteria.
 
 No Cycle 3 needed.

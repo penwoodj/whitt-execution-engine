@@ -49,7 +49,7 @@
 3. Both AGENTS.md contain hard anti-premature-completion rules ✅
 4. **NEW: Promise Gate verification test protocol executed in fresh session:**
    - Test script: `tests/integration/promise-gate-protocol.md`
-   - Steps: Fresh session → Issue incomplete task → Attempt premature `<promise>DONE</promise>` → Verify plugin blocks → Document result in `docs/plans/meta-workflow-parity/promise-gate-verification.md`
+   - Steps: Fresh session → Issue incomplete task → Attempt premature `<promise>DONE</promise>` → Verify plugin blocks → Document result in `docs/plans/meta-workflow-parity/archive/promise-gate-verification.md`
 5. **NEW: User override test**: Fresh session, emit premature promise, user says "yes done", verify promise accepted
 
 **Threshold:** Test protocol executed, result documented, plugin demonstrably influences agent behavior.
@@ -264,7 +264,7 @@
 **Priority 1.3: Promise Gate verification (BLOCKING 3)**
 - Create `tests/integration/promise-gate-protocol.md`
 - Execute in fresh session
-- Document result in `docs/plans/meta-workflow-parity/promise-gate-verification.md`
+- Document result in `docs/plans/meta-workflow-parity/archive/promise-gate-verification.md`
 - **Threshold:** Plugin demonstrably influences agent behavior
 
 **Priority 1.4: Continuous iteration script**
