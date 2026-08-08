@@ -1,0 +1,1 @@
+Read docs/plans/meta-workflow-parity/PRIMARY-OBJECTIVE.md and give me a three-bullet executive summary focused on what an external reviewer would need to understand about the iteration discipline and the pinch-point validation strategy. Output the three bullets to stdout, nothing else.
