@@ -413,6 +413,8 @@ fn create_test_models_config(count: usize) -> ModelsConfig {
                 execution: Default::default(),
                 thinking: Default::default(),
                 tools: Default::default(),
+                load_params: Default::default(),
+                sampling: Default::default(),
                 guardrails: Default::default(),
             },
         );

@@ -1,5 +1,46 @@
 # Whitt Execution Engine — Agent Operating Rules
 
+## PRIMARY OBJECTIVE (user directive 2026-08-06, supersedes prior goals)
+
+**Source of truth:** `docs/plans/meta-workflow-parity/PRIMARY-OBJECTIVE.md` (read for full context).
+
+**Goal:** Three natural-language prompts matching user's opencode chat style. Live-system-test each through the meta-workflow generator (SW1-SW5) AND the resulting workflow execution. Prove both output workflow AND execution produce desired results with extensive logging reviewed. Achieve parity with opencode reliability for tasks the framework supports.
+
+**Prompt structure:** 2 complex (1 coding + 1 research) + 1 simple (single-step summary, last to iterate on, control). Generator must learn to skip excessive validation on simple prompts.
+
+**Iteration discipline:** If near-flawless execution not achieved, iterate on subsections of the meta-workflow `.yml` generator one by one (SW1 alone, SW2 alone, etc.) with beginning/end + incremental validation pinch points. Pinch points are **adaptive per prompt** based on task complexity.
+
+**Exit criteria:** User says each specific element is working + regression testing added for features and workflow input set + logging level set in workflow.
+
+**Cleanup-first execution order:** Finish pending cleanup (push commits, LLM-judge, release build verify) BEFORE starting primary objective work. Don't interleave.
+
+---
+
+## CRITICAL: TDD Hard Rule (user directive 2026-08-06)
+
+When executing on framework code:
+
+1. **Run minimal tests** as you try to accomplish things — not the full suite every time
+2. **Write test FIRST, watch it FAIL**, then write code to make it pass
+3. **Always TDD for framework changes** — no exceptions for `src/` modifications
+4. **Vertical slices with exploded architecture** — organize code in vertical slices, not horizontal layers
+
+**Forbidden:** Writing framework code in `src/` without first writing a failing test for the behavior.
+
+---
+
+## CRITICAL: Schema Discipline (user directive 2026-08-06)
+
+When iterating on workflows and workflow files:
+
+1. **Read `docs/schema/unified-workflow-schema.yml` BEFORE writing or modifying any workflow YAML**
+2. **Every new key added to YAMLs MUST have a schema line reference comment** (`# schema line NNN`)
+3. **Strict rules around schema are followed before executing on any of this** — no exceptions
+4. **WorkflowFile uses `deny_unknown_fields`** — any new YAML key requires corresponding struct field at every nesting level
+5. **Validate before executing** — `python3 scripts/meta-v6/validate-workflow.py <workflow.yml>` must pass before `whitt benchmark --workflow <file>`
+
+---
+
 ## CRITICAL: Repo Cleanliness Rule (HARD)
 
 **Top-level of repo MUST stay clean.** No stray workflow files, test outputs, or generator artifacts in repo root.

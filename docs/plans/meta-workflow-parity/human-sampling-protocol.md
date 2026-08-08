@@ -1,4 +1,12 @@
-# Human-Judgment Sampling Protocol
+# Human-Judgment Sampling Protocol — DEPRECATED
+
+**Status:** DEPRECATED 2026-08-06 per user direction.
+**Replacement:** `scripts/meta-v6/llm-judge.py` (LLM-as-judge automated reviewer).
+**Kept for:** Fallback if LLM judge unavailable, or when LLM judge returns PARTIAL.
+
+---
+
+## Original Protocol (superseded)
 
 **Scope:** Minimal human review on top of `parity-check.sh` + `semantic-check.py` to catch Goodhart cases that heuristic validators miss.
 
