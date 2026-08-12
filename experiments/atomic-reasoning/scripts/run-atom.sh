@@ -77,6 +77,8 @@ START=$(date +%s)
 cd "${REPO_ROOT}" || exit 1
 
 # 6. RUN WITH TIMEOUT + WATCHDOG (concurrent=1 prevents 4x parallelism crash)
+# Force sequential via env var (engine auto-detects 4× which crashes 8GB systems)
+export WHITT_MAX_CONCURRENT_INFERENCES=1
 timeout "${TIMEOUT_SECS}" "${WHITT}" benchmark \
   --workflow "${RUN_YML}" \
   --output-dir "${OUTDIR_ABS}" \
@@ -84,7 +86,6 @@ timeout "${TIMEOUT_SECS}" "${WHITT}" benchmark \
   --models-dir "${MODELS_DIR}" \
   --load-timeout 60 \
   --prompts 1 \
-  --concurrent 1 \
   >> "${RUN_LOG}" 2>&1 &
 WHITT_PID=$!
 

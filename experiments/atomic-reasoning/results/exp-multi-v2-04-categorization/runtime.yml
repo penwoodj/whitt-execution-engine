@@ -1,0 +1,133 @@
+# ══════════════════════════════════════════════════════════════════
+# ATOM OF REASONING — MULTI-MODEL v2 (shell-orchestrated)
+# Engine doesn't swap models cleanly within a workflow, so we orchestrate
+# multi-model flow via shell hooks calling /v1/chat/completions directly.
+# Runner tracks ONE model (worker); router inference happens in shell.
+# ══════════════════════════════════════════════════════════════════
+workflow_id: atom_multi_v2
+name: "Atom of Reasoning — Multi-Model v2 (shell-orchestrated)"
+description: "Router inference via shell+curl. Worker via engine. Avoids swap conflict."
+version: "2.0.0"
+author: "Whitt Execution Engine"
+tags: [atom, multi-model, shell-orchestrated]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config: { host: localhost, port: 8080 }
+
+models:
+  "worker":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.3, max_tokens: 300 }
+
+workflow_execution_strategy:
+  memory: { model_lifecycle: { unload_unused: false } }
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/results/exp-multi-v2-04-categorization/last-run.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+
+    # ── STEP 0: Bootstrap + Router inference via shell ─────────
+    step_00_bootstrap_route:
+      generative_entity: "${models.worker}"
+      prompt: "READY."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        before_step_starts:
+          - shell:
+              command: |
+                set -e
+                # Call tiny router model (Qwen2.5-0.5B) via API
+                ROUTER_RESP=$(curl -s -m 30 -X POST http://localhost:8080/v1/chat/completions \
+                  -H "Content-Type: application/json" \
+                  -d "$(python3 -c "import json; print(json.dumps({'model':'Qwen2.5-0.5B-Instruct-Q4_K_M','messages':[{'role':'user','content':'Classify this task into ONE word: SUMMARY, FIX, DECOMPOSE, CLASSIFY, or CODE. Reply with the word ONLY.\n\nTASK:\n' + open('/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/inputs/input-04-categorization.txt').read()[:500]}],'max_tokens':10,'temperature':0}))")" || echo '{"choices":[{"message":{"content":"UNKNOWN"}}]}')
+                KIND=$(echo "$ROUTER_RESP" | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['choices'][0]['message']['content'].strip().split()[0].upper() if d.get('choices') else 'UNKNOWN')" 2>/dev/null || echo UNKNOWN)
+                echo "$KIND" > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/results/exp-multi-v2-04-categorization/task-kind.txt
+                echo "[router] classified as: $KIND" >> /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/results/exp-multi-v2-04-categorization/router-debug.log
+                # Unload router immediately (1-model invariant)
+                curl -s -m 10 -X POST http://localhost:8080/models/unload \
+                  -H "Content-Type: application/json" \
+                  -d '{"model":"Qwen2.5-0.5B-Instruct-Q4_K_M"}' >> /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/results/exp-multi-v2-04-categorization/router-debug.log 2>&1 || true
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: false
+          - shell:
+              command: "KIND=$(cat /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/results/exp-multi-v2-04-categorization/task-kind.txt 2>/dev/null || echo UNKNOWN); echo \"TASK_KIND: ${KIND}\"; echo ''; echo 'INPUT:'; cat /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/inputs/input-04-categorization.txt"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: true
+
+    # ── STEP 1: Worker GENERATE ────────────────────────────────
+    step_01_generate:
+      depends_on: [step_00_bootstrap_route]
+      generative_entity: "${models.worker}"
+      prompt: |
+        Complete this task. Output ONLY the result, no preamble.
+
+        {{bookmarks.shell_output.stdout}}
+      model_overrides: { temperature: 0.4, max_tokens: 300 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $draft
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/results/exp-multi-v2-04-categorization/draft.txt"
+          - log:
+              to_file_path: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/results/exp-multi-v2-04-categorization/step-01.log"
+              event_fields: [step_name, duration_ms, model_name]
+              level: info
+
+    # ── STEP 2: CRITIQUE ───────────────────────────────────────
+    step_02_critique:
+      depends_on: [step_01_generate]
+      generative_entity: "${models.worker}"
+      prompt: |
+        Review this output for ONE problem only.
+
+        OUTPUT:
+        {{bookmarks.draft}}
+
+        If output is correct and well-formatted, write "NO PROBLEM".
+        Otherwise write one sentence starting with "PROBLEM:".
+      model_overrides: { temperature: 0.2, max_tokens: 60 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $critique
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/results/exp-multi-v2-04-categorization/critique.txt"
+
+    # ── STEP 3: REFINE + VERIFY ────────────────────────────────
+    step_03_refine:
+      depends_on: [step_02_critique]
+      generative_entity: "${models.worker}"
+      prompt: |
+        If critique says "NO PROBLEM", output the original draft unchanged.
+        Otherwise, fix the stated problem.
+
+        ORIGINAL DRAFT:
+        {{bookmarks.draft}}
+
+        CRITIQUE:
+        {{bookmarks.critique}}
+
+        Output the complete version. No commentary.
+      model_overrides: { temperature: 0.3, max_tokens: 300 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $final_output
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/results/exp-multi-v2-04-categorization/final.txt"
+          - shell:
+              command: "python3 /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/scripts/verify.py '{{bookmarks.final_output}}' > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/results/exp-multi-v2-04-categorization/verify-result.txt 2>&1 || true"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: false
+          - log:
+              to_file_path: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/results/exp-multi-v2-04-categorization/summary.log"
+              event_fields: [workflow_id, total_steps]
+              level: info
