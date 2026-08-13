@@ -1,0 +1,113 @@
+# ══════════════════════════════════════════════════════════════════
+# ATOM OF REASONING — SINGLE-MODEL CPU v1
+# CPU-only. Ministral-3B (3B Mistral, designed for edge CPUs).
+# gpu_layers=0 enforced via config.yml + model config defaults.
+# Pattern: GENERATE → CRITIQUE → REFINE → VERIFY (single pass)
+# ══════════════════════════════════════════════════════════════════
+workflow_id: atom_single_cpu_v1
+name: "Atom of Reasoning — Single-Model CPU v1"
+description: "CPU-only. Ministral-3B. Same atom logic as v1.6 GPU."
+version: "1.0.0"
+author: "Whitt Execution Engine"
+tags: [atom, single-model, cpu, safe]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config: { host: localhost, port: 8080 }
+
+models:
+  "worker":
+    name: "Ministral-3-3B-Instruct-2512-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.3, max_tokens: 300 }
+
+workflow_execution_strategy:
+  memory: { model_lifecycle: { unload_unused: false } }
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/results/exp-single-cpu-v1-02-yaml-block/last-run.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+
+    step_00_bootstrap:
+      generative_entity: "${models.worker}"
+      prompt: "READY."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/inputs/input-02-yaml-block.txt"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: true
+
+    step_01_generate:
+      depends_on: [step_00_bootstrap]
+      generative_entity: "${models.worker}"
+      prompt: |
+        Complete this task. Output ONLY the result, no preamble.
+
+        {{bookmarks.shell_output.stdout}}
+      model_overrides: { temperature: 0.4, max_tokens: 300 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $draft
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/results/exp-single-cpu-v1-02-yaml-block/draft.txt"
+          - log:
+              to_file_path: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/results/exp-single-cpu-v1-02-yaml-block/step-01.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+
+    step_02_critique:
+      depends_on: [step_01_generate]
+      generative_entity: "${models.worker}"
+      prompt: |
+        Review this output for ONE problem only.
+
+        OUTPUT:
+        {{bookmarks.draft}}
+
+        If output is correct and well-formatted, write "NO PROBLEM".
+        Otherwise write one sentence starting with "PROBLEM:".
+      model_overrides: { temperature: 0.2, max_tokens: 60 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $critique
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/results/exp-single-cpu-v1-02-yaml-block/critique.txt"
+
+    step_03_refine:
+      depends_on: [step_02_critique]
+      generative_entity: "${models.worker}"
+      prompt: |
+        If critique says "NO PROBLEM", output original draft unchanged.
+        Otherwise, fix the stated problem.
+
+        ORIGINAL DRAFT:
+        {{bookmarks.draft}}
+
+        CRITIQUE:
+        {{bookmarks.critique}}
+
+        Output complete version. No commentary.
+      model_overrides: { temperature: 0.3, max_tokens: 300 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $draft
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/results/exp-single-cpu-v1-02-yaml-block/refined.txt"
+          - shell:
+              command: "python3 /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/scripts/verify.py '{{bookmarks.draft}}' > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/results/exp-single-cpu-v1-02-yaml-block/verify-result.txt 2>&1 || true"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: false
+          - log:
+              to_file_path: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/atomic-reasoning/results/exp-single-cpu-v1-02-yaml-block/summary.log"
+              event_fields: [workflow_id, total_steps]
+              level: info
