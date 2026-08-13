@@ -37,6 +37,40 @@ def check_forbidden(text: str, phrases: list) -> list:
     return hits
 
 
+def check_contains_required(text: str, required: list) -> list:
+    missing = []
+    for r in required:
+        if r not in text:
+            missing.append(r)
+    return missing
+
+
+def check_contains_any(text: str, options: list) -> list:
+    found = []
+    for o in options:
+        if o in text:
+            found.append(o)
+    return found
+
+
+def check_yaml_parsable(text: str) -> tuple:
+    try:
+        import yaml
+        # Strip markdown code fences if present
+        stripped = text.strip()
+        if stripped.startswith("```"):
+            lines = stripped.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            stripped = "\n".join(lines)
+        yaml.safe_load(stripped)
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
 def run_checks(angle_num, case, text):
     checks = case.get("deterministic_checks", {})
     results = {
@@ -78,6 +112,34 @@ def run_checks(angle_num, case, text):
         results["checks"]["forbidden_phrases"] = {
             "found": hits,
             "passed": ok,
+        }
+        results["passed"] = results["passed"] and ok
+
+    required = checks.get("contains_required", [])
+    if required:
+        missing = check_contains_required(text, required)
+        ok = len(missing) == 0
+        results["checks"]["contains_required"] = {
+            "missing": missing,
+            "passed": ok,
+        }
+        results["passed"] = results["passed"] and ok
+
+    any_of = checks.get("contains_any", [])
+    if any_of:
+        found = check_contains_any(text, any_of)
+        ok = len(found) > 0
+        results["checks"]["contains_any"] = {
+            "found": found,
+            "passed": ok,
+        }
+        results["passed"] = results["passed"] and ok
+
+    if checks.get("yaml_parsable", False):
+        ok, err = check_yaml_parsable(text)
+        results["checks"]["yaml_parsable"] = {
+            "passed": ok,
+            "error": err,
         }
         results["passed"] = results["passed"] and ok
 
