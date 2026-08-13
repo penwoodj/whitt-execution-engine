@@ -1,0 +1,277 @@
+# ══════════════════════════════════════════════════════════════════
+# CORRECTION ATOM v2 — Iteration after case-001 v1 failure
+# Fix: hard "preserve format" constraint on angles 2-5
+# Fix: angle-specific anti-pattern blocks (based on v1 observations)
+# Pattern: 5 angles mutate text in sequence, but each MUST preserve format
+# ══════════════════════════════════════════════════════════════════
+workflow_id: correction_atom_v2
+name: "Correction Atom — Multi-Perspective v2"
+description: "Format-preserving angles. Anti-pattern blocks per angle."
+version: "2.0.0"
+author: "Whitt Execution Engine"
+tags: [correction, multi-perspective, v2]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config: { host: localhost, port: 8080 }
+
+models:
+  "worker":
+    name: "Ministral-3-3B-Instruct-2512-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.2, max_tokens: 400 }
+
+workflow_execution_strategy:
+  memory: { model_lifecycle: { unload_unused: false } }
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "__OUTPUT_DIR__/last-run.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+
+    step_00_bootstrap:
+      generative_entity: "${models.worker}"
+      prompt: "READY."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/emit-context.py __CASE_FILE__"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+
+    # ── ANGLE 1 — FORMAT AUDITOR (owns structural changes) ────
+    step_01_format_auditor:
+      depends_on: [step_00_bootstrap]
+      generative_entity: "${models.worker}"
+      prompt: |
+        PERSONA: FORMAT AUDITOR
+        GOAL: Fix structural defects only.
+
+        LENS: Surface structure. NOT facts, NOT logic, NOT requirements.
+
+        RECOGNIZE ISSUE:
+        - Bullet count output != spec count
+        - Mixed indentation
+        - Leaked prompt artifacts: "ORIGINAL DRAFT:", "TASK_KIND:", "PROBLEM:", meta phrases
+        - Markdown broken
+        - Output format != spec format
+
+        FIX RULES:
+        - Match spec format exactly (bullets, JSON, code, etc).
+        - Strip prompt artifacts completely.
+        - Preserve content meaning. Only restructure.
+        - No new info added.
+
+        INPUTS:
+        {{bookmarks.shell_output.stdout}}
+
+        Emit corrected text only. No commentary. No markdown fences around the answer.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_after_angle_1
+              - "__OUTPUT_DIR__/after-angle-1.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 1 __CASE_FILE__ '{{bookmarks.text_after_angle_1}}' > __OUTPUT_DIR__/check-angle-1.json 2>&1 || true"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    # ── ANGLE 2 — FACT CHECKER (preserve format) ───────────────
+    step_02_fact_checker:
+      depends_on: [step_01_format_auditor]
+      generative_entity: "${models.worker}"
+      prompt: |
+        PERSONA: FACT CHECKER
+        GOAL: Fix factual mismatches vs source. PRESERVE FORMAT.
+
+        HARD CONSTRAINTS:
+        - PRESERVE bullet count exactly (3 bullets in = 3 bullets out).
+        - PRESERVE bullet markers (- * •).
+        - DO NOT add sentences after bullets.
+        - DO NOT add parens or italic notes.
+        - DO NOT change format.
+
+        LENS: Numbers, names, quotes only.
+
+        RECOGNIZE ISSUE:
+        - Number in output != source
+        - Quoted text altered
+        - Named entity not in source
+        - Math wrong
+        - Statistics cited without source
+
+        FIX RULES:
+        - Replace wrong number with sourced number.
+        - No correct value available: remove claim entirely.
+        - No new facts introduced.
+        - Output format identical to input.
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_after_angle_1}}
+
+        SOURCE:
+        {{bookmarks.shell_output.stdout}}
+
+        Emit corrected bullets only. No commentary. No italic notes.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_after_angle_2
+              - "__OUTPUT_DIR__/after-angle-2.txt"
+
+    # ── ANGLE 3 — REQUIREMENTS TRACER (preserve format) ───────
+    step_03_requirements_tracer:
+      depends_on: [step_02_fact_checker]
+      generative_entity: "${models.worker}"
+      prompt: |
+        PERSONA: REQUIREMENTS TRACER
+        GOAL: Fix incomplete output. PRESERVE FORMAT.
+
+        HARD CONSTRAINTS:
+        - PRESERVE bullet count exactly.
+        - DO NOT merge bullets.
+        - DO NOT remove bullets.
+        - DO NOT convert bullets to paragraphs.
+        - DO NOT add commentary.
+
+        LENS: Coverage only. Each spec requirement addressed?
+
+        RECOGNIZE ISSUE:
+        - Spec asks N items, output has different count
+        - Spec asks specific field, output omits
+        - Output addresses spec partially
+
+        FIX RULES:
+        - If requirement missing: ADD only if spec count allows.
+        - If all spec requirements covered: OUTPUT INPUT UNCHANGED.
+        - DO NOT improve existing content.
+        - DO NOT remove content.
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_after_angle_2}}
+
+        TASK SPEC:
+        {{bookmarks.shell_output.stdout}}
+
+        If all requirements met: output input verbatim. Else minimal change.
+        No commentary.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_after_angle_3
+              - "__OUTPUT_DIR__/after-angle-3.txt"
+
+    # ── ANGLE 4 — HALLUCINATION HUNTER (preserve format) ──────
+    step_04_hallucination_hunter:
+      depends_on: [step_03_requirements_tracer]
+      generative_entity: "${models.worker}"
+      prompt: |
+        PERSONA: HALLUCINATION HUNTER
+        GOAL: Fix fabricated content. PRESERVE FORMAT.
+
+        HARD CONSTRAINTS:
+        - PRESERVE bullet count exactly.
+        - PRESERVE bullet structure.
+        - DO NOT convert bullets to paragraphs.
+        - DO NOT add markdown formatting (**bold**, *italic*).
+        - DO NOT add headers or code fences.
+
+        LENS: Invented facts only.
+
+        RECOGNIZE ISSUE:
+        - Output introduces taxonomy not in source
+        - Output cites rubric/criteria not in source
+        - Output invents library/API name
+        - Output creates quote by combining fragments
+        - Output uses technical term that doesn't exist
+
+        FIX RULES:
+        - Remove fabricated content from within a bullet.
+        - DO NOT remove the bullet itself.
+        - DO NOT restructure.
+        - If no hallucinations: OUTPUT INPUT UNCHANGED.
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_after_angle_3}}
+
+        SOURCE:
+        {{bookmarks.shell_output.stdout}}
+
+        Emit bullets only. No commentary.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_after_angle_4
+              - "__OUTPUT_DIR__/after-angle-4.txt"
+
+    # ── ANGLE 5 — CONSISTENCY AUDITOR (preserve format) ───────
+    step_05_consistency_auditor:
+      depends_on: [step_04_hallucination_hunter]
+      generative_entity: "${models.worker}"
+      prompt: |
+        PERSONA: CONSISTENCY AUDITOR
+        GOAL: Fix internal inconsistencies. PRESERVE FORMAT.
+
+        HARD CONSTRAINTS:
+        - PRESERVE bullet count exactly.
+        - DO NOT merge bullets into single sentence.
+        - DO NOT add parentheticals.
+        - DO NOT condense.
+        - DO NOT add summary notes.
+
+        LENS: Meta language only.
+
+        RECOGNIZE ISSUE (ONLY these count):
+        - Output contains "I will fix..." or "the output does not..." or "here is corrected..."
+        - Output acknowledges issue ("PROBLEM: X") but X still present
+        - Output claims "fixed Y" but Y still broken
+
+        FIX RULES:
+        - Remove ONLY the meta language phrase.
+        - DO NOT touch bullet content.
+        - DO NOT merge bullets.
+        - If no meta language: OUTPUT INPUT UNCHANGED.
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_after_angle_4}}
+
+        If no meta-language present: output input verbatim. Else remove only the meta phrase.
+        Emit bullets only. No commentary. No parens.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $final_output
+              - "__OUTPUT_DIR__/final-corrected.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 5 __CASE_FILE__ '{{bookmarks.final_output}}' > __OUTPUT_DIR__/check-angle-5.json 2>&1 || true"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    step_06_emit:
+      depends_on: [step_05_consistency_auditor]
+      generative_entity: "${models.worker}"
+      prompt: "DONE."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        after_step_succeeds:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/build-changelog.py __CASE_FILE__ __OUTPUT_DIR__ > __OUTPUT_DIR__/change-log.json 2>&1 || true"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+          - log:
+              to_file_path: "__OUTPUT_DIR__/summary.log"
+              event_fields: [workflow_id, total_steps]
+              level: info

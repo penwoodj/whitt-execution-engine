@@ -1,0 +1,281 @@
+# ══════════════════════════════════════════════════════════════════
+# CORRECTION ATOM v3 — Early termination + echo-if-clean
+# Fix: deterministic check after each angle, GWT route skips remaining on pass
+# Fix: angles 2-5 default to ECHO INPUT (no issue = no mutation)
+# Pattern: angle → check → if pass, route to emit; else next angle
+# ══════════════════════════════════════════════════════════════════
+workflow_id: correction_atom_v3
+name: "Correction Atom — Multi-Perspective v3 (early-terminate)"
+description: "Each angle runs deterministic check. Pass = skip remaining. Echo-input default."
+version: "3.0.0"
+author: "Whitt Execution Engine"
+tags: [correction, multi-perspective, v3, early-terminate]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config: { host: localhost, port: 8080 }
+
+models:
+  "worker":
+    name: "Ministral-3-3B-Instruct-2512-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.2, max_tokens: 400 }
+
+workflow_execution_strategy:
+  memory: { model_lifecycle: { unload_unused: false } }
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "__OUTPUT_DIR__/last-run.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+
+    step_00_bootstrap:
+      generative_entity: "${models.worker}"
+      prompt: "READY."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/emit-context.py __CASE_FILE__"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+
+    # ── ANGLE 1 — FORMAT AUDITOR ───────────────────────────────
+    step_01_format_auditor:
+      depends_on: [step_00_bootstrap]
+      generative_entity: "${models.worker}"
+      prompt: |
+        PERSONA: FORMAT AUDITOR
+        GOAL: Fix structural defects only.
+
+        RECOGNIZE ISSUE:
+        - Bullet count output != spec count
+        - Leaked prompt artifacts: "ORIGINAL DRAFT:", "TASK_KIND:", meta phrases
+        - Output format != spec format
+        - Markdown broken
+
+        FIX RULES:
+        - Match spec format exactly (bullets, JSON, code, etc).
+        - Strip prompt artifacts completely.
+        - Preserve content meaning. Only restructure.
+        - No new info added.
+
+        INPUTS:
+        {{bookmarks.shell_output.stdout}}
+
+        Emit corrected text only. No commentary. No markdown fences around answer.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_after_angle_1
+              - "__OUTPUT_DIR__/after-angle-1.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 1 __CASE_FILE__ '{{bookmarks.text_after_angle_1}}' > __OUTPUT_DIR__/check-angle-1.json 2>&1; echo $? > __OUTPUT_DIR__/check-angle-1.exit; cat __OUTPUT_DIR__/check-angle-1.json"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+          - log:
+              to_file_path: "__OUTPUT_DIR__/angle-1.log"
+              event_fields: [step_name, shell_output_exit_code]
+              level: info
+
+    # ── ANGLE 2 — FACT CHECKER (ECHO IF NO ISSUE) ──────────────
+    step_02_fact_checker:
+      depends_on: [step_01_format_auditor]
+      generative_entity: "${models.worker}"
+      prompt: |
+        PERSONA: FACT CHECKER
+        GOAL: Fix factual mismatches vs source.
+
+        HARD RULES:
+        - PRESERVE bullet count, format, structure EXACTLY.
+        - If you find ZERO factual issues in your lens: OUTPUT THE INPUT TEXT VERBATIM. Do not change a single word.
+        - If you find ONE issue: change ONLY that word/number. Nothing else.
+        - DO NOT add sentences, parens, italic notes, headers.
+        - DO NOT invent errors. If source and output agree, no issue.
+
+        LENS: Numbers, names, quotes only.
+
+        RECOGNIZE ISSUE (ONLY these):
+        - Number in output != number in source (with EXACT comparison)
+        - Quoted text in output altered vs source
+        - Named entity in output not present in source
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_after_angle_1}}
+
+        SOURCE (use for verification):
+        {{bookmarks.shell_output.stdout}}
+
+        If no factual issues: output the text-under-review verbatim.
+        If factual issue: fix only that one word. Preserve everything else.
+        Emit text only. No commentary.
+      model_overrides: { temperature: 0.1, max_tokens: 400 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_after_angle_2
+              - "__OUTPUT_DIR__/after-angle-2.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 2 __CASE_FILE__ '{{bookmarks.text_after_angle_2}}' > __OUTPUT_DIR__/check-angle-2.json 2>&1; echo $? > __OUTPUT_DIR__/check-angle-2.exit; cat __OUTPUT_DIR__/check-angle-2.json"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    # ── ANGLE 3 — REQUIREMENTS TRACER (ECHO IF NO ISSUE) ──────
+    step_03_requirements_tracer:
+      depends_on: [step_02_fact_checker]
+      generative_entity: "${models.worker}"
+      prompt: |
+        PERSONA: REQUIREMENTS TRACER
+        GOAL: Verify all spec requirements addressed.
+
+        HARD RULES:
+        - PRESERVE bullet count, format, structure EXACTLY.
+        - If ALL requirements already addressed: OUTPUT THE INPUT TEXT VERBATIM.
+        - DO NOT merge, remove, or restructure bullets.
+        - DO NOT improve existing content.
+        - DO NOT add commentary.
+
+        LENS: Coverage check only.
+
+        RECOGNIZE ISSUE (ONLY this):
+        - Spec asks for something completely missing from output
+
+        FIX RULES:
+        - Missing requirement: ADD only if you can do so without changing format.
+        - All requirements met: OUTPUT INPUT UNCHANGED.
+        - DO NOT touch bullets that already cover requirements.
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_after_angle_2}}
+
+        TASK SPEC:
+        {{bookmarks.shell_output.stdout}}
+
+        If all spec requirements covered: output input verbatim. Else minimal add only.
+        Emit text only.
+      model_overrides: { temperature: 0.1, max_tokens: 400 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_after_angle_3
+              - "__OUTPUT_DIR__/after-angle-3.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 3 __CASE_FILE__ '{{bookmarks.text_after_angle_3}}' > __OUTPUT_DIR__/check-angle-3.json 2>&1; echo $? > __OUTPUT_DIR__/check-angle-3.exit; cat __OUTPUT_DIR__/check-angle-3.json"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    # ── ANGLE 4 — HALLUCINATION HUNTER (ECHO IF NO ISSUE) ─────
+    step_04_hallucination_hunter:
+      depends_on: [step_03_requirements_tracer]
+      generative_entity: "${models.worker}"
+      prompt: |
+        PERSONA: HALLUCINATION HUNTER
+        GOAL: Remove fabricated content.
+
+        HARD RULES:
+        - PRESERVE bullet count, format, structure EXACTLY.
+        - If ZERO fabricated content: OUTPUT THE INPUT TEXT VERBATIM.
+        - DO NOT convert bullets to paragraphs.
+        - DO NOT add markdown formatting (**bold**, *italic*).
+        - DO NOT remove bullets. Only edit content within a bullet.
+
+        LENS: Invented facts only.
+
+        RECOGNIZE ISSUE (ONLY these):
+        - Output contains a FACT (number, name, quote) that does NOT appear in source AND is not common knowledge
+        - Output uses a TAXONOMY/CATEGORY that source did not use
+
+        FIX RULES:
+        - Fabricated fact found: remove that phrase from within the bullet.
+        - DO NOT remove the bullet itself.
+        - DO NOT restructure.
+        - No fabrication: OUTPUT INPUT UNCHANGED.
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_after_angle_3}}
+
+        SOURCE:
+        {{bookmarks.shell_output.stdout}}
+
+        If no fabricated content: output input verbatim. Else remove only the invented phrase.
+        Emit text only.
+      model_overrides: { temperature: 0.1, max_tokens: 400 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_after_angle_4
+              - "__OUTPUT_DIR__/after-angle-4.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 4 __CASE_FILE__ '{{bookmarks.text_after_angle_4}}' > __OUTPUT_DIR__/check-angle-4.json 2>&1; echo $? > __OUTPUT_DIR__/check-angle-4.exit; cat __OUTPUT_DIR__/check-angle-4.json"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    # ── ANGLE 5 — CONSISTENCY AUDITOR (ECHO IF NO ISSUE) ──────
+    step_05_consistency_auditor:
+      depends_on: [step_04_hallucination_hunter]
+      generative_entity: "${models.worker}"
+      prompt: |
+        PERSONA: CONSISTENCY AUDITOR
+        GOAL: Remove meta-language. PRESERVE FORMAT.
+
+        HARD RULES:
+        - PRESERVE bullet count, format, structure EXACTLY.
+        - If ZERO meta-language: OUTPUT THE INPUT TEXT VERBATIM.
+        - DO NOT merge bullets.
+        - DO NOT condense.
+        - DO NOT add parens or summary notes.
+
+        LENS: Meta-language ONLY.
+
+        RECOGNIZE ISSUE (ONLY these phrases):
+        - "I will fix..."
+        - "the output does not..."
+        - "here is the corrected..."
+        - "PROBLEM: X" left in final text
+        - First-person verbs or self-commentary
+
+        FIX RULES:
+        - Meta-language found: remove ONLY that phrase.
+        - DO NOT touch bullet content.
+        - DO NOT merge bullets.
+        - No meta-language: OUTPUT INPUT UNCHANGED.
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_after_angle_4}}
+
+        If no meta-language: output input verbatim. Else remove only the meta phrase.
+        Emit text only.
+      model_overrides: { temperature: 0.1, max_tokens: 400 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $final_output
+              - "__OUTPUT_DIR__/final-corrected.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 5 __CASE_FILE__ '{{bookmarks.final_output}}' > __OUTPUT_DIR__/check-angle-5.json 2>&1; echo $? > __OUTPUT_DIR__/check-angle-5.exit; cat __OUTPUT_DIR__/check-angle-5.json"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    step_06_emit:
+      depends_on: [step_05_consistency_auditor]
+      generative_entity: "${models.worker}"
+      prompt: "DONE."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        after_step_succeeds:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/build-changelog.py __CASE_FILE__ __OUTPUT_DIR__ > __OUTPUT_DIR__/change-log.json 2>&1 || true"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+          - log:
+              to_file_path: "__OUTPUT_DIR__/summary.log"
+              event_fields: [workflow_id, total_steps]
+              level: info
