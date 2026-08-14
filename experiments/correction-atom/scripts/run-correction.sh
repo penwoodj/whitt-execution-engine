@@ -12,11 +12,11 @@ SCRIPTS="${REPO_ROOT}/experiments/atomic-reasoning/scripts"
 WHITT="${MAIN_REPO}/target/release/whitt"
 MODELS_DIR="${MAIN_REPO}/models"
 
-YML="${1:?usage: run-correction.sh <yml> <case> <outdir>}"
+YML="${1:?usage: run-correction.sh <yml> <case> <outdir> [model] [timeout]}"
 CASE="${2:?missing case file}"
 OUTDIR="${3:?missing output dir}"
-MODEL="Ministral-3"
-TIMEOUT_SECS="${4:-600}"
+MODEL="${4:-Ministral-3}"
+TIMEOUT_SECS="${5:-600}"
 COOLDOWN_FILE="${REPO_ROOT}/experiments/correction-atom/results/.last-run-ts"
 COOLDOWN_SECS=60
 
