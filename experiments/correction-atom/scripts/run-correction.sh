@@ -16,7 +16,7 @@ YML="${1:?usage: run-correction.sh <yml> <case> <outdir>}"
 CASE="${2:?missing case file}"
 OUTDIR="${3:?missing output dir}"
 MODEL="Ministral-3"
-TIMEOUT_SECS="${4:-300}"
+TIMEOUT_SECS="${4:-600}"
 COOLDOWN_FILE="${REPO_ROOT}/experiments/correction-atom/results/.last-run-ts"
 COOLDOWN_SECS=60
 
