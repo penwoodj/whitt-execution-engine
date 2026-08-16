@@ -1,0 +1,286 @@
+# ══════════════════════════════════════════════════════════════════
+# CORRECTION ATOM v7 — Deterministic-First, Zero-Retry Cascade
+# ══════════════════════════════════════════════════════════════════
+#
+# WHAT CHANGED vs v6 (inefficiency fixes from 9-run log analysis):
+#
+# 1. RETRIES DELETED — 0/13 retry executions produced an early exit in
+#    v6; same-model retry after deterministic failure never won.
+#    The cascade IS the retry (bigger model each escalation).
+#
+# 2. ANGLE 1 = DETERMINISTIC PYTHON (was Qwen2.5-0.5B) — 0.5B went
+#    0/9 first-try passes and was never selected. format-fix.py does
+#    its job (strip forbidden preamble/closing, extract bullets) in
+#    ~0ms. In-bullet factual defects intentionally survive → LLM
+#    angles fix those. Step skips its own inference via skip_step
+#    (schema line 866).
+#
+# 3. BOOTSTRAP DELETED — "READY." 3-token inference (~2-3s/run) was
+#    pure overhead. Each LLM angle emits its own state via
+#    emit-state.py in before_step_starts.
+#
+# 4. ESCALATION ORDER — det → 1.7B fact → 4B requirements → 9B
+#    hallucination → 4B consistency. All v6 winning angles preserved.
+#
+# Angle file numbering unchanged (after-angle-1..5.txt) so
+# analyze.py / select-best.py / comparison tooling work as-is.
+#
+# Engine mechanics (validated live in v6): GWT exit-code route
+# (runner.rs:2213/2602), skip_step before load (runner.rs:1998),
+# before_step_starts RouteTo honored (runner.rs:2024).
+# ══════════════════════════════════════════════════════════════════
+workflow_id: correction_atom_v7
+name: "Correction Atom v7 — Deterministic-First Zero-Retry Cascade"
+description: "Deterministic format pass then 4 specialist LLM angles, no retries, early exit on first deterministic pass."
+version: "7.0.0"
+author: "Whitt Execution Engine"
+tags: [correction, multi-model, early-exit, deterministic-first]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config: { host: localhost, port: 8080 }
+
+models:
+  "fact_checker":
+    name: "Qwen3-1.7B-abliterated-q4_k_m"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.2, max_tokens: 400 }
+  "requirements_tracer":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.2, max_tokens: 400 }
+  "hallucination_hunter":
+    name: "Qwen3-5-9B-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.2, max_tokens: 400 }
+  "consistency_auditor":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.2, max_tokens: 400 }
+
+workflow_execution_strategy:
+  memory: { model_lifecycle: { unload_unused: true } }
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "__OUTPUT_DIR__/last-run.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+
+    # ── STEP 1: ANGLE 1 DETERMINISTIC (format-fix.py, zero LLM) ──
+    # generative_entity must resolve (main-loop model lookup precedes
+    # hook execution) but skip_step fires before any load or inference.
+    step_01_det_format:
+      generative_entity: "${models.fact_checker}"
+      prompt: "OK."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/format-fix.py __CASE_FILE__ __OUTPUT_DIR__/after-angle-1.txt"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 1 __CASE_FILE__ __OUTPUT_DIR__/after-angle-1.txt > __OUTPUT_DIR__/check-angle-1.json 2>&1; EXIT=$?; echo $EXIT > __OUTPUT_DIR__/check-angle-1.exit; exit $EXIT"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+          - gwt:
+              - given: "{{bookmarks.shell_output.exit_code}} == 0"
+                then: step_99_finalize
+          - skip_step: true
+
+    # ── STEP 2: ANGLE 2 (FACT CHECKER — Qwen3-1.7B) ───────────
+    step_02_angle_2:
+      generative_entity: "${models.fact_checker}"
+      prompt: |
+        PERSONA: FACT CHECKER
+        GOAL: Fix factual mismatches vs source.
+
+        LENS: Numbers, names, quotes must trace to task spec or auxiliary.
+
+        RECOGNIZE:
+        - Number != source
+        - Quoted text altered
+        - Named entity not in source
+        - Math wrong
+        - Statistics unsourced
+
+        FIX RULES:
+        - Replace wrong with sourced value.
+        - No correct value: remove claim.
+        - Preserve format.
+        - COPY actual input text.
+
+        {{bookmarks.shell_output.stdout}}
+
+        Emit corrected text only. FIRST WORD MUST MATCH TASK SPEC FORMAT. NO prose preamble. NO commentary.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/emit-state.py __CASE_FILE__ __OUTPUT_DIR__"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "__OUTPUT_DIR__/after-angle-2.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 2 __CASE_FILE__ __OUTPUT_DIR__/after-angle-2.txt > __OUTPUT_DIR__/check-angle-2.json 2>&1; EXIT=$?; echo $EXIT > __OUTPUT_DIR__/check-angle-2.exit; exit $EXIT"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+          - gwt:
+              - given: "{{bookmarks.shell_output.exit_code}} == 0"
+                then: step_99_finalize
+
+    # ── STEP 3: ANGLE 3 (REQUIREMENTS TRACER — Qwen3-4B) ──────
+    step_03_angle_3:
+      generative_entity: "${models.requirements_tracer}"
+      prompt: |
+        PERSONA: REQUIREMENTS TRACER
+        GOAL: Fix incomplete output. Every spec requirement addressed.
+
+        LENS: Task spec = checklist. Missing = issue. Extra = also issue.
+
+        RECOGNIZE:
+        - Spec asks N items, output has different count
+        - Spec asks specific field, output omits
+        - Output addresses spec partially
+        - Output adds unrequested content
+
+        FIX RULES:
+        - Add missing requirements with sourced content.
+        - Remove scope creep.
+        - Match requested format.
+        - Only check format markers if task spec explicitly requires them.
+        - COPY actual input text.
+
+        {{bookmarks.shell_output.stdout}}
+
+        Emit corrected text only. FIRST WORD MUST MATCH TASK SPEC FORMAT. NO prose preamble.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/emit-state.py __CASE_FILE__ __OUTPUT_DIR__"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "__OUTPUT_DIR__/after-angle-3.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 3 __CASE_FILE__ __OUTPUT_DIR__/after-angle-3.txt > __OUTPUT_DIR__/check-angle-3.json 2>&1; EXIT=$?; echo $EXIT > __OUTPUT_DIR__/check-angle-3.exit; exit $EXIT"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+          - gwt:
+              - given: "{{bookmarks.shell_output.exit_code}} == 0"
+                then: step_99_finalize
+
+    # ── STEP 4: ANGLE 4 (HALLUCINATION HUNTER — Qwen3-5-9B) ───
+    step_04_angle_4:
+      generative_entity: "${models.hallucination_hunter}"
+      prompt: |
+        PERSONA: HALLUCINATION HUNTER
+        GOAL: Fix fabricated content. Output invents things not in source.
+
+        LENS: Distinguish sourced vs plausible-sounding invention.
+
+        RECOGNIZE:
+        - Taxonomy not in source
+        - Rubric/criteria invented
+        - Library/API/name fabricated
+        - Technical term that doesn't exist
+        - Claim attributed to source that source didn't make
+
+        FIX RULES:
+        - Remove fabricated content.
+        - Replace with sourced content if available.
+        - Nothing to replace with: leave gap.
+        - COPY actual input text.
+
+        {{bookmarks.shell_output.stdout}}
+
+        Emit corrected text only. FIRST WORD MUST MATCH TASK SPEC FORMAT. NO prose preamble.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/emit-state.py __CASE_FILE__ __OUTPUT_DIR__"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "__OUTPUT_DIR__/after-angle-4.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 4 __CASE_FILE__ __OUTPUT_DIR__/after-angle-4.txt > __OUTPUT_DIR__/check-angle-4.json 2>&1; EXIT=$?; echo $EXIT > __OUTPUT_DIR__/check-angle-4.exit; exit $EXIT"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+          - gwt:
+              - given: "{{bookmarks.shell_output.exit_code}} == 0"
+                then: step_99_finalize
+
+    # ── STEP 5: ANGLE 5 (CONSISTENCY AUDITOR — Qwen3-4B, last) ──
+    step_05_angle_5:
+      generative_entity: "${models.consistency_auditor}"
+      prompt: |
+        PERSONA: CONSISTENCY AUDITOR
+        GOAL: Fix internal inconsistencies.
+
+        LENS: Internal coherence. Claims must agree. Acknowledged issues must be fixed.
+
+        RECOGNIZE:
+        - Meta language about output itself
+        - Acknowledged issue still present
+        - Output copy-verbatim of broken input
+        - Self-contradiction
+
+        FIX RULES:
+        - Remove meta language.
+        - Fix acknowledged issues OR remove acknowledgment.
+        - Output == input verbatim: rephrase broken section.
+        - COPY actual input text.
+
+        {{bookmarks.shell_output.stdout}}
+
+        Emit corrected text only. FIRST WORD MUST MATCH TASK SPEC FORMAT. NO prose preamble. This is the final attempt.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/emit-state.py __CASE_FILE__ __OUTPUT_DIR__"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "__OUTPUT_DIR__/after-angle-5.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 5 __CASE_FILE__ __OUTPUT_DIR__/after-angle-5.txt > __OUTPUT_DIR__/check-angle-5.json 2>&1; EXIT=$?; echo $EXIT > __OUTPUT_DIR__/check-angle-5.exit; exit $EXIT"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    # ── STEP 99: FINALIZE (zero-LLM ratchet) ───────────────────
+    step_99_finalize:
+      generative_entity: "${models.consistency_auditor}"
+      prompt: "OK."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/select-best.py __OUTPUT_DIR__ && python3 __REPO_ROOT__/experiments/correction-atom/scripts/build-changelog-v4.py __CASE_FILE__ __OUTPUT_DIR__ > __OUTPUT_DIR__/change-log.json 2>&1 || true"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+          - skip_step: true
+        after_step_succeeds:
+          - log:
+              to_file_path: "__OUTPUT_DIR__/summary.log"
+              event_fields: [workflow_id, total_steps]
+              level: info

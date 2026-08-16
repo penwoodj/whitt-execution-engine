@@ -34,15 +34,32 @@ if ! bash "${SCRIPTS}/preflight.sh" >> "${RUN_LOG}" 2>&1; then
   exit 2
 fi
 
-# Cooldown
+wait_for_ram() {  # $1=min_mb  $2=max_wait_secs
+  local waited=0
+  while [ "${waited}" -lt "${2}" ]; do
+    local avail
+    avail=$(free -m | awk '/Mem:/{print $7}')
+    if [ "${avail}" -ge "${1}" ]; then
+      return 0
+    fi
+    sleep 5
+    waited=$((waited + 5))
+  done
+  return 1
+}
+
+# Cooldown: RAM-gated (AGENTS.md batch policy: >=3GB between model runs).
+# Replaces fixed 60s wait + 30s post-run sleep (~90s dead time per case).
 if [ -f "${COOLDOWN_FILE}" ]; then
   LAST_TS=$(cat "${COOLDOWN_FILE}")
   NOW_TS=$(date +%s)
   ELAPSED=$((NOW_TS - LAST_TS))
   if [ "${ELAPSED}" -lt "${COOLDOWN_SECS}" ]; then
-    WAIT=$((COOLDOWN_SECS - ELAPSED))
-    echo "[run-correction] cooldown: waiting ${WAIT}s" | tee -a "${RUN_LOG}"
-    sleep "${WAIT}"
+    if ! wait_for_ram 3072 120; then
+      echo "[run-correction] RAM low after wait — restarting docker" | tee -a "${RUN_LOG}"
+      docker restart whitt-llama-server >> "${RUN_LOG}" 2>&1 || true
+      sleep 45
+    fi
   fi
 fi
 
@@ -105,35 +122,40 @@ else
   echo "[run-correction] SUCCESS exit=0 duration=${DUR}s" | tee -a "${RUN_LOG}"
 fi
 
-# Write minimal metrics
+# Write metrics (angle outcomes from select-best.json — early-exit aware)
 python3 - "${OUTDIR_ABS}" "${DUR}" "${EXIT}" <<'PYEOF' || true
-import json, sys, os
+import glob
+import json
+import os
+import sys
+
 outdir, dur, exit_code = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
-angle_files = [f"after-angle-{i}.txt" for i in range(1, 5)] + ["final-corrected.txt"]
-angles_present = sum(1 for f in angle_files if os.path.exists(os.path.join(outdir, f)))
-checks = {}
-for i in [1, 5]:
-    p = os.path.join(outdir, f"check-angle-{i}.json")
-    if os.path.exists(p):
-        try:
-            checks[f"angle_{i}"] = json.load(open(p))
-        except Exception:
-            pass
+angle_files = sorted(glob.glob(os.path.join(outdir, "after-angle-*.txt")))
+angles_present = len(angle_files)
+selected_angle, case_passed = None, None
+sb_path = os.path.join(outdir, "select-best.json")
+if os.path.exists(sb_path):
+    try:
+        sb = json.load(open(sb_path))
+        selected_angle = sb.get("selected_angle")
+        case_passed = sb.get("passed")
+    except Exception:
+        pass
 metrics = {
     "wall_clock_seconds": dur,
     "exit_code": exit_code,
     "timed_out": exit_code == 124,
     "angles_completed": angles_present,
     "total_angles": 5,
-    "deterministic_checks": checks,
+    "selected_angle": selected_angle,
+    "case_passed": case_passed,
 }
 with open(os.path.join(outdir, "metrics.json"), "w") as f:
     json.dump(metrics, f, indent=2)
-print(f"[run-correction] metrics: {angles_present}/5 angles, {dur}s, exit={exit_code}")
+print(f"[run-correction] metrics: {angles_present}/5 angle files, {dur}s, exit={exit_code}, selected={selected_angle}, passed={case_passed}")
 PYEOF
 
-# Post-run cooldown
-echo "[run-correction] post-run cooldown 30s" | tee -a "${RUN_LOG}"
-sleep 30
+# Post-run: settle + RAM gate only (fixed 30s sleep removed)
+wait_for_ram 3072 60 || true
 
 exit ${EXIT}

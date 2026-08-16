@@ -24,7 +24,7 @@ ANGLE_FILES = [
     (2, "after-angle-2.txt", "check-angle-2.json"),
     (3, "after-angle-3.txt", "check-angle-3.json"),
     (4, "after-angle-4.txt", "check-angle-4.json"),
-    (5, "final-corrected.txt", "check-angle-5.json"),
+    (5, "after-angle-5.txt", "check-angle-5.json"),
 ]
 
 

@@ -1,0 +1,256 @@
+# ══════════════════════════════════════════════════════════════════
+# CORRECTION ATOM v8 — Memory-Escalation Cascade
+# ══════════════════════════════════════════════════════════════════
+#
+# WHAT CHANGED vs v7 (from 27-case suite analysis):
+#
+# 1. 9B STAGE DELETED — Qwen3-5-9B (hallucination hunter) won 0/27
+#    cases and 0/35 historical runs, including the hallucination-
+#    primary case (017, won by 4B requirements tracer). Saves ~20s
+#    load+infer whenever reached and one VRAM-heavy model swap.
+#    Cascade: det → 1.7B fact → 4B requirements → 4B consistency.
+#
+# 2. ESCALATION MEMORY — emit-state.py now aggregates still-open
+#    deterministic failures across angles (latest-wins per check) and
+#    injects them with fix hints: "PRIOR ANGLE FAILURES (fix ALL)".
+#    Each angle focuses its lens on the actual remaining defect
+#    instead of re-hunting everything blind.
+#
+# 3. FAILURE-FOCUSED PROMPT ORDER — role one-liner, then spec+source,
+#    then open failures, then text, then hard output rules last
+#    (recency). Prior PERSONA/LENS/RECOGNIZE walls removed — 1.7B/4B
+#    models follow short focused prompts better than long rubrics.
+#
+# 4. HARD-FAIL GATE — select-best.py refuses to ship best-partial
+#    when its remaining failures include prompt_leak / degenerate /
+#    forbidden_phrases / yaml_parsable (mode=hard_fail_input_fallback,
+#    no final written). Never ship worse-than-input.
+#
+# 5. VERIFIER — contains_required now number-normalizes (three ≡ 3,
+#    third ≡ 3rd); long_token threshold 25→35 alnum chars (model
+#    filenames in YAML are legitimate).
+#
+# 6. CASE LINT — scripts/test-cases.py + fixtures/reference-fixes.yml:
+#    every case must fail its own checks broken and pass with its
+#    reference fix. All 27 validated at authoring time.
+#
+# Angle file numbering: 1 (det), 2, 3, 5 — angle 4 slot intentionally
+# absent (9B deleted); analyze.py / select-best.py tolerate gaps.
+# ══════════════════════════════════════════════════════════════════
+workflow_id: correction_atom_v8
+name: "Correction Atom v8 — Memory-Escalation Cascade"
+description: "Deterministic pass then 3 specialist angles with cross-angle failure memory; no 9B stage; hard-fail output gate."
+version: "8.0.0"
+author: "Whitt Execution Engine"
+tags: [correction, multi-model, early-exit, escalation-memory]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config: { host: localhost, port: 8080 }
+
+models:
+  "fact_checker":
+    name: "Qwen3-1.7B-abliterated-q4_k_m"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.2, max_tokens: 400 }
+  "requirements_tracer":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.2, max_tokens: 400 }
+  "consistency_auditor":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.2, max_tokens: 400 }
+
+workflow_execution_strategy:
+  memory: { model_lifecycle: { unload_unused: true } }
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "__OUTPUT_DIR__/last-run.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+
+    # ── STEP 1: ANGLE 1 DETERMINISTIC (format-fix.py, zero LLM) ──
+    step_01_det_format:
+      generative_entity: "${models.fact_checker}"
+      prompt: "OK."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/format-fix.py __CASE_FILE__ __OUTPUT_DIR__/after-angle-1.txt"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 1 __CASE_FILE__ __OUTPUT_DIR__/after-angle-1.txt > __OUTPUT_DIR__/check-angle-1.json 2>&1; EXIT=$?; echo $EXIT > __OUTPUT_DIR__/check-angle-1.exit; exit $EXIT"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+          - gwt:
+              - given: "{{bookmarks.shell_output.exit_code}} == 0"
+                then: step_99_finalize
+          - skip_step: true
+
+    # ── STEP 2: ANGLE 2 (FACT CHECKER — Qwen3-1.7B) ───────────
+    step_02_angle_2:
+      generative_entity: "${models.fact_checker}"
+      prompt: |
+        ROLE: FACT CHECKER — fix factual mismatches vs source.
+
+        LENS: Numbers, names, quotes must trace to task spec or auxiliary.
+
+        RECOGNIZE:
+        - Number != source
+        - Quoted text altered
+        - Named entity not in source
+        - Unit wrong
+        - Statistics unsourced
+
+        FIX RULES:
+        - Replace wrong with sourced value.
+        - No correct value: remove claim.
+        - Preserve format.
+        - COPY actual input text.
+
+        {{bookmarks.shell_output.stdout}}
+
+        RULES:
+        - Fix the PRIOR ANGLE FAILURES listed above (if any) — they are still unfixed.
+        - Output the FULL corrected deliverable (complete text, not a diff).
+        - First character must match the required output format.
+        - No preamble. No commentary. No instructions.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/emit-state.py __CASE_FILE__ __OUTPUT_DIR__"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "__OUTPUT_DIR__/after-angle-2.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 2 __CASE_FILE__ __OUTPUT_DIR__/after-angle-2.txt > __OUTPUT_DIR__/check-angle-2.json 2>&1; EXIT=$?; echo $EXIT > __OUTPUT_DIR__/check-angle-2.exit; exit $EXIT"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+          - gwt:
+              - given: "{{bookmarks.shell_output.exit_code}} == 0"
+                then: step_99_finalize
+
+    # ── STEP 3: ANGLE 3 (REQUIREMENTS TRACER — Qwen3-4B) ──────
+    step_03_angle_3:
+      generative_entity: "${models.requirements_tracer}"
+      prompt: |
+        ROLE: REQUIREMENTS TRACER — every spec requirement addressed.
+
+        LENS: Task spec = checklist. Missing = issue. Extra = also issue.
+
+        RECOGNIZE:
+        - Spec asks N items, output has different count
+        - Spec asks specific field, output omits
+        - Output addresses spec partially
+        - Output adds unrequested content
+        - Output contradicts source (wrong numbers, invented claims, forbidden phrasing)
+
+        FIX RULES:
+        - Add missing requirements with sourced content.
+        - Remove scope creep.
+        - Remove any phrase listed as forbidden in PRIOR ANGLE FAILURES.
+        - Match requested format.
+        - COPY actual input text.
+
+        {{bookmarks.shell_output.stdout}}
+
+        RULES:
+        - Fix the PRIOR ANGLE FAILURES listed above (if any) — they are still unfixed.
+        - Output the FULL corrected deliverable (complete text, not a diff).
+        - First character must match the required output format.
+        - No preamble. No commentary. No instructions.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/emit-state.py __CASE_FILE__ __OUTPUT_DIR__"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "__OUTPUT_DIR__/after-angle-3.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 3 __CASE_FILE__ __OUTPUT_DIR__/after-angle-3.txt > __OUTPUT_DIR__/check-angle-3.json 2>&1; EXIT=$?; echo $EXIT > __OUTPUT_DIR__/check-angle-3.exit; exit $EXIT"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+          - gwt:
+              - given: "{{bookmarks.shell_output.exit_code}} == 0"
+                then: step_99_finalize
+
+    # ── STEP 5: ANGLE 5 (CONSISTENCY AUDITOR — Qwen3-4B, last) ──
+    step_05_angle_5:
+      generative_entity: "${models.consistency_auditor}"
+      prompt: |
+        ROLE: CONSISTENCY AUDITOR — fix internal inconsistencies.
+
+        LENS: Internal coherence. Claims must agree with source. No meta language, no hedging.
+
+        RECOGNIZE:
+        - Meta language about output itself
+        - Acknowledged issue still present
+        - Output copy-verbatim of broken input
+        - Self-contradiction
+        - Claim not traceable to source
+
+        FIX RULES:
+        - Remove meta language and hedging.
+        - Fix acknowledged issues OR remove acknowledgment.
+        - Output == input verbatim: rephrase broken section using sourced facts.
+        - Remove any phrase listed as forbidden in PRIOR ANGLE FAILURES.
+        - COPY actual input text.
+
+        {{bookmarks.shell_output.stdout}}
+
+        RULES:
+        - Fix the PRIOR ANGLE FAILURES listed above (if any) — they are still unfixed.
+        - Output the FULL corrected deliverable (complete text, not a diff).
+        - First character must match the required output format.
+        - No preamble. No commentary. No instructions. This is the final attempt.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/emit-state.py __CASE_FILE__ __OUTPUT_DIR__"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "__OUTPUT_DIR__/after-angle-5.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 5 __CASE_FILE__ __OUTPUT_DIR__/after-angle-5.txt > __OUTPUT_DIR__/check-angle-5.json 2>&1; EXIT=$?; echo $EXIT > __OUTPUT_DIR__/check-angle-5.exit; exit $EXIT"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    # ── STEP 99: FINALIZE (zero-LLM ratchet + hard-fail gate) ──
+    step_99_finalize:
+      generative_entity: "${models.consistency_auditor}"
+      prompt: "OK."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/select-best.py __OUTPUT_DIR__ && python3 __REPO_ROOT__/experiments/correction-atom/scripts/build-changelog-v4.py __CASE_FILE__ __OUTPUT_DIR__ > __OUTPUT_DIR__/change-log.json 2>&1 || true"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+          - skip_step: true
+        after_step_succeeds:
+          - log:
+              to_file_path: "__OUTPUT_DIR__/summary.log"
+              event_fields: [workflow_id, total_steps]
+              level: info
