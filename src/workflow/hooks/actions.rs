@@ -178,6 +178,9 @@ fn execute_append_to(
                 engine.store_bookmark(var_key.to_string(), serde_json::Value::String(combined));
             } else {
                 let resolved_path = resolve_context_templates(var_name, context, engine);
+                if let Some(err) = unresolved_placeholder_error(&resolved_path) {
+                    return HookResult::Fail { reason: err };
+                }
                 if let Err(e) = append_to_file(&resolved_path, &output) {
                     eprintln!("Failed to append to {}: {}", resolved_path, e);
                 }
@@ -185,6 +188,9 @@ fn execute_append_to(
         }
         AppendToAction::FilePath(path) => {
             let resolved_path = resolve_context_templates(path, context, engine);
+            if let Some(err) = unresolved_placeholder_error(&resolved_path) {
+                return HookResult::Fail { reason: err };
+            }
             if let Err(e) = append_to_file(&resolved_path, &output) {
                 eprintln!("Failed to append to {}: {}", resolved_path, e);
             }
@@ -203,6 +209,9 @@ fn execute_append_to(
                     engine.store_bookmark(var_name.to_string(), serde_json::Value::String(combined));
                 } else {
                     let resolved_path = resolve_context_templates(target, context, engine);
+                    if let Some(err) = unresolved_placeholder_error(&resolved_path) {
+                        return HookResult::Fail { reason: err };
+                    }
                     if let Err(e) = append_to_file(&resolved_path, &output) {
                         eprintln!("Failed to append to {}: {}", resolved_path, e);
                     }
@@ -253,6 +262,9 @@ fn execute_save_to(
             } else {
                 let resolved_path = resolve_context_templates(var_name, context, engine);
                 let final_path = resolve_save_path(&resolved_path, engine);
+                if let Some(err) = unresolved_placeholder_error(&final_path) {
+                    return HookResult::Fail { reason: err };
+                }
                 if let Err(e) = save_to_file(&final_path, &output) {
                     eprintln!("Failed to save to {}: {}", final_path, e);
                 }
@@ -261,6 +273,9 @@ fn execute_save_to(
         SaveToAction::FilePath(path) => {
             let resolved_path = resolve_context_templates(path, context, engine);
             let final_path = resolve_save_path(&resolved_path, engine);
+            if let Some(err) = unresolved_placeholder_error(&final_path) {
+                return HookResult::Fail { reason: err };
+            }
             if let Err(e) = save_to_file(&final_path, &output) {
                 eprintln!("Failed to save to {}: {}", final_path, e);
             }
@@ -272,6 +287,9 @@ fn execute_save_to(
                 } else {
                     let resolved_path = resolve_context_templates(target, context, engine);
                     let final_path = resolve_save_path(&resolved_path, engine);
+                    if let Some(err) = unresolved_placeholder_error(&final_path) {
+                        return HookResult::Fail { reason: err };
+                    }
                     if let Err(e) = save_to_file(&final_path, &output) {
                         eprintln!("Failed to save to {}: {}", final_path, e);
                     }
@@ -313,6 +331,22 @@ fn resolve_save_path(path: &str, engine: &HookEngine) -> String {
         return base.join(path).to_string_lossy().to_string();
     }
     path.to_string()
+}
+
+/// Detect an unresolved `${...}` placeholder in a file path. Writing such
+/// a path would create a directory literally named `${OUTPUT_DIR}` etc. —
+/// an authoring/substitution bug that must Fail loudly, not materialize
+/// (Issue H, run-atom.sh:149-152 legacy-fallback evidence).
+fn unresolved_placeholder_error(path: &str) -> Option<String> {
+    if let Some(start) = path.find("${") {
+        if path[start..].contains('}') {
+            return Some(format!(
+                "path contains unresolved placeholder: \"{}\" — refusing to create a directory with a literal ${{...}} name; fix template substitution / placeholder spelling upstream",
+                path
+            ));
+        }
+    }
+    None
 }
 
 /// Execute route to action.
@@ -357,6 +391,9 @@ fn execute_bookmark(
     };
 
     if let Some(ref path) = file_path {
+        if let Some(err) = unresolved_placeholder_error(path) {
+            return HookResult::Fail { reason: err };
+        }
         if let Err(e) = save_to_file(path, &formatted_json) {
             eprintln!("Failed to write bookmark to {}: {}", path, e);
         }
@@ -600,14 +637,35 @@ fn execute_gwt(
     for clause in clauses {
         if let Some(ref given) = clause.given {
             let resolved_given = engine.resolve_templates(given);
-            if evaluate_gwt_condition(&resolved_given, &json) {
-                let target = match &clause.r#then {
-                    RouteToAction::Single(t) => t.clone(),
-                    RouteToAction::Multiple(ts) => ts.join(","),
-                };
-                info!("[hook] after_gwt_evaluates: decision=routed target={}", target);
-                fire_gwt_trigger("after_gwt_evaluates", hook_config, engine, &step_name, &json, "routed", None, Some(&target));
-                return execute_route_to(&clause.r#then, context, engine);
+            match evaluate_gwt_condition(&resolved_given, &json) {
+                Ok(true) => {
+                    let target = match &clause.r#then {
+                        RouteToAction::Single(t) => t.clone(),
+                        RouteToAction::Multiple(ts) => ts.join(","),
+                    };
+                    info!("[hook] after_gwt_evaluates: decision=routed target={}", target);
+                    fire_gwt_trigger("after_gwt_evaluates", hook_config, engine, &step_name, &json, "routed", None, Some(&target));
+                    return execute_route_to(&clause.r#then, context, engine);
+                }
+                Ok(false) => continue,
+                Err(e) => {
+                    // Loud failure: a GWT expression that cannot even be
+                    // evaluated means a workflow/generator bug (historically
+                    // hid for two versions as a quiet WARN + "treating as
+                    // false" — experiments/reasoning-enhancer/REVIEW-CYCLES.md:143).
+                    let template_hint = if resolved_given.contains("{{") || resolved_given.contains("}}") {
+                        " — hint: an unresolved {{...}} brace template reached the GWT lexer; check template substitution / bookmark names upstream (e.g. Python .format() collapsing braces)"
+                    } else {
+                        ""
+                    };
+                    let reason = format!(
+                        "[hooks] GWT expression evaluation failed: {} — expression: \"{}\"{} — refusing to silently treat as false (loud-failure fix)",
+                        e, resolved_given, template_hint
+                    );
+                    tracing::error!("[hook] after_gwt_evaluates: decision=error step={} {}", step_name, reason);
+                    fire_gwt_trigger("after_gwt_evaluates", hook_config, engine, &step_name, &json, "error", None, None);
+                    return HookResult::Fail { reason };
+                }
             }
         }
     }
@@ -667,14 +725,8 @@ fn fire_gwt_trigger(
     }
 }
 
-fn evaluate_gwt_condition(condition: &str, json: &serde_json::Value) -> bool {
-    match super::gwt::evaluate(condition, json) {
-        Ok(result) => result,
-        Err(e) => {
-            tracing::warn!("[hooks] GWT expression evaluation failed: {} — expression: \"{}\" — treating as false", e, condition);
-            false
-        }
-    }
+fn evaluate_gwt_condition(condition: &str, json: &serde_json::Value) -> Result<bool, String> {
+    super::gwt::evaluate(condition, json).map_err(|e| e.to_string())
 }
 
 /// Extract output string from context based on context type.
@@ -1214,7 +1266,12 @@ mod tests {
     }
 
     #[test]
-    fn given_gwt_invalid_condition_when_execute_then_treats_as_false() {
+    fn given_gwt_invalid_condition_when_execute_then_fails_loudly() {
+        // Regression: GWT expression errors used to be swallowed as a quiet
+        // WARN + "treating as false" (Continue) — hid a generator bug for two
+        // versions (experiments/reasoning-enhancer/REVIEW-CYCLES.md:143 OC-1,
+        // results/SUMMARY-overcontext.md:81-82). Correct behavior: hard Fail
+        // naming the bad expression.
         let clauses = vec![GwtClause {
             given: Some("invalid condition syntax".to_string()),
             r#when: None,
@@ -1231,7 +1288,52 @@ mod tests {
 
         let result = execute_gwt(&clauses, &context, &mut engine, None);
 
-        assert_eq!(result, HookResult::Continue);
+        match result {
+            HookResult::Fail { reason } => {
+                assert!(
+                    reason.contains("invalid condition syntax"),
+                    "reason should quote the failing expression, got: {reason}"
+                );
+            }
+            _ => panic!("Expected Fail result for invalid GWT condition, got {result:?}"),
+        }
+    }
+
+    #[test]
+    fn given_gwt_unresolved_brace_template_when_executed_then_fails_with_template_hint() {
+        // Regression: an unresolved {{...}} brace template reaching the GWT
+        // lexer (template substitution miss / bookmark-name mismatch /
+        // Python .format() brace-collapse) must Fail with a hint pointing at
+        // the upstream template bug, not quietly evaluate as false.
+        let clauses = vec![GwtClause {
+            given: Some("{{bookmarks.foo}} == \"x\"".to_string()),
+            r#when: None,
+            r#then: RouteToAction::Single("next_step".to_string()),
+        }];
+        let context = WorkflowHookContext::BeforeStepStarts(BeforeStepStartsContext {
+            step_name: "test".to_string(),
+            step_type: StepType::Generative,
+            model_name: "model".to_string(),
+            prompt_preview: "prompt".to_string(),
+            workflow_variables: HashMap::new(),
+        });
+        let mut engine = HookEngine::new();
+
+        let result = execute_gwt(&clauses, &context, &mut engine, None);
+
+        match result {
+            HookResult::Fail { reason } => {
+                assert!(
+                    reason.contains("{{bookmarks.foo}}"),
+                    "reason should quote the failing expression, got: {reason}"
+                );
+                assert!(
+                    reason.contains("template"),
+                    "reason should hint at unresolved template, got: {reason}"
+                );
+            }
+            _ => panic!("Expected Fail result for unresolved brace template, got {result:?}"),
+        }
     }
 
     #[test]
@@ -1285,6 +1387,62 @@ mod tests {
         assert_eq!(bookmark.unwrap().get("saved").and_then(|v| v.as_bool()), Some(true));
         let content = fs::read_to_string(&file_path).unwrap();
         assert!(content.contains("\"saved\""));
+    }
+
+    // Regression (Issue H, silent-wrong-behavior): engine created a
+    // directory literally named `${OUTPUT_DIR}` when YAML carried an
+    // unresolved placeholder — experiments/atomic-reasoning/scripts/
+    // run-atom.sh:149-152 had to move outputs from that literal dir
+    // post-run. Placeholder paths must Fail loudly, never materialize.
+    #[test]
+    fn given_save_to_with_unresolved_placeholder_when_executed_then_fails_not_literal_dir() {
+        let action = SaveToAction::FilePath("${OUTPUT_DIR}/result.json".to_string());
+        let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+            step_name: "test_step".to_string(),
+            output: "{\"x\":1}".to_string(),
+            duration_ms: 100,
+            quality_score: None,
+            token_count: 10,
+            model_name: "model".to_string(),
+            refusal_detected: false,
+        });
+        let mut engine = HookEngine::new();
+
+        let result = execute_save_to(&action, &context, &mut engine);
+
+        match result {
+            HookResult::Fail { reason } => {
+                assert!(reason.contains("${OUTPUT_DIR}"), "reason should quote the placeholder path, got: {reason}");
+                assert!(reason.contains("placeholder"), "reason should name the placeholder problem, got: {reason}");
+            }
+            _ => panic!("Expected Fail result for unresolved placeholder path, got {result:?}"),
+        }
+        assert!(!Path::new("${OUTPUT_DIR}").exists(), "no literal placeholder dir may be created");
+    }
+
+    #[test]
+    fn given_append_to_with_unresolved_placeholder_when_executed_then_fails_not_literal_dir() {
+        let action = AppendToAction::FilePath("${OUTPUT_DIR}/log.txt".to_string());
+        let context = WorkflowHookContext::AfterStepSucceeds(AfterStepSucceedsContext {
+            step_name: "test_step".to_string(),
+            output: "line".to_string(),
+            duration_ms: 100,
+            quality_score: None,
+            token_count: 10,
+            model_name: "model".to_string(),
+            refusal_detected: false,
+        });
+        let mut engine = HookEngine::new();
+
+        let result = execute_append_to(&action, &context, &mut engine);
+
+        match result {
+            HookResult::Fail { reason } => {
+                assert!(reason.contains("${OUTPUT_DIR}"), "reason should quote the placeholder path, got: {reason}");
+            }
+            _ => panic!("Expected Fail result for unresolved placeholder path, got {result:?}"),
+        }
+        assert!(!Path::new("${OUTPUT_DIR}").exists(), "no literal placeholder dir may be created");
     }
 
     #[test]

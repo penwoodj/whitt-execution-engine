@@ -250,13 +250,65 @@ pub enum SaveToAction {
 }
 
 /// Route to action.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Accepts the shorthand forms (`then: X`, `then: [X, Y]`) and the verbose
+/// documented form (`then: { route_to: X }`, unified-workflow-schema.yml
+/// examples) — Issue R: the verbose form previously failed serde, so
+/// workflows copied from the schema doc errored out.
+#[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum RouteToAction {
     /// Route to single step.
     Single(String),
     /// Route to multiple steps.
     Multiple(Vec<String>),
+}
+
+impl<'de> serde::Deserialize<'de> for RouteToAction {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        fn list(arr: Vec<serde_json::Value>) -> Result<RouteToAction, String> {
+            let mut targets = Vec::with_capacity(arr.len());
+            for item in arr {
+                match item {
+                    serde_json::Value::String(s) => targets.push(s),
+                    other => {
+                        return Err(format!(
+                            "route target list entries must be strings, got: {}",
+                            other
+                        ))
+                    }
+                }
+            }
+            Ok(RouteToAction::Multiple(targets))
+        }
+        match value {
+            serde_json::Value::String(s) => Ok(RouteToAction::Single(s)),
+            serde_json::Value::Array(arr) => {
+                list(arr).map_err(serde::de::Error::custom)
+            }
+            serde_json::Value::Object(mut map) => match map.remove("route_to") {
+                Some(serde_json::Value::String(s)) => Ok(RouteToAction::Single(s)),
+                Some(serde_json::Value::Array(arr)) => {
+                    list(arr).map_err(serde::de::Error::custom)
+                }
+                Some(other) => Err(serde::de::Error::custom(format!(
+                    "route_to must be a step name or list of step names, got: {}",
+                    other
+                ))),
+                None => Err(serde::de::Error::custom(
+                    "expected a step name, a list of step names, or the verbose form {route_to: ...}",
+                )),
+            },
+            other => Err(serde::de::Error::custom(format!(
+                "expected a step name, a list of step names, or the verbose form {{route_to: ...}}, got: {}",
+                other
+            ))),
+        }
+    }
 }
 
 /// Bookmark action.

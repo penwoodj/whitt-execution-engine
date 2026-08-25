@@ -5,6 +5,7 @@ Ported and trimmed from experiments/correction-atom/scripts/check_angle_lib.py
 Pure stdlib. Same input -> same output. No network, no LLM.
 """
 
+import json
 import re
 import yaml
 
@@ -32,6 +33,9 @@ KNOWN_CHECK_KEYS = {
     "bullet_count_max",
     "yaml_parsable",
     "numbers_must_sum_to",
+    "json_exact",
+    "line_count",
+    "all_caps",
 }
 
 
@@ -117,6 +121,35 @@ def check_yaml_parsable(text, want: bool):
     return True, "parses"
 
 
+def _canon_json(s: str) -> str:
+    return json.dumps(json.loads(s), sort_keys=True, separators=(",", ":"))
+
+
+def check_json_exact(text, want: str):
+    t = text.strip()
+    if not t.startswith("{") or not t.endswith("}"):
+        return False, "output is not a bare JSON object"
+    try:
+        ok = _canon_json(t) == _canon_json(want)
+    except Exception:
+        return False, "invalid JSON in output or target"
+    return ok, "exact JSON match (key-order insensitive)" if ok else "JSON fields/values differ"
+
+
+def check_line_count(text, n: int):
+    lines = [ln for ln in text.strip().splitlines() if ln.strip()]
+    ok = len(lines) == n
+    return ok, f"{len(lines)} non-empty lines, want {n}"
+
+
+def check_all_caps(text, want: bool):
+    letters = [c for c in text if c.isalpha()]
+    if not letters:
+        return want, "no letters — vacuously satisfies"
+    is_caps = all(c.isupper() for c in letters)
+    return is_caps == want, f"all-caps={is_caps}, want {want}"
+
+
 def _dollar_amounts(text):
     return [float(m) for m in re.findall(r"\$\s*(\d+(?:\.\d+)?)", text)]
 
@@ -167,6 +200,9 @@ FIX_HINTS = {
     "bullet_count_max": "merge or delete bullet lines above the maximum",
     "yaml_parsable": "fix indentation/syntax so the output parses as YAML",
     "numbers_must_sum_to": "recompute the amounts so they sum to the target",
+    "json_exact": "output ONLY the JSON object with exactly the required fields and values",
+    "line_count": "adjust content to produce exactly the required number of non-empty lines",
+    "all_caps": "convert all letters to uppercase (or mixed if want=false)",
     "degenerate": "write real content, not repeated or near-empty text",
     "prompt_leak": "never mention instructions, prompts, or your role",
 }
@@ -218,6 +254,12 @@ def run_checks(text, checks):
             record("yaml_parsable", *check_yaml_parsable(text, True))
         elif key == "numbers_must_sum_to" and checks[key] is not None:
             record("numbers_must_sum_to", *check_numbers_sum(text, checks[key]))
+        elif key == "json_exact" and checks[key]:
+            record("json_exact", *check_json_exact(text, checks[key]))
+        elif key == "line_count" and checks[key] is not None:
+            record("line_count", *check_line_count(text, checks[key]))
+        elif key == "all_caps" and checks[key] is not None:
+            record("all_caps", *check_all_caps(text, checks[key]))
 
     record("degenerate", *check_degenerate(text))
     record("prompt_leak", *check_prompt_leak(text))

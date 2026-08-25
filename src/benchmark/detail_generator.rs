@@ -227,6 +227,7 @@ mod tests {
             error: None,
             gpu_mode: "gpu".to_string(),
             speedup_factor: Some(2.5),
+            step_id: None,
         }
     }
 

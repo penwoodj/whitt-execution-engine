@@ -264,3 +264,18 @@ async fn test_sandbox_max_file_size_enforced() {
         .to_string()
         .contains("too large"));
 }
+
+// LOW parking-lot fix (Issue: registry set_state ignored): ModelLoadTool /
+// ModelUnloadTool updated the registry via `let _ = ...set_state(...)` — a
+// poisoned lock silently diverged registry state from reality. Every call
+// site must handle the Result (logged), none may discard it.
+#[test]
+fn given_tools_source_when_set_state_discards_counted_then_zero() {
+    let src = include_str!("../src/agent/tools.rs");
+    let needle = concat!("let _ = self.", "registry");
+    assert_eq!(
+        src.matches(needle).count(),
+        0,
+        "tools.rs must not silently discard registry set_state results"
+    );
+}

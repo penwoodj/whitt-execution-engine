@@ -126,6 +126,9 @@ pub struct BenchmarkRunner {
     refusal_patterns: Vec<String>,
     streaming_enabled: bool,
     detail_template: Option<String>,
+    // Issue Y: when true, load <output_dir>/checkpoint.jsonl before the
+    // workflow loop and skip steps whose outputs are already recorded.
+    resume: bool,
 }
 
 impl BenchmarkRunner {
@@ -139,7 +142,13 @@ impl BenchmarkRunner {
             refusal_patterns: DEFAULT_REFUSAL_PATTERS.iter().map(|s| s.to_string()).collect(),
             streaming_enabled: false,
             detail_template: None,
+            resume: false,
         }
+    }
+
+    pub fn with_resume(mut self, resume: bool) -> Self {
+        self.resume = resume;
+        self
     }
 
     pub fn with_streaming_enabled(mut self, enabled: bool) -> Self {
@@ -199,6 +208,12 @@ struct WorkflowStep {
     step_name: String,
     step_id: String,
     requires: Vec<String>,
+    // Conditions attached to `requires: [{step: X, condition: <expr>}]` entries
+    // (unified-workflow-schema.yml:411-414). Keyed by dependency name.
+    require_conditions: std::collections::HashMap<String, String>,
+    // Per-step `retry.max_attempts` override (schema:273-276, StepRetryConfig).
+    // None → global inference_max_attempts applies.
+    retry_max_attempts: Option<u32>,
     when: Option<serde_json::Value>,
     prompt: Option<String>,
     generative_entity: Option<String>,
@@ -222,6 +237,13 @@ fn hook_actions_as_vec(actions: &serde_json::Value) -> Vec<serde_json::Value> {
 /// Returns capped value: 1 (min) <= result <= 4 (max).
 /// Falls back to 2 on detection failure.
 fn detect_max_concurrent_inferences() -> usize {
+    // Manual override for the 2GB-per-inference heuristic, which overestimates
+    // small-VRAM boxes (4× parallel crashed 8GB systems; SAFETY.md:5-9,88).
+    if let Some(n) = env_concurrency_override() {
+        info!("[benchmark] WHITT_MAX_CONCURRENT_INFERENCES={} overridden (clamped to {})", n, n);
+        return n;
+    }
+
     if let Some(vram_gb) = detect_vram_gb() {
         let max_concurrent = (vram_gb / 2.0).floor() as usize;
         let capped = max_concurrent.clamp(1, 4);
@@ -240,13 +262,27 @@ fn detect_max_concurrent_inferences() -> usize {
     2
 }
 
+/// Parse WHITT_MAX_CONCURRENT_INFERENCES: valid values are integers >= 1.
+fn env_concurrency_override() -> Option<usize> {
+    std::env::var("WHITT_MAX_CONCURRENT_INFERENCES").ok()?
+        .trim()
+        .parse::<usize>()
+        .ok()
+        .filter(|n| *n >= 1)
+}
+
+/// amdgpu sysfs `mem_info_vram_total` reports BYTES (RX 580 8GiB = 8589934592).
+/// Dividing bytes as KB produced the "8192.0 GB VRAM" misreport (SAFETY.md:88).
+fn vram_bytes_to_gb(bytes: u64) -> f64 {
+    bytes as f64 / 1024.0 / 1024.0 / 1024.0
+}
+
 /// Detect available VRAM in GB from sysfs.
 ///
 /// Returns Some(vram_gb) if successful, None otherwise.
 fn detect_vram_gb() -> Option<f64> {
-    if let Some(vram_kb) = read_sysfs_vram_amd() {
-        let vram_gb = vram_kb as f64 / 1024.0 / 1024.0;
-        return Some(vram_gb);
+    if let Some(vram_bytes) = read_sysfs_vram_amd() {
+        return Some(vram_bytes_to_gb(vram_bytes));
     }
 
     if let Some(vram_mb) = read_proc_vram_nvidia() {
@@ -279,7 +315,8 @@ fn detect_available_ram_gb() -> Option<f64> {
 
 /// Read AMD GPU VRAM from sysfs.
 ///
-/// Returns Some(vram_kb) if successful, None otherwise.
+/// Returns Some(vram_bytes) if successful — amdgpu `mem_info_vram_total`
+/// reports total VRAM in bytes, not KB.
 fn read_sysfs_vram_amd() -> Option<u64> {
     if let Ok(entries) = fs::read_dir("/sys/class/drm") {
         for entry in entries.flatten() {
@@ -289,8 +326,8 @@ fn read_sysfs_vram_amd() -> Option<u64> {
             if card_name_str.starts_with("card") {
                 let vram_path = entry.path().join("device/mem_info_vram_total");
                 if let Ok(vram_content) = fs::read_to_string(&vram_path) {
-                    if let Ok(vram_kb) = vram_content.trim().parse::<u64>() {
-                        return Some(vram_kb);
+                    if let Ok(vram_bytes) = vram_content.trim().parse::<u64>() {
+                        return Some(vram_bytes);
                     }
                 }
             }
@@ -327,6 +364,45 @@ fn read_proc_vram_nvidia() -> Option<u64> {
 
 impl BenchmarkRunner {
     /// Pre-flight checks: verify system health before starting benchmark.
+    /// Zombie detector must count only llama-server children, never
+    /// the router parent (router-mode legitimately runs 1 router +
+    /// N loaded models; counting the router false-positives at N=2).
+    fn zombie_threshold() -> i32 {
+        std::env::var("WHITT_ZOMBIE_MAX")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2)
+    }
+
+    fn zombie_check_command(own_port: u16) -> String {
+        format!(
+            "ps -eo stat,args | grep -v 'Z' | grep llama-server | grep -v -- --models-dir | grep -v -- --port {} | grep -c llama-server",
+            own_port
+        )
+    }
+
+    /// Server port parsed from the configured server_url; used to exclude
+    /// our own live server from the zombie count.
+    fn own_server_port(server_url: &str) -> u16 {
+        server_url
+            .rsplit(':')
+            .next()
+            .and_then(|p| p.trim_matches('/').parse().ok())
+            .unwrap_or(8080)
+    }
+
+    /// Temp dir used for disk-space checks. Honors TMPDIR (non-empty),
+    /// falls back to /tmp — preflight previously hardcoded /tmp and
+    /// aborted when a foreign process filled it despite TMPDIR pointing
+    /// at a roomier volume (SUMMARY-overcontext.md:88-91).
+    fn tmp_root() -> std::path::PathBuf {
+        std::env::var("TMPDIR")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| Path::new("/tmp").to_path_buf())
+    }
+
     pub async fn preflight_check(&self) -> Result<()> {
         info!("[benchmark] starting preflight checks...");
 
@@ -345,32 +421,36 @@ impl BenchmarkRunner {
         }
 
         let min_bytes = self.config.min_tmp_space_mb * 1024 * 1024;
-        match disk_monitor::ensure_min_free_space(Path::new("/tmp"), min_bytes) {
+        let tmp = Self::tmp_root();
+        match disk_monitor::ensure_min_free_space(&tmp, min_bytes) {
             Ok(info) => {
                 let available_mb = info.available_bytes / (1024 * 1024);
-                info!("[benchmark] ✓ /tmp space check passed: {} MB available (min: {} MB required)",
-                    available_mb, self.config.min_tmp_space_mb);
+                info!("[benchmark] ✓ {} space check passed: {} MB available (min: {} MB required)",
+                    tmp.display(), available_mb, self.config.min_tmp_space_mb);
             }
             Err(e) => {
-                let msg = format!("/tmp space check failed: {}", e);
+                let msg = format!("{} space check failed: {}", tmp.display(), e);
                 info!("[benchmark] ✗ {}", msg);
                 anyhow::bail!(crate::error::Error::benchmark(msg));
             }
         }
 
-        // Count only non-defunct (running/sleeping) llama-server processes
+        // Count only non-defunct (running/sleeping) llama-server processes,
+        // excluding the router parent and our own live server
+        let own_port = Self::own_server_port(&self.config.server_url);
         let zombie_check = TokioCommand::new("sh")
-            .args(["-c", "ps -eo stat,comm | grep -v 'Z' | grep -c llama-server"])
+            .args(["-c", &Self::zombie_check_command(own_port)])
             .output()
             .await;
         match zombie_check {
             Ok(output) => {
                 let count_str = String::from_utf8_lossy(&output.stdout);
                 let count: i32 = count_str.trim().parse().unwrap_or(0);
-                if count <= 2 {
+                if count <= Self::zombie_threshold() {
                     info!("[benchmark] ✓ Zombie process check passed: {} llama-server process(es) found", count);
                 } else {
-                    let msg = format!("Found {} zombie llama-server processes (expected 0-2)", count);
+                    let msg = format!("Found {} llama-server processes (threshold {})",
+                    count, Self::zombie_threshold());
                     info!("[benchmark] ✗ {}", msg);
                     anyhow::bail!(crate::error::Error::benchmark(msg));
                 }
@@ -408,19 +488,20 @@ impl BenchmarkRunner {
     #[deprecated(since = "0.4.0", note = "Use hook-driven preflight via before_workflow_starts trigger")]
     pub async fn check_system_health(&self) -> Result<()> {
         let min_bytes = self.config.min_tmp_space_mb * 1024 * 1024;
-        match disk_monitor::check_disk_space(Path::new("/tmp")) {
+        let tmp = Self::tmp_root();
+        match disk_monitor::check_disk_space(&tmp) {
             Ok(info) => {
                 let available_mb = info.available_bytes / (1024 * 1024);
-                info!("[benchmark] /tmp space: {} MB available (min: {} MB required)",
-                    available_mb, self.config.min_tmp_space_mb);
+                info!("[benchmark] {} space: {} MB available (min: {} MB required)",
+                    tmp.display(), available_mb, self.config.min_tmp_space_mb);
                 if info.available_bytes < min_bytes {
-                    let msg = format!("Insufficient /tmp space: {} MB available, {} MB required",
-                        available_mb, self.config.min_tmp_space_mb);
+                    let msg = format!("Insufficient {} space: {} MB available, {} MB required",
+                        tmp.display(), available_mb, self.config.min_tmp_space_mb);
                     anyhow::bail!(crate::error::Error::benchmark(msg));
                 }
             }
             Err(e) => {
-                let msg = format!("Failed to check /tmp space: {}", e);
+                let msg = format!("Failed to check {} space: {}", tmp.display(), e);
                 anyhow::bail!(crate::error::Error::benchmark(msg));
             }
         }
@@ -443,9 +524,10 @@ impl BenchmarkRunner {
 
     #[deprecated(since = "0.4.0", note = "Use hook-driven log action in before_step_starts")]
     fn log_resource_state(&self, phase: &str, model_id: &str) {
-        if let Ok(info) = disk_monitor::check_disk_space(Path::new("/tmp")) {
+        let tmp = Self::tmp_root();
+        if let Ok(info) = disk_monitor::check_disk_space(&tmp) {
             let available_mb = info.available_bytes / (1024 * 1024);
-            info!("[benchmark] [{}] resource state {}: /tmp available={} MB", model_id, phase, available_mb);
+            info!("[benchmark] [{}] resource state {}: {} available={} MB", model_id, phase, tmp.display(), available_mb);
         }
 
         if let Ok(output) = Command::new("free").args(["-m"]).output() {
@@ -545,6 +627,7 @@ impl BenchmarkRunner {
             error: Some(format!("Model '{}' not found on server for workflow step '{}'", model_name, step_id)),
             gpu_mode: "gpu".to_string(),
             speedup_factor: None,
+            step_id: Some(step_id.to_string()),
         }
     }
 
@@ -556,8 +639,13 @@ impl BenchmarkRunner {
         let content = match fs::read_to_string(wf_path) {
             Ok(c) => c,
             Err(e) => {
-                warn!("[benchmark] failed to read workflow file {}: {}", wf_path, e);
-                return Ok(None);
+                return Err(anyhow::anyhow!(
+                    "[benchmark] cannot read --workflow file {}: {} — \
+                     refusing to fall back to discovery benchmark \
+                     (silent-fallback fix; original: flan-t5 loaded by accident)",
+                    wf_path,
+                    e
+                ));
             }
         };
 
@@ -819,12 +907,45 @@ impl BenchmarkRunner {
         }))
     }
 
-    fn load_workflow_steps(&self) -> Option<Vec<WorkflowStep>> {
-        let wf_path = self.config.workflow_file.as_ref()?;
-        let content = fs::read_to_string(wf_path).ok()?;
+    fn load_workflow_steps(&self) -> Result<Option<Vec<WorkflowStep>>> {
+        let wf_path = match self.config.workflow_file.as_ref() {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+        let content = match fs::read_to_string(wf_path) {
+            Ok(c) => c,
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "[benchmark] cannot read --workflow file {}: {} — \
+                     refusing to fall back to discovery benchmark \
+                     (Issue T: steps-loading seam; original: flan-t5 loaded by accident)",
+                    wf_path,
+                    e
+                ));
+            }
+        };
 
-        let yaml_value: serde_json::Value = serde_saphyr::from_str(&content).ok()?;
-        let agentic_workflow = yaml_value.get("agentic_workflow")?;
+        let yaml_value: serde_json::Value = match serde_saphyr::from_str(&content) {
+            Ok(v) => v,
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "[benchmark] failed to parse workflow YAML {}: {} — \
+                     refusing to fall back to discovery benchmark (Issue T)",
+                    wf_path,
+                    e
+                ));
+            }
+        };
+        let agentic_workflow = match yaml_value.get("agentic_workflow") {
+            Some(aw) => aw,
+            None => {
+                return Err(anyhow::anyhow!(
+                    "[benchmark] no agentic_workflow section in {} — \
+                     refusing to fall back to discovery benchmark (Issue T)",
+                    wf_path
+                ));
+            }
+        };
         let workflow_default_hooks = agentic_workflow.get("when");
 
         // NEW: look at agentic_workflow.steps, not agentic_workflow itself
@@ -833,23 +954,38 @@ impl BenchmarkRunner {
 
         let steps: Vec<WorkflowStep> = if let Some(steps_array) = steps_section.as_array() {
             steps_array.iter()
-                .filter_map(|step| {
-                    let step_name = step.get("step")?.as_str()?.to_string();
+                .enumerate()
+                .map(|(i, step)| {
+                    let step_name = step.get("step")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .ok_or_else(|| anyhow::anyhow!(
+                            "[benchmark] array-format step {} (0-based index {}) in {} is missing the `step:` name key — \
+                             refusing to silently drop it (previously filter_map discarded it) — \
+                             refusing to fall back to discovery benchmark (Issue T)",
+                            i + 1, i, wf_path
+                        ))?;
                     let step_id = step.get("id")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| step_name.clone());
-                    let requires = Self::extract_dependency_names(step);
+                    let (requires, require_conditions) = Self::extract_dependency_names(step);
                     let when = Self::merged_step_hooks(workflow_default_hooks, step);
                     let prompt = step.get("prompt").and_then(|v| v.as_str()).map(|s| s.to_string());
                     let generative_entity = step.get("generative_entity").and_then(|v| v.as_str()).map(|s| s.to_string());
                     let model_overrides = step.get("model_overrides").cloned();
                     let loop_config = step.get("loop").cloned();
+                    let retry_max_attempts = step.get("retry")
+                        .and_then(|r| r.get("max_attempts"))
+                        .and_then(|v| v.as_u64())
+                        .map(|v| v as u32);
 
-                    Some(WorkflowStep {
+                    Ok(WorkflowStep {
                         step_name,
                         step_id,
                         requires,
+                        require_conditions,
+                        retry_max_attempts,
                         when,
                         prompt,
                         generative_entity,
@@ -857,7 +993,7 @@ impl BenchmarkRunner {
                         r#loop: loop_config,
                     })
                 })
-                .collect()
+                .collect::<Result<Vec<_>>>()?
         } else if let Some(steps_map) = steps_section.as_object() {
             steps_map.iter()
                 .map(|(step_name_key, step_value)| {
@@ -866,17 +1002,23 @@ impl BenchmarkRunner {
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| step_name.clone());
-                    let requires = Self::extract_dependency_names(step_value);
+                    let (requires, require_conditions) = Self::extract_dependency_names(step_value);
                     let when = Self::merged_step_hooks(workflow_default_hooks, step_value);
                     let prompt = step_value.get("prompt").and_then(|v| v.as_str()).map(|s| s.to_string());
                     let generative_entity = step_value.get("generative_entity").and_then(|v| v.as_str()).map(|s| s.to_string());
                     let model_overrides = step_value.get("model_overrides").cloned();
                     let loop_config = step_value.get("loop").cloned();
+                    let retry_max_attempts = step_value.get("retry")
+                        .and_then(|r| r.get("max_attempts"))
+                        .and_then(|v| v.as_u64())
+                        .map(|v| v as u32);
 
                     WorkflowStep {
                         step_name,
                         step_id,
                         requires,
+                        require_conditions,
+                        retry_max_attempts,
                         when,
                         prompt,
                         generative_entity,
@@ -886,14 +1028,29 @@ impl BenchmarkRunner {
                 })
                 .collect()
         } else {
-            return None;
+            return Err(anyhow::anyhow!(
+                "[benchmark] agentic_workflow.steps in {} is neither a list nor a map — \
+                 refusing to fall back to discovery benchmark (Issue T)",
+                wf_path
+            ));
         };
 
-        Some(steps)
+        if steps.is_empty() {
+            return Err(anyhow::anyhow!(
+                "[benchmark] agentic_workflow.steps in {} is empty — \
+                 refusing to fall back to discovery benchmark (Issue T)",
+                wf_path
+            ));
+        }
+
+        Ok(Some(steps))
     }
 
-    fn extract_dependency_names(step_value: &serde_json::Value) -> Vec<String> {
+    fn extract_dependency_names(
+        step_value: &serde_json::Value,
+    ) -> (Vec<String>, std::collections::HashMap<String, String>) {
         let mut dependencies = Vec::new();
+        let mut conditions = std::collections::HashMap::new();
 
         for key in ["depends_on", "requires"] {
             let Some(value) = step_value.get(key) else {
@@ -910,12 +1067,39 @@ impl BenchmarkRunner {
                         if !dependencies.iter().any(|existing| existing == name) {
                             dependencies.push(name.to_string());
                         }
+                        if let Some(condition) =
+                            item.get("condition").and_then(|v| v.as_str())
+                        {
+                            conditions.insert(name.to_string(), condition.to_string());
+                        }
                     }
                 }
             }
         }
 
-        dependencies
+        (dependencies, conditions)
+    }
+
+    /// Evaluate a `requires: [{step: X, condition: expr}]` condition against
+    /// the upstream step's output. JSON outputs are exposed as `result.<field>`
+    /// paths; non-JSON outputs fall back to `result.output` holding the raw
+    /// string. Uses the GWT evaluator (same expression language as hooks).
+    /// Errors are returned loud (malformed expression), never treated as
+    /// satisfied.
+    fn eval_require_condition(output: &str, expr: &str) -> Result<bool> {
+        let parsed: serde_json::Value = match serde_json::from_str::<serde_json::Value>(output) {
+            Ok(v) => serde_json::json!({ "result": v }),
+            Err(_) => serde_json::json!({ "result": { "output": output } }),
+        };
+        crate::workflow::hooks::gwt::evaluate(expr, &parsed)
+            .map_err(|e| anyhow::anyhow!("requirement condition {:?} failed to evaluate: {}", expr, e))
+    }
+
+    /// Effective inference attempts for a step: per-step `retry.max_attempts`
+    /// (schema:273-276) overrides the global `inference_max_attempts`;
+    /// result is clamped to >= 1 (a step must always get one shot).
+    fn effective_max_attempts(global: u32, step_override: Option<u32>) -> u32 {
+        step_override.unwrap_or(global).max(1)
     }
 
     /// Topologically sort workflow steps by their dependency graph.
@@ -1084,15 +1268,78 @@ impl BenchmarkRunner {
         Some(models)
     }
 
+    /// Resolve a workflow model name to a discovered model file.
+    ///
+    /// Matching layers (first hit wins):
+    /// 1. exact id (with or without `.gguf`)
+    /// 2. normalized equality (case-insensitive, `.`/`-`/`_` unified, `.gguf` stripped)
+    /// 3. substring containment (legacy behavior)
+    /// 4. base-name containment (legacy behavior)
+    ///
+    /// Layers 2+ exist because YAML names drift from filenames in case and
+    /// separator spelling ("Qwen3.5-9B" vs "Qwen3-5-9B.gguf"); before them,
+    /// such steps failed with "Model not found" or bound an arbitrary
+    /// sibling variant (atomic-reasoning/benchmarks/SUMMARY.md:125,
+    /// reasoning-enhancer-plus/docs/07-TRACKING.md:61-63).
+    /// Hint text when a model resolved through a fuzzy layer: the engine
+    /// proceeds, but raw API calls (shell-hook curl) need the exact name.
+    fn model_name_drift_hint(requested: &str, resolved_id: &str) -> Option<String> {
+        let exact = requested == resolved_id
+            || requested.strip_suffix(".gguf") == Some(resolved_id)
+            || resolved_id.strip_suffix(".gguf") == Some(requested)
+            || format!("{}.gguf", requested) == resolved_id;
+        if exact {
+            None
+        } else {
+            Some(format!(
+                "model name drift: workflow says {:?}, server filename is {:?} — engine resolved it, but raw API calls (e.g. shell-hook curl) need the exact filename",
+                requested, resolved_id
+            ))
+        }
+    }
+
     fn resolve_model_file(&self, model_name: &str, discovered_models: &[(String, String)]) -> Option<(String, String)> {
+        let want_gguf = format!("{}.gguf", model_name);
+        if let Some(hit) = discovered_models
+            .iter()
+            .find(|(id, _)| *id == model_name || *id == want_gguf)
+        {
+            return Some(hit.clone());
+        }
+
+        let normalize = |s: &str| {
+            s.strip_suffix(".gguf")
+                .unwrap_or(s)
+                .to_lowercase()
+                .chars()
+                .map(|c| match c { '.' | '-' | '_' => '-', c => c })
+                .collect::<String>()
+        };
+        let want = normalize(model_name);
+        if let Some(hit) = discovered_models
+            .iter()
+            .find(|(id, _)| normalize(id) == want)
+        {
+            if let Some(hint) = Self::model_name_drift_hint(model_name, &hit.0) {
+                warn!("[benchmark] {}", hint);
+            }
+            return Some(hit.clone());
+        }
+
         for (id, path) in discovered_models {
             if id.contains(model_name) {
+                if let Some(hint) = Self::model_name_drift_hint(model_name, id) {
+                    warn!("[benchmark] {}", hint);
+                }
                 return Some((id.clone(), path.clone()));
             }
         }
         let base_name = model_name.split('-').next().unwrap_or(model_name);
         for (id, path) in discovered_models {
             if id.contains(base_name) {
+                if let Some(hint) = Self::model_name_drift_hint(model_name, id) {
+                    warn!("[benchmark] {}", hint);
+                }
                 return Some((id.clone(), path.clone()));
             }
         }
@@ -1661,6 +1908,8 @@ impl BenchmarkRunner {
                 step_name: step.step_name.clone(),
                 step_id: step.step_id.clone(),
                 requires: step.requires.clone(),
+                require_conditions: Default::default(),
+                retry_max_attempts: None,
                 when: step.when.clone(),
                 prompt: resolved_prompt,
                 generative_entity: step.generative_entity.clone(),
@@ -1682,6 +1931,8 @@ impl BenchmarkRunner {
                 step_name: step.step_name.clone(),
                 step_id: step.step_id.clone(),
                 requires: step.requires.clone(),
+                require_conditions: Default::default(),
+                retry_max_attempts: None,
                 when: step.when.clone(),
                 prompt: resolved_prompt,
                 generative_entity: step.generative_entity.clone(),
@@ -1703,6 +1954,7 @@ impl BenchmarkRunner {
                     refusal_patterns: DEFAULT_REFUSAL_PATTERS.iter().map(|s| s.to_string()).collect(),
                     streaming_enabled: false,
                     detail_template: None,
+                    resume: false,
                 };
                 let result = runner.execute_workflow_step(&resolved_step, &client_clone, &model_clone, max_tokens, temperature, top_p, None).await;
                 (step_id_for_task, result)
@@ -2015,6 +2267,7 @@ impl BenchmarkRunner {
                         error: Some("Skipped by hook".to_string()),
                         gpu_mode: "gpu".to_string(),
                         speedup_factor: None,
+                        step_id: Some(step.step_id.clone()),
                     },
                     route_to: None,
                     skip_remaining: false,
@@ -2040,6 +2293,7 @@ impl BenchmarkRunner {
                         error: Some("Routed by hook".to_string()),
                         gpu_mode: "gpu".to_string(),
                         speedup_factor: None,
+                        step_id: Some(step.step_id.clone()),
                     },
                     route_to: Some(targets),
                     skip_remaining: false,
@@ -2065,6 +2319,7 @@ impl BenchmarkRunner {
                         error: Some("Skipped by hook".to_string()),
                         gpu_mode: "gpu".to_string(),
                         speedup_factor: None,
+                        step_id: Some(step.step_id.clone()),
                     },
                     route_to: None,
                     skip_remaining: false,
@@ -2116,11 +2371,12 @@ impl BenchmarkRunner {
             None
         };
 
-        let model_result = if self.streaming_enabled && Self::has_during_streaming_hook(&step.when) {
+        let mut model_result = if self.streaming_enabled && Self::has_during_streaming_hook(&step.when) {
             self.run_model_inference_streaming(client, model_id, model_path, &resolved_prompt, step_max_tokens, step_temperature, top_p, system_prompt.as_deref(), &step.when, &step.step_name).await
         } else {
-            self.run_model_inference(client, model_id, model_path, "gpu", std::slice::from_ref(&resolved_prompt), step_max_tokens, step_temperature, top_p, system_prompt, true).await
+            self.run_model_inference(client, model_id, model_path, "gpu", std::slice::from_ref(&resolved_prompt), step_max_tokens, step_temperature, top_p, system_prompt, true, step.retry_max_attempts).await
         };
+        model_result.step_id = Some(step.step_id.clone());
 
         let output_text = model_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
 
@@ -2209,6 +2465,7 @@ impl BenchmarkRunner {
             match self.execute_hooks_for_trigger(&step.when, "after_step_succeeds", &after_context) {
                 Ok(HookResult::Fail { reason }) => {
                     warn!("[benchmark] after_step_succeeds hook failed: {}", reason);
+                    model_result.error = Some(format!("after_step_succeeds hook failed: {}", reason));
                 }
                 Ok(HookResult::RouteTo { targets }) => {
                     info!("[benchmark] step {} routed to {:?} by after_step_succeeds hook", step.step_id, targets);
@@ -2237,7 +2494,203 @@ impl BenchmarkRunner {
         })
     }
 
+    /// Iteration cap for the linear workflow loop: guards against
+    /// route_to/loop cycles without capping total steps in large
+    /// linear workflows. Floor 100, loop overrides win, otherwise
+    /// scale with step count (4x) so every step can execute once
+    /// plus bounded re-visits.
+    fn max_workflow_iterations(steps: &[WorkflowStep]) -> usize {
+        let loop_override = steps.iter()
+            .filter_map(|s| s.r#loop.as_ref())
+            .filter_map(|l| l.get("count"))
+            .filter_map(|c| c.get("max_iterations"))
+            .filter_map(|m| m.as_u64())
+            .max()
+            .unwrap_or(100);
+        (loop_override.max(100).max(steps.len() as u64 * 4)) as usize
+    }
+
+    /// Error message when the workflow loop stopped because the iteration
+    /// cap was hit while steps remain unexecuted. Returns `None` when the
+    /// workflow completed (cap not reached, or reached exactly as the last
+    /// step finished) — those are successes, not failures.
+    /// Regression (Issue E): cap exhaustion previously warned and returned
+    /// Ok, so abandoned workflows exited 0 (SUMMARY-benchmark.md:69-71).
+    fn premature_cap_error(
+        loop_count: usize,
+        max_loop_iterations: usize,
+        current_index: usize,
+        steps_len: usize,
+    ) -> Option<String> {
+        if loop_count >= max_loop_iterations && current_index < steps_len {
+            Some(format!(
+                "workflow loop exceeded {} iterations with {} step(s) unexecuted — stopping and failing instead of exiting 0 (silent-exit-0 fix)",
+                max_loop_iterations,
+                steps_len - current_index
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// Error message when topological sorting dropped steps because the
+    /// depends_on graph contains a cycle. Dropped steps would silently
+    /// never execute.
+    fn cycle_error(sorted_len: usize, original_len: usize) -> Option<String> {
+        if sorted_len < original_len {
+            Some(format!(
+                "cycle detected in depends_on graph: {} of {} steps dropped by topological sort — refusing to run a workflow that silently skips steps",
+                original_len - sorted_len,
+                original_len
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// Issue Y: read a checkpoint.jsonl written by a previous (killed or
+    /// crashed) run into a step_id → output map. Malformed lines are
+    /// skipped; when a step id appears more than once, the LAST entry wins
+    /// (it is the most recent output). A missing file is an empty map, not
+    /// an error — nothing was checkpointed.
+    fn load_checkpoint(path: &Path) -> std::collections::HashMap<String, String> {
+        #[derive(serde::Deserialize)]
+        struct CheckpointEntry {
+            step_id: String,
+            output: String,
+        }
+        let contents = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => return std::collections::HashMap::new(),
+        };
+        let mut map = std::collections::HashMap::new();
+        for line in contents.lines() {
+            if let Ok(entry) = serde_json::from_str::<CheckpointEntry>(line) {
+                map.insert(entry.step_id, entry.output);
+            }
+        }
+        map
+    }
+
+    /// Issue Y: record a completed step's output in-memory and append it to
+    /// `<output_dir>/checkpoint.jsonl` so a watchdog kill no longer loses
+    /// all completed work (REVIEW-CYCLES.md OC-4). Checkpoint IO failures
+    /// are logged, never fatal — the run itself continues.
+    fn record_step_output(
+        &self,
+        step_outputs: &mut std::collections::HashMap<String, String>,
+        step_id: &str,
+        output: &str,
+    ) {
+        step_outputs.insert(step_id.to_string(), output.to_string());
+        let Some(ref output_dir) = self.config.output_dir else {
+            return;
+        };
+        let checkpoint = Path::new(output_dir).join("checkpoint.jsonl");
+        let line = serde_json::json!({ "step_id": step_id, "output": output });
+        let append = || -> std::io::Result<()> {
+            if let Some(parent) = checkpoint.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let mut file = fs::OpenOptions::new().create(true).append(true).open(&checkpoint)?;
+            use std::io::Write;
+            writeln!(file, "{}", line)
+        };
+        if let Err(e) = append() {
+            warn!("[benchmark] checkpoint append failed for step {}: {}", step_id, e);
+        }
+    }
+
+    /// Apply scalar/timing overrides from the workflow YAML to the runner
+    /// config. MUST be called before `preflight_check()` so gates like the
+    /// disk-space minimum consume the YAML value, not just the CLI value
+    /// (Issue D: `timing.min_tmp_space_mb` used to be applied only after
+    /// preflight had already run — 07-TRACKING.md:284-286).
+    fn apply_workflow_timing_overrides(&mut self, ctx: &BenchmarkWorkflowConfig) {
+        if ctx.inference_max_attempts != self.inference_max_attempts {
+            info!("[benchmark] workflow YAML overrides inference_max_attempts: {} → {}", self.inference_max_attempts, ctx.inference_max_attempts);
+            self.inference_max_attempts = ctx.inference_max_attempts;
+        }
+        if !ctx.refusal_patterns.is_empty() {
+            info!("[benchmark] workflow YAML overrides refusal_patterns: {} → {} patterns", self.refusal_patterns.len(), ctx.refusal_patterns.len());
+            self.refusal_patterns = ctx.refusal_patterns.clone();
+        }
+        if self.config.output_dir.is_none() {
+            if let Some(ref yaml_out) = ctx.output_root {
+                info!("[benchmark] workflow YAML provides output_root: {}", yaml_out);
+                self.config.output_dir = Some(yaml_out.clone());
+            }
+        }
+        if let Some(secs) = ctx.cooldown_after_unload_secs {
+            info!("[benchmark] workflow YAML overrides cooldown_after_unload: {:?} → {}s", self.config.cooldown_after_unload, secs);
+            self.config.cooldown_after_unload = Duration::from_secs(secs);
+        }
+        if let Some(secs) = ctx.model_load_timeout_secs {
+            info!("[benchmark] workflow YAML overrides model_load_timeout: {:?} → {}s", self.config.model_load_timeout, secs);
+            self.config.model_load_timeout = Duration::from_secs(secs);
+        }
+        if let Some(mb) = ctx.min_tmp_space_mb {
+            info!("[benchmark] workflow YAML overrides min_tmp_space_mb: {} → {}", self.config.min_tmp_space_mb, mb);
+            self.config.min_tmp_space_mb = mb;
+        }
+        if let Some(enabled) = ctx.streaming_enabled {
+            if enabled != self.streaming_enabled {
+                info!("[benchmark] workflow YAML overrides streaming_enabled: {} → {}", self.streaming_enabled, enabled);
+                self.streaming_enabled = enabled;
+            }
+        }
+        if let Some(ref tmpl) = ctx.detail_template {
+            if self.detail_template.as_ref() != Some(tmpl) {
+                info!("[benchmark] workflow YAML overrides detail_template: {} chars", tmpl.len());
+                self.detail_template = Some(tmpl.clone());
+            }
+        }
+        if let Some(ref filter) = ctx.model_filter {
+            if self.config.filter_name.as_ref() != Some(filter) {
+                info!("[benchmark] workflow YAML overrides filter_name: {:?} → {}", self.config.filter_name, filter);
+                self.config.filter_name = Some(filter.clone());
+            }
+        }
+    }
+
+    /// Absolutize the output dir against the process CWD. Relative
+    /// `--out-dir` / YAML `output_root` values previously leaked into hook
+    /// paths (WHITT_OUTPUT_DIR, save_to base) where they resolved against
+    /// whichever CWD the hook process happened to have — breaking shell
+    /// hooks silently (Issue G, 07-TRACKING.md:109).
+    fn normalized_output_dir(dir: &str) -> std::path::PathBuf {
+        let p = std::path::PathBuf::from(dir);
+        if p.is_relative() {
+            std::path::absolute(&p).unwrap_or(p)
+        } else {
+            p
+        }
+    }
+
     pub async fn run(&mut self) -> Result<BenchmarkSuiteResult> {
+        // Workflow config loads and timing overrides apply BEFORE preflight
+        // so preflight gates (e.g. min disk space) honor YAML values
+        // (Issue D: timing.min_tmp_space_mb previously unreachable).
+        let wf_ctx = match self.load_workflow_config() {
+            Ok(Some(ctx)) => Some(ctx),
+            Ok(None) => None,
+            Err(e) => {
+                return Err(e);
+            }
+        };
+
+        if let Some(ref ctx) = wf_ctx {
+            self.apply_workflow_timing_overrides(ctx);
+        }
+
+        if let Some(dir) = self.config.output_dir.clone() {
+            let abs = Self::normalized_output_dir(&dir);
+            if abs.to_string_lossy() != dir {
+                info!("[benchmark] --out-dir was relative: {} → absolutized to {} (hook-path stability fix)", dir, abs.display());
+                self.config.output_dir = Some(abs.to_string_lossy().to_string());
+            }
+        }
+
         self.preflight_check().await.context("Preflight checks failed")?;
 
         if self.config.preflight_only {
@@ -2251,6 +2704,7 @@ impl BenchmarkRunner {
                 total_models: 0,
                 successful: 0,
                 failed: 0,
+                planned_steps: None,
                 results: vec![],
             });
         }
@@ -2276,61 +2730,6 @@ impl BenchmarkRunner {
                 .unwrap_or_default();
             format!("unix_epoch_{}s", dur.as_secs())
         };
-
-        let wf_ctx = match self.load_workflow_config() {
-            Ok(Some(ctx)) => Some(ctx),
-            Ok(None) => None,
-            Err(e) => {
-                return Err(e);
-            }
-        };
-
-        if let Some(ref ctx) = wf_ctx {
-            if ctx.inference_max_attempts != self.inference_max_attempts {
-                info!("[benchmark] workflow YAML overrides inference_max_attempts: {} → {}", self.inference_max_attempts, ctx.inference_max_attempts);
-                self.inference_max_attempts = ctx.inference_max_attempts;
-            }
-            if !ctx.refusal_patterns.is_empty() {
-                info!("[benchmark] workflow YAML overrides refusal_patterns: {} → {} patterns", self.refusal_patterns.len(), ctx.refusal_patterns.len());
-                self.refusal_patterns = ctx.refusal_patterns.clone();
-            }
-            if self.config.output_dir.is_none() {
-                if let Some(ref yaml_out) = ctx.output_root {
-                    info!("[benchmark] workflow YAML provides output_root: {}", yaml_out);
-                    self.config.output_dir = Some(yaml_out.clone());
-                }
-            }
-            if let Some(secs) = ctx.cooldown_after_unload_secs {
-                info!("[benchmark] workflow YAML overrides cooldown_after_unload: {:?} → {}s", self.config.cooldown_after_unload, secs);
-                self.config.cooldown_after_unload = Duration::from_secs(secs);
-            }
-            if let Some(secs) = ctx.model_load_timeout_secs {
-                info!("[benchmark] workflow YAML overrides model_load_timeout: {:?} → {}s", self.config.model_load_timeout, secs);
-                self.config.model_load_timeout = Duration::from_secs(secs);
-            }
-            if let Some(mb) = ctx.min_tmp_space_mb {
-                info!("[benchmark] workflow YAML overrides min_tmp_space_mb: {} → {}", self.config.min_tmp_space_mb, mb);
-                self.config.min_tmp_space_mb = mb;
-            }
-            if let Some(enabled) = ctx.streaming_enabled {
-                if enabled != self.streaming_enabled {
-                    info!("[benchmark] workflow YAML overrides streaming_enabled: {} → {}", self.streaming_enabled, enabled);
-                    self.streaming_enabled = enabled;
-                }
-            }
-            if let Some(ref tmpl) = ctx.detail_template {
-                if self.detail_template.as_ref() != Some(tmpl) {
-                    info!("[benchmark] workflow YAML overrides detail_template: {} chars", tmpl.len());
-                    self.detail_template = Some(tmpl.clone());
-                }
-            }
-            if let Some(ref filter) = ctx.model_filter {
-                if self.config.filter_name.as_ref() != Some(filter) {
-                    info!("[benchmark] workflow YAML overrides filter_name: {:?} → {}", self.config.filter_name, filter);
-                    self.config.filter_name = Some(filter.clone());
-                }
-            }
-        }
 
         // Apply load_params from workflow config (restarts Docker with model spec env vars)
         if let Some(ref ctx) = wf_ctx {
@@ -2441,12 +2840,34 @@ impl BenchmarkRunner {
         let mut results = Vec::new();
         let mut step_outputs: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
+        // Issue Y: pre-populate from a previous run's checkpoint so a
+        // watchdog kill no longer discards completed work
+        // (REVIEW-CYCLES.md OC-4). resumed_steps is a snapshot — runtime
+        // revisits of the same step are NOT skipped, only the steps whose
+        // outputs came from the checkpoint file.
+        let mut resumed_steps: std::collections::HashSet<String> = std::collections::HashSet::new();
+        if self.resume {
+            if let Some(ref output_dir) = self.config.output_dir {
+                let checkpoint = Path::new(output_dir).join("checkpoint.jsonl");
+                let restored = Self::load_checkpoint(&checkpoint);
+                if !restored.is_empty() {
+                    info!(
+                        "[benchmark] resume: restored {} completed step output(s) from {}",
+                        restored.len(),
+                        checkpoint.display()
+                    );
+                    resumed_steps = restored.keys().cloned().collect();
+                    step_outputs = restored;
+                }
+            }
+        }
+
         let suite_metadata = format!(
             "run_timestamp: {}\nserver_url: {}\ntotal_models: {}\ncompare_gpu_cpu: {}",
             run_timestamp, self.config.server_url, models.len(), compare_gpu_cpu
         );
 
-        let workflow_steps = self.load_workflow_steps();
+        let workflow_steps = self.load_workflow_steps()?;
         let yaml_models = self.load_workflow_models();
 
         if let Some(steps) = &workflow_steps {
@@ -2456,9 +2877,9 @@ impl BenchmarkRunner {
             // Without this, runner iterates in YAML order which may not match dep chain.
             // Bug symptom: step_t1_1 skipped because step_t1 hadn't run yet.
             let sorted_steps = Self::topological_sort_steps(steps.clone());
-            if sorted_steps.len() != steps.len() {
-                warn!("[benchmark] cycle detected in depends_on graph: {} steps after sort (originally {})",
-                    sorted_steps.len(), steps.len());
+            if let Some(msg) = Self::cycle_error(sorted_steps.len(), steps.len()) {
+                error!("[benchmark] {}", msg);
+                anyhow::bail!(crate::error::Error::benchmark(msg));
             }
             let steps: &[WorkflowStep] = &sorted_steps;
 
@@ -2467,14 +2888,7 @@ impl BenchmarkRunner {
                 .map(|(i, s)| (s.step_id.clone(), i))
                 .collect();
 
-            let max_loop_iterations = steps.iter()
-                .filter_map(|s| s.r#loop.as_ref())
-                .filter_map(|l| l.get("count"))
-                .filter_map(|c| c.get("max_iterations"))
-                .filter_map(|m| m.as_u64())
-                .max()
-                .unwrap_or(100)
-                .max(100) as usize;
+            let max_loop_iterations = Self::max_workflow_iterations(&steps);
             let mut current_index: usize = 0;
             let mut loop_count: usize = 0;
 
@@ -2483,24 +2897,54 @@ impl BenchmarkRunner {
                 loop_count += 1;
 
                 if !step.requires.is_empty() {
-                    let missing_deps: Vec<String> = step.requires.iter()
-                        .filter(|dep| !step_outputs.contains_key(*dep))
-                        .cloned()
-                        .collect();
+                    let mut missing_deps: Vec<String> = Vec::new();
+                    let mut unsatisfied_conditions: Vec<String> = Vec::new();
 
-                    if !missing_deps.is_empty() {
-                        warn!("[benchmark] step {} skipped: missing dependencies {:?}", step.step_id, missing_deps);
+                    for dep in &step.requires {
+                        let Some(output) = step_outputs.get(dep) else {
+                            missing_deps.push(dep.clone());
+                            continue;
+                        };
+                        if let Some(condition) = step.require_conditions.get(dep) {
+                            match Self::eval_require_condition(output, condition) {
+                                Ok(true) => {}
+                                Ok(false) => unsatisfied_conditions.push(format!(
+                                    "{} (condition {:?} not met)",
+                                    dep, condition
+                                )),
+                                // Loud failure: a malformed condition must never
+                                // silently pass the dependency check.
+                                Err(e) => anyhow::bail!(e),
+                            }
+                        }
+                    }
+
+                    if !missing_deps.is_empty() || !unsatisfied_conditions.is_empty() {
+                        let mut all_missing = missing_deps.clone();
+                        all_missing.extend(unsatisfied_conditions.iter().cloned());
+                        warn!("[benchmark] step {} skipped: missing/unsatisfied dependencies {:?}", step.step_id, all_missing);
                         let requires_context = WorkflowHookContext::OnRequiresFailed(
                             OnRequiresFailedContext {
                                 failed_step: step.step_id.clone(),
-                                reason: format!("Dependencies not satisfied: {:?}", missing_deps),
-                                dependency_chain: missing_deps.clone(),
+                                reason: format!("Dependencies not satisfied: {:?}", all_missing),
+                                dependency_chain: all_missing.clone(),
                             }
                         );
-                        let _ = self.execute_hooks_for_trigger(&step.when, "on_requires_failed", &requires_context);
+                        match self.execute_hooks_for_trigger(&step.when, "on_requires_failed", &requires_context) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!("[benchmark] on_requires_failed hook error: {}", e);
+                            }
+                        }
                         current_index += 1;
                         continue;
                     }
+                }
+
+                if self.resume && resumed_steps.contains(&step.step_id) {
+                    info!("[benchmark] resumed: skipping completed step {}", step.step_id);
+                    current_index += 1;
+                    continue;
                 }
 
                 let variable_sets = self.extract_iterate_values(step);
@@ -2542,6 +2986,8 @@ impl BenchmarkRunner {
                                     step_name: step.step_name.clone(),
                                     step_id: step.step_id.clone(),
                                     requires: step.requires.clone(),
+                                    require_conditions: Default::default(),
+                                    retry_max_attempts: None,
                                     when: step.when.clone(),
                                     prompt: resolved_prompt.clone(),
                                     generative_entity: resolved_ge,
@@ -2562,10 +3008,15 @@ impl BenchmarkRunner {
                                                 loop_type: "iterate_values".to_string(),
                                             }
                                         );
-                                        let _ = self.execute_hooks_for_trigger(&step.when, "after_loop_iteration_fails", &fail_context);
+                                        match self.execute_hooks_for_trigger(&step.when, "after_loop_iteration_fails", &fail_context) {
+                                            Ok(_) => {}
+                                            Err(e) => {
+                                                error!("[benchmark] after_loop_iteration_fails hook error: {}", e);
+                                            }
+                                        }
                                     }
                                     let output_text = last_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
-                                    step_outputs.insert(step.step_id.clone(), output_text.clone());
+                                    self.record_step_output(&mut step_outputs, &step.step_id, &output_text);
                                     self.hook_engine.lock().unwrap().store_bookmark(step.step_id.clone(), serde_json::Value::String(output_text.to_string()));
                                 }
 
@@ -2635,6 +3086,8 @@ impl BenchmarkRunner {
                                                 step_name: target_step.step_name.clone(),
                                                 step_id: target_step.step_id.clone(),
                                                 requires: target_step.requires.clone(),
+                                                require_conditions: Default::default(),
+                                                retry_max_attempts: None,
                                                 when: target_step.when.clone(),
                                                 prompt: resolved_prompt,
                                                 generative_entity: target_step.generative_entity.clone(),
@@ -2647,7 +3100,7 @@ impl BenchmarkRunner {
                                                          let output_text = last.inference_results.first()
                                                              .map(|inf| inf.response_text.clone())
                                                              .unwrap_or_default();
-                                                         step_outputs.insert(target_step.step_id.clone(), output_text.clone());
+                                                         self.record_step_output(&mut step_outputs, &target_step.step_id, &output_text);
                                                          self.hook_engine.lock().unwrap().store_bookmark(target_step.step_id.clone(), serde_json::Value::String(output_text.to_string()));
                                                      }
                                                      last_target_idx = target_idx;
@@ -2677,7 +3130,9 @@ impl BenchmarkRunner {
                         let model_file = self.resolve_model_file(model_name, &models);
 
                         if let Some(model) = model_file {
-                            info!("[benchmark] executing step {} with model {}", step.step_id, model.0);
+                            // No step-start log here: execute_workflow_step
+                            // owns the single "executing step" emission
+                            // (Issue O duplicate-log regression).
 
                             // Bookmark resolution deferred — hooks must fire first.
                             let resolved_prompt = step.prompt.as_ref()
@@ -2689,6 +3144,8 @@ impl BenchmarkRunner {
                                  step_name: step.step_name.clone(),
                                  step_id: step.step_id.clone(),
                                  requires: step.requires.clone(),
+                                 require_conditions: Default::default(),
+                                 retry_max_attempts: None,
                                  when: step.when.clone(),
                                  prompt: resolved_prompt,
                                  generative_entity: step.generative_entity.clone(),
@@ -2701,7 +3158,7 @@ impl BenchmarkRunner {
 
                               if let Some(last_result) = results.last() {
                                   let output_text = last_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
-                                  step_outputs.insert(step.step_id.clone(), output_text.clone());
+                                  self.record_step_output(&mut step_outputs, &step.step_id, &output_text);
                                   self.hook_engine.lock().unwrap().store_bookmark(step.step_id.clone(), serde_json::Value::String(output_text.to_string()));
                               }
 
@@ -2744,6 +3201,8 @@ impl BenchmarkRunner {
                                                         step_name: target_step.step_name.clone(),
                                                         step_id: target_step.step_id.clone(),
                                                         requires: target_step.requires.clone(),
+                                                        require_conditions: Default::default(),
+                                                        retry_max_attempts: None,
                                                         when: target_step.when.clone(),
                                                         prompt: resolved_prompt,
                                                         generative_entity: target_step.generative_entity.clone(),
@@ -2756,7 +3215,7 @@ impl BenchmarkRunner {
                                                         let output_text = last.inference_results.first()
                                                             .map(|inf| inf.response_text.clone())
                                                             .unwrap_or_default();
-                                                        step_outputs.insert(target_step.step_id.clone(), output_text.clone());
+                                                        self.record_step_output(&mut step_outputs, &target_step.step_id, &output_text);
                                                         self.hook_engine.lock().unwrap().store_bookmark(target_step.step_id.clone(), serde_json::Value::String(output_text.to_string()));
                                                     }
                                                     last_target_idx = target_idx;
@@ -2833,6 +3292,8 @@ impl BenchmarkRunner {
                                                             step_name: target_step.step_name.clone(),
                                                             step_id: target_step.step_id.clone(),
                                                             requires: target_step.requires.clone(),
+                                                            require_conditions: Default::default(),
+                                                            retry_max_attempts: None,
                                                             when: target_step.when.clone(),
                                                             prompt: resolved_prompt,
                                                             generative_entity: target_step.generative_entity.clone(),
@@ -2845,7 +3306,7 @@ impl BenchmarkRunner {
                                                             let output_text = last.inference_results.first()
                                                                 .map(|inf| inf.response_text.clone())
                                                                 .unwrap_or_default();
-                                                            step_outputs.insert(target_step.step_id.clone(), output_text.clone());
+                                                            self.record_step_output(&mut step_outputs, &target_step.step_id, &output_text);
                                                 self.hook_engine.lock().unwrap().store_bookmark(target_step.step_id.clone(), serde_json::Value::String(output_text.to_string()));
                                                         }
                                                         last_target_idx = target_idx;
@@ -2879,6 +3340,8 @@ impl BenchmarkRunner {
                                 step_name: step.step_name.clone(),
                                 step_id: step.step_id.clone(),
                                 requires: step.requires.clone(),
+                                require_conditions: Default::default(),
+                                retry_max_attempts: None,
                                 when: step.when.clone(),
                                 prompt: resolved_prompt,
                                 generative_entity: step.generative_entity.clone(),
@@ -2891,7 +3354,7 @@ impl BenchmarkRunner {
 
                               if let Some(last_result) = results.last() {
                                   let output_text = last_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
-                                  step_outputs.insert(step.step_id.clone(), output_text.clone());
+                                  self.record_step_output(&mut step_outputs, &step.step_id, &output_text);
                                   self.hook_engine.lock().unwrap().store_bookmark(step.step_id.clone(), serde_json::Value::String(output_text.to_string()));
                               }
 
@@ -2934,6 +3397,8 @@ impl BenchmarkRunner {
                                                         step_name: target_step.step_name.clone(),
                                                         step_id: target_step.step_id.clone(),
                                                         requires: target_step.requires.clone(),
+                                                        require_conditions: Default::default(),
+                                                        retry_max_attempts: None,
                                                         when: target_step.when.clone(),
                                                         prompt: resolved_prompt,
                                                         generative_entity: target_step.generative_entity.clone(),
@@ -2946,7 +3411,7 @@ impl BenchmarkRunner {
                                                         let output_text = last.inference_results.first()
                                                             .map(|inf| inf.response_text.clone())
                                                             .unwrap_or_default();
-                                                        step_outputs.insert(target_step.step_id.clone(), output_text.clone());
+                                                        self.record_step_output(&mut step_outputs, &target_step.step_id, &output_text);
                                                         self.hook_engine.lock().unwrap().store_bookmark(target_step.step_id.clone(), serde_json::Value::String(output_text.to_string()));
                                                     }
                                                     last_target_idx = target_idx;
@@ -2976,8 +3441,14 @@ impl BenchmarkRunner {
                 }
             }
 
-            if loop_count >= max_loop_iterations {
-                warn!("[benchmark] workflow loop exceeded {} iterations, stopping", max_loop_iterations);
+            if let Some(msg) = Self::premature_cap_error(
+                loop_count,
+                max_loop_iterations,
+                current_index,
+                steps.len(),
+            ) {
+                error!("[benchmark] {}", msg);
+                anyhow::bail!(crate::error::Error::benchmark(msg));
             }
         }
 
@@ -3014,6 +3485,7 @@ impl BenchmarkRunner {
                         error: Some(format!("Health check failed: {}", e)),
                         gpu_mode: "gpu".to_string(),
                         speedup_factor: None,
+                        step_id: None,
                     };
                     self.log_step_result(&failed_result)?;
                     self.log_step_error(model_id, failed_result.error.as_deref().unwrap_or("unknown error"))?;
@@ -3062,6 +3534,7 @@ impl BenchmarkRunner {
                             error: Some(format!("Health check failed: {}", e)),
                             gpu_mode: "cpu".to_string(),
                             speedup_factor: None,
+                            step_id: None,
                         };
                         self.log_step_result(&cpu_result)?;
                         self.log_step_error(model_id, cpu_result.error.as_deref().unwrap_or("unknown error"))?;
@@ -3192,6 +3665,7 @@ impl BenchmarkRunner {
                         error: Some(format!("Health check failed: {}", e)),
                         gpu_mode: "gpu".to_string(),
                         speedup_factor: None,
+                        step_id: None,
                     };
                     self.log_step_result(&failed_result)?;
                     self.log_step_error(model_id, failed_result.error.as_deref().unwrap_or("unknown error"))?;
@@ -3232,25 +3706,41 @@ impl BenchmarkRunner {
             }
         }
 
-        let successful = results.iter().filter(|r| r.error.is_none()).count();
-        let failed = results.len() - successful;
-        let timestamp = {
-                let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-                format!("unix_epoch_{}s", d.as_secs())
-            };
-
-        let suite_result = BenchmarkSuiteResult {
-            timestamp,
-            server_url: self.config.server_url.clone(),
-            total_models: results.len(),
-            successful,
-            failed,
+        let suite_result = BenchmarkRunner::suite_result_from(
             results,
-        };
+            workflow_steps.as_ref().map(|s| s.len()),
+            &self.config.server_url,
+        );
 
         self.write_final_report(&suite_result)?;
 
         Ok(suite_result)
+    }
+
+    /// Assemble the final suite result. `planned_steps` states how many
+    /// steps the workflow declared (Issue J: under early exit,
+    /// total_models alone invited "3/5 ran" miscounts because
+    /// unexecuted steps simply never appeared in results).
+    fn suite_result_from(
+        results: Vec<ModelBenchmarkResult>,
+        planned_steps: Option<usize>,
+        server_url: &str,
+    ) -> BenchmarkSuiteResult {
+        let successful = results.iter().filter(|r| r.error.is_none()).count();
+        let failed = results.len() - successful;
+        let timestamp = {
+            let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+            format!("unix_epoch_{}s", d.as_secs())
+        };
+        BenchmarkSuiteResult {
+            timestamp,
+            server_url: server_url.to_string(),
+            total_models: results.len(),
+            successful,
+            failed,
+            planned_steps,
+            results,
+        }
     }
 
     /// Send a single chat completion request. Used for parallel inference.
@@ -3435,7 +3925,7 @@ impl BenchmarkRunner {
                 response_text.clone()
             };
 
-            step_outputs.insert(step.step_id.clone(), output_text.clone());
+            self.record_step_output(step_outputs, &step.step_id, &output_text);
             last_target_idx = *target_idx;
 
             info!("[benchmark] parallel target {} completed: {} tokens in {:?}", step.step_id, tokens, duration);
@@ -3556,6 +4046,7 @@ impl BenchmarkRunner {
                     error: None,
                     gpu_mode: "gpu".to_string(),
                     speedup_factor: None,
+                    step_id: None,
                 }
             }
             Err(e) => {
@@ -3575,13 +4066,14 @@ impl BenchmarkRunner {
                     error: Some(format!("Streaming failed: {}", e)),
                     gpu_mode: "gpu".to_string(),
                     speedup_factor: None,
+                    step_id: None,
                 }
             }
         }
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn run_model_inference(&self, client: &LlamaHttpClient, model_id: &str, model_source_path: &str, gpu_mode: &str, prompts: &[String], max_tokens: usize, temperature: f64, top_p: f64, system_prompt: Option<String>, skip_unload: bool) -> ModelBenchmarkResult {
+    pub async fn run_model_inference(&self, client: &LlamaHttpClient, model_id: &str, model_source_path: &str, gpu_mode: &str, prompts: &[String], max_tokens: usize, temperature: f64, top_p: f64, system_prompt: Option<String>, skip_unload: bool, step_max_attempts: Option<u32>) -> ModelBenchmarkResult {
         let server_model_id = model_id.strip_suffix(".gguf").unwrap_or(model_id);
         let start = Instant::now();
 
@@ -3651,6 +4143,7 @@ impl BenchmarkRunner {
                     error: Some(msg),
                     gpu_mode: gpu_mode.to_string(),
                     speedup_factor: None,
+                    step_id: None,
                 };
             }
         };
@@ -3672,6 +4165,7 @@ impl BenchmarkRunner {
                 error: Some(format!("Load failed: {}", e)),
                 gpu_mode: gpu_mode.to_string(),
                 speedup_factor: None,
+                step_id: None,
             };
         }
 
@@ -3679,7 +4173,7 @@ impl BenchmarkRunner {
         let mut any_retry_exhausted: Option<String> = None;
 
         for prompt in prompts {
-            let max_retries: u32 = self.inference_max_attempts;
+            let max_retries: u32 = Self::effective_max_attempts(self.inference_max_attempts, step_max_attempts);
             let mut last_error = None;
 
             for attempt in 0..max_retries {
@@ -3853,6 +4347,7 @@ impl BenchmarkRunner {
             error: any_retry_exhausted,
             gpu_mode: gpu_mode.to_string(),
             speedup_factor: None,
+            step_id: None,
         }
     }
 
@@ -3913,6 +4408,7 @@ impl BenchmarkRunner {
                         error: check.error_message,
                         gpu_mode: gpu_mode.to_string(),
                         speedup_factor: None,
+                        step_id: None,
                     };
                 }
             }
@@ -3958,6 +4454,7 @@ impl BenchmarkRunner {
                 error: Some(format!("Health check before load failed: {}", e)),
                 gpu_mode: gpu_mode.to_string(),
                 speedup_factor: None,
+                step_id: None,
             };
         }
 
@@ -3992,6 +4489,7 @@ impl BenchmarkRunner {
                     error: Some(msg),
                     gpu_mode: gpu_mode.to_string(),
                     speedup_factor: None,
+                    step_id: None,
                 };
             }
         };
@@ -4013,6 +4511,7 @@ impl BenchmarkRunner {
                 error: Some(format!("Load failed: {}", e)),
                 gpu_mode: gpu_mode.to_string(),
                 speedup_factor: None,
+                step_id: None,
             };
         }
 
@@ -4171,6 +4670,7 @@ impl BenchmarkRunner {
             error: None,
             gpu_mode: gpu_mode.to_string(),
             speedup_factor: None,
+            step_id: None,
         }
     }
 }
@@ -4191,12 +4691,413 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    fn given_router_mode_zombie_command_when_built_then_excludes_router_process() {
+        let cmd = BenchmarkRunner::zombie_check_command(8080);
+        assert!(cmd.contains("models-dir"),
+            "zombie check must exclude the router process so legitimately \
+        loaded router children are not false-positive zombies");
+    }
+
+    // Issue S residual: the live server this run talks to (identified by its
+    // --port) is not a zombie — excluding it gives foreign-process detection
+    // the full threshold budget instead of burning one slot on ourselves.
+    #[test]
+    fn given_own_server_port_when_zombie_command_built_then_excludes_live_server() {
+        let cmd = BenchmarkRunner::zombie_check_command(8080);
+        assert!(cmd.contains("grep -v -- --port 8080"),
+            "zombie check must exclude the live server on our own port");
+        let other = BenchmarkRunner::zombie_check_command(9999);
+        assert!(other.contains("grep -v -- --port 9999"));
+        assert!(!other.contains("--port 8080"));
+    }
+
+    #[test]
+    fn given_tmpdir_env_when_tmp_root_resolved_then_env_wins_over_hardcoded_tmp() {
+        // Regression: preflight tmp-space checks hardcoded /tmp and ignored
+        // TMPDIR (SUMMARY-overcontext.md:88-91; workaround was a PATH shim
+        // faking `df -B1 /tmp` output in experiments/reasoning-enhancer/scripts/shims/df).
+        let saved = std::env::var("TMPDIR").ok();
+        let custom = std::env::temp_dir().join("whitt-tmpdir-probe");
+        std::fs::create_dir_all(&custom).unwrap();
+        std::env::set_var("TMPDIR", &custom);
+        assert_eq!(BenchmarkRunner::tmp_root(), custom,
+            "TMPDIR must override the hardcoded /tmp in space checks");
+        std::env::set_var("TMPDIR", "");
+        assert_eq!(BenchmarkRunner::tmp_root(), Path::new("/tmp"),
+            "empty TMPDIR must fall back to /tmp");
+        std::env::remove_var("TMPDIR");
+        assert_eq!(BenchmarkRunner::tmp_root(), Path::new("/tmp"),
+            "unset TMPDIR must fall back to /tmp");
+        if let Some(prev) = saved {
+            std::env::set_var("TMPDIR", prev);
+        }
+    }
+
+    #[test]
     fn is_retry_exhausted_error_matches_known_patterns() {
         assert!(is_retry_exhausted_error("All 3 attempts failed: timeout"));
         assert!(is_retry_exhausted_error("All 1 attempts failed: connection refused"));
         assert!(!is_retry_exhausted_error("Load failed: docker not running"));
         assert!(!is_retry_exhausted_error("attempts failed without prefix"));
         assert!(!is_retry_exhausted_error(""));
+    }
+
+    #[test]
+    fn given_linear_workflow_exceeding_100_steps_when_iteration_cap_computed_then_allows_full_run() {
+        let steps: Vec<WorkflowStep> = (0..385)
+            .map(|i| WorkflowStep {
+                step_name: format!("s{}", i),
+                step_id: format!("s{}", i),
+                requires: vec![],
+                require_conditions: Default::default(),
+                retry_max_attempts: None,
+                            when: None,
+                prompt: None,
+                generative_entity: None,
+                model_overrides: None,
+                r#loop: None,
+            })
+            .collect();
+        assert!(BenchmarkRunner::max_workflow_iterations(&steps) >= 385);
+    }
+
+    #[test]
+    fn given_no_loop_steps_when_iteration_cap_computed_then_floor_is_100() {
+        let steps = vec![WorkflowStep {
+            step_name: "only".into(),
+            step_id: "only".into(),
+            requires: vec![],
+            require_conditions: Default::default(),
+            retry_max_attempts: None,
+                    when: None,
+            prompt: None,
+            generative_entity: None,
+            model_overrides: None,
+            r#loop: None,
+        }];
+        assert_eq!(BenchmarkRunner::max_workflow_iterations(&steps), 100);
+    }
+
+    #[test]
+    fn given_loop_max_iterations_when_iteration_cap_computed_then_respects_override_and_scale() {
+        let mut with_loop = WorkflowStep {
+            step_name: "looped".into(),
+            step_id: "looped".into(),
+            requires: vec![],
+            require_conditions: Default::default(),
+            retry_max_attempts: None,
+                    when: None,
+            prompt: None,
+            generative_entity: None,
+            model_overrides: None,
+            r#loop: Some(serde_json::json!({"count": {"max_iterations": 5000}})),
+        };
+        let steps = vec![
+            with_loop.clone(),
+            WorkflowStep {
+                step_name: "tail".into(),
+                step_id: "tail".into(),
+                requires: vec![],
+                require_conditions: Default::default(),
+                retry_max_attempts: None,
+                            when: None,
+                prompt: None,
+                generative_entity: None,
+                model_overrides: None,
+                r#loop: None,
+            },
+        ];
+        assert_eq!(BenchmarkRunner::max_workflow_iterations(&steps), 5000);
+        with_loop.r#loop = Some(serde_json::json!({"count": {"max_iterations": 3}}));
+        assert_eq!(BenchmarkRunner::max_workflow_iterations(&[with_loop]), 100);
+    }
+
+    // Regression (Issue J, silent-wrong-behavior): "metrics.json lied
+    // under early exit ('3/5 angles')" — correction-atom/results/
+    // SUMMARY-v7.md:15 — every entry carried only the model FILE name
+    // (identical across steps), so consumers could not attribute
+    // results to steps nor distinguish executed vs hook-skipped.
+    // Workflow results must now carry the step id.
+    #[tokio::test]
+    async fn given_hook_skipped_step_when_executed_then_result_attributed_to_step() {
+        let runner = BenchmarkRunner::new(make_test_config());
+        let step = WorkflowStep {
+            step_name: "angle_one".into(),
+            step_id: "angle_one".into(),
+            requires: vec![],
+            require_conditions: Default::default(),
+            retry_max_attempts: None,
+                    when: Some(serde_json::json!({
+                "before_step_starts": [ {"skip_step": true} ]
+            })),
+            prompt: Some("say hi".into()),
+            generative_entity: None,
+            model_overrides: None,
+            r#loop: None,
+        };
+        // Dead port is safe: the hook-skip arm returns before any client use.
+        let client = LlamaHttpClient::new("http://127.0.0.1:9").expect("client ctor only builds");
+        let model = ("m.gguf".to_string(), "/models/m.gguf".to_string());
+        let result = runner
+            .execute_workflow_step(&step, &client, &model, 10, 0.1, 0.9, None)
+            .await
+            .expect("hook-skip arm must return Ok");
+        assert_eq!(result.benchmark_result.error.as_deref(), Some("Skipped by hook"));
+        assert_eq!(result.benchmark_result.step_id.as_deref(), Some("angle_one"));
+    }
+
+    // Regression (Issue AD): a `fail` action on after_step_succeeds is a
+    // hook verdict that the step's output is unacceptable (e.g. a verifier
+    // hook). The step result must record that verdict as an error so the
+    // suite/report cannot count the step as successful. Previously the Fail
+    // arm only warned and model_result.error stayed None.
+    #[tokio::test]
+    async fn given_success_hook_fail_verdict_when_step_executes_then_result_marked_failed() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = match stream { Ok(s) => s, Err(_) => continue };
+                let mut buf = [0u8; 8192];
+                let mut n = stream.read(&mut buf).unwrap_or(0);
+                let mut req = String::from_utf8_lossy(&buf[..n]).to_string();
+                while let Some(cl) = content_length(&req) {
+                    let body_start = req.find("\r\n\r\n").map(|i| i + 4).unwrap_or(0);
+                    if req.len() >= body_start + cl { break; }
+                    n = stream.read(&mut buf).unwrap_or(0);
+                    if n == 0 { break; }
+                    req.push_str(&String::from_utf8_lossy(&buf[..n]));
+                }
+                let first = req.lines().next().unwrap_or_default().to_string();
+                let (status, body) = if first.starts_with("GET /v1/models") {
+                    ("200 OK", r#"{"data":[{"id":"m.gguf","status":{"value":"loaded"}},{"id":"m","status":{"value":"loaded"}}]}"#.to_string())
+                } else if first.starts_with("POST /v1/chat/completions") {
+                    ("200 OK", r#"{"id":"x","object":"chat.completion","created":0,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"hello world"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":2,"total_tokens":4}}"#.to_string())
+                } else if first.starts_with("POST /models/load") {
+                    ("200 OK", r#"{"success":true}"#.to_string())
+                } else if first.starts_with("POST /models/unload") {
+                    ("200 OK", "{}".to_string())
+                } else {
+                    ("200 OK", "{}".to_string())
+                };
+                let resp = format!(
+                    "HTTP/1.1 {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    status, body.len(), body
+                );
+                let _ = stream.write_all(resp.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+
+        fn content_length(req: &str) -> Option<usize> {
+            for line in req.lines() {
+                if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    return v.trim().parse().ok();
+                }
+            }
+            None
+        }
+
+        let runner = BenchmarkRunner::new(make_test_config());
+        let step = WorkflowStep {
+            step_name: "verified_step".into(),
+            step_id: "verified_step".into(),
+            requires: vec![],
+            require_conditions: Default::default(),
+            retry_max_attempts: None,
+            when: Some(serde_json::json!({
+                "after_step_succeeds": [ {"fail": {"message": "verifier rejected output"}} ]
+            })),
+            prompt: Some("say hi".into()),
+            generative_entity: None,
+            model_overrides: None,
+            r#loop: None,
+        };
+        let client = LlamaHttpClient::new(&format!("http://127.0.0.1:{}", port)).expect("client ctor");
+        let model = ("m.gguf".to_string(), "/models/m.gguf".to_string());
+        let result = runner
+            .execute_workflow_step(&step, &client, &model, 10, 0.1, 0.9, None)
+            .await
+            .expect("step must execute against mock server");
+        let err = result
+            .benchmark_result
+            .error
+            .expect("hook fail verdict must mark the step result as failed");
+        assert!(
+            err.contains("verifier rejected output"),
+            "error must carry the hook's reason, got: {}",
+            err
+        );
+    }
+
+    // Regression (Issue J): BenchmarkSuiteResult carried only
+    // total_models=results.len() with no planned-step count, so under
+    // early exit consumers mis-derived "3/5 angles" from a suite that
+    // silently dropped unexecuted steps. The suite must state how many
+    // steps the workflow planned.
+    #[test]
+    fn given_results_and_planned_steps_when_suite_assembled_then_counts_honest() {
+        fn base_result(error: Option<String>) -> ModelBenchmarkResult {
+            ModelBenchmarkResult {
+                model_id: "m.gguf".to_string(),
+                model_path: "/models/m.gguf".to_string(),
+                file_size_bytes: 0,
+                load_duration: Duration::ZERO,
+                inference_results: vec![],
+                unload_duration: Duration::ZERO,
+                total_duration: Duration::ZERO,
+                tokens_per_second: 0.0,
+                avg_latency_ms: 0.0,
+                p50_latency_ms: 0.0,
+                p95_latency_ms: 0.0,
+                p99_latency_ms: 0.0,
+                error,
+                gpu_mode: "gpu".to_string(),
+                speedup_factor: None,
+                step_id: None,
+            }
+        }
+        let r1 = base_result(None);
+        let r2 = base_result(None);
+        let r3 = base_result(Some("Skipped by hook".to_string()));
+
+        let suite = BenchmarkRunner::suite_result_from(vec![r1, r2, r3], Some(5), "http://x");
+        assert_eq!(suite.total_models, 3);
+        assert_eq!(suite.successful, 2);
+        assert_eq!(suite.failed, 1);
+        assert_eq!(suite.planned_steps, Some(5));
+
+        let suite_plain = BenchmarkRunner::suite_result_from(vec![], None, "http://x");
+        assert_eq!(suite_plain.planned_steps, None);
+        // Model-discovery mode JSON stays byte-identical: planned_steps
+        // is omitted when None.
+        let v = serde_json::to_value(&suite_plain).expect("serialize suite");
+        assert!(v.get("planned_steps").is_none());
+    }
+
+    // Regression (Issue G, silent-wrong-behavior): "relative --out-dir
+    // breaks engine shell hooks (always absolute)" —
+    // experiments/reasoning-enhancer-plus/docs/07-TRACKING.md:109.
+    // Relative output dirs resolved against process CWD made hook
+    // paths (WHITT_OUTPUT_DIR, save_to base, working_dir) land in
+    // unpredictable locations. Engine must absolutize at ingestion.
+    #[test]
+    fn given_relative_output_dir_when_normalized_then_absolute_against_cwd() {
+        let abs = BenchmarkRunner::normalized_output_dir("outputs/run-42");
+        assert!(abs.is_absolute(), "relative --out-dir must become absolute: {abs:?}");
+        let cwd = std::env::current_dir().expect("cwd");
+        assert!(abs.starts_with(&cwd), "absolute must be cwd-joined: {abs:?} vs {cwd:?}");
+
+        let already_abs = BenchmarkRunner::normalized_output_dir("/tmp/abs-out");
+        assert_eq!(already_abs, std::path::PathBuf::from("/tmp/abs-out"));
+    }
+
+    // Regression (Issue K, silent-wrong-behavior): "Engine-managed swap →
+    // Model not found" — experiments/atomic-reasoning/benchmarks/SUMMARY.md:125.
+    // resolve_model_file matched by raw case-sensitive substring with a
+    // base-name fallback, so valid models failed resolution (and steps died
+    // "Model not found") on case or '.'/'-' spelling drift between YAML and
+    // filename (07-TRACKING.md:61-63: "Qwen3-5-9B not Qwen3.5-9B").
+    #[test]
+    fn given_dot_dash_spelling_drift_when_model_resolved_then_normalized_match() {
+        let runner = BenchmarkRunner::new(make_test_config());
+        let discovered = vec![(
+            "Qwen3-5-9B-Q4_K_M.gguf".to_string(),
+            "/models/Qwen3-5-9B-Q4_K_M.gguf".to_string(),
+        )];
+        // YAML spelled it "Qwen3.5-9B": neither substring nor base-name
+        // ("Qwen3.5") matches the file — resolution returned None before.
+        let hit = runner.resolve_model_file("Qwen3.5-9B-Q4_K_M", &discovered);
+        assert!(hit.is_some(), "dot/dash drift must resolve via normalization");
+        assert_eq!(hit.unwrap().0, "Qwen3-5-9B-Q4_K_M.gguf");
+    }
+
+    // Regression (Issue K / N): case-sensitive matching made valid
+    // lowercase YAML names miss capitalized filenames entirely.
+    #[test]
+    fn given_case_mismatch_when_model_resolved_then_case_insensitive_match() {
+        let runner = BenchmarkRunner::new(make_test_config());
+        let discovered = vec![(
+            "Ministral-3B-instruct.gguf".to_string(),
+            "/models/Ministral-3B-instruct.gguf".to_string(),
+        )];
+        let hit = runner.resolve_model_file("ministral-3b-instruct", &discovered);
+        assert!(hit.is_some(), "case drift must resolve via normalization");
+        assert_eq!(hit.unwrap().0, "Ministral-3B-instruct.gguf");
+    }
+
+    // Regression (Issue K): substring-first matching let an arbitrary
+    // sibling variant win over the exact file the step asked for.
+    #[test]
+    fn given_exact_name_and_variant_when_model_resolved_then_exact_wins() {
+        let runner = BenchmarkRunner::new(make_test_config());
+        let discovered = vec![
+            (
+                "Model-X-Q8_0.gguf".to_string(),
+                "/models/Model-X-Q8_0.gguf".to_string(),
+            ),
+            (
+                "Model-X.gguf".to_string(),
+                "/models/Model-X.gguf".to_string(),
+            ),
+        ];
+        let hit = runner.resolve_model_file("Model-X", &discovered);
+        assert_eq!(hit.expect("must resolve").0, "Model-X.gguf");
+    }
+
+    // Regression (Issue E, silent-wrong-behavior): "workflow loop hard cap
+    // 100 iterations (silent exit 0 after — log shows `workflow loop
+    // exceeded 100 iterations`)" — experiments/reasoning-enhancer/results/
+    // SUMMARY-benchmark.md:69-71. Cap exhaustion with steps unexecuted MUST
+    // be an error, not a warn-and-return-Ok.
+    #[test]
+    fn given_cap_exhausted_with_steps_unexecuted_when_cap_error_computed_then_some() {
+        let msg = BenchmarkRunner::premature_cap_error(100, 100, 12, 100);
+        assert!(msg.is_some(), "cap exhausted with 88 steps unexecuted must yield error");
+        let msg = msg.unwrap();
+        assert!(msg.contains("100"), "message should name the cap: {msg}");
+        assert!(msg.contains("88"), "message should count unexecuted steps: {msg}");
+    }
+
+    #[test]
+    fn given_workflow_completed_at_cap_when_cap_error_computed_then_none() {
+        // Boundary: workflow finished exactly at the cap — NOT an error.
+        assert!(BenchmarkRunner::premature_cap_error(100, 100, 100, 100).is_none());
+        // Cap not reached — normal case.
+        assert!(BenchmarkRunner::premature_cap_error(42, 100, 42, 42).is_none());
+    }
+
+    // Regression (Issue O, loud-crash/log pollution): "Every log line
+    // written 2× — deleted duplicate `info!` at main-loop call site (kept
+    // inner log, runner.rs:1975) — live-verified: 1 line/step ... source
+    // restored byte-exact" — experiments/correction-atom/results/
+    // SUMMARY-v7.md:14. The restoration un-shipped the fix; the duplicate
+    // re-emerged (call site + executor). Exactly one emission site allowed.
+    #[test]
+    fn given_workflow_step_execution_when_emission_sites_counted_then_exactly_one() {
+        let src = include_str!("runner.rs");
+        let needle = concat!("executing step", " {} with model");
+        let count = src.matches(needle).count();
+        assert_eq!(
+            count, 1,
+            "duplicate 'executing step' log emission sites found ({count}) — every step logs 2×; keep the executor's inner log only"
+        );
+    }
+
+    // Regression (Issue F2): on_requires_failed / after_loop_iteration_fails
+    // hook triggers fired with `let _ =` — hook execution errors (bad shell,
+    // unwritable path, ...) vanished, unlike every other trigger which logs
+    // an error. Zero swallowed-trigger call sites allowed.
+    #[test]
+    fn given_hook_trigger_call_sites_when_counted_then_none_swallow_errors() {
+        let src = include_str!("runner.rs");
+        let needle = concat!("let _ = self.", "execute_hooks_for_trigger");
+        let count = src.matches(needle).count();
+        assert_eq!(
+            count, 0,
+            "swallowed hook-trigger errors found ({count} sites) — every trigger must match/Err-log like after_step_fails"
+        );
     }
 
     #[test]
@@ -4328,6 +5229,66 @@ model_load_timeout_secs: 120
         assert_eq!(cfg.min_tmp_space_mb, None);
     }
 
+    // Regression (Issue D, silent-wrong-behavior): "YAML
+    // timing.min_tmp_space_mb did NOT reach preflight [config built
+    // pre-parse] — CLI flag is the reliable path" —
+    // experiments/reasoning-enhancer-plus/docs/07-TRACKING.md:284-286.
+    // Overrides must apply to config BEFORE preflight consumes it.
+    #[test]
+    fn given_workflow_yaml_min_tmp_space_when_timing_overrides_applied_then_config_updated() {
+        let dir = std::env::temp_dir().join("whitt_issue_d_timing_override");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let yaml_path = dir.join("workflow.yml");
+        std::fs::write(&yaml_path, r#"
+workflow_id: issue-d-timing
+name: issue-d-timing
+schema_version: "2.0.0"
+workspace:
+  directories:
+    output: /tmp/out
+workflow_execution_strategy:
+  timing:
+    min_tmp_space_mb: 2048
+agentic_workflow:
+  steps:
+    s1:
+      prompt: "hello"
+"#).unwrap();
+
+        let config = BenchmarkConfig {
+            server_url: "http://localhost:8080".to_string(),
+            models_dir: None,
+            model_list_file: None,
+            prompts: vec![],
+            max_tokens: 1,
+            filter_size_max: None,
+            filter_size_min: None,
+            filter_name: None,
+            delay_between_swaps: Duration::from_secs(0),
+            compare_gpu_cpu: false,
+            output_dir: None,
+            workflow_file: Some(yaml_path.to_string_lossy().to_string()),
+            temperature: None,
+            top_p: None,
+            cooldown_after_unload: Duration::from_secs(0),
+            preflight_only: false,
+            model_load_timeout: Duration::from_secs(1),
+            min_tmp_space_mb: 1,
+        };
+        let mut runner = BenchmarkRunner::new(config);
+        let ctx = runner.load_workflow_config()
+            .expect("load_workflow_config should succeed")
+            .expect("YAML should produce Some(config)");
+
+        runner.apply_workflow_timing_overrides(&ctx);
+
+        assert_eq!(runner.config.min_tmp_space_mb, 2048,
+            "YAML timing.min_tmp_space_mb must override config before preflight reads it");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn timing_config_rejects_unknown_field() {
         let yaml = r#"
@@ -4449,7 +5410,9 @@ agentic_workflow:
             step_name: "decide".into(),
             step_id: "s1".into(),
             requires: vec![],
-            when: None,
+            require_conditions: Default::default(),
+            retry_max_attempts: None,
+                    when: None,
             prompt: None,
             generative_entity: Some("control_flow".into()),
             model_overrides: None,
@@ -4465,7 +5428,9 @@ agentic_workflow:
             step_name: "infer".into(),
             step_id: "s2".into(),
             requires: vec![],
-            when: None,
+            require_conditions: Default::default(),
+            retry_max_attempts: None,
+                    when: None,
             prompt: None,
             generative_entity: Some("agent".into()),
             model_overrides: None,
@@ -4482,7 +5447,9 @@ agentic_workflow:
             step_name: "infer".into(),
             step_id: "s3".into(),
             requires: vec![],
-            when: None,
+            require_conditions: Default::default(),
+            retry_max_attempts: None,
+                    when: None,
             prompt: Some("   \n\t  ".into()),
             generative_entity: None,
             model_overrides: None,
@@ -4498,7 +5465,9 @@ agentic_workflow:
             step_name: "infer".into(),
             step_id: "s4".into(),
             requires: vec![],
-            when: None,
+            require_conditions: Default::default(),
+            retry_max_attempts: None,
+                    when: None,
             prompt: Some("Hello world".into()),
             generative_entity: Some("agent".into()),
             model_overrides: None,
@@ -4580,6 +5549,7 @@ enabled: true
             error: None,
             gpu_mode: "gpu".to_string(),
             speedup_factor: Some(2.5),
+            step_id: None,
         };
 
         assert_eq!(result.gpu_mode, "gpu", "gpu_mode should be 'gpu'");
@@ -4604,6 +5574,7 @@ enabled: true
             error: None,
             gpu_mode: "gpu".to_string(),
             speedup_factor: Some(2.5),
+            step_id: None,
         };
 
         let suite_result = BenchmarkSuiteResult {
@@ -4612,6 +5583,7 @@ enabled: true
             total_models: 1,
             successful: 1,
             failed: 0,
+            planned_steps: None,
             results: vec![gpu_result],
         };
 
@@ -4640,6 +5612,7 @@ enabled: true
             error: None,
             gpu_mode: "gpu".to_string(),
             speedup_factor: Some(2.5),
+            step_id: None,
         };
 
         let suite_result = BenchmarkSuiteResult {
@@ -4648,6 +5621,7 @@ enabled: true
             total_models: 1,
             successful: 1,
             failed: 0,
+            planned_steps: None,
             results: vec![gpu_result],
         };
 
@@ -4981,6 +5955,39 @@ enabled: true
         assert!(vram_mb.is_none(), "should return None when /proc/driver/nvidia/gpus doesn't exist");
     }
 
+    // --- Issue I regression: VRAM unit misreport + lost env override ---
+    // Evidence: experiments/atomic-reasoning/SAFETY.md:5-9,88 — "8192.0 GB VRAM
+    // available" on an 8GB RX 580; sysfs mem_info_vram_total reports BYTES but the
+    // engine divided as KB → 8589934592/1024/1024 = 8192.0 GB → concurrency 4 → OOM.
+    // Workaround WHITT_MAX_CONCURRENT_INFERENCES=1 (run-atom.sh:81) worked only in
+    // an uncommitted experiment build — never landed in committed src.
+
+    #[test]
+    fn given_rx580_vram_bytes_when_converted_then_reports_8gb_not_8192() {
+        // RX 580 8GiB: sysfs reports 8589934592 bytes.
+        assert!((vram_bytes_to_gb(8_589_934_592) - 8.0).abs() < 1e-9,
+            "8GiB in bytes must convert to 8.0 GB, not 8192.0 GB");
+        assert!((vram_bytes_to_gb(0) - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn given_env_concurrency_override_when_parsed_then_valid_wins_and_invalid_ignored() {
+        // Workaround contract from experiments (run-atom.sh:81, SAFETY.md):
+        // WHITT_MAX_CONCURRENT_INFERENCES forces sequential inference on 8GB boxes.
+        let saved = std::env::var("WHITT_MAX_CONCURRENT_INFERENCES").ok();
+        std::env::set_var("WHITT_MAX_CONCURRENT_INFERENCES", "1");
+        assert_eq!(env_concurrency_override(), Some(1));
+        std::env::set_var("WHITT_MAX_CONCURRENT_INFERENCES", "0");
+        assert_eq!(env_concurrency_override(), None, "0 must be rejected (floor is 1)");
+        std::env::set_var("WHITT_MAX_CONCURRENT_INFERENCES", "abc");
+        assert_eq!(env_concurrency_override(), None);
+        std::env::remove_var("WHITT_MAX_CONCURRENT_INFERENCES");
+        assert_eq!(env_concurrency_override(), None);
+        if let Some(v) = saved {
+            std::env::set_var("WHITT_MAX_CONCURRENT_INFERENCES", v);
+        }
+    }
+
     // --- Workflow Step Parser Tests ---
 
     /// Helper: build a WorkflowStep with given id + dependencies.
@@ -4989,7 +5996,9 @@ enabled: true
             step_name: id.to_string(),
             step_id: id.to_string(),
             requires: requires.into_iter().map(String::from).collect(),
-            when: None,
+            require_conditions: Default::default(),
+            retry_max_attempts: None,
+                    when: None,
             prompt: None,
             generative_entity: None,
             model_overrides: None,
@@ -5104,7 +6113,7 @@ agentic_workflow:
             ..make_test_config()
         };
         let runner = BenchmarkRunner::new(config);
-        let steps = runner.load_workflow_steps();
+        let steps = runner.load_workflow_steps().unwrap();
 
         assert!(steps.is_some(), "should parse workflow steps");
         let steps = steps.unwrap();
@@ -5119,8 +6128,459 @@ agentic_workflow:
     fn test_load_workflow_steps_no_workflow_file() {
         let config = make_test_config(); // workflow_file: None
         let runner = BenchmarkRunner::new(config);
-        let steps = runner.load_workflow_steps();
+        let steps = runner.load_workflow_steps().unwrap();
         assert!(steps.is_none(), "should return None when no workflow file");
+    }
+
+    // Regression: missing --workflow file must hard-error, not silently fall back
+    // to discovery benchmark. Original evidence: flan-t5 loaded by accident
+    // (experiments/reasoning-enhancer-plus/docs/07-TRACKING.md:331-332,684).
+    #[test]
+    fn given_missing_workflow_file_when_config_loaded_then_hard_error() {
+        let mut config = make_test_config();
+        config.workflow_file = Some("/nonexistent/whitt-missing-workflow.yml".to_string());
+        let runner = BenchmarkRunner::new(config);
+        let result = runner.load_workflow_config();
+        let msg = match result {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!(
+                "missing --workflow file must hard-error instead of silent discovery fallback"
+            ),
+        };
+        assert!(
+            msg.contains("whitt-missing-workflow.yml"),
+            "error must name the missing file, got: {}",
+            msg
+        );
+    }
+
+    // Issue AE: map-format workflows must take CLI-default sampling values
+    // (temperature/max_tokens) from the FIRST step in YAML document order,
+    // not the alphabetically-first key (serde_json Map = BTreeMap sorted
+    // keys unless preserve_order is enabled).
+    #[test]
+    fn given_map_format_steps_when_first_step_sampled_then_yaml_order_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        let yaml = r#"
+workflow_id: map_order_workflow
+name: MapOrder
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  steps:
+    z_first:
+      prompt: "first in document"
+      model_overrides:
+        temperature: 0.2
+        max_tokens: 512
+    a_second:
+      prompt: "second in document"
+      model_overrides:
+        temperature: 0.9
+        max_tokens: 2048
+"#;
+        std::fs::write(&yaml_path, yaml).unwrap();
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let ctx = match runner.load_workflow_config() {
+            Ok(Some(ctx)) => ctx,
+            Ok(None) => panic!("workflow with valid steps must load a config"),
+            Err(e) => panic!("valid map-format workflow must parse, got: {}", e),
+        };
+        assert_eq!(
+            ctx.temperature, 0.2,
+            "temperature must come from z_first (YAML-first), got {} (alphabetical pick?)",
+            ctx.temperature
+        );
+        assert_eq!(
+            ctx.max_tokens, 512,
+            "max_tokens must come from z_first (YAML-first), got {} (alphabetical pick?)",
+            ctx.max_tokens
+        );
+    }
+
+    // Issue Z: schema documents conditional dependencies
+    // (`requires: [{step: X, condition: "result.field == true"}]`,
+    // docs/schema/unified-workflow-schema.yml:411-414) but the engine
+    // previously dropped `condition:` at parse time and treated mere output
+    // presence as satisfaction — conditional deps silently unconditional.
+    #[test]
+    fn given_conditional_requirement_when_steps_loaded_then_condition_preserved() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        let yaml = r#"
+workflow_id: cond_dep_workflow
+name: CondDep
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  steps:
+    upstream:
+      prompt: "produce result"
+    downstream:
+      prompt: "consume result"
+      requires:
+        - step: upstream
+          condition: "result.ready == true"
+"#;
+        std::fs::write(&yaml_path, yaml).unwrap();
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let steps = runner.load_workflow_steps().unwrap().unwrap();
+        let downstream = steps.iter().find(|s| s.step_id == "downstream").unwrap();
+        assert_eq!(
+            downstream.require_conditions.get("upstream").map(|c| c.as_str()),
+            Some("result.ready == true"),
+            "conditional dependency must be preserved for evaluation"
+        );
+    }
+
+    // Issue AC: schema declares per-step `retry.max_attempts`
+    // (step.rs StepRetryConfig; unified-workflow-schema.yml:273-276) but the
+    // benchmark path never consulted it — global inference_max_attempts
+    // silently applied to every step regardless of per-step config.
+    #[test]
+    fn given_step_retry_config_when_steps_loaded_then_max_attempts_parsed() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        let yaml = r#"
+workflow_id: retry_workflow
+name: Retry
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  steps:
+    fragile_step:
+      prompt: "try hard"
+      retry:
+        max_attempts: 1
+    normal_step:
+      prompt: "default attempts"
+"#;
+        std::fs::write(&yaml_path, yaml).unwrap();
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let steps = runner.load_workflow_steps().unwrap().unwrap();
+        let fragile = steps.iter().find(|s| s.step_id == "fragile_step").unwrap();
+        let normal = steps.iter().find(|s| s.step_id == "normal_step").unwrap();
+        assert_eq!(fragile.retry_max_attempts, Some(1), "per-step retry.max_attempts must be parsed");
+        assert_eq!(normal.retry_max_attempts, None, "steps without retry config keep global default");
+    }
+
+    #[test]
+    fn given_step_retry_override_when_effective_attempts_computed_then_step_wins() {
+        assert_eq!(
+            BenchmarkRunner::effective_max_attempts(3, Some(1)),
+            1,
+            "step-level retry.max_attempts overrides global"
+        );
+        assert_eq!(
+            BenchmarkRunner::effective_max_attempts(3, Some(7)),
+            7,
+            "step-level override may exceed global"
+        );
+        assert_eq!(
+            BenchmarkRunner::effective_max_attempts(3, None),
+            3,
+            "no step config → global applies"
+        );
+        assert_eq!(
+            BenchmarkRunner::effective_max_attempts(3, Some(0)),
+            1,
+            "zero attempts clamped to 1 (never zero-shot)"
+        );
+    }
+
+    // LOW parking-lot fix: an array-format step missing its `step:` name key
+    // used to vanish silently via filter_map — a typo dropped a whole step
+    // from the workflow with no signal.
+    #[test]
+    fn given_array_step_missing_name_when_steps_loaded_then_hard_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        let yaml = r#"
+workflow_id: keyless_workflow
+name: Keyless
+version: "2.0.0"
+schema_version: "2.0.0"
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+models:
+  primary:
+    host:
+      type: llama_cpp_with_vulkan
+agentic_workflow:
+  steps:
+    - step: named_step
+      prompt: "fine"
+    - prompt: "i have no step key"
+"#;
+        std::fs::write(&yaml_path, yaml).unwrap();
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        match runner.load_workflow_steps() {
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(
+                    msg.contains("step 2") && msg.contains("step") && msg.to_lowercase().contains("missing"),
+                    "error must name the offending entry, got: {}",
+                    msg
+                );
+            }
+            Ok(steps) => panic!(
+                "keyless array step must hard-error, got Ok with {} steps",
+                steps.map(|s| s.len()).unwrap_or(0)
+            ),
+        }
+    }
+
+    // LOW parking-lot fix: a cycle in depends_on used to drop the cyclic
+    // steps silently (warn only) — the workflow ran incomplete.
+    // Issue N residual: engine resolution tolerates name drift, but raw API
+    // calls (e.g. shell-hook curl to /v1/models/load) need the EXACT server
+    // filename — so every fuzzy-layer hit must tell the user the drift.
+    #[test]
+    fn given_fuzzy_model_resolution_when_drift_hint_computed_then_names_drift() {
+        let some = BenchmarkRunner::model_name_drift_hint(
+            "Qwen3.5-9B",
+            "Qwen3-5-9B-Q4_K_M.gguf",
+        );
+        assert!(some.is_some(), "fuzzy match must yield a drift hint");
+        let hint = some.unwrap();
+        assert!(hint.contains("Qwen3.5-9B") && hint.contains("Qwen3-5-9B-Q4_K_M.gguf"));
+
+        assert_eq!(
+            BenchmarkRunner::model_name_drift_hint("m.gguf", "m.gguf"),
+            None,
+            "exact match needs no hint"
+        );
+        assert_eq!(
+            BenchmarkRunner::model_name_drift_hint("m", "m.gguf"),
+            None,
+            "optional-.gguf suffix match counts as exact"
+        );
+    }
+
+    // Issue Y: a watchdog kill mid-run previously lost ALL completed step
+    // outputs (REVIEW-CYCLES.md OC-4 — "total loss per kill"). Minimal
+    // checkpoint: each completed step appends {step_id, output} to
+    // checkpoint.jsonl; --resume reloads it and skips completed steps.
+    #[test]
+    fn given_checkpoint_file_when_loaded_then_returns_last_outputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("checkpoint.jsonl");
+        std::fs::write(
+            &path,
+            "{\"step_id\":\"a\",\"output\":\"first\"}\nnot json at all\n{\"step_id\":\"a\",\"output\":\"second\"}\n{\"step_id\":\"b\",\"output\":\"done\"}\n",
+        )
+        .unwrap();
+        let map = BenchmarkRunner::load_checkpoint(&path);
+        assert_eq!(map.get("a").map(|s| s.as_str()), Some("second"), "duplicate step ids: last entry must win");
+        assert_eq!(map.get("b").map(|s| s.as_str()), Some("done"));
+        assert_eq!(map.len(), 2, "malformed lines are skipped, not fatal");
+
+        let missing = dir.path().join("no-such-file.jsonl");
+        assert!(BenchmarkRunner::load_checkpoint(&missing).is_empty(), "missing checkpoint = empty map, not error");
+    }
+
+    #[test]
+    fn given_step_output_when_recorded_then_checkpoint_appended() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = make_test_config();
+        config.output_dir = Some(dir.path().to_str().unwrap().to_string());
+        let runner = BenchmarkRunner::new(config);
+        let mut outputs = std::collections::HashMap::new();
+
+        runner.record_step_output(&mut outputs, "gen_one", "hello");
+        runner.record_step_output(&mut outputs, "gen_two", "world");
+
+        assert_eq!(outputs.get("gen_one").map(|s| s.as_str()), Some("hello"));
+        let checkpoint = dir.path().join("checkpoint.jsonl");
+        let content = std::fs::read_to_string(&checkpoint)
+            .expect("checkpoint file must exist after recording");
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 2, "one JSON line per recorded step");
+        assert!(lines[0].contains("gen_one") && lines[0].contains("hello"));
+        assert!(lines[1].contains("gen_two") && lines[1].contains("world"));
+    }
+
+    #[test]
+    fn given_cycle_when_cycle_error_computed_then_some() {
+        let msg = BenchmarkRunner::cycle_error(3, 5)
+            .expect("cycle (steps dropped by topo sort) must produce an error");
+        assert!(msg.contains("cycle") && msg.contains("2"), "message must name cycle + dropped count: {}", msg);
+        assert!(BenchmarkRunner::cycle_error(5, 5).is_none(), "full sort = no error");
+        assert!(BenchmarkRunner::cycle_error(0, 0).is_none(), "empty = no error");
+    }
+
+    #[test]
+    fn given_upstream_json_output_when_require_condition_evaluated_then_reflects_fields() {
+        // satisfied: output JSON carries the field the condition needs
+        assert_eq!(
+            BenchmarkRunner::eval_require_condition(r#"{"ready": true}"#, "result.ready == true").unwrap(),
+            true
+        );
+        // unsatisfied: field false → dependency NOT satisfied
+        assert_eq!(
+            BenchmarkRunner::eval_require_condition(r#"{"ready": false}"#, "result.ready == true").unwrap(),
+            false
+        );
+        // non-JSON output falls back to raw string under `result.output`
+        assert_eq!(
+            BenchmarkRunner::eval_require_condition("plain text", "result.output == \"plain text\"").unwrap(),
+            true
+        );
+    }
+
+    // Issue T: --workflow provided but steps unparseable or empty must hard-error
+    // at the steps-loading seam, not silently fall back to the discovery
+    // benchmark. Original evidence: missing/garbage steps shape previously
+    // returned None/empty and run() fell into model discovery
+    // (07-TRACKING.md:331-332 — flan-t5 loaded by accident).
+    #[test]
+    fn given_empty_steps_array_when_steps_loaded_then_hard_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        std::fs::write(&yaml_path, "agentic_workflow:\n  steps: []\n").unwrap();
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let msg = match runner.load_workflow_steps() {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("empty steps must hard-error, not silently fall back to discovery"),
+        };
+        assert!(
+            msg.contains("refusing to fall back"),
+            "error must refuse discovery fallback, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn given_scalar_steps_when_steps_loaded_then_hard_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        std::fs::write(&yaml_path, "agentic_workflow:\n  steps: 42\n").unwrap();
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let msg = match runner.load_workflow_steps() {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("scalar steps must hard-error, not silently fall back to discovery"),
+        };
+        assert!(
+            msg.contains("refusing to fall back"),
+            "error must refuse discovery fallback, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn given_unreadable_workflow_path_when_steps_loaded_then_hard_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = BenchmarkConfig {
+            workflow_file: Some(dir.path().to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let msg = match runner.load_workflow_steps() {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("unreadable workflow path must hard-error, not silently fall back to discovery"),
+        };
+        assert!(
+            msg.contains("refusing to fall back"),
+            "error must refuse discovery fallback, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn given_no_agentic_workflow_section_when_steps_loaded_then_hard_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        std::fs::write(&yaml_path, "some_other_key: value\n").unwrap();
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let msg = match runner.load_workflow_steps() {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("missing agentic_workflow must hard-error, not silently fall back to discovery"),
+        };
+        assert!(
+            msg.contains("refusing to fall back"),
+            "error must refuse discovery fallback, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn given_invalid_yaml_when_steps_loaded_then_hard_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml_path = dir.path().join("workflow.yml");
+        std::fs::write(&yaml_path, ": : :not yaml [\n").unwrap();
+        let config = BenchmarkConfig {
+            workflow_file: Some(yaml_path.to_str().unwrap().to_string()),
+            ..make_test_config()
+        };
+        let runner = BenchmarkRunner::new(config);
+        let msg = match runner.load_workflow_steps() {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("invalid YAML must hard-error, not silently fall back to discovery"),
+        };
+        assert!(
+            msg.contains("refusing to fall back"),
+            "error must refuse discovery fallback, got: {}",
+            msg
+        );
     }
 
     #[test]
@@ -5157,7 +6617,7 @@ agentic_workflow:
             ..make_test_config()
         };
         let runner = BenchmarkRunner::new(config);
-        let steps = runner.load_workflow_steps();
+        let steps = runner.load_workflow_steps().unwrap();
 
         assert!(steps.is_some());
         let steps = steps.unwrap();
@@ -5341,7 +6801,7 @@ agentic_workflow:
             ..make_test_config()
         };
         let runner = BenchmarkRunner::new(config);
-        let steps = runner.load_workflow_steps();
+        let steps = runner.load_workflow_steps().unwrap();
 
         assert!(steps.is_some());
         let steps = steps.unwrap();
@@ -5381,7 +6841,7 @@ agentic_workflow:
             ..make_test_config()
         };
         let runner = BenchmarkRunner::new(config);
-        let steps = runner.load_workflow_steps();
+        let steps = runner.load_workflow_steps().unwrap();
 
         assert!(steps.is_some());
         let steps = steps.unwrap();
@@ -5419,7 +6879,7 @@ agentic_workflow:
             ..make_test_config()
         };
         let runner = BenchmarkRunner::new(config);
-        let steps = runner.load_workflow_steps();
+        let steps = runner.load_workflow_steps().unwrap();
 
         // Should still parse for MVP
         assert!(steps.is_some());
@@ -5461,7 +6921,7 @@ agentic_workflow:
             ..make_test_config()
         };
         let runner = BenchmarkRunner::new(config);
-        let steps = runner.load_workflow_steps();
+        let steps = runner.load_workflow_steps().unwrap();
 
         assert!(steps.is_some());
         let steps = steps.unwrap();
@@ -5511,7 +6971,7 @@ agentic_workflow:
         let runner = BenchmarkRunner::new(config);
 
         // Parse steps
-        let steps = runner.load_workflow_steps();
+        let steps = runner.load_workflow_steps().unwrap();
         assert!(steps.is_some());
         let steps = steps.unwrap();
         assert_eq!(steps.len(), 1);
@@ -5582,7 +7042,7 @@ agentic_workflow:
             ..make_test_config()
         };
         let runner = BenchmarkRunner::new(config);
-        let steps = runner.load_workflow_steps();
+        let steps = runner.load_workflow_steps().unwrap();
 
         assert!(steps.is_some());
         let steps = steps.unwrap();
@@ -5611,7 +7071,9 @@ agentic_workflow:
             step_name: "test".to_string(),
             step_id: "test_step".to_string(),
             requires: vec![],
-            when: Some(serde_json::json!({
+            require_conditions: Default::default(),
+            retry_max_attempts: None,
+                    when: Some(serde_json::json!({
                 "before_step_starts": [
                     {
                         "iterate_values": {
@@ -5652,7 +7114,9 @@ agentic_workflow:
             step_name: "test".to_string(),
             step_id: "test_step".to_string(),
             requires: vec![],
-            when: None,
+            require_conditions: Default::default(),
+            retry_max_attempts: None,
+                    when: None,
             prompt: None,
             generative_entity: None,
             model_overrides: None,
@@ -5672,7 +7136,9 @@ agentic_workflow:
             step_name: "test".to_string(),
             step_id: "test_step".to_string(),
             requires: vec![],
-            when: Some(serde_json::json!({
+            require_conditions: Default::default(),
+            retry_max_attempts: None,
+                    when: Some(serde_json::json!({
                 "after_step_succeeds": [{"log": {}}]
             })),
             prompt: None,
@@ -5694,7 +7160,9 @@ agentic_workflow:
             step_name: "test".to_string(),
             step_id: "test_step".to_string(),
             requires: vec![],
-            when: Some(serde_json::json!({
+            require_conditions: Default::default(),
+            retry_max_attempts: None,
+                    when: Some(serde_json::json!({
                 "before_step_starts": [
                     {"log": {}}
                 ]
@@ -5718,7 +7186,9 @@ agentic_workflow:
             step_name: "test".to_string(),
             step_id: "test_step".to_string(),
             requires: vec![],
-            when: Some(serde_json::json!({
+            require_conditions: Default::default(),
+            retry_max_attempts: None,
+                    when: Some(serde_json::json!({
                 "before_step_starts": [
                     {
                         "iterate_values": {
@@ -5759,7 +7229,9 @@ agentic_workflow:
             step_name: "test".to_string(),
             step_id: "test_step".to_string(),
             requires: vec![],
-            when: Some(serde_json::json!({
+            require_conditions: Default::default(),
+            retry_max_attempts: None,
+                    when: Some(serde_json::json!({
                 "before_step_starts": [
                     {
                         "iterate_values": {
@@ -5875,7 +7347,7 @@ agentic_workflow:
             ..make_test_config()
         };
         let runner = BenchmarkRunner::new(config);
-        let steps = runner.load_workflow_steps();
+        let steps = runner.load_workflow_steps().unwrap();
 
         assert!(steps.is_some(), "Expected steps to be loaded from YAML");
         let steps = steps.unwrap();
@@ -5950,7 +7422,7 @@ agentic_workflow:
             ..make_test_config()
         };
         let runner = BenchmarkRunner::new(config);
-        let steps = runner.load_workflow_steps();
+        let steps = runner.load_workflow_steps().unwrap();
 
         assert!(steps.is_some());
         let steps = steps.unwrap();
@@ -6022,7 +7494,7 @@ agentic_workflow:
             ..make_test_config()
         };
         let runner = BenchmarkRunner::new(config);
-        let steps = runner.load_workflow_steps();
+        let steps = runner.load_workflow_steps().unwrap();
 
         assert!(steps.is_some());
         let steps = steps.unwrap();
@@ -6081,7 +7553,7 @@ agentic_workflow:
             ..make_test_config()
         };
         let runner = BenchmarkRunner::new(config);
-        let steps = runner.load_workflow_steps();
+        let steps = runner.load_workflow_steps().unwrap();
 
         assert!(steps.is_some());
         let steps = steps.unwrap();
@@ -6134,7 +7606,7 @@ agentic_workflow:
             ..make_test_config()
         };
         let runner = BenchmarkRunner::new(config);
-        let steps = runner.load_workflow_steps();
+        let steps = runner.load_workflow_steps().unwrap();
 
         assert!(steps.is_some());
         let steps = steps.unwrap();
@@ -6200,7 +7672,7 @@ agentic_workflow:
             ..make_test_config()
         };
         let runner = BenchmarkRunner::new(config);
-        let steps = runner.load_workflow_steps();
+        let steps = runner.load_workflow_steps().unwrap();
 
         assert!(steps.is_some());
         let steps = steps.unwrap();
@@ -6255,7 +7727,7 @@ agentic_workflow:
             ..make_test_config()
         };
         let runner = BenchmarkRunner::new(config);
-        let steps = runner.load_workflow_steps();
+        let steps = runner.load_workflow_steps().unwrap();
 
         assert!(steps.is_some());
         let steps = steps.unwrap();
@@ -6319,7 +7791,7 @@ agentic_workflow:
             ..make_test_config()
         };
         let runner = BenchmarkRunner::new(config);
-        let steps = runner.load_workflow_steps();
+        let steps = runner.load_workflow_steps().unwrap();
 
         assert!(steps.is_some());
         let steps = steps.unwrap();

@@ -396,7 +396,20 @@ mod expr {
         }
 
         pub fn parse(&mut self) -> Result<Expr, GwtError> {
-            self.parse_or_expr()
+            let expr = self.parse_or_expr()?;
+            if self.pos < self.tokens.len() {
+                // Trailing unconsumed tokens = malformed expression (e.g.
+                // "invalid condition syntax" parsed only the first word).
+                // Historically ignored, which quietly evaluated as false.
+                return Err(GwtError::ParserError {
+                    pos: self.pos,
+                    message: format!(
+                        "Unexpected trailing tokens: {:?}",
+                        &self.tokens[self.pos..]
+                    ),
+                });
+            }
+            Ok(expr)
         }
 
         fn parse_or_expr(&mut self) -> Result<Expr, GwtError> {

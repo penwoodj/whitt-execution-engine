@@ -17,8 +17,11 @@ docker-compose -f docker/docker-compose.yml up -d
 # Chat interactively
 ./target/release/whitt chat --model ministral-3b
 
-# Run a workflow
-./target/release/whitt workflow --workflow workflows/example.yml
+# Run a workflow (the workflow file is a positional argument)
+./target/release/whitt workflow workflows/example.yml
+
+# Run a benchmark driven by a workflow YAML (--workflow is a benchmark flag)
+./target/release/whitt benchmark --workflow docs/benchmarks/workflows/live-test-ministral-3b.yml
 ```
 
 ### Prerequisites
