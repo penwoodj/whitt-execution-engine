@@ -1,0 +1,26 @@
+# chunk-12 summary (prompts 0551-0600, 08-08 → 08-09)
+
+## 1bcoder/local-model coding loop (continues)
+- "Continue and get it working" (0552); AGENTS.md stack-context injections ×many (Vite 8 + React 19 + TS strict + Storybook 10.5.7 + styled-components)
+- "It is 3.5 not 3-5" — exact model naming (Qwen3.5-9B) (0558)
+- Status for each [subagent]? (0559); give me command to run ONLY if needed — if you can't clean up, tell me + finish (0560)
+- Pause/checkpoint/resume cycles (0561-0563)
+- Example React JS app, 3 pages + dynamic functionality, then give me the command [to run] (0567)
+- Reverse-engineer 1bcoder --scriptapply script parsing (compiled .so; Bun-based rumor vs pipx Python reality) (0570-0572, 0577-0578)
+- Scriptapply not found triage (0572); /ctx option + /ctx load "file not found" bug (0590, 0593); /ctx list pipe (0595)
+- "You run and iterate on the results of each of these until you have it working" (0596)
+- "How did it do? look at resulting files and report back with logs added to context" (0575)
+- Restore backups [after bad run]; how to configure 1bcoder + model to get this working (0576)
+- Model didn't know to read files it needed; prompts+thinking+response [quality] (0591)
+- "This model is better with thinking so increase the load params and accept slower execution time down to 5 tps" (0600) — explicit speed/quality tradeoff acceptance
+
+## vision-graph-ui design iteration
+- ChatGPT-style node layout redesign (0598)
+- Monokai dark palette NO white; font color/contrast rules dark theme (0585-0586)
+- Voice recording flow fix (recording [UX]) (0587)
+- Graph page STILL white background; prompt textarea "so wrong" — pasted model chat as evidence; NodePromptArea Style 1 rewrite (0602-0604)
+- Start more zoomed out; details panel shouldn't show until [zoomed in / through flow] (0606)
+- Node = circle w/ title + state tag → hover expands to square full version; same box minimized→expanding (0612-0613)
+- Graph sim in Storybook 2: each project shows different example graph (0615)
+- Computer crashed → recover then continue (0607)
+- Move everything outside hormozi to ~/code/working-1bcoder (home path, NOT in project) (0608-0611)
