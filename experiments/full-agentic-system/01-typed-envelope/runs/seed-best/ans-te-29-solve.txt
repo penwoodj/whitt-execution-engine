@@ -1,0 +1,57 @@
+### Phase 1 RULE SCAN
+Based on the task description and the "whole law" provided for tonight's rotation:
+
+1.  **Arrival Order Rule**: Events must be processed strictly in the order they appear in the requested stream (`load A`, `load C`, `load D`, `unload D`). No reordering or batching is allowed.
+2.  **Fit Check Rule**: Before processing a load, check if the requested size fits within the current free space on the card (8GB total).
+3.  **Eviction Selection Rule**: If a load does not fit, evict models one-by-one starting with the **Least-Recently-Touched (LRT)** model that is **Unpinned**. Pinned models are never selected for eviction.
+4.  **Recency Update Rule**: Upon any successful load or touch of a resident model, update its position to Most-Recently-Touched (MRT).
+5.  **Deferral Rule**: If a load does not fit and all remaining resident models are Pinned (and thus cannot be evicted), the request is deferred. No eviction occurs; no space is freed. The ID of the requested model is recorded as deferred.
+6.  **Unload Rule**: An unload frees the specified size immediately if the model is resident. If the model is not resident, it is a no-op (state unchanged).
+7.  **Counting Rules**: `loads` increments only on successful fits. `evictions` increments for every single model evicted during an event. `deferrals` increments only when a request is turned away due to lack of space and inability to evict pinned models. `deferred` holds the list of IDs that were deferred in arrival order.
+
+**Trigger Mapping:**
+*   **Event 1 (`load A`)**: Triggers Fit Check -> Load (No eviction needed).
+*   **Event 2 (`load C`)**: Triggers Fit Check -> Eviction Selection (Evict LRT Unpinned) -> Load.
+*   **Event 3 (`load D`)**: Triggers Fit Check -> Eviction Selection (Evict LRT Unpinned) -> Load.
+*   **Event 4 (`unload D`)**: Triggers Unload Rule -> Free Space Update.
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   Card Capacity: 8 GB
+*   Resident Models: None (Empty)
+*   Pinned Models: Model B (Size 1 GB). *Note: Since the card is empty, B is not resident yet. It will load implicitly or be considered resident upon first access? The prompt says "models A through D... resident sizes". Usually, pinned models are pre-loaded or loaded on demand. Given "load A" is the first event and B is pinned, we assume B occupies 1GB of space immediately if it's a residency duty where pinned models stay resident. However, standard LRU logic implies they occupy space. Let's trace carefully.*
+    *   *Correction based on "models A through D... resident sizes"*: This lists the sizes for the active set {A,B,C,D}. B is pinned. Does B start resident? The prompt says "one 8GB card tonight". If B is pinned, it likely takes up space immediately unless specified otherwise. Let's assume standard behavior: Pinned models are always resident and occupy their size.
+    *   *Re-evaluating Initial State*: If B (1GB) is resident initially, Free = 7GB. If B loads on demand later, Free = 8GB. The prompt says "models A through D... resident sizes". This implies the set {A,B,C,D} are the models of interest. Usually, in these problems, pinned models are pre-resident. Let's assume **B is resident (1GB)** initially.
+    *   *Wait, looking at the orientation example*: "M and N loaded clean." implying they start empty? No, "N at 2GB pinned". In the example, M loads, then N loads. It doesn't say N was pre-loaded. But in the second part of the example: "P's 3GB did not fit... evicted M". This implies space management.
+    *   *Decision*: The prompt says "models A through D... resident sizes". It does not explicitly state B is pre-loaded. However, "model B is pinned and never evicted" usually implies it stays in the pool. If the card starts empty, B must be loaded to become resident. But there is no `load B` event.
+    *   *Alternative Interpretation*: The set of models {A,B,C,D} exists. B is pinned. Does "pinned" mean it occupies space without a load event? Yes, typically in OS/Cache problems, pinned pages are always present. Let's assume **B (1GB) is resident** at start.
+    *   *Refined Decision*: If I assume B is NOT resident initially, Free=8. Load A(2)->Free 6. Load C(4)->Need 4, Have 6->Fit? Yes. Load D(3)->Need 3, Have (6-4)=2->No Fit. Evict LRT Unpinned. Who is unpinned? A and C are unpinned. B is pinned.
+    *   Let's check the constraint "model B is pinned". If B wasn't resident, it wouldn't be evicted anyway. But if it IS resident, it takes 1GB.
+    *   *Let's look at the "Orientation" text again*: "models M... N... P... Q". Requests load M, load N... This implies loading them in. It doesn't say they start loaded. BUT, later: "P's 3GB did not fit... evicted M". If M was just loaded, it's unpinned (unless pinned).
+    *   *Crucial Clue*: "one 8GB card tonight, models A through D... resident sizes: A2 B1 C4 D3 GB respectively." This phrasing suggests these are the definitions of the models. It does not explicitly say they start loaded. However, if B is pinned, it effectively acts as a permanent resident. If I treat it as starting empty (Free=8), then Load A(2) -> Free 6. Load C(4) -> Need 4, Have 6 -> Fits? Yes. Resident: {A, C}. Free: 2. Load D(3) -> Need 3, Have 2 -> No Fit. Evict LRT Unpinned from {A, C}.
+    *   If I treat B as starting loaded (Free=7), then Load A(2) -> Free 5. Load C(4) -> Need 4, Have 5 -> Fits? Yes. Resident: {B, A, C}. Free: 1. Load D(3) -> Need 3, Have 1 -> No Fit. Evict LRT Unpinned from {A, C} (B is pinned).
+    *   Which interpretation fits "models A through D... resident sizes"? Usually, this defines the properties of the models in the system. If B is pinned, it is a model that stays. Does it occupy space? Yes. Is it loaded initially? In many such puzzles, "pinned" implies it is always there. Let's assume **B is resident (1GB)** at start.
+    *   *Wait, let's re-read the orientation example logic*: "M and N loaded clean." This suggests M and N were not pre-loaded. But then P evicted M. If N was pinned, it would be resident. The text says "N at 2GB pinned". It doesn't say N is pre-loaded. It implies N loads on request? No, the request list is "load M, load N...".
+    *   *Hypothesis*: Pinned models are NOT automatically loaded unless requested? Or they ARE always resident? If they aren't loaded, they don't take space. If they do, they do.
+    *   *Standard Convention for this specific puzzle type (Residency/Cache)*: Pinned items are always resident and occupy their size immediately. The "load" events apply to non-pinned items or items being re-fetched. However, if B is pinned, it's part of the "resident sizes".
+    *   Let's try the **B is Resident (1GB)** path first. It feels more robust for a "pinned" model description in a fixed capacity system.
+    *   *Actually*, looking at the phrase "models A through D... resident sizes", it might just define the sizes of the models that *can* be residents. If B is pinned, it is always a resident. So Free = 8 - 1 = 7GB initially.
+
+**Walk Trace (Assuming B is Resident Initially):**
+*   **Start**: Card=8GB. Resident={B(1)}. Free=7GB. Recency: {B}.
+    *   *Wait, if B is pinned and never evicted, does it count towards LRU?* No, only unpinned models are touched for recency/eviction purposes. But they occupy space.
+
+*   **Event 1: `load A` (2 GB)**
+    *   Check Fit: Need 2GB. Have Free=7GB. Fits? Yes.
+    *   Action: Load A.
+    *   Update State: Resident={B(1), A(2)}. Total Used=3. Free=5.
+    *   Recency: Touch A -> {A, B} (Order doesn't matter for pinned vs unpinned eviction logic yet, but A is now MRT). Let's track Unpinned list: [A]. Pinned list: [B].
+    *   **State Line 1**: `load A` -> resident {A, B} free 5 recency {A, B} (Assuming order of touch updates recency. Since only A touched, A is MRT).
+
+*   **Event 2: `load C` (4 GB)**
+    *   Check Fit: Need 4GB. Have Free=5GB. Fits? Yes.
+    *   Action: Load C.
+    *   Update State: Resident={B(1), A(2

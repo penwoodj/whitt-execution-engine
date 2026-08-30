@@ -1,0 +1,100 @@
+**Phase 1 RULE SCAN**
+1. `arrival`: A new request arrives; state updates to reflect the pending ask against current pool.
+2. `grant_full`: If pool >= ask, grant full amount; pool decreases by ask.
+3. `grant_partial`: If pool < ask (and pool > 0), grant partial amount (pool); pool becomes 0. Request is still "granted".
+4. `deny_empty`: If pool == 0 upon arrival, request is denied and added to `denied` list; no tokens transferred.
+5. `expiry_trigger`: Upon completion of the trigger request (the one named in the expiry rule), an expired grant returns half its **granted** amount (rounded down) immediately before the next event processing begins.
+
+**Phase 2 LEDGER WALK**
+*Initial State:* Pool = 50, Granted = 0, Denied = []
+
+1. **Event r1 arrives:** Ask = 4.
+   - Rule: `grant_full` (50 >= 4).
+   - Action: Grant 4. Pool becomes 46.
+   - State: Pool=46, Granted=4.
+
+2. **Event r2 arrives:** Ask = 6.
+   - Rule: `grant_full` (46 >= 6).
+   - Action: Grant 6. Pool becomes 40.
+   - State: Pool=40, Granted=10.
+
+3. **Event r3 arrives:** Ask = 9.
+   - Rule: `grant_full` (40 >= 9).
+   - Action: Grant 9. Pool becomes 31.
+   - State: Pool=31, Granted=19.
+
+4. **Event r4 arrives:** Ask = 13.
+   - Rule: `grant_full` (31 >= 13).
+   - Action: Grant 13. Pool becomes 18.
+   - State: Pool=18, Granted=32.
+
+5. **Event r5 arrives:** Ask = 15.
+   - Rule: `grant_full` (18 >= 15).
+   - Action: Grant 15. Pool becomes 3.
+   - State: Pool=3, Granted=47.
+
+*Note on Expiry:* The prompt states "the grant for r1 expires after request r2 completes". However, the walk above shows that requests r1 through r5 were all fully granted sequentially without any intervening denials or partials that would trigger an expiry return *during* this specific sequence based on the standard flow described. Let's re-read the specific constraint: "the grant for r1 expires after request r2 completes".
+- Request r2 completed at step 2.
+- At this point, we must apply the expiry rule for r1.
+- Expiry Rule: Return half of what was **granted** to r1 (which is 4), rounded down. $floor(4/2) = 2$.
+- This return happens *before* processing the next request (r3).
+
+Let's re-walk with the explicit expiry trigger inserted at step 2 completion.
+
+**Corrected Phase 2 LEDGER WALK**
+
+1. **Event r1 arrives:** Ask = 4.
+   - Rule: `grant_full`. Pool (50) >= 4.
+   - Action: Grant 4. Pool -> 46.
+   - State: Pool=46, Granted=4.
+
+2. **Event r2 arrives:** Ask = 6.
+   - Rule: `grant_full`. Pool (46) >= 6.
+   - Action: Grant 6. Pool -> 40.
+   - State: Pool=40, Granted=10.
+   - *Trigger Check:* Request r2 completed. Expiry for r1 triggers.
+   - Rule: `expiry_trigger`. Return half of granted amount for r1 ($floor(4/2)=2$).
+   - Action: Add 2 to pool. Pool -> 42.
+   - State: Pool=42, Granted=10 (r1 is effectively closed/expired).
+
+3. **Event r3 arrives:** Ask = 9.
+   - Rule: `grant_full`. Pool (42) >= 9.
+   - Action: Grant 9. Pool -> 33.
+   - State: Pool=33, Granted=19.
+
+4. **Event r4 arrives:** Ask = 13.
+   - Rule: `grant_full`. Pool (33) >= 13.
+   - Action: Grant 13. Pool -> 20.
+   - State: Pool=20, Granted=32.
+
+5. **Event r5 arrives:** Ask = 15.
+   - Rule: `grant_full`. Pool (20) >= 15.
+   - Action: Grant 15. Pool -> 5.
+   - State: Pool=5, Granted=47.
+
+*Final Totals:*
+- Total Granted Units: $4 + 6 + 9 + 13 + 15 = 47$. (Note: The expiry return is a refund to the pool, not a new grant unit for the application logic, but it reduces the net depletion).
+- Wait, let's look at the definition of `granted_units`. Usually, this sums the successful grants. $4+6+9+13+15 = 47$.
+- Pool Left: Started 50. Minus total granted (47) plus expiry return (2). $50 - 47 + 2 = 5$.
+- Denied: Empty list.
+
+Let's double check the "orientation" story logic to ensure I'm not missing a hidden partial or denial condition.
+Orientation: Start 25. Ask 11 -> Grant 11 (Pool 14). Ask 7 -> Grant 7 (Pool 7). Expiry r1 (11) returns floor(11/2)=5. Pool becomes 12. Ask 13 -> Partial grant 12 (Pool 0). Total granted: 11+7+12 = 30.
+This matches the "orientation" description perfectly ("closed with 30 granted").
+
+Now applying to Tonight's numbers:
+Start 50.
+r1(4) -> Grant 4. Pool 46.
+r2(6) -> Grant 6. Pool 40. **Expiry r1 triggers.** Return floor(4/2)=2. Pool 42.
+r3(9) -> Grant 9. Pool 33.
+r4(13) -> Grant 13. Pool 20.
+r5(15) -> Grant 15. Pool 5.
+
+Total Granted Units = $4+6+9+13+15 = 47$.
+Pool Left = 5.
+Denied = [].
+
+**Final Answer JSON**
+```json
+{"granted_units": 47, "denied": [], "pool_left": 5}
+```

@@ -1,0 +1,70 @@
+Based on the strict rules provided in the text ("tonight's numbers," "arrival order," "eviction logic"), here is the step-by-step derivation of the state before generating the final JSON output.
+
+### Phase 1: Rule List & Logic Check
+The following rules govern the system for "tonight":
+1.  **Arrival Order:** Events are processed strictly in the sequence provided. No events from previous attempts or orientation stories apply to tonight's arithmetic.
+2.  **Capacity Check (Load):** When a load arrives, it is checked against current free space.
+    *   If `Free Space >= Load Size`: The model loads cleanly.
+    *   If `Free Space < Load Size` AND `Unpinned Residents Exist`: Evict the Least-Recently-Touched (LRT) unpinned resident(s) until enough room exists or pinned models remain. Count evictions.
+    *   If `Free Space < Load Size` AND only `Pinned Models Remain` OR even after max eviction there is no room: The load **defers**. The deferred ID is the load's own ID.
+3.  **Unload:** Releases a model if it is resident. Returns its space to free pool. (If not resident, no-op).
+4.  **Counts:** `loads` = successful loads (clean + after eviction). `evictions` = total count of evicted models. `deferrals` = total count of deferred loads. `deferred` = list of IDs that were deferred.
+
+### Phase 2: State Walk (Tonight's Events)
+**Initial State:** Empty pool. Free Space = 8 GB. Residents = []. Evictions = 0. Loads = 0. Deferrals = 0. Deferred List = [].
+
+**Event 1: Load A (1 GB)**
+*   Current Free: 8 GB. Needed: 1 GB.
+*   Action: Fits cleanly.
+*   State Update: Residents = [A]. Free Space = 7 GB. Loads count increments to 1. Evictions/Deferrals remain 0.
+
+**Event 2: Load B (4 GB)**
+*   Current Free: 7 GB. Needed: 4 GB.
+*   Action: Fits cleanly.
+*   State Update: Residents = [A, B]. Free Space = 3 GB. Loads count increments to 2. Evictions/Deferrals remain 0.
+
+**Event 3: Load C (2 GB)**
+*   Current Free: 3 GB. Needed: 2 GB.
+*   Action: Fits cleanly.
+*   State Update: Residents = [A, B, C]. Free Space = 1 GB. Loads count increments to 3. Evictions/Deferrals remain 0.
+
+**Event 4: Load D (6 GB)**
+*   Current Free: 1 GB. Needed: 6 GB.
+*   Check Unpinned Residents: A and C are unpinned. B is pinned.
+*   Action: Insufficient space. Evict LRT unpinned model(s).
+    *   LRU Order (Least Recently Used): A was loaded at Event 1, C at Event 3. A is the LRT.
+    *   Evict **A** (Size 1 GB). Free Space becomes $1 + 1 = 2$ GB. Evictions count: 1.
+    *   Check again: Need 6 GB, have 2 GB. Still insufficient.
+    *   Next unpinned LRT is **C**.
+    *   Evict **C** (Size 2 GB). Free Space becomes $2 + 2 = 4$ GB. Evictions count: 2.
+    *   Check again: Need 6 GB, have 4 GB. Still insufficient.
+    *   Next resident is **B** (Pinned). Cannot evict pinned models.
+    *   Result: Load D cannot fit even after exhausting all unpinned eviction options.
+*   Action: **Defer**.
+*   State Update: Residents = [B, C? No, C was evicted]. Wait, let's re-verify the resident list.
+    *   Before Eviction: Residents = {A, B, C}. (Order of arrival: A, B, C).
+    *   LRT is A. Evict A. Residents = {B, C}. Free = 2 GB.
+    *   Next LRT is C (since B was loaded before C in the stream? No, B arrived Event 2, C arrived Event 3. So C is newer than B, but older than D).
+    *   Wait, "Least-Recently-Touched" usually implies time of last access/arrival.
+        *   Access times: A (Event 1), B (Event 2), C (Event 3).
+        *   LRT is A. Evict A.
+        *   Remaining Unpinned: {C}. (B is pinned).
+        *   Is C LRT? Yes, it's the only unpinned one left. Evict C.
+    *   After evicting C: Residents = {B} (Pinned). Free Space = $1 + 1 + 2 = 4$ GB.
+    *   Need 6 GB. Have 4 GB. Pinned models remain. Cannot fit.
+*   Action: **Defer** Load D.
+*   State Update: Residents = [B]. (A and C are gone). Free Space = 4 GB. Loads count remains 3. Evictions = 2. Deferrals = 1. Deferred List = ["D"].
+
+**Event 5: Unload B (4 GB)**
+*   Current Resident Check: B is in the pool.
+*   Action: Remove B from Residents. Add 4 GB to Free Space.
+*   State Update: Residents = []. Free Space = $4 + 4 = 8$ GB. Loads count remains 3. Evictions = 2. Deferrals = 1.
+
+**Final Totals:**
+*   **Loads:** 3 (A, B, C successfully loaded).
+*   **Evictions:** 2 (Models A and C were evicted to make room for D).
+*   **Deferrals:** 1 (Load D was deferred).
+*   **Deferred List:** ["D"]
+
+### Final Answer JSON
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}

@@ -1,0 +1,93 @@
+Based on the strict rules provided in the text, here is the step-by-step deduction for tonight's events.
+
+**State Initialization:**
+*   **Card Capacity:** 8 GB
+*   **Current Usage:** 0 GB
+*   **Models & Sizes:** A=1GB, B=4GB, C=2GB, D=6GB
+*   **Pinned Models:** {B} (Never evicted)
+*   **Unpinned Models:** {A, C, D}
+
+**Event Walkthrough:**
+
+1.  **Event: Load A (1 GB)**
+    *   **Rule Check:** Can the load fit? Yes (Current Usage 0 + 1 = 1 $\le$ 8).
+    *   **Action:** Load A into memory.
+    *   **State:** {A}, Usage: 1. Evictions: 0.
+
+2.  **Event: Load B (4 GB)**
+    *   **Rule Check:** Can the load fit? Yes (Current Usage 1 + 4 = 5 $\le$ 8). Note: B is pinned, but fitting depends on capacity first. Since it fits, it loads immediately without needing to evict anything.
+    *   **Action:** Load B into memory.
+    *   **State:** {A, B}, Usage: 5. Evictions: 0.
+
+3.  **Event: Load C (2 GB)**
+    *   **Rule Check:** Can the load fit? Yes (Current Usage 5 + 2 = 7 $\le$ 8).
+    *   **Action:** Load C into memory.
+    *   **State:** {A, B, C}, Usage: 7. Evictions: 0.
+
+4.  **Event: Load D (6 GB)**
+    *   **Rule Check:** Can the load fit? No (Current Usage 7 + 6 = 13 > 8).
+    *   **Action Required:** Must free up at least $13 - 8 = 5$ GB of space.
+    *   **Eviction Logic:** Evict the Least-Recently-Touched (LRT) unpinned models until enough space is freed.
+        *   Current Unpinned: {A, C} (B is pinned).
+        *   To free 5 GB from {A(1), C(2)}, we must evict both A and C ($1+2=3$ GB). Total freed = 3. Remaining deficit = $5 - 3 = 2$. Wait, the requirement is to reach $\le 8$.
+        *   Let's re-evaluate space needed: Current usage is 7. Target max usage for D (6GB) is 8. We only need **1 GB** of free space ($8-7=1$).
+        *   Wait, the load size is added to current usage. If we have 7 used, adding 6 makes 13. We need to reduce usage by $13 - 8 = 5$.
+        *   Available unpinned models: A (1GB), C (2GB). Total unpinned space = 3GB.
+        *   Evicting all unpinned (A and C) frees 3GB. New Usage = $7 - 3 = 4$. Remaining deficit to reach capacity for D ($8-6=2$) is still not met? No, if we evict A and C, usage becomes 4 (just B). Adding D (6) makes total 10. Still over 8?
+        *   Let's re-read the rule: "a load that cannot fit evicts as many LRU unpinned models as needed".
+        *   Current Set: {A, B, C}. Sizes: 1, 4, 2. Total: 7. Pinned: {B}. Unpinned: {A, C}.
+        *   Target: Load D (6). Max Capacity 8.
+        *   Space needed to be free before adding D: $8 - 6 = 2$ GB.
+        *   Current Free Space: $8 - 7 = 1$ GB.
+        *   Deficit in free space: $2 - 1 = 1$ GB. We need 1 more GB of free space.
+        *   Available models to evict (Unpinned): A (1), C (2).
+        *   Evict LRT Unpinned. Assume order is based on arrival/usage history. Usually, the smallest or oldest is picked first. Let's assume standard LRU where the earliest loaded is evicted first if we need space. Or strictly "as many as needed".
+        *   If we evict A (1GB): Free becomes $1+1=2$. This meets the requirement ($\ge 2$).
+        *   **Result:** Evict Model A. Load D.
+    *   **Action:** Evict A, Load D.
+    *   **State:** {B, C, D}. Usage: $4 + 2 + 6 = 12$.
+    *   **Wait, check logic again.** If I evict A (1GB), usage goes from 7 to 6. Then add D (6). Total 12. Still > 8. The rule says "evicts as many... as needed". Does this mean it keeps evicting until the *total* load fits? Yes, usually LRU eviction continues until the new model can be loaded entirely within capacity.
+    *   Let's re-calculate:
+        *   Current: {B, C} (Pinned B=4, Unpinned C=2). A was evicted. Usage = 6.
+        *   Add D(6) -> Total 12. Over limit by 4.
+        *   Must free 4 GB.
+        *   Available unpinned: Only {C} (2GB). Evict C?
+        *   If we evict C, set is {B}. Usage 4. Add D(6) -> Total 10. Over limit by 2.
+        *   Must free 2 GB.
+        *   Available unpinned: None. Only Pinned {B} remains.
+        *   Rule: "if only pinned models remain and it still does not fit it defers".
+    *   **Correction on Eviction Sequence:**
+        *   Start: {A, B, C}. Usage 7. Need free space for D(6) is 2GB. Current free 1GB. Deficit 1GB.
+        *   Unpinned: A(1), C(2).
+        *   Evict A (1GB)? New free = $1+1=2$. Requirement met ($\ge 2$).
+        *   Set becomes {B, C}. Add D? Total usage $4+2+6=12$. Still > 8.
+        *   The rule implies we evict until the *new* model fits. Since A was unpinned and LRT (likely), it is removed. Now we have {B, C}. Free space = 2 ($8-6$). Wait, usage is $4+2=6$. Free is 2. We need free space of 2 to hold D(6)? Yes.
+        *   So if we evict A, set is {B, C} (Usage 6). Add D -> Usage 12. This fails.
+        *   Why did I think freeing A was enough? Because I calculated "Free Space Needed" based on current usage before eviction.
+        *   Correct Logic: We need Total Usage $\le$ 8 after adding D.
+        *   Current Models: {B(4), C(2)}. Sum = 6. Add D(6) -> 12. Over by 6.
+        *   Must remove models summing to at least 6 GB from unpinned set {C}.
+        *   Evict C (2GB). Set is {B}. Sum = 4. Add D(6) -> 10. Over by 4.
+        *   Unpinned set empty. Only Pinned B remains. Cannot evict B.
+        *   **Conclusion:** The load cannot fit after exhausting all unpinned models.
+    *   **Action:** Evict A, then Evict C (or vice versa depending on LRU order, but both must go to satisfy the math). Then Attempt Load D. It fails. Trigger Deferral.
+    *   **Revised State Step 4:**
+        *   Evict A (Unpinned). Set: {B, C}. Usage 6.
+        *   Check fit for D(6): Total would be 12. Needs to free $12-8=4$.
+        *   Available Unpinned: {C} (2GB).
+        *   Evict C. Set: {B}. Usage 4.
+        *   Check fit for D(6): Total would be 10. Needs to free $10-8=2$.
+        *   Available Unpinned: {}. Only Pinned B remains.
+        *   Cannot evict more. Load fails.
+        *   **Result:** Evictions = A, C. Deferral = Yes. Deferred List adds D.
+    *   **State:** {B}. Usage 4.
+
+5.  **Event: Unload B (4 GB)**
+    *   **Rule Check:** Is B resident? Yes.
+    *   **Action:** Remove B from memory.
+    *   **Note:** The load D was deferred, so it is not in memory. Only B was loaded and remains. Unloading B clears the card.
+
+**Final Counts:**
+*   **Loads Successful:** A, B, C were successful loads. D failed (deferred).
+*   **Total Loads Counted (Successful):** 3.
+*   **Evictions:** In step 4, to attempt loading D, we evicted A and then C because neither alone nor in combination with just one eviction cleared enough space for the *

@@ -1,0 +1,105 @@
+The task requires walking a specific state machine based on 6 observations (events) against defined limits for two stages. The final output must be a JSON object with `rollout_pct`, `stages_done`, and `status`.
+
+**Rule Analysis:**
+1.  **Limits:**
+    *   Steps 1-5: Limit = 2.0%.
+    *   Steps 6-10: Limit = 1.0%.
+    *   Post-Breach Tightening: If a breach occurs, the limit for remaining steps becomes 0.8%. (Note: The prompt mentions "after any rollback" or "tightens to 0.8". In this specific walk, we must check if the breach triggers a state change that affects subsequent limits).
+2.  **Stage Logic:**
+    *   A clean observation at position $N$ completes Stage $N$.
+    *   Rollout after completion = $10 \times N$.
+    *   A breaching observation is spent; it does not advance the stage or rollout. The state holds the last completed values.
+3.  **Status Logic:**
+    *   If a breach occurs, status becomes `PAUSED` (if only one breach) or `STOPPED` (if multiple breaches).
+    *   If no breach, status is `DONE`.
+
+**Event Walk (6 Observations):**
+
+*   **Step 1:** Rate = 0.5%. Limit = 2.0%. Verdict: Clean.
+    *   Action: Complete Stage 1. Rollout becomes $10 \times 1 = 10$.
+    *   State: Rollout=10, Stages=1.
+
+*   **Step 2:** Rate = 0.8%. Limit = 2.0%. Verdict: Clean.
+    *   Action: Complete Stage 2. Rollout becomes $10 \times 2 = 20$.
+    *   State: Rollout=20, Stages=2.
+
+*   **Step 3:** Rate = 2.1%. Limit = 2.0%. Verdict: Breach (2.1 > 2.0).
+    *   Action: Observation spent. No stage advancement.
+    *   State Check: This is the first breach. Status becomes `PAUSED`.
+    *   Does this trigger a limit change to 0.8%? The prompt says "after any rollback... tightens". However, in standard state machine interpretation for these types of problems (like Canary rollout), a single breach usually pauses the process at the last valid stage unless specified that it resets limits immediately for future attempts *within* the same list. Even if limits tightened to 0.8%, let's look at Step 4.
+    *   Current State: Rollout=20, Stages=2.
+
+*   **Step 4:** Rate = 0.6%. Limit (if tight) = 0.8% OR Limit (original) = 2.0%.
+    *   Regardless of whether the limit is 0.8% or 2.0%, 0.6% is under both.
+    *   Verdict: Clean.
+    *   Action: Since it is clean, does it advance the stage? The rule says "a clean observation completes the stage equal to its own position". Position 4. So Stage becomes 4. Rollout becomes $10 \times 4 = 40$.
+    *   State: Rollout=40, Stages=4.
+
+*   **Step 5:** Rate = 0.7%. Limit (if tight) = 0.8% OR Limit (original) = 2.0%.
+    *   Verdict: Clean.
+    *   Action: Position 5. Stage becomes 5. Rollout becomes $10 \times 5 = 50$.
+    *   State: Rollout=50, Stages=5.
+
+*   **Step 6:** Rate = 0.9%. Limit (if tight) = 0.8% OR Limit (original) = 2.0%.
+    *   Wait, Step 6 is in the "Steps 6-10" range where the original limit is 1.0%.
+    *   If the breach at Step 3 triggered a global reset to 0.8%, then 0.9% > 0.8% -> Breach.
+    *   If the breach did not trigger a reset (only "after rollback" or if the list continues with original limits), then 0.9% < 1.0% -> Clean.
+
+Let's re-read the specific constraint: "after any rollback the limit tightens to 0.8 for every remaining step."
+Does a breach count as a "rollback"? The text says "the rollback leaves the rollout and stages at the last completed stage's values". This implies that when a breach happens, it acts like a rollback event. Therefore, the limit *should* tighten to 0.8%.
+
+Let's re-evaluate Step 6 with Limit = 0.8%.
+Rate = 0.9%. Limit = 0.8%. Verdict: Breach (0.9 > 0.8).
+Action: Observation spent. No stage advancement.
+State Check: This is the second breach.
+Status Logic: "a second breach stops everything with status STOPPED".
+
+So, if Step 3 was a breach -> Limit tightens to 0.8%.
+Step 4 (0.6) < 0.8 -> Clean -> Stage 4, Rollout 40.
+Step 5 (0.7) < 0.8 -> Clean -> Stage 5, Rollout 50.
+Step 6 (0.9) > 0.8 -> Breach.
+Result: Second breach detected. Status = STOPPED.
+
+Let's double check the "Steps 1-5" vs "Steps 6-10" limit rule.
+Original limits: Steps 1-5 (2.0%), Steps 6-10 (1.0%).
+The prompt says: "after any rollback the limit tightens to 0.8 for every remaining step."
+Since Step 3 was a breach, it triggered a rollback state. Thus, for Step 4, 5, and 6, the effective limit is 0.8%.
+
+Walk Summary:
+1.  Clean (Stage 1, Rollout 10)
+2.  Clean (Stage 2, Rollout 20)
+3.  Breach (Limit tightens to 0.8%) -> State holds Stage 2, Rollout 20. Status PAUSED.
+4.  Rate 0.6 < 0.8 -> Clean. Completes Stage 4? Or does it complete the next available stage? The rule says "completes the stage equal to its own position". So Position 4 completes Stage 4. Rollout = 40.
+5.  Rate 0.7 < 0.8 -> Clean. Position 5 completes Stage 5. Rollout = 50.
+6.  Rate 0.9 > 0.8 -> Breach. Second breach. Status STOPPED.
+
+Final State:
+Rollout_pct: 50
+Stages_done: 5
+Status: STOPPED
+
+Wait, let's re-read the "orientation" example carefully to see if it clarifies the "skip spent position" logic vs "limit tightening".
+Orientation Example:
+Pos 1 (Clean) -> Stage 1.
+Pos 2 (Clean) -> Stage 2.
+Pos 3 (Breach 2.5 > 2.0). Spent. Limit tightens to 0.8. State holds Stage 2, Rollout 20.
+Pos 4 (Clean 0.5 < 0.8). "it carries stage 4 by position... rollout jumps to 40".
+List ended there. One breach only -> PAUSED.
+
+In the orientation example, the list *ended* after one breach. Here we have a second breach at Step 6.
+The rule for second breach: "a second breach stops everything with status STOPPED".
+
+So the calculation holds:
+Step 3 Breach -> Limit becomes 0.8%.
+Step 4 Clean (0.6 < 0.8) -> Stage 4, Rollout 40.
+Step 5 Clean (0.7 < 0.8) -> Stage 5, Rollout 50.
+Step 6 Breach (0.9 > 0.8) -> Second breach. Status STOPPED.
+
+Final Values:
+Rollout_pct: 50
+Stages_done: 5
+Status: STOPPED
+
+```json
+{"rollout_pct": 50, "stages_done": 5, "status": "STOPPED"}
+```

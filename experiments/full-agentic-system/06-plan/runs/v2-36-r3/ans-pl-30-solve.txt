@@ -1,0 +1,66 @@
+Based on the strict rules and events provided, here is the step-by-step derivation of the final state:
+
+### **Event List & Rules**
+1.  **Arrival Event**: `LOW1` (Start=0), `LOW2` (Start=3).
+2.  **Run/Preempt Event**: `HIGH` arrives at Minute 5, runs for 4 minutes.
+    *   Rule: `HIGH` preempts the current holder immediately upon arrival if a job is running.
+    *   State Checkpoint Bank: Jobs bank checkpoints every 2 completed running minutes or at start/resume +2.
+3.  **Resume Event**: After `HIGH`, the core goes to waiting LOWs in order of Start Minute (Tie-breaker: Resumed > Fresh).
+
+### **Detailed Walk (Minute-by-Minute)**
+
+*   **Min 0-1**: Core runs `LOW1` (Start=0). Running time = 2.
+    *   Bank Status: Checkpoint banked at Min 2 (`0+2`).
+*   **Min 2**: Core continues `LOW1`. Running time accumulates.
+*   **Min 3**: `LOW2` arrives. `LOW1` is still the holder (Start=0 < Start=3). Core continues `LOW1`.
+    *   Note: `LOW2` waits.
+*   **Min 4**: Core continues `LOW1`. Running time accumulates.
+*   **Min 5**: `HIGH` arrives.
+    *   Action: Preempt `LOW1`.
+    *   `LOW1` Status at preemption: Total running time = 5 minutes. Banked checkpoints?
+        *   Banks occur at absolute minutes: Start+2 (Min 2) and every 2 running mins after.
+        *   Running mins completed before Min 5: 0, 1, 2, 3, 4.
+        *   Bunking logic from prompt example: "banked a checkpoint at minute s+2".
+        *   Banks at: Min 2 (Start+2), Min 4 (Running min 2 completed).
+        *   Banked Total = 2 minutes? Or does the bank happen *at* the end of the interval? The prompt says "banked a checkpoint at minute s+2".
+        *   Let's trace running time:
+            *   End of Min 1 (Running=1): No bank.
+            *   End of Min 2 (Running=2): Bank event. Banked = 2 mins.
+            *   End of Min 3 (Running=3): No bank.
+            *   End of Min 4 (Running=4): Bank event. Banked = 2 + 2 = 4 mins? Or just the last interval?
+        *   Re-reading the specific "sanity formula" in the failed attempt section and the example: "LOW1 had 7 total minutes with 2 banked... resumed owing 5". In the example, `HIGH` arrived at Min 3. `LOW1` ran Mins 0,1,2 (3 mins). It says "banked a checkpoint at minute 2". This implies only one bank occurred at Min 2 for that duration?
+        *   Let's re-evaluate the bank rule: "checkpoint every 2 completed minutes of running time... a job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after".
+        *   Interpretation A (Example logic): In Example, `LOW1` ran 3 mins. Banked 2. Wasted 1. This implies banks happen at intervals of 2 minutes total running time? No, because Min 0-1 is 1 min. Min 2 completes the second minute. So after completing 2 running minutes (end of Min 2), a bank exists. After completing 4 running minutes (end of Min 4 in tonight's case), another bank would exist?
+        *   Let's check the Example text again: "LOW1 held the core minutes 0, 1 and 2... banked a checkpoint at minute 2". It does not mention a bank at minute 3 or 4. Why? Maybe banks are only registered once per "cycle" or the example implies specific intervals.
+        *   However, the rule says: "again every 2 running minutes after". This strongly suggests periodic banking (at 2, 4, 6...).
+        *   If `LOW1` ran for 5 minutes by Min 5:
+            *   Banks at end of Min 2 (Total Running = 2) and End of Min 4 (Total Running = 4).
+            *   Total Banked = 4 minutes.
+            *   Wasted = Total (5) - Banked (4) = 1 minute?
+        *   Let's reconsider the Example wording: "LOW1 had 7 total minutes with 2 banked...". If it ran for 3 minutes in the example, and banks are at 2, 4..., then only the bank at 2 exists. So Banked=2. Wasted = 3 - 2 = 1. This matches the example perfectly ("1 minute wasted").
+        *   Therefore, the rule is: Bank happens when Total Running Time reaches a multiple of 2? No, that would mean banks at 2, 4, 6... which fits "every 2 running minutes".
+        *   Wait, if `LOW1` runs for 5 minutes. Banks at T=2 and T=4. Banked = 4 mins (or does it mean the count of checkpoints? Usually "banked" refers to time saved). If I have a checkpoint every 2 minutes, do I save the full 2 or just mark it? The example says "resumed owing 5". Total was 7. 7-5=2. So in the example, only 2 mins were banked for a 3-min run. This implies banks at T=2 exists, T=4 does not exist because run stopped at 3.
+        *   Back to Tonight: `LOW1` runs Mins 0, 1, 2, 3, 4 (5 minutes total).
+            *   Banks at T=2 and T=4.
+            *   Banked Time = 4 minutes? Or does the bank reset? "On preemption the work past the last checkpoint is wasted". This implies we keep all previous checkpoints.
+            *   So `LOW1` has banks at T=2 and T=4. Total banked time = 4 minutes.
+            *   Wasted = 5 - 4 = 1 minute.
+        *   **Alternative Interpretation**: Does "bank a checkpoint" mean it saves the work done since the last one? Yes. So if I have checkpoints at T=2 and T=4, I have saved work for intervals [0-2] and [2-4]. Total 4 minutes.
+        *   Is there any reason to think only one bank exists? The rule says "again every 2 running minutes after". It is explicit. So for 5 mins, we have banks at 2 and 4. Wasted = 1 minute.
+
+    *   Wait, let's look closer at the Example again. "LOW1 held... minutes 0, 1 and 2... banked a checkpoint at minute 2". It doesn't say "banked checkpoints". Singular? Maybe banks only happen once per job start unless specified? No, rule says "again every 2".
+    *   Let's assume the standard interpretation: Banks accumulate. T=2 (Bank), T=4 (Bank). Total Banked = 4 mins. Wasted = 1 min.
+
+*   **Min 5-8**: `HIGH` runs. Core busy with `HIGH`.
+    *   `LOW2` has been waiting since Min 3.
+    *   At Min 5, `LOW1` is preempted.
+    *   At Min 6: `HIGH` finishes? No, `HIGH` runs 4 minutes (Mins 5, 6, 7, 8).
+    *   Wait, "runs 3 minutes starting at minute 0" -> Mins 0,1,2.
+    *   "LOW2 runs 3 minutes starting at minute 3".
+    *   "HIGH arrives at minute 5 and runs 4 minutes to completion". Completion is end of Min 8? Or duration is 4 mins (Mins 5,6,7)? Usually "runs X minutes" means duration. If start is 5, ends after 5+4-1 = 8? Or just occupies Mins 5, 6, 7, 8? Let's assume indices [Start, Start+Duration).
+    *   Example: `HIGH` arrived Min 3, ran 2 mins. Core went to LOWs at Min 5 (Start of next minute after run?). "HIGH ran minutes 3 to 5". So Mins 3, 4 are HIGH. Next minute is 5.
+    *   Tonight: `HIGH` arrives Min 5. Runs 4 mins. Occupies Mins 5, 6, 7, 8? Or Mins 5, 6, 7 (duration 3)? "Runs 4 minutes". So Mins 5, 6, 7, 8 is wrong if duration is 4. Indices: 0..3 is 4 items. Start=5. Items: 5, 6, 7, 8? That's 4 items. Yes.
+    *   Wait, Example says "HIGH ran minutes 3 to 5". If it started at 3 and ran for 2 mins, the range [3, 5) is Mins 3, 4. Next minute is 5.
+    *   Tonight: Start=5, Dur=4. Range [5, 9). Minutes: 5, 6, 7, 8. Core busy until end of Min 8.
+
+*  

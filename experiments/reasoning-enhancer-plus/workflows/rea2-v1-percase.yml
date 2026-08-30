@@ -1,0 +1,207 @@
+# REA+ v2.1 concept — per-case behavioral routing (DO NOT RUN YET)
+# 6 specialists, keyword+GWT routing, verify, 2-stage retry.
+# Specializations from 35-model probe data (07-TRACKING 2026-08-18):
+#   FMT/exact-IO -> Qwen3-4B-Instruct-2507 (FMT 4/4, 1.4s/case)
+#   PLN/priority -> gemma-3n-E4B (PLN 4/4 unique, 2.2s/case)
+#   LOG/policy   -> Bonsai-27B-Q1 (LOG 4/4, 4.1s/case)
+#   DRV/multi-step math -> Bonsai-27B-Q1 (biggest reasoner)
+#   AUD/verify   -> nvidia_Orchestrator-8B (AUD 1/4 best-tie + orchestration FT)
+#   general/retry-> Qwen3-4B-Hivemind-Hrtic (10/20 balanced, 1.4s/case)
+workflow_id: rea2_v1_percase
+name: "REA+ v2.1 — per-case behavioral routing (concept)"
+version: "2.1.0"
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  fmt_specialist:
+    name: Qwen3-4B-Instruct-2507-Q4_K_M
+    provider: llama_cpp_with_vulkan
+    host:
+      type: llama_cpp_with_vulkan
+  pln_specialist:
+    name: gemma-3n-E4B-it-Q4_K_M
+    provider: llama_cpp_with_vulkan
+    host:
+      type: llama_cpp_with_vulkan
+  deep_reasoner:
+    name: Bonsai-27B-Q1_0
+    provider: llama_cpp_with_vulkan
+    host:
+      type: llama_cpp_with_vulkan
+  auditor:
+    name: nvidia_Orchestrator-8B-Q5_K_L
+    provider: llama_cpp_with_vulkan
+    host:
+      type: llama_cpp_with_vulkan
+  fmt_repair:
+    name: AesCoder-4B.Q6_K
+    provider: llama_cpp_with_vulkan
+    host:
+      type: llama_cpp_with_vulkan
+  generalist:
+    name: Qwen3-4B-Hivemind-Inst-Hrtic-Ablit-Uncensored-Q4_K_M-imat
+    provider: llama_cpp_with_vulkan
+    host:
+      type: llama_cpp_with_vulkan
+
+agentic_workflow:
+  steps:
+    classify_task:
+      generative_entity: "${models.generalist}"
+      prompt: |
+        Routing placeholder. Deterministic classifier sets the category
+        bookmark before this step; GWT below jumps straight to the
+        winning specialist, so this body only runs for category=general.
+        Solve the task:
+        {{bookmarks.shell_output.stdout}}
+      model_overrides: { temperature: 0.0, max_tokens: 3500 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/scripts/classify-task.py /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v1/case.yml | python3 /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/scripts/fingerprint.py --case current --step classify --run-dir /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v1"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: true
+        after_step_starts:
+          - gwt:
+              - given: "bookmarks.shell_output.stdout contains '\\\"category\\\":\\\"fmt\\\"'"
+                then: { route_to: solve_fmt }
+              - given: "bookmarks.shell_output.stdout contains '\\\"category\\\":\\\"pln\\\"'"
+                then: { route_to: solve_pln }
+              - given: "bookmarks.shell_output.stdout contains '\\\"category\\\":\\\"logic\\\"'"
+                then: { route_to: solve_logic }
+              - given: "bookmarks.shell_output.stdout contains '\\\"category\\\":\\\"derive\\\"'"
+                then: { route_to: solve_derive }
+              - given: "bookmarks.shell_output.stdout contains '\\\"category\\\":\\\"audit\\\"'"
+                then: { route_to: solve_audit }
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v1/ans-general.txt"
+
+    solve_fmt:
+      generative_entity: "${models.fmt_specialist}"
+      prompt: |
+        {{bookmarks.shell_output.stdout}}
+      model_overrides: { temperature: 0.0, max_tokens: 250 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v1/ans-fmt.txt"
+
+    solve_pln:
+      generative_entity: "${models.pln_specialist}"
+      prompt: |
+        {{bookmarks.shell_output.stdout}}
+      model_overrides: { temperature: 0.0, max_tokens: 250 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v1/ans-pln.txt"
+
+    solve_logic:
+      generative_entity: "${models.deep_reasoner}"
+      prompt: |
+        {{bookmarks.shell_output.stdout}}
+      model_overrides: { temperature: 0.0, max_tokens: 2000 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v1/ans-logic.txt"
+
+    solve_derive:
+      generative_entity: "${models.deep_reasoner}"
+      prompt: |
+        {{bookmarks.shell_output.stdout}}
+      model_overrides: { temperature: 0.0, max_tokens: 2000 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v1/ans-derive.txt"
+
+    solve_audit:
+      generative_entity: "${models.auditor}"
+      prompt: |
+        {{bookmarks.shell_output.stdout}}
+      model_overrides: { temperature: 0.0, max_tokens: 3500 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v1/ans-audit.txt"
+
+    verify_answer:
+      generative_entity: "${models.generalist}"
+      prompt: "verify placeholder - deterministic check below decides"
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        before_step_starts:
+        after_step_starts:
+          - gwt:
+              - given: "bookmarks.shell_output.exit_code == 0 && output contains '\"passed\": true'"
+                then: { route_to: done }
+              - given: "output contains '\"passed\": false' && bookmarks.shell_output.stdout contains '\"category\":\"fmt\"'"
+                then: { route_to: retry_fmt_repair }
+              - given: "output contains '\"passed\": false'"
+                then: { route_to: retry_generalist }
+
+    retry_fmt_repair:
+      generative_entity: "${models.fmt_repair}"
+      prompt: |
+        Format-specialist answer failed exact-structure checks.
+        Fix hint: {{bookmarks.shell_output.stdout}}
+        Re-emit with exact structure:
+        {{bookmarks.shell_output.stdout}}
+      model_overrides: { temperature: 0.0, max_tokens: 400 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v1/ans-retry-fmt.txt"
+
+    retry_generalist:
+      generative_entity: "${models.generalist}"
+      prompt: |
+        Previous specialist answer failed deterministic checks.
+        Fix hint: {{bookmarks.shell_output.stdout}}
+        Solve the original task:
+        {{bookmarks.shell_output.stdout}}
+      model_overrides: { temperature: 0.2, max_tokens: 3500 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v1/ans-retry1.txt"
+
+    retry_deep:
+      generative_entity: "${models.deep_reasoner}"
+      prompt: |
+        Two attempts failed deterministic checks. Reason step by step,
+        then output ONLY the final answer:
+        {{bookmarks.shell_output.stdout}}
+      model_overrides: { temperature: 0.0, max_tokens: 3500 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v1/ans-retry2.txt"
+
+    done:
+      generative_entity: "${models.generalist}"
+      prompt: "terminal"
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        after_step_succeeds:
+          - log:
+              level: info
+              message: "case complete current"

@@ -1,0 +1,66 @@
+Based on the strict rules and events provided for "tonight's" rotation, here is the step-by-step derivation of the state.
+
+### **Phase 1: Rule List & Event Triggers**
+The following rules govern the system state changes during the event stream:
+
+1.  **Arrival/Load Attempt**: Triggered by every request in the stream (e.g., `load A`). Checks if requested size fits in remaining free space (`free_GB`).
+2.  **Eviction Selection**: If a load cannot fit, triggered to select the Least-Recently-Touched (LRT) *unpinned* model for eviction.
+3.  **Eviction Execution**: Triggered when an LRT unpinned model is removed from `resident` and its size is added back to `free_GB`. Count increments.
+4.  **Deferred Load**: If after evicting all available unpinned models, the requested load still does not fit (because only pinned models remain), triggered to mark the load as deferred. No eviction count increment for this specific step; deferral count increments.
+5.  **Successful Load**: Triggered when a model is added to `resident` and its size subtracted from `free_GB`. Count increments.
+6.  **Unload Execution**: Triggered by an unload request (e.g., `unload D`). Adds the model's size back to `free_GB`.
+
+### **Phase 2: Ledger Walk**
+We walk through the events in strict arrival order, updating the state line after each event.
+
+*   **Initial State**:
+    *   `resident`: []
+    *   `free_GB`: 8 GB (Total card size)
+    *   `loads`: 0
+    *   `evictions`: 0
+    *   `deferrals`: 0
+    *   `deferred`: []
+
+**Event 1: `load A` (1 GB)**
+*   **Check**: Requested 1 GB. Available 8 GB. Fits? Yes.
+*   **Action**: Add Model A to resident. Subtract 1 GB from free. Update recency of A.
+*   **State**: `event -> resident {A} free {7} recency {A}`
+
+**Event 2: `load C` (3 GB)**
+*   **Check**: Requested 3 GB. Available 7 GB. Fits? Yes.
+*   **Action**: Add Model C to resident. Subtract 3 GB from free. Update recency of C.
+    *   *Note*: Model C is pinned, but it fits without needing eviction logic.
+*   **State**: `event -> resident {A, C} free {4} recency {C}` (Order in set implies A then C based on arrival; recency list tracks most recent at end).
+
+**Event 3: `load D` (4 GB)**
+*   **Check**: Requested 4 GB. Available 4 GB. Fits? Yes ($4 \le 4$).
+*   **Action**: Add Model D to resident. Subtract 4 GB from free. Update recency of D.
+    *   *Note*: No eviction needed because it fits exactly in the remaining space.
+*   **State**: `event -> resident {A, C, D} free {0} recency {D}`
+
+**Event 4: `unload D` (4 GB)**
+*   **Check**: Requested to unload Model D. Is D in resident? Yes.
+*   **Action**: Remove D from resident. Add 4 GB back to free. Update recency of remaining models (A, C).
+    *   *Recency Logic*: A was touched first, then C, then D. After removing D, the order of "oldest" is determined by when they were last touched. A was touched at Event 1. C was touched at Event 2. So A is older than C.
+*   **State**: `event -> resident {A, C} free {4} recency {C}` (Wait, let's re-verify recency order).
+    *   Touch history:
+        1.  Load A (Event 1) -> Recency: [A]
+        2.  Load C (Event 2) -> Recency: [A, C] (C is newest)
+        3.  Load D (Event 3) -> Recency: [A, C, D] (D is newest)
+        4.  Unload D (Event 4) -> Remove D. Remaining: A, C. Oldest is A. Newest is C.
+    *   Correct State Line: `event -> resident {A, C} free {4} recency {C}`? No, the list usually denotes oldest to newest or vice versa. The prompt says "recency {ids oldest to newest}".
+        *   Oldest: A (touched Event 1).
+        *   Newest: C (touched Event 2).
+    *   State Line: `event -> resident {A, C} free {4} recency {A, C}`.
+
+### **Final Calculation**
+*   **Loads**: Successful loads occurred for A, C, and D. Total = 3.
+*   **Evictions**: No evictions were required because every load fit in the available space at the time of arrival (8 -> 7 -> 4 -> 0). Even though `load D` filled the card exactly, it did not require eviction.
+*   **Deferrals**: No loads were deferred.
+*   **Deferred List**: Empty.
+
+### **Final Answer JSON**
+
+```json
+{"loads": 3, "evictions": 0, "deferrals": 0, "deferred": []}
+```

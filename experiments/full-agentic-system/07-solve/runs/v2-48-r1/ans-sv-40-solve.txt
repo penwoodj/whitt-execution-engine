@@ -1,0 +1,67 @@
+**Phase 1: RULE SCAN**
+The following rules govern the state changes during this event sequence (Low Job arrivals/checkpoints, High Job arrival/preemption):
+1.  **Arrival Rule**: A Low job enters the waiting queue upon its start minute arriving; `owed` is calculated as `total_duration - banked`.
+2.  **Checkpoint/Bank Rule**: Banks accumulate at `start + 2` and every subsequent even number of running minutes (`s+4`, `s+6`...); a bank landing exactly on the High arrival minute prevents waste.
+3.  **Preemption/Waste Rule**: When High arrives, if Low is running (or just finished), any time past the last valid bank is marked as `wasted` and must be redone upon resume.
+4.  **Resumption Priority Rule**: A resumed Low job outranks a fresh Low job at any tie in start minutes for core selection.
+5.  **Non-Idle Core Rule**: The core runs a waiting Low job immediately after a previous one finishes or is preempted within the same minute.
+
+**Phase 2: LEDGER WALK (Minute-by-Minute)**
+*Legend:* `[Job]` = Running Job, `(Job)` = Waiting in Queue. `W` = Minutes wasted previously.
+*Initial State:* Min 0: LOW1 arrives. Total=4. Bank at 2. Running.
+*Event Sequence:*
+-   **Min 0**: Start LOW1. Status: `[LOW1]`. (Banked: 0)
+-   **Min 1**: Run LOW1. Status: `[LOW1]`. (Banked: 0)
+-   **Min 2**: Run LOW1. Bank accumulates at `0+2=2`. Status: `[LOW1]`. (Banked: 2). *Note: Even though bank lands on the arrival minute of HIGH later, this is a valid checkpoint.*
+-   **Min 3**: Start LOW2. Status: `[LOW1], (LOW2)`. (Low1 has run 3 mins total; owed = 4-2=2).
+    -   *Event*: High arrives at Min 3. Total=6.
+    -   *Action*: Preempt Low1 immediately.
+    -   *Calculation*: Last bank was at Min 2 (absolute minute). Time run since bank: 0 minutes? No, time elapsed is from start of minute 3 to end? Wait. The rule says "minutes past the last bank". If High arrives at the exact minute a bank lands (Min 2), nothing is wasted *yet* if we consider the bank valid. However, Low1 has run minutes 0, 1, 2. It needs 4 mins total. It has completed 3 running minutes of work?
+    -   Let's re-read carefully: "LOW jobs checkpoint every 2 completed minutes...".
+        -   Min 0 (start): Run min 0.
+        -   Min 1: Run min 1.
+        -   Min 2: Run min 2. This is the 3rd minute of execution? Or are we counting duration?
+        -   "Banks in absolute minutes". Bank at `s+2` (where s=start). Start=0 -> Bank at Min 2.
+        -   At Min 2, Low1 completes its running time for that minute. It now has completed 3 minutes of work? No, it started at 0. Minute 0 is the first unit. Minute 1 is second. Minute 2 is third.
+        -   Checkpoint condition: "every 2 completed minutes". Does Min 2 count as completing a checkpoint? Yes, `s+2` is absolute minute 2.
+        -   Preemption happens at arrival of High (Min 3). The system checks for waste *before* switching to High? Or does the switch happen instantly? "instantly preempting whatever LOW job is running".
+        -   If Low1 ran Min 0, 1, 2. It has completed 3 minutes of work. It needs 4.
+        -   Bank was at Min 2. Time since bank: The system enters Minute 3. High arrives. Does the switch happen *during* Minute 3 or *at the start*? Usually "arrives at minute X" means available for scheduling at X.
+        -   If Low1 ran Min 0, 1, 2. It has completed 3 minutes. The next bank would be `s+4` (Min 4).
+        -   Wait, the rule says: "a job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after".
+        -   Low1 Start=0. Banks at Min 2. Next bank `s+4` (Min 4).
+        -   Did it complete the interval between Min 2 and Min 3? Yes, Minute 3 started for LOW1.
+        -   So at preemption (arrival of High), has Low1 completed enough to trigger a bank? No, next bank is Min 4.
+        -   Has it completed "every 2 minutes"? It completed minute 0, 1, 2. That's 3 minutes. The checkpoint at `s+2` (Min 2) was valid when Minute 2 ended.
+        -   So if it runs Minute 3 and then gets preempted? No, High arrives *at* minute 3. Does that mean before Minute 3 starts or after?
+        -   Standard interpretation: Events happen at the tick boundary. Arrive at Min 3 -> Available for scheduling in Min 3.
+        -   If Low1 ran Min 0, 1, 2. It has completed 3 minutes of work. The last bank was at Min 2.
+        -   Did it run any time *after* the last bank? Yes, Minute 3 (start) belongs to Low1 until High takes it.
+        -   How long does it run in Minute 3 before switching? "Instantly preempting". This implies 0 duration in Min 3 for LOW1? Or that the switch happens immediately upon arrival?
+        -   If arrival is instantaneous, Low1 gets 0 time in Min 3.
+        -   So Low1 runs exactly Minutes 0, 1, 2. Total run time = 3 minutes.
+        -   Last bank at Min 2 (end of minute).
+        -   Time since last bank: The system tries to run Minute 3. But High arrives. If arrival is instantaneous, does Low1 get a slice? No.
+        -   So Low1 completed exactly up to the end of Min 2.
+        -   Last Bank was at Min 2 (end).
+        -   Did it run time *past* the last bank? No, because the switch happens immediately upon arrival (Min 3 start).
+        -   Therefore: Wasted = 0.
+        -   Low1 remaining work = Total (4) - Banked (at Min 2). How much is banked at Min 2? "Every 2 completed minutes". It completed Min 0, Min 1, Min 2. That's 3 units. But checkpoints are every 2.
+        -   Let's trace the "Bank" logic strictly: "Banks a checkpoint at minute s+2 and again every 2 running minutes after".
+            -   Start=0. Bank at Min 2. (End of Minute 2).
+            -   Next bank `s+4` (Min 4).
+        -   Did Low1 complete the interval from Min 2 to Min 3? No, it was preempted instantly at Min 3 start.
+        -   So no time was run *after* the last bank (Min 2).
+        -   Wasted = 0.
+        -   Remaining work = Total (4) - Work completed up to last bank.
+        -   How much work is covered by a checkpoint at Min 2? It covers the first 2 minutes? Or does it cover everything up to that point if valid?
+        -   "On preemption the work past the last checkpoint is wasted". If no time was run past the checkpoint, nothing is wasted.
+        -   So Low1 resumes with `4 - 0 = 4`? Or does it resume from where it left off (3 mins)?
+        -   Usually, checkpoints save progress. If you have a valid checkpoint at Min 2, and you didn't run any time since then, your state is saved as "Completed 3 minutes"? No, checkpoints usually mark boundaries of safety. If the interval since last checkpoint is empty, there is nothing to discard. You are effectively at the boundary.
+        -   So Low1 resumes with remaining work = `Total (4) - Time covered by checkpoint`. If checkpoint covers up to Min 2 end (3 minutes duration), then remaining is 1 minute?
+        -   Let's look at the example provided in the prompt to resolve this ambiguity: "LOW1 runs 7 minutes... banked a checkpoint at minute 2, and its 3rd minute was unbanked when the swap came, so 1 minute wasted."
+            -   Example: Min 0, 1 run. Bank at Min 2 (end).
+            -   Next event is Min 3 (arrival of High).
+            -   In example: "its 3rd minute was unbanked". This implies the system *started* the 3rd minute (Min 2 to Min 3 interval? No, minutes are 0-indexed usually. Min 0, Min 1, Min 2 is the 3rd minute).
+            -   If it ran Min 0, 1, 2 and then High came at Min 3. The example says "3rd minute was unbanked". This suggests that running into the interval *after* the checkpoint count (which might be even numbers) matters? Or maybe minutes are counted 1..N?
+            -   Let's re-read the specific rule text: "LOW jobs checkpoint every 2 completed minutes... banks

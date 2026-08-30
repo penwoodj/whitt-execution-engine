@@ -1,0 +1,90 @@
+### Phase 1 RULE SCAN
+This phase lists every rule in the task that changes state during the event sequence (the "flaky upstream" scenario), identifying the specific trigger for each.
+
+1.  **Per-Attempt Cost Rule**: Triggers on every attempt (failed or successful). Adds `3` tokens to spend.
+2.  **Wait Time Rule**: Triggers after a failed attempt before the next retry. Adds wait seconds (`3`, then doubles) to spend.
+3.  **Total Spend Calculation Rule**: Aggregates Per-Attempt costs and Wait Time costs. Defines `spend = sum(attempt_costs) + sum(wait_seconds)`.
+4.  **Budget Limit Rule**: Compares `spend` against the initial `budget` (30). If `spend > budget`, triggers suppression logic.
+5.  **Single Budget Doubling Rule**: Triggers exactly once if `spend > budget`. Doubles the budget for re-evaluation.
+6.  **Re-Check Suppression Rule**: Compares `spend` against the *doubled* budget. If still over, sets `suppressed = true`; otherwise `suppressed = false`.
+7.  **Budget After Calculation Rule**: Computes `budget_after = doubled_budget - spend` (if doubling occurred) or `initial_budget - spend` (if not).
+
+---
+
+### Phase 2 LEDGER WALK
+This phase applies the events in strict arrival order, updating the state line by line based on the rules above.
+
+**Initial State:**
+*   `budget`: 30
+*   `spend`: 0
+*   `attempts`: 0
+*   `wait_s`: 0
+*   `suppressed`: false (pending check)
+
+**Event Sequence Analysis:**
+The task states: "the job needs 3 failed attempts before the 4th succeeds."
+Waits observed: 3, 6, 12.
+This implies a sequence of: Fail -> Wait(3) -> Retry(Fail) -> Wait(6) -> Retry(Fail) -> Wait(12) -> Retry(Success).
+
+**Step-by-Step Walk:**
+
+1.  **Attempt 1 (Fail)**
+    *   Cost: +3 (attempt)
+    *   Spend: 0 + 3 = 3
+    *   State: `attempts`=1, `spend`=3
+
+2.  **Wait after Attempt 1**
+    *   Wait: +3 seconds
+    *   Spend: 3 + 3 = 6
+    *   State: `wait_s`=3, `spend`=6
+
+3.  **Attempt 2 (Fail)**
+    *   Cost: +3 (attempt)
+    *   Spend: 6 + 3 = 9
+    *   State: `attempts`=2, `spend`=9
+
+4.  **Wait after Attempt 2**
+    *   Wait: +6 seconds (doubled from 3)
+    *   Spend: 9 + 6 = 15
+    *   State: `wait_s`=9, `spend`=15
+
+5.  **Attempt 3 (Fail)**
+    *   Cost: +3 (attempt)
+    *   Spend: 15 + 3 = 18
+    *   State: `attempts`=3, `spend`=18
+
+6.  **Wait after Attempt 3**
+    *   Wait: +12 seconds (doubled from 6)
+    *   Spend: 18 + 12 = 30
+    *   State: `wait_s`=21, `spend`=30
+
+7.  **Attempt 4 (Success)**
+    *   Cost: +3 (attempt)
+    *   Spend: 30 + 3 = 33
+    *   State: `attempts`=4, `spend`=33
+
+8.  **Budget Check & Doubling**
+    *   Current `budget`: 30.
+    *   Current `spend`: 33.
+    *   Condition: `spend` (33) > `budget` (30). Trigger Single Budget Doubling Rule.
+    *   New Budget for Re-check: 30 * 2 = 60.
+
+9.  **Re-Check Suppression**
+    *   Compare `spend` (33) against Doubled Budget (60).
+    *   Condition: 33 <= 60.
+    *   Result: Job runs, `suppressed` = false.
+    *   Calculate `budget_after`: Doubled Budget (60) - Spend (33) = 27.
+
+**Final State Values:**
+*   `attempts`: 4
+*   `wait_s`: 21 (Sum of 3 + 6 + 12)
+*   `budget_after`: 27
+*   `suppressed`: false
+
+---
+
+### Final Answer
+
+```json
+{"attempts": 4, "wait_s": 21, "budget_after": 27, "suppressed": false}
+```

@@ -1,0 +1,79 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the "orientation story" provided as a reference for rule logic (applied strictly to tonight's numbers), here are the rules that change state during the event sequence:
+
+1.  **Arrival Rule**: Triggers on every new request arrival; initializes or updates the `attempts` counter and resets the current wait time based on the failure history (doubling logic).
+2.  **Cost Accumulation Rule**: Triggers on every attempt (failed or successful); adds the per-attempt cost to the total `spend`.
+3.  **Wait Time Rule**: Triggers after a failed attempt; adds the calculated wait duration (based on current failure count) to the total `wait_s` and updates the next wait time for the subsequent retry.
+4.  **Budget Check Rule**: Triggers after every cost accumulation step; compares `spend` against `budget`. If `spend > budget`, it triggers a "doubling" event which doubles the `budget` exactly once, then re-evaluates suppression status immediately using the new doubled budget.
+5.  **Suppression Verdict Rule**: Triggers after the Budget Check (and potential doubling); determines if `suppressed` is true or false based on whether the spend exceeds the *current* effective budget.
+6.  **Success Termination Rule**: Triggers when an attempt succeeds; stops further processing for this job instance, finalizing `attempts`, `wait_s`, and calculating `budget_after`.
+
+---
+
+### Phase 2 LEDGER WALK
+
+Applying the events in strict arrival order using tonight's numbers:
+*   **Base Parameters**: Budget = 36. Attempt Cost = 2. Wait Sequence (observed): 2s, 4s, 8s. Success Condition: After 3 failures.
+*   **State Initialization**: `attempts` = 0, `wait_s` = 0, `spend` = 0, `budget` = 36, `suppressed` = false.
+
+**Event 1: Arrival (Attempt 1)**
+*   Action: Start job.
+*   Cost: +2 tokens.
+*   Wait: None yet (first attempt).
+*   State Update: `attempts`=1, `spend`=2, `wait_s`=0.
+*   Check: Spend (2) <= Budget (36). No suppression.
+
+**Event 2: Failure (End of Attempt 1)**
+*   Action: Job fails. Increment failure count to 1.
+*   Cost: None additional (cost paid in Event 1).
+*   Wait Calculation: Next wait is 2s. Add to `wait_s`.
+*   State Update: `attempts`=1, `spend`=2, `wait_s`=2.
+
+**Event 3: Arrival (Attempt 2)**
+*   Action: Retry job after waiting.
+*   Cost: +2 tokens.
+*   Wait: None additional (waiting happened in Event 2).
+*   State Update: `attempts`=2, `spend`=4, `wait_s`=2.
+*   Check: Spend (4) <= Budget (36). No suppression.
+
+**Event 4: Failure (End of Attempt 2)**
+*   Action: Job fails. Increment failure count to 2.
+*   Cost: None additional.
+*   Wait Calculation: Next wait is 4s (doubling from 2). Add to `wait_s`.
+*   State Update: `attempts`=2, `spend`=4, `wait_s`=6.
+
+**Event 5: Arrival (Attempt 3)**
+*   Action: Retry job after waiting.
+*   Cost: +2 tokens.
+*   Wait: None additional.
+*   State Update: `attempts`=3, `spend`=6, `wait_s`=6.
+*   Check: Spend (6) <= Budget (36). No suppression.
+
+**Event 6: Failure (End of Attempt 3)**
+*   Action: Job fails. Increment failure count to 3.
+*   Cost: None additional.
+*   Wait Calculation: Next wait is 8s (doubling from 4). Add to `wait_s`.
+*   State Update: `attempts`=3, `spend`=6, `wait_s`=14.
+
+**Event 7: Arrival (Attempt 4 - Success)**
+*   Action: Retry job after waiting. Job succeeds on the 4th attempt.
+*   Cost: +2 tokens.
+*   Wait: None additional.
+*   State Update: `attempts`=4, `spend`=8, `wait_s`=14.
+*   Check: Spend (8) <= Budget (36). No suppression needed. Job completes successfully.
+
+**Final Calculation:**
+*   Total Attempts (`attempts`): 4
+*   Total Wait Seconds (`wait_s`): 2 + 4 + 8 = 14
+*   Total Spend: 8 (Budget remaining)
+*   Budget After (`budget_after`): 36 - 8 = 28
+*   Suppressed (`suppressed`): false
+
+---
+
+### Final Answer
+
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 28, "suppressed": false}
+```

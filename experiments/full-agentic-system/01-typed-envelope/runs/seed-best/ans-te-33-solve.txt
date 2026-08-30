@@ -1,0 +1,101 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event sequence, including triggers.*
+
+1. **Arrival Rule**: `HIGH` arrives at minute 2; triggers preemption of any running LOW job and blocks all other jobs until completion.
+2. **Preemption Loss Rule**: Upon preemption by `HIGH`, work past the last checkpoint (every 2 minutes) is wasted; triggers state change to "wasted" for the preempted job.
+3. **Resume Priority Rule**: A resumed LOW job outranks a fresh LOW job at any tie in start minute; determines scheduling order when core becomes free.
+4. **Start Minute Ordering Rule**: LOW jobs take the core in order of their start minutes (0 before 1); determines initial scheduling if no preemption occurs.
+5. **Waiting Queue Rule**: A LOW whose start minute arrives while the core is busy simply waits; triggers state change to "waiting" until core frees.
+6. **Completion Order Rule**: Completion order is determined by finish time, with ties broken by resume status (resumed before fresh) or start minute if applicable.
+7. **Makespan Calculation Rule**: Makespan counts from the first start of any job to the last finish; triggers final state aggregation.
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order, showing state after each event.*
+
+**Event 0: Start LOW1 (Start Minute 0)**
+- Action: `LOW1` starts running on the core.
+- State: Core busy with `LOW1`. `LOW1` elapsed=0/5. Checkpoint status: None yet.
+
+**Event 1: Start LOW2 (Start Minute 2)**
+- Action: `LOW2` arrives at minute 2. Core is currently busy with `LOW1` (which started at 0 and runs for 5 mins, so it finishes at 5).
+- State: `LOW2` enters "waiting" queue. Core still busy with `LOW1`.
+
+**Event 2: Arrival of HIGH (Minute 2)**
+- Action: `HIGH` arrives at minute 2. It instantly preempts the running job (`LOW1`).
+- Rule Application: Preemption Loss Rule applies to `LOW1`.
+- Checkpoint Analysis for `LOW1`: `LOW1` started at 0. At minute 2, it has run exactly 2 minutes. The rule states "checkpoint every 2 completed minutes". Since it reached exactly 2 minutes before being preempted, the checkpoint is valid. Work past the last checkpoint (which covers up to minute 2) is zero.
+- State: `LOW1` paused at elapsed=2/5. Wasted work = 0. Core now busy with `HIGH`. `LOW2` remains waiting.
+
+**Event 3: HIGH Runs (Minutes 2 to 5)**
+- Action: `HIGH` runs for its duration of 9 minutes? Wait, re-read task description carefully. "HIGH arrives at minute 2 and runs 9 minutes".
+- Correction on Duration: The prompt says "HIGH ... runs 9 minutes". Let's re-evaluate the timeline based on the text "runs 9 minutes to completion".
+- Timeline Check: `HIGH` starts at min 2. Runs for 9 mins. Finishes at min 11.
+- State during this block: Core busy with `HIGH`. `LOW1` waiting (resumed status). `LOW2` waiting (fresh status).
+
+**Event 4: HIGH Completes (Minute 11)**
+- Action: `HIGH` finishes. Core becomes free.
+- Scheduling Decision: Two jobs waiting: `LOW1` (Start Min 0, Resumed) and `LOW2` (Start Min 1, Fresh - wait, prompt says LOW2 starts at minute 2).
+- Re-evaluating Start Times from Prompt: "LOW1 runs 5 minutes starting at minute 0, LOW2 runs 7 minutes starting at minute 2."
+- So `LOW2` start time is 2. `HIGH` arrives at 2.
+- At Minute 11 (`HIGH` finishes):
+    - `LOW1`: Started 0, Paused at 2. Remaining work = 3 mins. Status: Resumed.
+    - `LOW2`: Started 2 (at same time HIGH arrived). It has been waiting since minute 2. Status: Fresh.
+- Priority Rule Application: "A resumed LOW outranks a fresh one". `LOW1` is resumed. `LOW2` is fresh. Even though start minutes are close, the resume status dictates priority.
+- Action: Core assigned to `LOW1`.
+
+**Event 5: LOW1 Resumes and Runs (Minutes 11 to 14)**
+- Action: `LOW1` resumes. Needs 3 more minutes to finish (Total 5).
+- Timeline: Starts running at min 11. Finishes at min 14.
+- Checkpoint Analysis for `LOW1`: It runs from 2 to 14 continuously? No, it was paused at 2. It resumes at 11. Does it checkpoint during the resume run? The rule says "checkpoint every 2 completed minutes of running time". This usually implies continuous runtime or total elapsed since start? Context suggests "running time" (active execution).
+    - Run segment 1: 0 to 2 (2 mins). Checkpoint at 2.
+    - Gap: 2 to 11.
+    - Run segment 2: 11 to 14 (3 mins).
+    - Does it hit a checkpoint in the second run? It runs for 3 minutes. No multiple of 2 is reached within this short burst (0, 2, 4...). It hits 2 mins total active time at minute 14? Or does it count cumulative? "every 2 completed minutes of running time". Usually implies continuous blocks in these scheduling puzzles unless specified as cumulative. Even if cumulative, it finishes before hitting the next checkpoint threshold relative to the resume block.
+- State: `LOW1` completes. Elapsed total = 5/5. Wasted previously calculated as 0.
+
+**Event 6: LOW2 Starts (Minute 14)**
+- Action: Core free. Only `LOW2` left in queue.
+- Start Time: Minute 14. Duration: 7 minutes.
+- State: `LOW2` starts running.
+
+**Event 7: LOW2 Runs and Completes (Minutes 14 to 21)**
+- Action: `LOW2` runs for 7 minutes.
+- Timeline: Starts 14, Finishes 21.
+- Checkpoint Analysis for `LOW2`: Starts at 0 runtime. Reaches 2 mins at min 16 (Checkpoint). Reaches 4 mins at min 18 (Checkpoint). Reaches 6 mins at min 20. Finishes at 21. No wasted work here as it completes naturally.
+- State: `LOW2` completes.
+
+**Final Aggregation:**
+- **Completion Order**: `LOW1` finished at minute 14. `LOW2` finished at minute 21. Order: `["LOW1", "LOW2"]`.
+- **Wasted Minutes**: `LOW1` was preempted at exactly minute 2 (its first checkpoint). Work done = 2 mins. Remaining needed = 3 mins. Wasted = 0. `HIGH` ran 9 mins (2 to 11). `LOW1` resumed and finished in 3 mins (11 to 14). Total time for `LOW1` cycle: 5 mins active + 9 mins gap = 14 mins elapsed from start? No, makespan is wall clock.
+- **Makespan**: First start was minute 0 (`LOW1`). Last finish was minute 21 (`LOW2`). Makespan = 21 - 0 = 21 minutes.
+
+*Self-Correction/Verification on "Wasted":*
+Rule: "on preemption the work past the last checkpoint is wasted".
+`LOW1`: Start 0. Checkpoint every 2 mins.
+Time 0-2: Runs 2 mins. Checkpoint reached at T=2.
+Time 2-11 (`HIGH` runs): `LOW1` is preempted.
+Work done in gap: 9 minutes? No, the work *accumulated* while running was only up to the checkpoint. The "work past the last checkpoint" refers to the active time since the last checkpoint. Since it hit a checkpoint exactly at T=2, there was no un-checked work accumulated between T=2 and T=11.
+Therefore, Wasted = 0.
+
+*Verification on Makespan:*
+Start: Min 0.
+End: Min 21 (LOW2 finishes).
+Makespan = 21.
+
+*Verification on Order:*
+LOW1 finishes at 14. LOW2 finishes at 21. Order: LOW1, LOW2.
+
+Let's double check the "HIGH runs 9 minutes" vs the example logic.
+Example in text: HIGH runs 3 to 5 (2 mins).
+Tonight: HIGH arrives min 2, runs 9 mins -> Finishes min 11.
+LOW1 Start 0, End 5 normally. Preempted at 2. Resume at 11. Finish at 14.
+LOW2 Start 2, Duration 7. Starts at 14 (after LOW1). Finish at 21.
+Makespan = 21.
+
+Wait, did `LOW2` start waiting at minute 2? Yes. "LOW2 runs 7 minutes starting at minute 2". It enters the queue at min 2.
+At min 11 (`HIGH` done), Queue has: `LOW1` (Resumed), `LOW2` (Fresh).
+Rule: "resumed LOW outranks a fresh one". `LOW1` goes first.
+`LOW1` runs 3 mins -> Done at 14.
+`LOW2` starts at 14. Runs 7 mins -> Done at 21.

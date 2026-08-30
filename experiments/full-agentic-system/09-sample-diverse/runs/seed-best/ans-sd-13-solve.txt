@@ -1,0 +1,64 @@
+### Phase 1 RULE SCAN
+This phase lists every rule that changes state during the event sequence (Arrivals), including budget limits, cost definitions, and suppression logic. No expiry or return rules apply as there are no grants to expire in this specific task window.
+
+1.  **Rule: Attempt Cost Definition** – Every attempt costs exactly 2 tokens; triggered by every `arrival` event.
+2.  **Rule: Wait Time Cost Definition** – Every wait second costs exactly 1 token; triggered by the retry logic following a failed attempt within an `arrival`.
+3.  **Rule: Budget Limit Check (Pre-Spend)** – The job is suppressed if total spend exceeds budget before any doubling occurs; triggered by calculating spend after each event.
+4.  **Rule: Budget Doubling Mechanism** – If spend > budget, the budget doubles exactly once immediately; triggered by a failed budget check.
+5.  **Rule: Re-Check Logic (Post-Doubling)** – The job is re-evaluated against the doubled budget to determine final suppression status; triggered after the doubling event completes.
+6.  **Rule: Final Suppression Verdict** – `suppressed` is set to true only if spend > doubled_budget after the re-check; triggered by the conclusion of the doubling/re-check cycle.
+
+---
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at a time in strict arrival order, updating the state (Spend, Budget, Suppression) line by line.
+
+**Initial State:**
+*   `budget`: 24
+*   `spend`: 0
+*   `suppressed`: false
+*   `attempts_count`: 0
+*   `wait_s_total`: 0
+
+**Event 1: Arrival (Attempt 1)**
+*   **Action**: Run Attempt 1.
+*   **Cost Calculation**: Cost = 2 (attempt) + 2s (wait) * 1 (cost/sec) = 4.
+*   **New Spend**: 0 + 4 = 4.
+*   **Check**: Is 4 > 24? No.
+*   **State Update**: `spend`=4, `attempts`=1, `wait_s`=2.
+
+**Event 2: Arrival (Attempt 2)**
+*   **Action**: Run Attempt 2.
+*   **Cost Calculation**: Cost = 2 (attempt) + 4s (wait) * 1 (cost/sec) = 6.
+*   **New Spend**: 4 + 6 = 10.
+*   **Check**: Is 10 > 24? No.
+*   **State Update**: `spend`=10, `attempts`=2, `wait_s`=2+4=6.
+
+**Event 3: Arrival (Attempt 3)**
+*   **Action**: Run Attempt 3.
+*   **Cost Calculation**: Cost = 2 (attempt) + 8s (wait) * 1 (cost/sec) = 10.
+*   **New Spend**: 10 + 10 = 20.
+*   **Check**: Is 20 > 24? No.
+*   **State Update**: `spend`=20, `attempts`=3, `wait_s`=6+8=14.
+
+**Event 4: Arrival (Attempt 4 - Success)**
+*   **Action**: Run Attempt 4 (Job succeeds).
+*   **Cost Calculation**: Cost = 2 (attempt) + 0s (no wait after success) = 2.
+*   **New Spend**: 20 + 2 = 22.
+*   **Check**: Is 22 > 24? No.
+*   **State Update**: `spend`=22, `attempts`=4, `wait_s`=14+0=14.
+
+**Final State Calculation:**
+*   Total Attempts: 4
+*   Total Wait Seconds: 14
+*   Total Spend: 22
+*   Budget After: 24 - 22 = 2
+*   Suppressed: false (Spend never exceeded budget)
+
+---
+
+### Final Answer
+
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 2, "suppressed": false}
+```

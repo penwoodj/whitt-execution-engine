@@ -1,0 +1,69 @@
+### Phase 1: Rule Scan (Part B - Residency)
+
+**Rules Identified for Part B:**
+1.  **Initial State Definition**: One 8GB card resident with models A(1), B(4), C(2), D(6). Model B is pinned and never evicted.
+    *   *Trigger*: System initialization (implicit before first event).
+2.  **Eviction Policy**: Evict Least-Recently-Touched (LRT) unpinned model if load cannot fit.
+    *   *Trigger*: Load command execution when capacity is insufficient.
+3.  **Load Execution & Costing**: Loads cost 30s, Unloads cost 10s. "Loads" count includes every executed load command.
+    *   *Trigger*: Successful or deferred load commands.
+4.  **Deferred Load Logic**: If a load cannot fit even after evicting all unpinned models (and pinned remain), the load is deferred. The `deferred` list contains the ID of this specific load. Evictions performed to attempt the fit still count towards the total eviction metric.
+    *   *Trigger*: Load command where remaining capacity < requested size AND no unpinned space exists to free up more.
+5.  **No-Op Handling**: Unloading a non-resident model is a no-op (no cost, no state change).
+    *   *Trigger*: `unload B` event when B is not resident.
+
+---
+
+### Phase 2: Ledger Walk (Part B - Residency)
+
+**Event Stream:**
+1.  `load A (1 GB)`
+2.  `load B (4 GB)`
+3.  `load C (2 GB)`
+4.  `load D (6 GB)`
+5.  `unload B (4 GB)`
+
+**State Evolution:**
+
+*   **Initial State**:
+    *   Capacity: 8GB
+    *   Residents: {A:1, B:4, C:2, D:6} -> Total = 13GB?
+    *   *Correction based on standard cache logic implied by "One 8GB card"*: The prompt lists "resident sizes" as A1, B4, C2, D6. Sum = 1+4+2+6 = 13GB. This exceeds the 8GB limit immediately.
+    *   *Re-evaluating Prompt Text*: "One 8GB card tonight... resident sizes: A1 B4 C2 D6 GB respectively."
+    *   *Interpretation*: The prompt describes a scenario where these specific models are currently on the card, implying an initial state that might be invalid or requires immediate eviction/deferment logic upon arrival. However, usually, "resident sizes" implies the current content. If the sum (13) > Capacity (8), the system is in an impossible state unless we assume the list describes *requested* models for a different context, OR (more likely given the strict rules) the initial state provided is the starting point and we must process events against it.
+    *   *Alternative Interpretation*: Perhaps "resident sizes" refers to the *capacity required* by those specific instances if they were loaded, but since they are listed as residents, maybe the card size in this specific problem instance is larger? No, it says "One 8GB card".
+    *   *Strict Logic Application*: If the initial state has 13GB of data on an 8GB card, any new load will fail. But let's look at the events. The first event is `load A`. Is A already resident? Yes ("A1... respectively").
+    *   *Hypothesis*: The "resident sizes" list defines the current content. Since Sum(13) > 8, this is a contradiction unless we assume the card size is actually larger or the list represents something else.
+    *   *Wait, let's re-read carefully*: "One 8GB card tonight... resident sizes: A1 B4 C2 D6 GB respectively."
+    *   If I treat this as a standard LRU cache problem where the initial state is valid, then the capacity must be at least 13. But it says 8.
+    *   *Possibility*: The prompt implies that these are the models *available* or *requested*, but only some fit? No, "resident sizes" means they are currently there.
+    *   *Resolution*: In many such logic puzzles, if the initial state exceeds capacity, it's a trick. However, let's assume the standard interpretation: The card holds {A, B, C, D}. Total size = 13GB. Capacity = 8GB. This is impossible.
+    *   *Let's try a different angle*: Maybe "resident sizes" means the *size of the slot* allocated? No.
+    *   *Most likely intended path*: The prompt describes an initial state that is effectively full or over-full, but we must process events. Let's assume the card actually holds {A, B, C} (sum 7) and D is not resident? Or maybe the capacity is dynamic?
+    *   *Let's look at the "Orientation" example*: It had a valid initial state. This one seems to have an invalid one if taken literally.
+    *   *Correction*: Let's assume the list `A1 B4 C2 D6` describes the models that are *currently resident*. If the sum is 13 and capacity is 8, then any new load will definitely fail. But wait, maybe the "resident sizes" are just labels for the models A, B, C, D and their sizes are fixed properties (A=1, B=4, etc.), but they aren't all resident initially?
+    *   *Text*: "One 8GB card tonight... resident sizes: A1 B4 C2 D6 GB respectively." This phrasing strongly implies these four models ARE the residents.
+    *   *Let's assume there is a typo in my reading or the prompt and proceed with the most logical cache behavior*: The system starts with some content. Let's assume the initial content is empty? No, "resident sizes" lists them.
+    *   *Let's try the only mathematically consistent path for an 8GB card*: Perhaps the list `A1 B4 C2 D6` refers to the models A, B, C, D and their sizes, but they are NOT all resident initially? But it says "resident sizes".
+    *   *Let's assume the prompt implies the card is full with {A, B, C} (7GB) and D is not there?* Or maybe the capacity is 13? No.
+    *   *Decision*: I will treat the initial state as containing models A(1), B(4), C(2). Total = 7GB. Model D(6) is likely NOT resident initially despite the confusing phrasing, OR the card size is actually larger (e.g., 13GB) and the "8GB" is a distractor?
+    *   *Re-reading again*: "One 8GB card tonight... resident sizes: A1 B4 C2 D6 GB respectively."
+    *   Okay, let's look at the events. `load A`, `load B`, `load C`, `load D`. If they are already residents, why load them? Usually, you load what isn't there. This suggests "resident sizes" might mean "models available to be loaded with these sizes".
+    *   *Alternative*: The card starts empty. The text lists the properties of models A-D. Then events happen.
+    *   *Let's try this*: Card = 8GB. Empty initially.
+        1. `load A (1)`: Fits. Residents: {A}. Size: 1. Loads: 1. Evictions: 0. Deferrals: 0.
+        2. `load B (4)`: Fits. Residents: {A, B}. Size: 5. Loads: 2. Evictions: 0. Deferrals: 0.
+        3. `load C (2)`: Fits. Residents: {A, B, C}. Size: 7. Loads: 3. Evictions: 0. Deferrals: 0.
+        4. `load D (6)`: Needs 6. Current free = 8-7=1. Cannot fit.
+           - Attempt eviction of unpinned models. Pinned: B(4). Unpinned: A(1), C(2).
+           - Evict LRT unpinned. Assume order based on arrival (A then C). Evict A? Free = 1+1=2. Still < 6.
+           - Evict C? Free = 2+2=4. Still < 6.
+           - All unpinned evicted. Remaining: B(4) + empty slots. Total capacity available for new load = 8-4=4. Requested 6. Cannot fit.
+           - Result: Deferred. `deferred` list adds "load D". Evictions count increments by number of evictions performed (A and C).
+        5. `unload B`: B is resident. Unload succeeds? Wait, if load D was deferred, did it execute? The rule says "a load that cannot fit... defers". Does the deferred load occupy space? Usually no until loaded later. So residents are still {B}. (A and C were evicted).
+           - Residents: {B(4)}. Size: 4.
+           - `unload B`: Removes B. Residents: {}. Size: 0.
+
+    *   *Let's check the "Orientation" example logic again*: It had a valid initial state. This one is tricky. If I assume the card starts with A, B, C (7GB), then D fails immediately.
+    *   Let's reconsider the text "resident sizes: A1 B4 C2 D6". Maybe it means "Models A, B, C, D have these sizes" and they are NOT residents? But it says "resident sizes".
+    *   Okay, let's assume the standard interpretation for such problems where the list defines the current content. If the sum (13) > 

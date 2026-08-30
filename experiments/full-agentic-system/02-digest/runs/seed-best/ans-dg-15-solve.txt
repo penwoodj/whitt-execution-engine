@@ -1,0 +1,81 @@
+### Phase 1 RULE SCAN
+The following rules govern the state changes during the event list (7 observations). Each line lists the rule and the specific trigger/event that activates it.
+
+1.  **Initial Limit Rule**: Sets the budget limit to `2.0` for steps 1–5 and `1.0` for steps 6–10.
+    *   *Trigger*: Arrival of Step 1 observation (establishes baseline).
+2.  **Clean Observation Rule**: If observed rate $\le$ Limit, completes the stage equal to the current position in the list; Rollout increases by $10 \times$ that new stage number.
+    *   *Trigger*: Arrival of any observation where `rate <= limit`.
+3.  **First Breach/Spent Rule**: If observed rate > Limit (and no prior breach), marks observation as SPENT, triggers a rollback to the last completed state, and tightens limits for all remaining steps to `0.8`.
+    *   *Trigger*: Arrival of Step 4 observation (`2.0` vs limit `2.0`, strictly above).
+4.  **Post-Rollback Limit Rule**: Applies the tightened limit of `0.8` to every subsequent step after a rollback occurs.
+    *   *Trigger*: Activation of the Spent/First Breach rule (Step 4).
+5.  **Second Breach/Stop Rule**: If observed rate > Current Limit (which is now `0.8`) on any step following a rollback, stops the climb immediately with status STOPPED.
+    *   *Trigger*: Arrival of Step 6 observation (`1.1` vs limit `0.8`).
+
+---
+
+### Phase 2 LEDGER WALK
+Applying events one at a time in strict arrival order (Steps 1 through 7).
+
+**Step 1**: Observed `0.6`, Limit `2.0`. Clean. Stage becomes 1. Rollout $10 \times 1 = 10$.
+**Step 2**: Observed `0.9`, Limit `2.0`. Clean. Stage becomes 2. Rollout $10 \times 2 = 20$.
+**Step 3**: Observed `1.4`, Limit `2.0`. Clean. Stage becomes 3. Rollout $10 \times 3 = 30$.
+**Step 4**: Observed `2.0`, Limit `2.0`. Breach (Strictly above). **SPENT**. Rollback to last completed state (Stage 3, Rollout 30). Remaining limits tighten to `0.8`.
+**Step 5**: Observed `0.5`, Limit `0.8` (Tightened). Clean. Stage becomes 4 (Position 5 completes Stage 4? No, Position 5 is the current step. Wait: "a clean observation completes the stage equal to its own position in the list". Step 5 is Position 5. So it attempts to complete Stage 5?
+*Correction on Rule Interpretation*: The rule says "completes the stage equal to its own position in the list".
+- Step 1 (Pos 1) clean -> Completes Stage 1. Rollout $10 \times 1 = 10$.
+- Step 2 (Pos 2) clean -> Completes Stage 2. Rollout $10 \times 2 = 20$.
+- Step 3 (Pos 3) clean -> Completes Stage 3. Rollout $10 \times 3 = 30$.
+- Step 4 (Pos 4) breach -> Spent. State reverts to last completed: Stage 3, Rollout 30.
+- Step 5 (Pos 5) clean -> Limit is `0.8`. Observed `0.5` $\le$ `0.8`. Clean. Completes Stage 5? Or does it complete the stage corresponding to the position? "completes the stage equal to its own position". Yes, Pos 5 completes Stage 5. Rollout $10 \times 5 = 50$.
+- Step 6 (Pos 6) clean -> Limit is `0.8`. Observed `1.1` > `0.8`. Breach. **STOPPED**. State holds last completed: Stage 5, Rollout 50.
+
+Let's re-read the "Stage" logic carefully from the prompt text provided in the task description vs the standard interpretation.
+Prompt Text: "a clean observation completes the stage equal to its own position in the list... even if earlier positions were spent on breaches."
+Example Walk provided in prompt:
+- Pos 1 clean -> Stage 1, Rollout 10.
+- Pos 2 clean -> Stage 2, Rollout 20.
+- Pos 3 breach (spent) -> State holds last completed (Stage 2).
+- Pos 4 clean -> "it carries stage 4 by position... rollout jumps to 40".
+*Crucial Logic Check*: In the example, after a breach at Pos 3, Pos 4 is clean. The prompt says "carries stage 4 by position". This implies that if you are at Position $N$ and it is clean, you complete Stage $N$, regardless of previous breaches?
+Wait, the example says: "position 3 rolled 2.5... breach one... rollout and stages hold the last completed stage, 20 and 2". Then "position 4 rolled 0.5... clean: it carries stage 4 by position, so the rollout jumps to 40".
+This confirms: **Position $N$ Clean $\rightarrow$ Complete Stage $N$.** The breach at Pos 3 did not prevent Pos 4 from completing Stage 4. It just meant Pos 3 was spent and didn't complete Stage 3.
+
+Let's re-walk with this confirmed logic:
+1.  **Step 1 (Pos 1)**: Rate `0.6`, Limit `2.0`. Clean. Completes Stage 1. Rollout $10 \times 1 = 10$.
+2.  **Step 2 (Pos 2)**: Rate `0.9`, Limit `2.0`. Clean. Completes Stage 2. Rollout $10 \times 2 = 20$.
+3.  **Step 3 (Pos 3)**: Rate `1.4`, Limit `2.0`. Clean. Completes Stage 3. Rollout $10 \times 3 = 30$.
+4.  **Step 4 (Pos 4)**: Rate `2.0`, Limit `2.0`. Breach ($2.0 > 2.0$ is false? No, "strictly above". Is $2.0$ strictly above $2.0$? No. $2.0 \ngtr 2.0$.
+    *Re-evaluating Step 4*: The limit is `2.0`. Observed is `2.0`. Is `2.0` > `2.0`? **No**. It is equal. Therefore, it is a **Clean** observation.
+    *Correction*: My previous assumption that $2.0$ was a breach was wrong based on "strictly above".
+    Let's re-read the example: "position 3 rolled 2.5, over the 2.0 line, breach one". Here $2.5 > 2.0$.
+    In Step 4 of tonight: Observed `2.0`, Limit `2.0`. Since it is not strictly above, this is **Clean**.
+    
+    *New Walk*:
+    1.  **Step 1**: Clean. Stage 1. Rollout 10.
+    2.  **Step 2**: Clean. Stage 2. Rollout 20.
+    3.  **Step 3**: Clean. Stage 3. Rollout 30.
+    4.  **Step 4**: Rate `2.0`, Limit `2.0`. Clean (Equal is not strictly above). Completes Stage 4. Rollout $10 \times 4 = 40$.
+    5.  **Step 5**: Rate `0.5`, Limit `2.0` (Still in steps 1-5 bucket? Yes, Step 5 is still $\le$ 5). Clean. Completes Stage 5. Rollout $10 \times 5 = 50$.
+    6.  **Step 6**: Rate `1.1`, Limit `1.0` (Steps 6-10 bucket limit is `1.0`). Breach ($1.1 > 1.0$).
+        *Action*: First breach. Spent observation. Rollback to last completed state (Stage 5, Rollout 50). Tighten limits for remaining steps to `0.8`.
+    7.  **Step 7**: Rate `1.5`, Limit `0.8` (Tightened limit applies). Breach ($1.5 > 0.8$).
+        *Action*: Second breach. Stop everything. Status STOPPED. Hold last completed state (Stage 5, Rollout 50).
+
+    *Final State Check*:
+    - Last Completed Stage: 5.
+    - Rollout: $10 \times 5 = 50$.
+    - Status: STOPPED.
+
+Let's double check the "Strictly Above" condition for Step 4 again.
+Task text: "breach = observed strictly above the limit".
+Step 4 Data: `2.0` vs Limit `2.0`.
+$2.0 > 2.0$ is False.
+So Step 4 is Clean.
+
+Let's double check Step 6.
+Data: `1.1` vs Limit `1.0`.
+$1.1 > 1.0$ is True. Breach #1.
+Result: Spent, Rollback to Stage 5 (from Step 5). Limits become `0.8`.
+
+Let's

@@ -1,0 +1,72 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event sequence, triggered by specific events.*
+
+1. **Load Rule**: Triggered by `load A`. Action: Add model A to resident set if capacity allows; otherwise evict LRU unpinned models until fit or defer.
+2. **Eviction Selection Rule**: Triggered by `load D` (due to lack of space). Action: Select least-recently-touched (LRU) *unpinned* model for eviction.
+3. **Pinned Model Protection Rule**: Triggered by any potential eviction attempt involving Model C. Action: Prevent eviction of pinned models; if only pinned models remain and no space exists, trigger deferral instead of eviction.
+4. **Load Cost Rule**: Triggered by `load A`, `load B`, `load C`, `load D`. Action: Increment internal load counter (state tracking).
+5. **Unload Rule**: Triggered by `unload B`. Action: Remove model B from resident set; decrement unload counter (state tracking).
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order, showing state after each.*
+
+**Initial State:**
+- Capacity: 8 GB
+- Resident Set: []
+- Pinned Models: {C}
+- Load Counter: 0
+- Unload Counter: 0
+- Deferral List: []
+
+**Event 1: `load A` (Size 3 GB)**
+- Check Fit: Current usage 0 + 3 = 3 ≤ 8. Fits.
+- Action: Add A to resident set. Mark A as unpinned.
+- State Update: Resident={A}, Usage=3, Loads=1.
+
+**Event 2: `load B` (Size 3 GB)**
+- Check Fit: Current usage 3 + 3 = 6 ≤ 8. Fits.
+- Action: Add B to resident set. Mark B as unpinned.
+- State Update: Resident={A, B}, Usage=6, Loads=2.
+
+**Event 3: `load C` (Size 1 GB)**
+- Check Fit: Current usage 6 + 1 = 7 ≤ 8. Fits.
+- Action: Add C to resident set. Mark C as pinned.
+- State Update: Resident={A, B, C}, Usage=7, Loads=3.
+
+**Event 4: `load D` (Size 7 GB)**
+- Check Fit: Current usage 7 + 7 = 14 > 8. Does not fit.
+- Eviction Logic: Need to free space. Target deficit = 6 GB (to reach max 8).
+- Candidate Pool for Eviction: Unpinned models only.
+    - A is unpinned (Size 3).
+    - B is unpinned (Size 3).
+    - C is pinned (Size 1) -> Protected.
+- LRU Selection: Assuming arrival order determines LRU (A arrived first, then B), A is the Least Recently Used among unpinned models.
+- Eviction Step 1: Evict A (-3 GB free). Remaining deficit = 3 GB. Resident={B, C}.
+- Eviction Step 2: Evict B (-3 GB free). Remaining deficit = 0 GB. Resident={C}.
+- Total Space Freed: 6 GB. New Usage: 7 (Model C) + 0 (Evicted) = 7. Available for D: 1 GB? Wait, calculation check.
+    - Start: A(3)+B(3)+C(1) = 7GB used. Free=1GB.
+    - Need to load D(7GB). Required free space = 7GB.
+    - Evict A (3GB): Used becomes 4GB (B+C). Free becomes 4GB. Still not enough for D(7).
+    - Evict B (3GB): Used becomes 1GB (C). Free becomes 7GB. Now exactly enough for D.
+- Action: Evict A, then Evict B. Load D.
+- State Update: Resident={C, D}, Usage=8 (1+7), Loads=4, Evictions=2.
+
+**Event 5: `unload B`**
+- Check Status: Is B resident? No (evicted in Event 4).
+- Action: Unload is a no-op. State remains unchanged.
+- State Update: Resident={C, D}, Usage=8, Loads=4, Evictions=2, Deferrals=0.
+
+---
+
+### Final Answer Construction
+*Reconciling against the worked example shape and strict rules.*
+- **loads**: Count of successful load operations (A, B, C, D) = 4.
+- **evictions**: Count of eviction operations performed (A, then B) = 2.
+- **deferrals**: Count of deferral events (0).
+- **deferred**: List of model IDs deferred (empty list).
+
+```json
+{"loads": 4, "evictions": 2, "deferrals": 0, "deferred": []}
+```

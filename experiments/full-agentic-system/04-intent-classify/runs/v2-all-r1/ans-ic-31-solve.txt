@@ -1,0 +1,52 @@
+### Phase 1: RULE SCAN
+The following rules govern the state changes during the event sequence (arrivals, grants, preemptions, resumptions):
+
+1.  **Arrival Rule**: `HIGH` arrives at minute 3; triggers immediate preemption of any running `LOW` job and halts all other execution until `HIGH` completes.
+2.  **Grant/Start Rule**: `LOW` jobs start or resume in order of their absolute start minutes (`s`). A resumed job outranks a fresh job if they share the same start minute tie-breaker (not applicable here as starts differ).
+3.  **Checkpoint Bank Rule**: Checkpoints bank at `start_or_resume + 2` and every subsequent `+ 2` running minutes, tracked in absolute time. Banks landing exactly on the preemption trigger count; work past the last bank is wasted.
+4.  **Preemption Waste Rule**: On preemption by `HIGH`, execution stops immediately. Minutes run between the last checkpoint bank and the preemption event are marked as "wasted" and must be redone upon resume.
+5.  **Resume Priority Rule**: Upon resumption, the core picks the waiting job with the earliest start minute (`s`). If multiple jobs have the same `s`, the one that was already running (resumed) takes priority over a fresh one (not applicable here).
+6.  **Completion Order Rule**: The final order lists only `LOW` jobs sorted by their absolute finish minute. `HIGH` is excluded from this list.
+
+---
+
+### Phase 2: LEDGER WALK (Minute-by-Minute Table)
+
+| Minute | Core Action | Event / State Detail |
+| :--- | :--- | :--- |
+| **0** | Start | `LOW1` starts (`s=0`). Runs minute 0. Bank @ min 2. |
+| **1** | Run | `LOW1` runs minute 1. Total run time = 2. Next bank @ min 4. |
+| **2** | Finish/Preempt | `LOW1` finishes its required 5 mins? No, needs 3 more. Wait, rule says "runs 5 minutes". Let's re-read carefully: "LOW1 runs 5 minutes starting at minute 0". It has run 2 mins (0,1). Needs 3 more. **Correction**: The example logic implies `LOW` jobs have a *duration* and need to complete that duration. `LOW1` needs 5 total. At min 2 it has done 2. It is NOT finished. <br> **Wait**, re-reading the prompt's specific constraint: "LOW1 runs 5 minutes starting at minute 0". Does this mean it *must* run for 5 minutes of wall-clock time, or complete a job of size 5? The example says "LOW1 had 7 total minutes... resumed owing 5". This implies `total_duration` is the metric. <br> **CRITICAL RE-EVAL**: In minute 2, `HIGH` arrives. `LOW1` has run for 2 minutes (0, 1). It needs to run 3 more minutes to reach its total of 5. <br> **BANK CHECK**: Banked at min 2? Yes ("banks a checkpoint at minute s+2"). Since the bank lands exactly on the arrival minute, nothing is wasted yet. The job is preempted with 0 waste. |
+| **3** | Run | `HIGH` runs (minute 1 of 8). Core busy with `HIGH`. |
+| **4** | Run | `HIGH` runs (minute 2 of 8). Core busy with `HIGH`. |
+| **5** | Run | `HIGH` runs (minute 3 of 8). Core busy with `HIGH`. |
+| **6** | Run | `HIGH` runs (minute 4 of 8). Core busy with `HIGH`. |
+| **7** | Run | `HIGH` runs (minute 5 of 8). Core busy with `HIGH`. |
+| **8** | Run | `HIGH` runs (minute 6 of 8). Core busy with `HIGH`. |
+| **9** | Run | `HIGH` runs (minute 7 of 8). Core busy with `HIGH`. |
+| **10**| Finish/Resume| `HIGH` finishes. Core becomes free. `LOW2` is waiting (`s=2`). `LOW1` is waiting (`s=0`). <br> Priority: `LOW1` (start min 0) > `LOW2` (start min 2). <br> Resume `LOW1`. It needs to redo the 3 minutes it missed. |
+| **11**| Run | `LOW1` resumes. Runs minute 1 of owed work. Total run time since resume = 1. Bank @ min 4? No, banks every 2 running mins. Current run count = 1. Next bank at run count 2 (absolute min 12). |
+| **12**| Run | `LOW1` resumes. Runs minute 2 of owed work. Total run time since resume = 2. Bank @ absolute min 12? Yes, "every 2 running minutes after". So it banks at abs min 12. <br> Wait, let's trace the bank logic strictly: "banks a checkpoint at minute s+2 and again every 2 running minutes after". <br> `LOW1` resumed at min 10. Run count = 0. <br> Min 11 (run count 1). No bank. <br> Min 12 (run count 2). Bank occurs here. <br> So at min 12, it banks. It has completed its owed work? Total needed was 5. Completed so far: 0-1 (2 mins) + 11-12 (2 mins) = 4 mins. Needs 1 more. |
+| **13**| Run | `LOW1` resumes. Runs minute 3 of owed work. Total run time since resume = 3. Bank @ abs min 14? Yes. <br> Wait, did it finish at 12 or 13? It needed 5 total. Had 2 done before preemption. Needs 3 more. <br> Min 11 (run 1). Min 12 (run 2). Min 13 (run 3). <br> At end of minute 13, it has completed the required 3 minutes. Total job complete. |
+| **14**| Finish/Start | `LOW1` finishes at min 13. Core free. `LOW2` waiting (`s=2`). Start `LOW2`. Needs 7 mins total. Runs minute 1. Bank @ s+2 = 4? No, banks every 2 running mins from start/resume. Run count 1. Next bank at run count 2 (abs min 16). |
+| **15**| Run | `LOW2` runs minute 2. Run count 2. Bank @ abs min 16. |
+| **16**| Finish/Start | `LOW2` finishes? No, needs 7 total. Done 2 so far (since start at 14). Needs 5 more. <br> Wait, let's re-calculate finish times carefully. <br> `LOW1`: Start 0. Preempted min 3. Resumed min 10. <br> Run 0-1 (2 mins). Bank @ 2. <br> Resume at 10. Needs 3 mins. <br> Min 11 (run 1). Min 12 (run 2, Bank). Min 13 (run 3). Finish at end of min 13. <br> `LOW2`: Start 2. Waiting until min 14. <br> Run 14-15 (2 mins). Bank @ s+2 = 4? No, "banks a checkpoint at minute s+2". Here s=2. So bank at abs min 4? But it wasn't running then. It resumes at 14. Does the rule apply to resume? "on preemption... redone after resume". "a job that starts or resumes at minute s banks a checkpoint at minute s+2". Yes, applies to resume. <br> So `LOW2` resumes at min 14 (`s=14`). Banks at `14+2 = 16`. <br> Run 14 (run count 1). Run 15 (run count 2). Bank @ 16. <br> Needs 7 total. Done 2. Needs 5 more. <br> Min 16 (run 3, Bank). Min 17 (run 4). Min 18 (run 5, Finish). |
+
+**Re-evaluating the "Bank at s+2" rule for `LOW2`**:
+The prompt says: "a job that starts or resumes at minute s banks a checkpoint at minute s+2".
+For `LOW2`: Start/Resume time = Minute 14. Bank time = Minute 16.
+Execution:
+- Min 14: Run (Count 1).
+- Min 15: Run (Count 2).
+- Min 16: Run (Count 3) AND Bank occurs? "again every 2 running minutes after".
+  - Start/Resume = Count 0.
+  - Count 2 -> Bank at `s+2`.
+  - Count 4 -> Bank at `s+4`.
+  So yes, bank happens when run count hits 2 (absolute min 16).
+- Min 17: Run (Count 3).
+- Min 18: Run (Count 4) AND Bank? No, next bank is Count 4 -> Abs Min 18. Wait.
+  - Run 0 (Start).
+  - Run 2 (Bank 1).
+  - Run 4 (Bank 2).
+  So banks at run counts 2 and 4.
+  `LOW2` needs

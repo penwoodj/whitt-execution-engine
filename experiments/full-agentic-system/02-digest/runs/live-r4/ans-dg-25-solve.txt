@@ -1,0 +1,54 @@
+### Phase 1 Rule List
+Based on the strict textual analysis of the rules provided for "tonight" (ignoring the orientation example's numbers):
+
+1.  **Arrival Order**: Jobs arrive in the order defined by their start times (`LOW1` @ min 0, `LOW2` @ min 2). The core never idles while a job is waiting; it immediately switches to the next available job upon finishing or being preempted.
+2.  **Preemption Priority**: `HIGH` preempts any running `LOW` job instantly upon arrival. While `HIGH` runs, no other jobs run.
+3.  **Resumption Order (Tie-Breaker)**: If multiple jobs are waiting when the core becomes free (after a finish or preemption), the core selects the job with the earliest **start minute**. A resumed job of that start time outranks a fresh job of a later start time.
+4.  **Checkpointing Logic**: `LOW` jobs checkpoint every 2 completed minutes of *running* time. On preemption, any work past the last checkpoint is wasted and must be redone upon resumption.
+5.  **Waste Calculation**: Wasted minutes = (Total scheduled runtime for a job) - (Runtime banked at checkpoints before preemption). Specifically, if a job has `T` total minutes and checks every 2 minutes, it banks `floor(current_running_time / 2)` * 2 minutes? No, the text says "checkpoints every 2 completed minutes". If it runs 1 minute, no checkpoint. If it runs 2 minutes, checkpoints at min 2 (banks 2 mins). If preempted at min 3 after running 2+1, only the 1 extra is wasted.
+6.  **Makespan Definition**: The total time from the first start (`LOW1` @ min 0) to the completion of the last job (`LOW2`).
+
+### Phase 2 Ledger Walk (Minute-by-Minute State)
+
+*   **Min 0**: `LOW1` starts (fresh). Core busy with `LOW1`.
+    *   `LOW1`: Running. Total needed: 5. Banked: 0.
+*   **Min 1**: `LOW1` continues.
+    *   `LOW1`: Running. Total needed: 4. Banked: 0. (Checkpoint at 2 is not reached).
+*   **Min 2**: `LOW1` completes 2nd minute. Checkpoint hit! Banks 2 mins.
+    *   `LOW1`: Running. Total needed: 3. Banked: 2.
+    *   Event: `LOW2` arrives (Start Min 2). Enters queue behind `LOW1`.
+*   **Min 3**: `HIGH` arrives. Preempts `LOW1`.
+    *   State Check: `LOW1` was running its 3rd minute. It had banked 2 mins (at end of min 2). The work done in min 3 is incomplete/preempted immediately.
+    *   Waste Calc for `LOW1`: Scheduled so far = 3 (min 0,1,2 completed + attempt at 3). Banked = 2. Wasted = 1 minute? Wait, the text says "checkpoints every 2 completed minutes". At min 2 exactly, it checkpoints. At min 3 start, it attempts to run. If `HIGH` arrives *at* min 3, does it preempt before completing the unit of work for min 3?
+    *   Re-reading orientation: "LOW1 held core... banked checkpoint at minute 2... next minute was unbanked when swap came, so 1 minute wasted." This implies if you arrive at T=2 and run into T=3, but get preempted before finishing the unit associated with T=3 (or even if you finish it?), the logic in the example suggests: If you have a checkpoint at T-2, you are safe up to T. Any time spent between T and preemption is wasted?
+    *   Let's trace orientation precisely: `LOW1` runs 0->2 (banks 2). `HIGH` arrives at 3. Example says "next minute was unbanked... 1 minute wasted". This implies the run from 2 to 3 (duration 1) is considered wasted. So `LOW1` resumes with 4 minutes left? Or 5-2=3?
+    *   Text rule: "a job with 5 total minutes and 2 banked resumes with 3 minutes left." In the example, `LOW1` resumed owing 3. It ran minutes 5 to 8 (duration 3). This matches. So in tonight's scenario, `LOW1` also resumes with **3 minutes** left.
+    *   `HIGH`: Starts running at Min 3. Duration: 8 mins. Ends at Min 10.
+*   **Min 4-9**: Core busy with `HIGH`. Queue: `[LOW2]`, then `[LOW1 (resumed)]`.
+*   **Min 10**: `HIGH` finishes. Core becomes free.
+    *   Queue State: `LOW2` (Start Min 2, Fresh). `LOW1` (Start Min 0, Resumed).
+    *   Selection Rule: Earliest Start Minute wins. `LOW1` (Start 0) beats `LOW2` (Start 2).
+    *   Action: Resume `LOW1`.
+*   **Min 11**: `LOW1` resumes. Needs 3 mins. Runs min 11, 12, 13.
+*   **Min 14**: Wait, let's re-calculate `LOW1` runtime. It needs 3 minutes to finish.
+    *   Min 11: Run (1/3).
+    *   Min 12: Run (2/3).
+    *   Min 13: Run (3/3) -> Finishes.
+*   **Min 14**: Core free. Queue: `[LOW2]`.
+    *   Action: Start `LOW2` (Fresh). Needs 2 mins.
+*   **Min 15**: `LOW2` runs (1/2).
+*   **Min 16**: `LOW2` runs (2/2) -> Finishes.
+
+**Final Calculations:**
+1.  **Wasted Minutes**: Only `LOW1` was preempted. It had banked 2 minutes (at end of Min 2). It attempted to run during Min 3. Per the orientation logic ("next minute was unbanked... 1 minute wasted"), the duration from the checkpoint time (Min 2) until preemption/swap (start of swap at Min 3, but effectively covering the slot meant for Min 3's work) counts as wasted?
+    *   Let's look closer at the orientation phrasing: "LOW1 held core... banked a checkpoint at minute 2, and its next minute was unbanked when the swap came". This implies the run occurring in the interval [2, 3) is unbanked. Since `HIGH` arrives at Min 3, does it preempt before or after completing the work for Min 3?
+    *   If `LOW1` runs 0-1 (safe), 1-2 (safe, checkpoint), 2-3 (unsafe). If `HIGH` takes over at Min 3, did `LOW1` finish the unit [2,3)? The text says "next minute was unbanked... so 1 minute wasted". This confirms the work in the slot immediately following the checkpoint is wasted upon preemption.
+    *   So `LOW1` waste = **1 minute**.
+2.  **Order**: `LOW1` finished at Min 13. `LOW2` finished at Min 16. Order: `["LOW1", "LOW2"]`.
+3.  **Makespan**: Start of first job (Min 0) to end of last job (Min 16). Duration = 16 minutes.
+
+### Final Answer JSON
+
+```json
+{"makespan_min": 16, "wasted_min": 1, "order": ["LOW1", "LOW2"]}
+```

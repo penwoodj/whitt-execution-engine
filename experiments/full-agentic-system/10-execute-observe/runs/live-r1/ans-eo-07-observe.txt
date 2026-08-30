@@ -1,0 +1,105 @@
+**Phase 1: Rule List**
+Based on the text provided, here are the rules governing the state changes for tonight's events (ignoring orientation numbers):
+
+1.  **Arrival/Attempt Cost Rule**: Each failed attempt costs 2 tokens; each wait second costs 1 token. Total spend accumulates per event in arrival order.
+2.  **Budget Check Rule**: After every event, check if `Total Spend` > `Initial Budget`. If true, trigger the doubling mechanism immediately for that specific check cycle.
+3.  **Doubling Mechanism Rule**: If a budget breach occurs, double the current budget exactly once (`New Budget = Old Budget * 2`). The spend remains unchanged during this step.
+4.  **Re-Check Rule**: After doubling, re-evaluate if `Total Spend` > `New Doubled Budget`.
+5.  **Suppression Verdict Rule**: If `Total Spend` <= `New Doubled Budget`, the job runs (`suppressed = false`) and `budget_after = New Doubled Budget - Total Spend`. If `Total Spend` > `New Doubled Budget` (after doubling), the job is suppressed (`suppressed = true`) and `budget_after = 0` (implied by suppression, though text focuses on the "runs" case for the example; standard logic dictates no remainder if fully exceeded).
+6.  **State Persistence Rule**: The state after each event must be written down immediately before proceeding to the next event. No re-computation from scratch is allowed mid-stream.
+
+**Phase 2: Ledger Walk**
+Applying the events one at a time in strict arrival order (Waits observed: 2, 4, 8; Attempts implied by "3 failed attempts before the 4th succeeds" and "after each failed attempt... then runs"):
+
+*   **Event 1**: Wait 2s. Attempt 1 (Failed).
+    *   Cost: 2 (wait) + 2 (attempt) = 4.
+    *   Total Spend: 4.
+    *   Initial Budget: 24.
+    *   Check: 4 <= 24. No doubling.
+    *   State: `attempts`=1, `wait_s`=2, `budget_after`=20, `suppressed`=false.
+
+*   **Event 2**: Wait 4s. Attempt 2 (Failed).
+    *   Cost: 4 (wait) + 2 (attempt) = 6.
+    *   Total Spend: 4 + 6 = 10.
+    *   Initial Budget: 24.
+    *   Check: 10 <= 24. No doubling.
+    *   State: `attempts`=2, `wait_s`=6 (2+4), `budget_after`=14, `suppressed`=false.
+
+*   **Event 3**: Wait 8s. Attempt 3 (Failed).
+    *   Cost: 8 (wait) + 2 (attempt) = 10.
+    *   Total Spend: 10 + 10 = 20.
+    *   Initial Budget: 24.
+    *   Check: 20 <= 24. No doubling.
+    *   State: `attempts`=3, `wait_s`=14 (6+8), `budget_after`=4, `suppressed`=false.
+
+*   **Event 4**: Wait 0s (implied between success and next? Or just the successful attempt). The text says "after each failed attempt... then runs". Usually, a successful attempt has no wait cost associated with it in this specific "wait doubles" pattern unless specified. However, looking at the orientation example: "3 attempts in all... waits 5+10=15". This implies only failed attempts incur the wait cost described by the doubling rule. The successful attempt incurs its own cost (2 tokens) but no wait cost from the sequence.
+    *   Wait: 0s.
+    *   Attempt 4 (Success). Cost: 2.
+    *   Total Spend: 20 + 2 = 22.
+    *   Initial Budget: 24.
+    *   Check: 22 <= 24. No doubling.
+    *   State: `attempts`=4, `wait_s`=14, `budget_after`=2, `suppressed`=false.
+
+*Wait, let me re-read the "3 failed attempts before the 4th succeeds" and "Waits observed: 2, 4, 8".*
+Does the successful attempt count towards the "attempts" total? Yes ("the job needs 3 failed..."). So `attempts` should be 4.
+Does the successful attempt incur a wait cost? The text says "first wait is 2s, each next wait doubles". This sequence applies to the *failed* attempts that trigger the retry logic. The successful attempt ends the cycle. It costs 2 tokens (per rule: "every attempt costs 2"). It does not have a "wait" attached in the doubling sequence context.
+
+Let's re-verify the totals with this interpretation:
+1.  **Fail 1**: Wait 2, Cost 2. Spend = 4. Budget 24. OK. (Wait sum=2)
+2.  **Fail 2**: Wait 4, Cost 2. Spend = 4+6=10. Budget 24. OK. (Wait sum=2+4=6)
+3.  **Fail 3**: Wait 8, Cost 2. Spend = 10+10=20. Budget 24. OK. (Wait sum=6+8=14)
+4.  **Success**: Wait 0, Cost 2. Spend = 20+2=22. Budget 24. OK. (Wait sum=14)
+
+Final State:
+`attempts`: 4
+`wait_s`: 14
+`budget_after`: 24 - 22 = 2
+`suppressed`: false
+
+*Self-Correction Check*: Is it possible the successful attempt also has a wait? "after each failed attempt the retry waits, then runs". The run is the success. No wait mentioned for the success itself in the doubling chain. The orientation example confirms: "3 attempts in all... total waiting 15s" (where waits were 5 and 10). If there was a 4th successful attempt with a wait, it would be listed or implied. Since only two waits are listed in the orientation ("base wait 5s, 2 failures doubling to 10s"), and the text says "three attempts in all" for that specific example (which is weird if one succeeds), let's look closer at the orientation: "had the spend there been 42... budget would double once... job runs". In the orientation, they explicitly say "3 attempts in all". This suggests the successful attempt might not be counted as an "attempt" in their specific counter, OR the cycle ends immediately.
+However, for tonight's task: "the job needs 3 failed attempts before the 4th succeeds". This clearly implies a 4th event (the success).
+If `attempts` counts only failures, it would be 3. If it counts all events including success, it is 4.
+Standard interpretation of "attempts" in retry logic includes the successful one.
+Let's check the budget calculation again.
+Spend = Sum(Waits) + Sum(Attempt Costs).
+Waits: 2 + 4 + 8 = 14.
+Attempt Costs: 2 (fail1) + 2 (fail2) + 2 (fail3) + 2 (success) = 8.
+Total Spend = 22.
+Budget = 24.
+Remainder = 2.
+
+Is there any scenario where the budget doubles?
+Max spend before success = 20. Budget 24. No double.
+With success cost added = 22. Still < 24. No double.
+
+What if "attempts" in the JSON key refers to the number of *failed* attempts + successful one? Yes, that is standard.
+So `attempts` = 4.
+`wait_s` = 14.
+`budget_after` = 2.
+`suppressed` = false.
+
+Let's double check the "orientation" logic to ensure I'm not missing a nuance about counting.
+Orientation: "3 attempts in all... waits 5+10=15". Spend 30 (15 wait + 15 attempt cost). Budget 39.
+If there were 4 attempts (3 fail, 1 success), and each costs 5, that's 20 cost. Wait 15. Total 35.
+Text says "spend 30". This matches 15 wait + 15 attempt cost.
+This implies the successful attempt *did* cost 5 (or whatever unit) in their example? Or did they count only failures?
+"three attempts in all" vs "2 failures doubling to 10s". If there were 3 attempts total, and 2 failed, then 1 succeeded. That matches.
+So `attempts` = Total events processed (Failures + Success).
+In tonight's case: 3 Failures + 1 Success = 4 Attempts.
+Cost per attempt = 2. Total Attempt Cost = 8.
+Wait Costs = 2+4+8 = 14.
+Total Spend = 22.
+Budget = 24.
+Result: `budget_after` = 2.
+
+Final JSON construction:
+{"attempts": 4, "wait_s": 14, "budget_after": 2, "suppressed": false}
+
+```json
+{
+  "attempts": 4,
+  "wait_s": 14,
+  "budget_after": 2,
+  "suppressed": false
+}
+```

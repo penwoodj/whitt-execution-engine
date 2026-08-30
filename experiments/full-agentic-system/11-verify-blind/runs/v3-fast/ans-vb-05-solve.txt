@@ -1,0 +1,58 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event or claim list.*
+
+1.  **Arrival Rule**: Requests land in strict arrival order; each asks for a fixed number of tokens.
+2.  **Grant Rule (Full)**: If the pool covers the full ask, grant the full amount and subtract from the pool.
+3.  **Grant Rule (Partial)**: If the pool cannot cover the full ask but has tokens, grant what is there (partial) and drain the pool to zero. This remains a "granted" request, not denied.
+4.  **Denial Rule**: A request arriving at an empty pool (exactly zero) is denied and listed by ID.
+5.  **Expiry Trigger Rule**: The grant for `r2` expires after request `r3` completes.
+6.  **Return Amount Rule**: An expired grant returns half of its *granted* tokens (rounded down), never half of the ask, and only that specific grant returns.
+7.  **Timing Rule**: The expiry return happens immediately before the next request is processed (after the trigger completes).
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order.*
+
+**Initial State:** Pool = 40, Granted = 0, Denied = []
+
+1.  **Event `r1` arrives (Ask: 5)**
+    *   Rule Applied: Grant Rule (Full). Pool (40) >= Ask (5).
+    *   Action: Grant 5. Pool becomes 35.
+    *   State: Pool=35, Granted=5 (`r1`).
+
+2.  **Event `r2` arrives (Ask: 8)**
+    *   Rule Applied: Grant Rule (Full). Pool (35) >= Ask (8).
+    *   Action: Grant 8. Pool becomes 27.
+    *   State: Pool=27, Granted=13 (`r1`, `r2`).
+
+3.  **Event `r3` arrives (Ask: 12)**
+    *   Rule Applied: Grant Rule (Full). Pool (27) >= Ask (12).
+    *   Action: Grant 12. Pool becomes 15.
+    *   State: Pool=15, Granted=25 (`r1`, `r2`, `r3`).
+    *   **Expiry Trigger**: The grant for `r2` expires after `r3` completes.
+    *   Return Calculation: Half of granted amount (8) = 4. Round down(4) = 4.
+    *   Action: Add 4 to pool. Pool becomes 19.
+    *   State: Pool=19, Granted=25 (`r1`, `r3`), Returned=4.
+
+4.  **Event `r4` arrives (Ask: 14)**
+    *   Rule Applied: Grant Rule (Full). Pool (19) >= Ask (14).
+    *   Action: Grant 14. Pool becomes 5.
+    *   State: Pool=5, Granted=39 (`r1`, `r3`, `r4`), Returned=4.
+
+5.  **Event `r5` arrives (Ask: 17)**
+    *   Rule Applied: Grant Rule (Partial). Pool (5) < Ask (17).
+    *   Action: Grant available amount (5). Pool becomes 0. Request is granted (partial), not denied.
+    *   State: Pool=0, Granted=44 (`r1`, `r3`, `r4`, `r5`), Returned=4.
+
+6.  **Event `r6` arrives (Ask: 21)**
+    *   Rule Applied: Denial Rule. Pool is exactly 0.
+    *   Action: Request denied. List ID `r6`.
+    *   State: Pool=0, Granted=44 (`r1`, `r3`, `r4`, `r5`), Denied=[`r6`], Returned=4.
+
+**Final Totals:**
+*   **Granted Units**: 5 + 8 + 12 + 14 + 5 = 44.
+*   **Denied List**: [`r6`].
+*   **Pool Left**: 0.
+
+```json
+{"granted_units": 44, "denied": ["r6"], "pool_left": 0}
+```

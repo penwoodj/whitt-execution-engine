@@ -1,0 +1,54 @@
+### Phase 1: Rule List
+Based on the task description, here are the rules that change state during events or claims (arrivals, grants/preemptions, expiries/checkpoints):
+
+1.  **Arrival Order Rule**: LOW jobs take the core in order of their start minutes; a resumed LOW outranks a fresh one at any tie.
+2.  **Preemption Rule**: HIGH arrives and instantly preempts whatever LOW job is running; while HIGH runs, nothing else runs.
+3.  **Checkpoint Banking Rule**: A job banks a checkpoint at `start_or_resume + 2` and every 2 running minutes after (absolute minutes).
+4.  **Waste Calculation Rule**: On preemption, work past the last banked checkpoint is wasted (`owed = total - banked`).
+5.  **Resume Priority Rule**: A resumed LOW outranks a fresh one at any tie; the core never idles while a LOW waits.
+
+### Phase 2: Ledger Walk (Minute-by-Minute Table)
+
+| Minute | Core Status | Event Details | Checkpoint Bank (Absolute Min) |
+| :--- | :--- | :--- | :--- |
+| **0** | LOW1 | Start LOW1 (Total=5). Runs min 0. | Bank @ 2 (Start+2). |
+| **1** | LOW1 | Run min 1. | - |
+| **2** | HIGH | Arrive HIGH (Total=9). Preempt LOW1. <br>LOW1 finished 2 mins, banked 2. <br>Wasted: 5-2 = 3 mins. <br>HIGH starts running. | Bank @ 4 (HIGH Start+2). |
+| **3** | HIGH | Run min 3. | - |
+| **4** | HIGH | Run min 4. | Bank @ 6 (Start+4). |
+| **5** | HIGH | Run min 5. | - |
+| **6** | HIGH | Run min 6. | Bank @ 8 (Start+6). |
+| **7** | HIGH | Run min 7. | - |
+| **8** | HIGH | Run min 8. | Bank @ 10 (Start+8). |
+| **9** | HIGH | Run min 9. <br>HIGH finishes (Total=9, ran mins 2-10? No, runs 9 mins starting at 2: 2,3,4,5,6,7,8,9,10). Wait, let's re-calc duration. Starts min 2. Runs 9 mins. Minutes: 2,3,4,5,6,7,8,9,10. <br>So HIGH finishes at end of minute 10. | Bank @ 12 (Start+10). |
+| **10** | LOW1 | Resume LOW1. <br>Owed: 3 mins. Runs min 10. | - |
+| **11** | LOW1 | Run min 11. | Bank @ 14 (Resume+2? No, resume at 10. Banks at 10+2=12). Wait, rule says "every 2 running minutes after". <br>Running time accumulates from resume. <br>Min 10: Run 1 (Total run 1). <br>Min 11: Run 2 (Total run 2). Bank @ 12? No, bank is absolute minute. <br>Resume at 10. First bank at 10+2=12. |
+| **12** | LOW1 | Run min 12. | Bank @ 14 (Running time 3 mins -> +2 from prev bank). Wait, let's track running time strictly. <br>Resume 10. <br>Min 10: RT=1. <br>Min 11: RT=2. <br>Min 12: RT=3. Bank @ 14 (Absolute). |
+| **13** | LOW1 | Run min 13. | - |
+| **14** | LOW1 | Run min 14. | Bank @ 16 (RT=5? No, RT increments by 1 each minute). <br>Let's re-eval banks for LOW1 resume. <br>Resume at 10. <br>Bank 1: Absolute 12 (Start+2). <br>Bank 2: Running time hits 2 mins? Or every 2 running minutes after start? "every 2 running minutes after". <br>So if RT=2, bank. If RT=4, bank. <br>Min 10 (RT=1), Min 11 (RT=2) -> Bank at absolute min corresponding to RT=2? No, rule says "bank a checkpoint at minute s+2 and again every 2 running minutes after". This implies the *absolute* time of the bank is determined by the running duration. <br>Let's assume standard interpretation: Banks occur when Running Time % 2 == 0. <br>Resume 10. <br>Min 10 (RT=1). <br>Min 11 (RT=2) -> Bank at absolute min 13? Or does the bank happen *at* the minute where RT hits the threshold? Usually "bank at s+2" means absolute time. "Again every 2 running minutes after" implies subsequent banks are spaced by 2 running minutes, which translates to 2 calendar minutes if speed is constant. <br>So Banks at: Absolute 12 (Start+2), Absolute 14 (RT=3? No). <br>Let's stick to the simplest logic used in similar problems: Bank happens every 2 minutes of *running* time. Since LOW1 runs continuously, it banks every 2 calendar minutes starting from resume+2. <br>Resume 10. Banks at 12, 14, 16... |
+| **15** | LOW1 | Run min 15. | - |
+| **16** | LOW1 | Run min 16. | Bank @ 18 (RT=7? No). <br>Let's restart the bank logic for clarity based on "absolute minutes". <br>Resume at 10. <br>Bank 1: Absolute 12 (Start+2). <br>Bank 2: Running time = 3 mins? No, running time must be even to trigger "every 2 running minutes after"? Or does it mean every 2 calendar minutes? The prompt says "bank a checkpoint at minute s+2 and again every 2 running minutes after". This phrasing suggests the interval is defined by running time. If speed is 1 min/job/min, then 2 running mins = 2 calendar mins. <br>So Banks at: 12, 14, 16... |
+| **17** | LOW1 | Run min 17. | - |
+| **18** | LOW1 | Run min 18. | Bank @ 20? (If pattern is +2). <br>Let's check total duration needed: 3 mins. <br>Mins run: 10, 11, 12. Total 3. <br>Banks at: 12 (Start+2), then every 2 running mins. <br>Running time sequence: 1, 2(Bank?), 3(Finish). <br>If bank is triggered when RT hits even numbers: Bank at RT=2. <br>When does RT hit 2? At end of minute 11 (start of 12). So bank happens at absolute min 12? Or 13? Usually "bank at s+2" means the checkpoint exists for that minute. Let's assume banks happen at absolute minutes: 12, 14... <br>Wait, LOW1 finishes at end of minute 12 (runs 10, 11, 12). Total 3 mins. <br>Banks: Start+2 = 12. Next bank would be RT=4 (Absolute 14). But job ends at 12. So only 1 bank recorded? Or does the bank happen *during* minute 12? <br>Let's assume the standard "bank every 2 minutes" logic: Banks at 12, 14... <br>Job runs 10, 11, 12 (3 mins). <br>Banks at absolute min 12. Does it bank again? RT=2 happens at end of min 11/start of 12. So yes, bank at 12. Next would be RT=4 (end of 13), but job ends. <br>So LOW1 finishes with 1 bank. |
+| **19** | - | Job Finished. | - |
+
+**Correction on HIGH Duration**:
+HIGH starts min 2, runs 9 mins.
+Minutes: 2, 3, 4, 5, 6, 7, 8, 9, 10. (Count: 9 minutes).
+High finishes at end of minute 10.
+
+**Correction on LOW1 Resume**:
+LOW1 resumes min 11? No, HIGH occupies core mins 2-10 inclusive.
+Minute 10 is the last minute HIGH runs.
+So at start of Minute 11, HIGH is done. Core becomes free for LOW1.
+LOW1 resumes at Minute 11.
+Total needed: 3 minutes.
+Runs: 11, 12, 13.
+Finishes end of Minute 13.
+
+**Re-evaluating Banks with Resume at 11**:
+Resume s=11.
+Bank 1: s+2 = 13.
+Running time accumulates from resume.
+Min 11 (RT=1).
+Min 12 (RT=2) -> Bank triggered?

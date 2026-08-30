@@ -1,0 +1,70 @@
+### Phase 1 Rule Scan (Part B Only)
+Based on the text provided for the "second matter" (residency rules), here are the active rules and their triggers:
+
+1.  **Eviction Selection Rule**: Evictions choose the least-recently-touched unpinned model. Triggered by any load that cannot fit in available space.
+2.  **Pinning Rule**: Model B is pinned and never evicted. Triggered implicitly during eviction selection to exclude Model B from the LRU list.
+3.  **Load Execution & Cost Rule**: Loads cost 30s, unloads cost 10s. Triggered by every load command actually executed (including those that cause evictions).
+4.  **Deferred Load Rule**: A load is deferred only after evicting every unpinned resident still leaves too little room. Triggered when a load cannot fit even after exhausting all unpinned space.
+5.  **No-Op Unload Rule**: An unload for a model no longer resident is a no-op (counts as 0 cost, 0 eviction). Triggered by `unload D` if D was already evicted or never loaded.
+
+### Phase 2 Ledger Walk (Part B Only)
+Applying the events in strict arrival order: `load A`, `load C`, `load D`, `unload D`.
+
+*   **Initial State**: Residents = {A, B, C, D}. Sizes = {A:2, B:1, C:4, D:3}. Total Capacity = 8GB.
+    *   Note: The prompt states "one 8GB card tonight... resident sizes: A2 B1 C4 D3 GB respectively." This implies the models are currently loaded into the cache at the start of the night.
+
+*   **Event 1: `load A (2 GB)`**
+    *   Current Residents: {A, B, C, D}. Total Used: 2+1+4+3 = 10GB.
+    *   Capacity Check: The card is 8GB. The current load (10GB) exceeds capacity immediately? Or does "resident sizes" imply these are the models available to be loaded, and we start empty?
+    *   Re-reading carefully: "one 8GB card tonight... resident sizes: A2 B1 C4 D3 GB respectively." Usually, in cache problems, if it lists specific residents with sizes summing > capacity (10 > 8), it implies a state where they are already there, or the prompt describes the *pool* of models. However, standard interpretation for "Requested stream" implies we process loads onto an empty or partially full card.
+    *   Let's check the math: If A(2)+B(1)+C(4)+D(3) = 10GB on an 8GB card, they cannot all be resident simultaneously unless the prompt describes a scenario where evictions happen to make room.
+    *   Alternative Interpretation: The list "A2 B1 C4 D3" defines the sizes of models A, B, C, D. It does not necessarily mean they are currently loaded. But the text says "resident sizes... respectively". This phrasing is tricky. Let's look at the stream: `load A`, `load C`, `load D`. If we start empty:
+        1.  **Load A (2GB)**: Fits in 8GB. Residents: {A}. Evictions: 0. Loads: 1.
+        2.  **Load C (4GB)**: Current used = 2. New total = 6. Fits in 8GB. Residents: {A, C}. Evictions: 0. Loads: 2.
+        3.  **Load D (3GB)**: Current used = 6. New total = 9. Exceeds 8GB by 1GB.
+            *   Must evict LRU unpinned model.
+            *   Residents: {A, C}. Both unpinned? Yes (B is pinned but not resident).
+            *   LRU order: We assume arrival order for LRU unless specified otherwise. A arrived first, then C. So A is LRU.
+            *   Evict A (2GB). New total = 6 + 3 = 9? Still too big? Wait. Capacity 8. Used before load was 6. Need to free at least 1GB. A is 2GB. Freeing A leaves 4GB used (C). Adding D(3) makes 7GB. Fits.
+            *   Action: Evict A. Load D.
+            *   Loads count: This command executed a load. Count = 3.
+            *   Evictions count: 1.
+        4.  **Unload D (3GB)**: D is resident. Unload succeeds. Cost 10s. No eviction needed.
+
+    *   Let's re-evaluate the "resident sizes" phrase. If it meant they are currently loaded, we would start with 10GB on 8GB, which is impossible. Therefore, "resident sizes" must define the properties of the models in the system, and the cache starts empty (or partially filled by previous unlisted events, but standard assumption is empty unless stated).
+    *   Wait, could "resident sizes: A2 B1 C4 D3" mean these are the *only* things that can be residents? Yes.
+    *   Let's trace again assuming Start Empty:
+        1.  `load A (2)`: Fits. State: {A}. Loads=1, Evictions=0.
+        2.  `load C (4)`: Fits (Total 6). State: {A, C}. Loads=2, Evictions=0.
+        3.  `load D (3)`: Needs room. Current 6GB. Capacity 8GB. Shortage 1GB.
+            *   Available unpinned residents to evict: A (2GB), C (4GB). B is pinned and not resident.
+            *   LRU selection: Between A and C, who is least recently touched? Assuming strict FIFO arrival order for "touch", A was loaded first, then C. A is LRU.
+            *   Evict A (2GB). New state before load: {C} (4GB). Fits D(3)? 4+3=7 <= 8. Yes.
+            *   Execute Load D. State: {C, D}.
+            *   Total Loads executed: 3. Total Evictions performed: 1.
+        4.  `unload D`: D is resident. Unload succeeds. No eviction.
+
+    *   Is there any scenario where "resident sizes" implies they are already loaded? If so, the problem is unsolvable without knowing which ones were evicted previously. Given the instruction "Requested stream: load A...", it implies these are the operations to perform on the cache state. The most logical starting point for a "tonight" task with no prior history mentioned is an empty cache or a cache where only pinned items might be resident? No, B is pinned but not listed as loaded in the initial set description (it just says "resident sizes..."). If B were resident, it would take 1GB.
+    *   Let's assume Start Empty.
+
+    **Revised Trace:**
+    1.  `load A`: Fits. Loads=1. Evictions=0. State: {A}.
+    2.  `load C`: Fits (Total 6). Loads=2. Evictions=0. State: {A, C}.
+    3.  `load D`: Overflows (Current 6 + 3 = 9 > 8).
+        *   Evict LRU unpinned. Candidates: A, C.
+        *   Assume A is LRU (loaded first). Evict A.
+        *   Load D. State: {C, D}.
+        *   Loads count increments to 3. Evictions count increments to 1.
+    4.  `unload D`: Fits. No eviction.
+
+    **Final Counts:**
+    *   Loads: 3 (A, C, D were loaded).
+    *   Evictions: 1 (A was evicted).
+    *   Deferrals: 0 (Space became available after eviction).
+    *   Deferred IDs: [] (None deferred).
+
+### Final Output JSON (Part B Only)
+
+```json
+{"loads": 3, "evictions": 1, "deferrals": 0, "deferred": []}
+```

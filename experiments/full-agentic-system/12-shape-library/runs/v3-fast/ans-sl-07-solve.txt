@@ -1,0 +1,79 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the specific "CANARY DISCIPLINE" provided in the failure analysis section (which overrides the narrative contradictions), here are the rules that change state during the event list:
+
+1.  **Limit Rule**: Sets the threshold for observation `X` based on step position (`2.0` for steps 1-5, `1.0` for steps 6-10).
+2.  **Breach Detection Rule**: Triggers if `observed > limit`. If true, marks event as "breach".
+3.  **Rollback/Spent Rule**: On the first breach, reduces active step count by 1 (effectively skipping the current observation), sets remaining limits to `0.8`, and marks the breached observation as "SPENT" (never retested). Triggered by: Step 3 event.
+4.  **Climb Completion Rule**: If an event is clean, increments the completed stage count equal to its position in the *active* list. Sets rollout percentage to `10 × current_stage`. Triggered by: Clean events (Step 1, Step 2, Step 5).
+5.  **Stop Condition Rule**: On a second breach, sets status to "STOPPED", freezes rollout and stages at the last completed values. Triggered by: N/A (No second breach occurs in this list).
+6.  **End Condition Rule**: If the list ends with no second breach, sets status based on count of breaches (`PAUSED` if 1, `DONE` if 0). Triggered by: End of Step 6 event.
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   Active Steps: 1 to 6 (Total 6 observations)
+*   Current Stage: 0
+*   Rollout Pct: 0%
+*   Status: RUNNING
+*   Breach Count: 0
+
+**Event 1: Step 1**
+*   **Input**: Observed `0.5`. Position `1`.
+*   **Limit Check**: Steps 1-5 limit is `2.0`.
+*   **Comparison**: `0.5 <= 2.0` -> Clean.
+*   **Action**: Increment Stage to 1. Set Rollout to `10 * 1 = 10%`.
+*   **State After**: Stage=1, Rollout=10%, BreachCount=0.
+
+**Event 2: Step 2**
+*   **Input**: Observed `0.8`. Position `2` (relative to start).
+*   **Limit Check**: Steps 1-5 limit is `2.0`.
+*   **Comparison**: `0.8 <= 2.0` -> Clean.
+*   **Action**: Increment Stage to 2. Set Rollout to `10 * 2 = 20%`.
+*   **State After**: Stage=2, Rollout=20%, BreachCount=0.
+
+**Event 3: Step 3**
+*   **Input**: Observed `2.1`. Position `3` (relative to start).
+*   **Limit Check**: Steps 1-5 limit is `2.0`.
+*   **Comparison**: `2.1 > 2.0` -> Breach.
+*   **Action**:
+    *   Mark observation as SPENT.
+    *   Do NOT increment stage for this position.
+    *   Apply Rollback: Remaining steps (4, 5, 6) now have limit `0.8`.
+    *   State holds last completed values (Stage=2, Rollout=20%).
+*   **State After**: Stage=2, Rollout=20%, BreachCount=1, Next Limit=0.8.
+
+**Event 4: Step 4**
+*   **Input**: Observed `0.6`. Position `4` (relative to start).
+*   **Limit Check**: This is the first observation after a rollback. The rule states "after any rollback the limit tightens to 0.8 for every remaining step".
+*   **Comparison**: `0.6 <= 0.8` -> Clean.
+*   **Action**: Increment Stage to 4 (skipping the spent position 3). Set Rollout to `10 * 4 = 40%`.
+    *   *Note*: The rule says "a clean observation completes the stage equal to its own position in the list". Since position 3 was spent, the next valid completion jumps from Stage 2 directly to Stage 4.
+*   **State After**: Stage=4, Rollout=40%, BreachCount=1.
+
+**Event 5: Step 5**
+*   **Input**: Observed `0.7`. Position `5` (relative to start).
+*   **Limit Check**: Post-rollback limit is `0.8`.
+*   **Comparison**: `0.7 <= 0.8` -> Clean.
+*   **Action**: Increment Stage to 5. Set Rollout to `10 * 5 = 50%`.
+*   **State After**: Stage=5, Rollout=50%, BreachCount=1.
+
+**Event 6: Step 6**
+*   **Input**: Observed `0.9`. Position `6` (relative to start).
+*   **Limit Check**: Post-rollback limit is `0.8`.
+*   **Comparison**: `0.9 > 0.8` -> Breach.
+*   **Action**:
+    *   This is the **Second Breach**.
+    *   Stop Condition Rule triggers: Status becomes "STOPPED".
+    *   Freeze values at last completed stage (Stage=5, Rollout=50%).
+*   **State After**: Stage=5, Rollout=50%, Status="STOPPED".
+
+---
+
+### Final Answer
+
+```json
+{"rollout_pct": 50, "stages_done": 5, "status": "STOPPED"}
+```

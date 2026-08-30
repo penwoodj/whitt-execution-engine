@@ -1,0 +1,59 @@
+The task requires simulating a "canary rollout" with specific rules for error limits, breach handling (rollback), and state updates based on a sequence of observed error rates. The final output must be a strict JSON object containing only three keys: `rollout_pct`, `stages_done`, and `status`.
+
+**Analysis of the Scenario:**
+1.  **Sequence:** Steps 1 through 5 have observed error rates of `0.4%`, `1.9%`, `0.5%`, `2.2%`, `0.6%` respectively.
+2.  **Initial Limits:**
+    *   Steps 1-5: Limit is `2.0%`.
+    *   Step 6+: Limit is `1.0%`. (Not reached in this sequence).
+3.  **Breach Rule:** If an observation exceeds the limit, it triggers a **rollback** to the previous step. The current step becomes "spent" and does not resume; instead, the climb resumes from the *next* available step with a tightened limit of `0.8%` for all remaining steps.
+4.  **Simulation Walk:**
+
+    *   **Step 1:** Observed = `0.4`. Limit = `2.0`. Result: Pass. Current Step: 1.
+    *   **Step 2:** Observed = `1.9`. Limit = `2.0`. Result: Pass (1.9 < 2.0). Current Step: 2.
+    *   **Step 3:** Observed = `0.5`. Limit = `2.0`. Result: Pass. Current Step: 3.
+    *   **Step 4:** Observed = `2.2`. Limit = `2.0`. Result: **Breach** (2.2 > 2.0).
+        *   Action: Rollback to previous step (Step 3).
+        *   Effect: The rollout is paused at the state of Step 3. The current attempt (Step 4) is consumed/spent. The system does not move forward from Step 4, nor does it retry Step 4 immediately with new limits; the "climb resumes from the next observation" implies resuming the sequence *after* the breach point in the context of the rollout progress, but since the progression logic dictates moving step-by-step and a rollback resets the active stage, the effective completed stages remain at the level prior to the failed step. However, usually in these "rollback one" scenarios described as "pauses the climb", the `rollout_pct` reflects the successful completion of the previous valid steps.
+        *   Let's re-read carefully: "a breach pauses the climb and rolls back to the previous step... the observation that breached is spent". This means we are stuck at the state where Step 3 was successfully completed. We cannot proceed to Step 4 or beyond because the mechanism for advancing (the current attempt) has failed and been reset, and the sequence of observations provided suggests a linear progression where `Step N` corresponds to `N` percent completion. If Step 4 fails, we are effectively at 3%.
+        *   Wait, does "rolls back" mean we lose the progress of Step 3? No, "previous step" usually implies the state *before* entering the current attempt. But since observations are tied to steps (1st observation -> 1% complete), a failure at step 4 means we haven't reached 4%. We have successfully passed 1, 2, and 3.
+        *   However, let's look at the "tighten" rule: "after any rollback the limit tightens to 0.8 for every remaining step". This implies there is a next attempt or next opportunity. But in this specific problem format (Canary rollout with fixed observations), a breach typically halts the progression entirely unless specified that it retries immediately. The phrase "pauses the climb" supports `status` being something other than `DONE`.
+        *   Is the status `PAUSED`? Or does the system stop because of a single breach rule? The text says: "a second breach stops everything... no breach at all and the climb finishes". This implies a first breach results in a pause/failure state, not an immediate halt (which requires two breaches).
+        *   Therefore, after Step 4 breach:
+            *   `stages_done`: We completed steps 1, 2, 3. So 3 stages? Or does the "rollback" reset us to 0? "Rolls back to the previous step". If I am at step 4 (attempting), rolling back puts me at step 3 (completed). The "rollout_pct" is likely the percentage of steps successfully traversed before the failure. That would be 3%.
+            *   `status`: Since it's only one breach, and the rule says "a second breach stops everything", the status after the first breach is likely `PAUSED` (as per standard state machine logic implied by "pause" vs "stop").
+
+    *   **Refining the "Rollout Pct":**
+        The prompt asks for `rollout_pct`. In a step-wise rollout, if you fail at step 4, you have completed steps 1-3. Thus `stages_done` = 3.
+        Does `rollout_pct` equal `stages_done`? Usually yes (e.g., 3 stages done = 3%).
+        
+    *   **Re-evaluating the "Paused" vs "Stopped":**
+        The text explicitly differentiates:
+        - "a breach pauses the climb..." -> State is paused.
+        - "a second breach stops everything... status is STOPPED".
+        Since we only have one breach in the sequence (Step 4), the state should be `PAUSED`.
+        
+    *   **Values:**
+        - `rollout_pct`: 3 (representing 3 completed steps).
+        - `stages_done`: 3.
+        - `status`: "PAUSED".
+
+    *   **Double Check against "Orientation" Story:**
+        The orientation story had a breach at step 4 (value 2.5 > limit), resulting in one rollback, and the status remained paused until further events or time passed ("window closed"). This confirms that one breach leads to a paused state, not an immediate stop.
+
+    *   **Final State Calculation:**
+        - Step 1: OK (0.4 < 2.0). Pct = 1.
+        - Step 2: OK (1.9 < 2.0). Pct = 2.
+        - Step 3: OK (0.5 < 2.0). Pct = 3.
+        - Step 4: FAIL (2.2 > 2.0). Breach occurs. Rollback to previous step (Step 3). Observation spent. Climb paused.
+        
+        Resulting State:
+        `rollout_pct`: 3
+        `stages_done`: 3
+        `status`: "PAUSED"
+
+    *   **Formatting Check:**
+        The user requires a bare JSON object with no markdown formatting around it (based on the `json_exact` rule mentioned in the previous attempt failure description: "observed [output is not a bare JSON object]"). I must output only the raw JSON string.
+
+```json
+{"rollout_pct": 3, "stages_done": 3, "status": "PAUSED"}
+```

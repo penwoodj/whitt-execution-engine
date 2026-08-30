@@ -1,0 +1,59 @@
+The state of the system after processing all events according to the strict rules provided is as follows:
+
+**Phase 1: Rule List & Phase 2 Walk Logic Applied**
+*   **Initial State:** Pool = 60, Granted = 0.
+*   **Event R1 (Ask 6):** Pool (60) >= Ask (6). Grant 6. Pool -> 54. Granted -> 6.
+    *   *Rule Check:* "Grant what is there and the pool drops to zero" applies only if Pool < Ask. Here Pool > Ask, so standard grant applies.
+*   **Event R2 (Ask 10):** Pool (54) >= Ask (10). Grant 10. Pool -> 44. Granted -> 16.
+    *   *Rule Check:* "The grant for r1 expires after request r2 completes." Triggered by completion of R2.
+    *   *Expiry Logic:* "An expired grant returns half its granted tokens rounded down to the pool... names exactly one request id so only that one grant ever returns".
+    *   *Calculation:* Half of R1's grant (6) = 3. Round down -> 3. Add to Pool: 44 + 3 = 47.
+*   **Event R3 (Ask 12):** Pool (47) >= Ask (12). Grant 12. Pool -> 35. Granted -> 28.
+*   **Event R4 (Ask 15):** Pool (35) >= Ask (15). Grant 15. Pool -> 20. Granted -> 43.
+*   **Event R5 (Ask 19):** Pool (20) >= Ask (19). Grant 19. Pool -> 1. Granted -> 62.
+*   **Event R6 (Ask 21):** Pool (1) < Ask (21).
+    *   *Rule Check:* "Grant what is there and the pool drops to zero". Since Pool cannot cover full ask, grant partial amount available in pool? No, rule says: "a request arriving at an empty pool is denied... a pool that still holds tokens never denies anyone, not even a request larger than what remains".
+    *   *Interpretation:* The text explicitly states "not even a request larger than what remains" implies the grant covers the remaining amount (partial grant allowed when pool < ask). However, let's re-read carefully: "grants are partial when the pool cannot cover the full ask, grant what is there and the pool drops to zero".
+    *   *Action:* Grant Pool (1). Pool -> 0. Granted -> 63.
+*   **Event R7 (Ask 24):** Pool (0) < Ask (24).
+    *   *Rule Check:* "a request arriving at an empty pool is denied and listed by id".
+    *   *Action:* Deny R7.
+
+**Final State Calculation:**
+*   **Granted Units:** Sum of all grants = 6 + 10 + 12 + 15 + 19 + 1 (from R6) = 63? Wait, let's re-sum the "Granted" counter logic vs physical tokens.
+    *   R1: +6
+    *   R2: +10
+    *   R3: +12
+    *   R4: +15
+    *   R5: +19
+    *   R6: Pool was 1. Grant is 1? Or does "grant what is there" mean grant the ask if possible, else partial? Text: "grants are partial when the pool cannot cover the full ask". So yes, grant 1.
+    *   Total Granted Units = 6+10+12+15+19+1 = 63.
+    *   Wait, did I miss an expiry return in the sum? The "Granted Units" usually refers to the total tokens successfully transferred from pool to user (or returned to pool then re-transferred). The JSON key is `granted_units`. Does this include the expiry return? Usually no, that's a system mechanic. But let's check the orientation story: "that night closed with 31 granted". In orientation: Start 35. R1(11)->24 left. R2(7)->17 left. Expiry(R1) returns 5 -> 22 left. R3(13) partial? Text says "took a partial and drained it" (22-13=9). Total granted = 11+7+13 = 31. The expiry return was NOT added to the "granted" count in the summary, it just replenished the pool for future requests.
+    *   So `granted_units` is strictly the sum of successful request grants.
+    *   Sum: 6 + 10 + 12 + 15 + 19 + 1 = 63.
+
+*   **Denied:** List of IDs where pool was empty upon arrival. Only R7 arrived at Pool=0.
+    *   Denied: ["r7"]
+
+*   **Pool Left:** Final state of the pool.
+    *   After R6, Pool became 0.
+    *   R7 denied, no change to pool.
+    *   Pool Left = 0.
+
+**Verification against Constraints:**
+*   "a request arriving at an empty pool is denied and listed by id". (R7 fits).
+*   "grants are partial when the pool cannot cover the full ask... a pool that still holds tokens never denies anyone, not even a request larger than what remains". (R6 fits: Pool 1 < Ask 21 -> Grant 1).
+*   Expiry logic applied correctly between R2 and R3.
+
+**Final JSON Construction:**
+`{"granted_units": 63, "denied": ["r7"], "pool_left": 0}`
+
+```json
+{
+"granted_units": 63,
+"denied": [
+"r7"
+],
+"pool_left": 0
+}
+```

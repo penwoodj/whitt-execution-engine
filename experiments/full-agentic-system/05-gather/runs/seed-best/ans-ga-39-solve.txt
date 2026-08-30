@@ -1,0 +1,81 @@
+**Phase 1: Rule List**
+Based on the task description, the following rules apply to this rotation:
+1.  **Job Scheduling:** Jobs take the core in order of their start minutes; a resumed job outranks a fresh one at any tie; if a job starts while the core is busy, it waits.
+2.  **Preemption:** `HIGH` arrives at minute 5 and instantly preempts whatever `LOW` job is running. While `HIGH` runs, nothing else runs.
+3.  **Checkpointing/Banking:** Jobs checkpoint every 2 completed minutes of running time. A job starting or resuming at minute $s$ banks a checkpoint at absolute minute $s+2$ and again every 2 running minutes after.
+4.  **Wasted Work:** On preemption, work past the last bank is wasted and redone after resume.
+5.  **Core Utilization:** The core never idles while a `LOW` job is waiting; if one finishes or is preempted, the next waiting `LOW` starts in that same minute.
+
+**Phase 2: Ledger Walk (Minute-by-Minute)**
+
+| Minute | Core Status | Event Details |
+| :--- | :--- | :--- |
+| **0** | Running LOW1 | LOW1 starts at min 0. Runs for 4 mins total. Bank @ $0+2=2$. |
+| **1** | Running LOW1 | LOW1 continues (running time 1). No bank yet. |
+| **2** | Running LOW1 | LOW1 completes 2nd minute of run. **Bank @ 2**. Remaining run: 2 mins. |
+| **3** | Running LOW1 | LOW1 continues (running time 3). No bank yet. |
+| **4** | Running LOW1 | LOW1 finishes its 4-minute job at end of min 4. Core becomes idle momentarily until next start. |
+| **5** | Preempted/Running HIGH | `HIGH` arrives at min 5. Instantly preempts (nothing running). `HIGH` starts. Runs for 4 mins total. Bank @ $5+2=7$. |
+| **6** | Running HIGH | `HIGH` continues (running time 1). No bank yet. |
+| **7** | Running HIGH | `HIGH` completes 2nd minute of run. **Bank @ 7**. Remaining run: 2 mins. |
+| **8** | Running HIGH | `HIGH` finishes its 4-minute job at end of min 8. Core becomes idle momentarily until next start. |
+| **9** | Running LOW2 | `LOW2` (started at min 3) resumes. It was preempted at min 5. Last bank for `LOW2` was @ 7? No, `LOW2` started at 3. Bank @ $3+2=5$. Then every 2 running mins. Running time: Min 3(1), Min 4(2->Bank). So last bank was absolute min 5. Wait, let's re-evaluate `LOW2` banks.<br>`LOW2` Start=3. Bank @ $3+2=5$ (Absolute). Then every 2 running mins. Running time accumulates from start.<br>Min 3 (Run 1), Min 4 (Run 2 -> Bank at Abs 5? No, rule says "minute s+2" is absolute. Start=3. Bank at 5. Then every 2 running minutes. Running time: min 3(1), min 4(2->Bank). So `LOW2` banks at absolute minute 5.<br>Wait, the prompt says "bank landing on exact minute HIGH arrives still counts". HIGH arrives at 5. `LOW2` would have banked at 5 if not preempted? Yes.<br>So when `HIGH` preempts at min 5, `LOW2` has run for 2 minutes (min 3, 4). It banks at abs 5. So work is safe up to min 5.<br>`HIGH` runs min 5, 6, 7, 8. Finishes end of min 8.<br>Resume `LOW2` at start of min 9.<br>Last bank for `LOW2` was absolute minute 5 (which corresponds to running time 2).<br>Total run needed: 3 minutes.<br>Banked: 2 minutes.<br>Owed: $3 - 2 = 1$ minute.<br>So at min 9, `LOW2` runs for 1 minute. Finishes end of min 9. |
+| **10** | Idle | All jobs finished. Core idle. |
+
+*Correction on `LOW2` Bank Logic:*
+Let's re-read carefully: "job that starts or resumes at minute s banks checkpoint at minute s+2 and again every 2 running minutes after".
+For `LOW2`: Start $s=3$.
+Bank 1: Absolute min $3+2 = 5$. (Running time elapsed to reach this is 2 mins).
+Then "every 2 running minutes after". This implies subsequent banks are based on running time accumulation.
+Running Time 0 -> Abs 3.
+Running Time 1 -> Abs 4.
+Running Time 2 -> Abs 5 (**Bank**).
+Running Time 3 -> Abs 6 (Finish).
+So `LOW2` has exactly 2 minutes of safe work when preempted at min 5.
+When resumed at min 9, it needs to complete the remaining $3 - 2 = 1$ minute.
+It runs for 1 minute in min 9 and finishes.
+
+*Re-evaluating `HIGH` Bank:*
+Start $s=5$.
+Bank 1: Absolute min $5+2 = 7$. (Running time elapsed to reach this is 2 mins).
+Then "every 2 running minutes after".
+Running Time 0 -> Abs 5.
+Running Time 1 -> Abs 6.
+Running Time 2 -> Abs 7 (**Bank**).
+Running Time 3 -> Abs 8 (Finish).
+`HIGH` finishes at end of min 8.
+
+*Re-evaluating `LOW1`:*
+Start $s=0$. Finish at end of min 4. Total run 4 mins. No preemption. Safe.
+
+**Final Calculation:**
+- **Makespan:** The last job (`LOW2`) finishes at the end of minute 9. So makespan = 9 minutes.
+- **Wasted Min:** `LOW1` had no preemption. `HIGH` had no preemption (it was fresh). `LOW2` resumed with exactly its last bank intact (banked at abs 5, preempted at min 5). Wait, did it run past the bank? No, it ran min 3 and 4. Bank is at end of min 4/start of min 5? "minute s+2". Start=3. Bank at 5. So it runs min 3 (1), min 4 (2). At the transition from 4 to 5, it banks. Preemption happens at minute 5 arrival. The work done in minutes 3 and 4 is safe. Work past last bank = 0.
+- **Order:** `LOW1` finishes at end of min 4. `LOW2` finishes at end of min 9. Order: `["LOW1", "LOW2"]`.
+
+Wait, let's double check the "bank landing on exact minute HIGH arrives" rule.
+If `LOW2` banks at absolute minute 5, and `HIGH` arrives at minute 5. The bank is valid. Nothing is wasted.
+Is there any scenario where something is wasted?
+Maybe my interpretation of "every 2 running minutes after" implies a second bank later? But the job finishes before that would happen anyway for `LOW1` (4 mins) and `HIGH` (4 mins). For `LOW2`, it only needs 3 mins. So only one bank occurs within its lifetime.
+So Wasted = 0.
+
+Let's re-read "minute s+2". Start=3. Bank at 5.
+Run min 3, 4. At end of min 4 (start of 5), it has completed 2 running minutes. It banks.
+Preemption happens when `HIGH` arrives at minute 5. The work done in minutes 3 and 4 is preserved.
+So Wasted = 0.
+
+Makespan: `LOW1` ends min 4. `HIGH` ends min 8. `LOW2` resumes min 9, runs 1 min, ends min 9. Total makespan = 9.
+Order: `["LOW1", "LOW2"]`.
+
+One detail: "minute one LOW job finishes or is preempted, next waiting LOW starts in that same minute".
+Min 4: `LOW1` finishes. Core idle for instant? Min 5: `HIGH` arrives. Does `LOW2` start at min 5? No, `HIGH` preempts instantly. `LOW2` waits until `HIGH` finishes (end of min 8). Then starts at min 9.
+This matches the logic used.
+
+Final check on values:
+Makespan_min: 9
+Wasted_min: 0
+Order: ["LOW1", "LOW2"]
+
+```json
+{"makespan_min": 9, "wasted_min": 0, "order": ["LOW1", "LOW2"]}
+```

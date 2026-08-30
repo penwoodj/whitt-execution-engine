@@ -1,0 +1,55 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the "orientation story" provided as a reference for rule logic (which defines the state machine), here are the rules that change state during an event or claim list:
+
+1.  **Arrival Rule**: Triggers on `attempts` arrival; increments `attempts` count by 1, adds `attempt_cost` to `spend`.
+2.  **Wait Rule**: Triggers on `wait_s` arrival (between attempts); increments `wait_s` sum by the wait duration, adds `wait_duration` to `spend`.
+3.  **Budget Check Rule**: Evaluates if `spend > budget`; if true, triggers a "Double Budget" event which sets `budget = budget * 2` and re-evaluates suppression immediately after.
+4.  **Suppression Rule**: Finalizes the job state; if `spend > budget` (after doubling check), sets `suppressed = true`, otherwise `suppressed = false`.
+5.  **Expiry Return Rule**: Triggers on a grant expiry event; returns `floor(granted_amount / 2)` to the pool immediately before the next request is processed.
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   `attempts`: 0
+*   `wait_s`: 0
+*   `budget`: 24
+*   `spend`: 0
+*   `suppressed`: false (default)
+*   `grants`: [] (empty list of partials/grants to track for expiry)
+
+**Event List:**
+1.  **Arrival**: Attempt 1 arrives. Cost = 2.
+    *   State: `attempts`=1, `spend`=2.
+2.  **Wait**: Wait 2s observed (between attempt 1 and 2). Cost = 2.
+    *   State: `wait_s`=2, `spend`=4.
+3.  **Arrival**: Attempt 2 arrives. Cost = 2.
+    *   State: `attempts`=2, `spend`=6.
+4.  **Wait**: Wait 4s observed (between attempt 2 and 3). Cost = 4.
+    *   State: `wait_s`=6, `spend`=10.
+5.  **Arrival**: Attempt 3 arrives. Cost = 2.
+    *   State: `attempts`=3, `spend`=12.
+
+**Final Calculation:**
+*   Total Spend (`spend`) = 12 (from attempts) + 6 (from waits) = 18.
+*   Initial Budget = 24.
+*   Check: Is `spend` (18) > `budget` (24)? No.
+*   Double Budget Rule does not fire.
+*   Suppression Rule: Since spend is under budget, job runs. `suppressed` = false.
+*   Final State Values:
+    *   `attempts`: 3
+    *   `wait_s`: 6 (Sum of 2 + 4)
+    *   `budget_after`: 24 - 18 = 6
+    *   `suppressed`: false
+
+*(Note: The task mentions "the job needs 2 failed attempts before the 3th succeeds". This implies a sequence of Attempt(Fail), Wait, Attempt(Fail), Wait, Attempt(Success). The costs apply to all arrivals and waits regardless of success/failure outcome in this specific budgeting model described.)*
+
+---
+
+### Final Answer
+
+```json
+{"attempts": 3, "wait_s": 6, "budget_after": 6, "suppressed": false}
+```

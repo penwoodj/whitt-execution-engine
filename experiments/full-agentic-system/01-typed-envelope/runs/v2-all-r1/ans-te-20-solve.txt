@@ -1,0 +1,58 @@
+### Phase 1 RULE SCAN
+This phase lists every rule in the task that changes state during the event sequence (tonight's events), excluding the "orientation" story numbers.
+
+1.  **Retry Wait Rule**: After a failed attempt, wait time doubles ($3s \to 6s \to 12s$). Triggered by: Failed Attempt.
+2.  **Attempt Cost Rule**: Each retry attempt costs 3 tokens. Triggered by: Retry Attempt Execution.
+3.  **Wait Cost Rule**: Each second of waiting costs 1 token. Triggered by: Wait Period Elapse.
+4.  **Budget Check Rule**: Total spend (attempts + waits) is compared against the budget (30). If exceeded, job is suppressed. Triggered by: End of Attempt Sequence / Budget Calculation.
+5.  **Suppression Rule**: If spend > budget, suppress job and double budget exactly once for re-check. Triggered by: Budget Exceeded Event.
+6.  **Success Condition Rule**: Job succeeds on the 4th attempt (after 3 failures). Triggered by: Successful Attempt Execution.
+
+### Phase 2 LEDGER WALK
+This phase applies tonight's events in strict arrival order, calculating state after each step.
+
+**Event 1: Failed Attempt #1**
+*   Action: Execute Attempt #1.
+*   Cost: 3 tokens (Attempt).
+*   Wait: 3 seconds (Initial wait).
+*   Cost: 3 tokens (Wait).
+*   Total Spend so far: $3 + 3 = 6$.
+*   State Check: $6 \le 30$ (Budget OK).
+*   Result: Failure.
+
+**Event 2: Failed Attempt #2**
+*   Action: Execute Attempt #2.
+*   Cost: 3 tokens (Attempt).
+*   Wait: 6 seconds (Doubled from 3).
+*   Cost: 6 tokens (Wait).
+*   Total Spend so far: $6 + 3 + 6 = 15$.
+*   State Check: $15 \le 30$ (Budget OK).
+*   Result: Failure.
+
+**Event 3: Failed Attempt #3**
+*   Action: Execute Attempt #3.
+*   Cost: 3 tokens (Attempt).
+*   Wait: 12 seconds (Doubled from 6).
+*   Cost: 12 tokens (Wait).
+*   Total Spend so far: $15 + 3 + 12 = 30$.
+*   State Check: $30 \le 30$ (Budget OK, exactly at limit).
+*   Result: Failure.
+
+**Event 4: Successful Attempt #4**
+*   Action: Execute Attempt #4 (Success condition met).
+*   Cost: 3 tokens (Attempt).
+*   Wait: None specified for success (job completes).
+*   Total Spend so far: $30 + 3 = 33$.
+*   State Check: $33 > 30$ (Budget Exceeded).
+*   Rule Application: Job is suppressed. Budget doubles to 60 (re-checked, but suppression already triggered by the first exceedance during this sequence).
+*   Result: Suppressed.
+
+**Final State Calculation:**
+*   **Attempts**: The job went through 4 attempts (3 failed, 1 succeeded before suppression logic finalized the outcome as suppressed due to budget breach). The count of *executed* attempts is 4.
+*   **Wait_s**: Sum of wait seconds: $3 + 6 + 12 = 21$.
+*   **Budget_after**: The original budget was 30. It was exceeded. The rule states "budget doubles exactly once". New budget = 60. (Note: Even though the job is suppressed, the state variable `budget` reflects the doubled value per the specific instruction "re-checked after doubling").
+*   **Suppressed**: True (Because spend 33 > initial budget 30).
+
+```json
+{"attempts": 4, "wait_s": 21, "budget_after": 60, "suppressed": true}
+```

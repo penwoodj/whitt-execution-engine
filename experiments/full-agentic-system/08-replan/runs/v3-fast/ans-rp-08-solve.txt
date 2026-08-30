@@ -1,0 +1,81 @@
+### Phase 1 RULE SCAN
+The following rules govern the state changes during the event list (5 observations):
+
+1.  **Limit Assignment Rule**: Steps 1–5 have a limit of 2.0%; Steps 6–10 have a limit of 1.0%. Triggered by: Observation arrival.
+2.  **Breach Definition Rule**: An observation is a breach if `observed > limit`. Triggered by: Observation arrival.
+3.  **Clean Completion Rule**: If an observation is clean, it completes the stage equal to its position in the list (Stage = Position). Triggered by: Clean observation.
+4.  **Rollout Update Rule**: Upon a clean completion, `rollout_pct` becomes `10 * Stage`. Triggered by: Clean observation.
+5.  **First Breach Rollback Rule**: If an observation breaches, the rollout and stages revert to the last completed stage's values (Stage = Previous Position). The current observation is SPENT. Triggered by: First breach.
+6.  **Tightened Limit Rule**: After any rollback, the limit for all remaining steps becomes 0.8%. Triggered by: Rollback event.
+7.  **Second Breach Stop Rule**: If a second breach occurs (after rollback), status becomes STOPPED. `rollout_pct` = `10 * Previous Stage`. `stages_done` = Observations consumed so far (including the spent one). Triggered by: Second breach.
+8.  **Single Breach Pause Rule**: If exactly one breach occurs and the list ends, status becomes PAUSED. Values hold at last completed stage. Triggered by: End of list with count(breaches) == 1.
+
+### Phase 2 LEDGER WALK
+
+**Event 1 (Step 1):**
+*   Position: 1
+*   Observed Rate: 0.4%
+*   Limit: 2.0%
+*   Verdict: Clean (0.4 <= 2.0)
+*   Stage Completed: 1
+*   Rollout After: 10
+
+**Event 2 (Step 2):**
+*   Position: 2
+*   Observed Rate: 1.9%
+*   Limit: 2.0%
+*   Verdict: Clean (1.9 <= 2.0)
+*   Stage Completed: 2
+*   Rollout After: 20
+
+**Event 3 (Step 3):**
+*   Position: 3
+*   Observed Rate: 0.5%
+*   Limit: 2.0%
+*   Verdict: Clean (0.5 <= 2.0)
+*   Stage Completed: 3
+*   Rollout After: 30
+
+**Event 4 (Step 4):**
+*   Position: 4
+*   Observed Rate: 2.2%
+*   Limit: 2.0%
+*   Verdict: Breach (2.2 > 2.0) -> **First Breach**
+*   Action: Rollback to last completed stage (Stage 3). Observation SPENT.
+*   State After Event: Stage = 3, Rollout = 30. Limit tightens to 0.8% for next steps.
+
+**Event 5 (Step 5):**
+*   Position: 5
+*   Observed Rate: 0.6%
+*   Limit: 0.8% (Tightened from previous rollback)
+*   Verdict: Breach (0.6 > 0.8 is FALSE, wait: 0.6 < 0.8). **Clean**.
+    *Correction*: 0.6 is less than 0.8. So it is Clean.
+    *Re-evaluating Event 5*:
+    Limit was tightened to 0.8%. Observed is 0.6%. 0.6 <= 0.8. Result: Clean.
+*   Action: Completes Stage equal to position (Stage 5).
+*   Rollout After: `10 * 5` = 50.
+
+**Final State Calculation:**
+*   Last Completed Stage: 5
+*   Final Rollout: 50%
+*   Total Breaches: 2? No, Event 4 was a breach (rollback). Event 5 was clean.
+    Wait, let's re-read the "Second Breach" rule carefully.
+    Rule: "a second breach stops everything with status STOPPED".
+    Did we have a second breach?
+    Event 1: Clean.
+    Event 2: Clean.
+    Event 3: Clean.
+    Event 4: Breach (Rollback). This is the **First** breach.
+    Event 5: Observed 0.6 vs Limit 0.8. 0.6 < 0.8. This is **Clean**.
+    
+    So we have exactly **one** breach in the entire list.
+    Rule for Single Breach: "exactly one breach and the list ends: status PAUSED with the last completed stage's values."
+    
+    Last Completed Stage was determined by Event 5 (Position 5).
+    Rollout = 10 * 5 = 50.
+    Stages Done = 5.
+
+**Final Answer JSON:**
+```json
+{"rollout_pct": 50, "stages_done": 5, "status": "PAUSED"}
+```

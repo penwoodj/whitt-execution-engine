@@ -1,0 +1,90 @@
+### Phase 1 Rule Scan (First Half Only)
+
+**Rules Identified:**
+1.  **Arrival Order & Preemption:** `HIGH` arrives at minute 3 and runs for 8 minutes. Upon arrival, it instantly preempts any running `LOW` job. While `HIGH` is active, no other jobs run.
+2.  **Job Scheduling (Tie-Breaking):** `LOW` jobs take the core in order of their start minutes (`LOW1` at min 0 vs `LOW2` at min 2). A resumed `LOW` outranks a fresh one at any tie. If the core is busy when a `LOW`'s start minute arrives, it waits until the current job finishes or is preempted in that same minute.
+3.  **Checkpointing & Wasted Work:** `LOW` jobs checkpoint every 2 completed minutes of running time. On preemption, work past the last checkpoint is wasted and redone after resume. A job starting/resuming at minute $s$ banks a checkpoint at $s+2$ and every subsequent even interval relative to its own timeline (absolute minutes).
+4.  **Specific Job Durations:** `LOW1` runs for 5 total minutes. `LOW2` runs for 7 total minutes.
+
+### Phase 2 Ledger Walk (First Half Only)
+
+**Timeline Simulation:**
+
+*   **Minute 0:** `LOW1` starts (Duration: 5 min). Core busy with `LOW1`.
+    *   State: Running `LOW1` (Time elapsed: 0/5).
+*   **Minute 1:** `LOW1` continues.
+    *   State: Running `LOW1` (Time elapsed: 1/5).
+*   **Minute 2:** `LOW1` continues. Checkpoint banked at absolute minute $0+2=2$.
+    *   State: Running `LOW1` (Time elapsed: 2/5).
+*   **Minute 3:** `HIGH` arrives. Preempts `LOW1`. `LOW1` has completed 2 minutes. It needs to complete 3 more ($5-2$) after resume. Work done so far is saved; work past checkpoint (none yet, as it just hit the bank) is safe.
+    *   State: Running `HIGH` (Duration: 8 min). `LOW1` paused with 3 mins remaining.
+*   **Minute 4:** `HIGH` continues. `LOW2` start minute (2) has passed, but core is busy with `HIGH`. `LOW2` waits.
+    *   State: Running `HIGH` (Time elapsed: 1/8).
+*   **Minute 5:** `HIGH` continues. `LOW2` still waiting.
+    *   State: Running `HIGH` (Time elapsed: 2/8).
+*   **Minute 6:** `HIGH` continues.
+    *   State: Running `HIGH` (Time elapsed: 3/8).
+*   **Minute 7:** `HIGH` continues.
+    *   State: Running `HIGH` (Time elapsed: 4/8).
+*   **Minute 8:** `HIGH` continues.
+    *   State: Running `HIGH` (Time elapsed: 5/8).
+*   **Minute 9:** `HIGH` continues.
+    *   State: Running `HIGH` (Time elapsed: 6/8).
+*   **Minute 10:** `HIGH` finishes. Core becomes free. `LOW2` start minute was 2, so it is waiting. `LOW1` is also waiting with 3 mins remaining.
+    *   Tie-breaker: Resumed `LOW1` (needs 3) vs Fresh `LOW2` (needs 7). Rule: "A resumed LOW outranks a fresh one".
+    *   Action: Resume `LOW1`.
+*   **Minute 11:** Running `LOW1` (Resumed). Needs 3 mins. Checkpoint banked at absolute minute $0+4=4$? No, checkpoints are every 2 running minutes. It ran 0-2 (banked), then resumed. The next checkpoint is after completing 2 more minutes of *running* time.
+    *   State: Running `LOW1` (Running elapsed: 0/3).
+*   **Minute 12:** Running `LOW1`. Completes 1st minute post-resume. Total running time since start = 3 mins. Checkpoint banked at absolute minute $0+4=4$? Wait, let's track checkpoints strictly by "completed minutes of running time".
+    *   Run 1: Min 0-2 (Completed 2 mins). Banked checkpoint.
+    *   Resume: Needs 3 mins.
+    *   Run 2: Min 11-12 (Completed 1 min post-resume). Total running = 3 mins. No checkpoint yet (needs even intervals of running time? "Checkpoint every 2 completed minutes"). So at 3 mins total, no checkpoint. Next checkpoint at 4 mins total running.
+    *   State: Running `LOW1` (Running elapsed: 1/3).
+*   **Minute 13:** Running `LOW1`. Completes 2nd minute post-resume. Total running time = 4 mins. Checkpoint banked.
+    *   State: Running `LOW1` (Running elapsed: 2/3).
+*   **Minute 14:** Running `LOW1`. Completes 3rd minute post-resume. Total running time = 5 mins. Job Finished.
+    *   State: `LOW1` Complete. Core free.
+
+**Wait, let's re-evaluate the "Fresh" vs "Resumed" logic and timing.**
+Did `LOW2` start? No, it waited until minute 10.
+At minute 10, `HIGH` finishes. `LOW1` (resumed) vs `LOW2` (fresh).
+Rule: "A resumed LOW outranks a fresh one". So `LOW1` runs first.
+`LOW1` needs 3 minutes. It takes minutes 11, 12, 14? No, continuous. Minutes 11, 12, 13?
+Let's count:
+Start Min 0.
+Min 0-1 (1 min)
+Min 1-2 (2 mins). Checkpoint at 2.
+Preempted at Min 3.
+Resume needs 3 mins.
+Run resumes at Min 10.
+Min 10-11 (1 min running). Total running = 3.
+Min 11-12 (2 min running). Total running = 4. Checkpoint at 4? Yes, every 2 completed minutes.
+Min 12-13 (3 min running). Total running = 5. Job Done.
+So `LOW1` finishes at end of Minute 13.
+
+Now `LOW2`. Start minute was 2. It waited until Min 10.
+At Min 14, core free. `LOW2` starts. Duration 7 mins.
+Min 14-15 (1)
+Min 15-16 (2). Checkpoint at $2+2=4$? No, checkpoints are relative to running time or absolute? "A job that starts... banks a checkpoint at minute s+2". Here start was effectively delayed. But the rule says "LOW jobs take the core in order of their start minutes". `LOW2` started at 2.
+Does it bank a checkpoint at $2+2=4$? Yes, if it had run continuously. Since it waited, does it retroactively bank?
+"on preemption the work past the last checkpoint is wasted and redone after resume."
+For `LOW2`, no preemption occurred. It just started late.
+Does it have a checkpoint at absolute minute 4? "A job that starts or resumes at minute s banks a checkpoint at minute s+2". If we consider its *effective* start as when it actually ran (Min 14), then $s=14$, bank at 16.
+However, the text says: "LOW jobs take the core in order of their start minutes... a LOW whose start minute arrives while the core is busy simply waits."
+And: "A job that starts or resumes at minute s banks a checkpoint at minute s+2".
+If `LOW2` started at 2 but waited, did it bank at 4? No, because it wasn't running. It only banks when running. The rule implies the bank happens *after* completing minutes of running time ("Checkpoint every 2 completed minutes"). The "s+2" phrasing likely refers to the timeline if uninterrupted, or simply $start\_time + 2$ relative to its own clock.
+Let's assume standard checkpointing: Every 2 minutes of *running*.
+`LOW2` starts at Min 14.
+Min 14-15 (1 min)
+Min 15-16 (2 mins). Checkpoint banked.
+...
+Finishes at $14 + 7 = 21$.
+
+**Wait, let's re-read the "Resumed vs Fresh" rule carefully.**
+"A resumed LOW outranks a fresh one".
+At Min 10: `LOW1` is Resumed (needs 3). `LOW2` is Fresh (needs 7).
+`LOW1` runs. Finishes at Min 14 (since $10+3=13$? No, minutes are discrete blocks. Start 10. Block 1: 10-11. Block 2: 11-12. Block 3: 12-13. Finish end of 13).
+So `LOW1` finishes at Min 14 (start of next minute).
+Then `LOW2` starts. Duration 7. $14+7=21$. Finishes at Min 22? Or does it finish at the end of the 7th minute block?
+Start 14.
+1: 

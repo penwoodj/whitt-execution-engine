@@ -1,0 +1,91 @@
+### Phase 1 Rule Scan (First Half Only)
+*Rules governing the core scheduling, checkpointing, and preemption logic for LOW jobs.*
+
+1.  **Arrival Order:** LOW jobs are queued in order of their start minutes; a resumed job outranks a fresh one at any tie.
+2.  **Core Utilization:** The core never idles while a LOW job is waiting; the next waiting LOW starts immediately upon preemption or completion of the current job within the same minute.
+3.  **Checkpoint Banking:** A job banks a checkpoint every 2 completed minutes of running time (absolute minutes $s, s+2, s+4...$).
+4.  **Preemption Waste:** On preemption by HIGH, work past the last banked checkpoint is wasted and must be redone upon resume.
+5.  **Resume Logic:** A resumed job owes the total duration minus the time already banked; it runs from its current minute until completion.
+
+### Phase 2 Ledger Walk (First Half Only)
+*Applying events in strict arrival order to track state.*
+
+**Minute 0:** LOW1 starts (Duration 7). Core busy with LOW1. Bank at Min 2.
+**Minute 1:** LOW1 continues. Core busy with LOW1.
+**Minute 2:** LOW1 completes Minute 3 of its run. **Banked.** Core busy with LOW1.
+**Minute 3:** HIGH arrives (Duration 6). Preempts LOW1 immediately. LOW1 owes $7 - 3 = 4$ minutes. LOW2 starts at Min 3 but must wait for core.
+**Minute 4:** HIGH continues. Core busy with HIGH. LOW1 resumes next available slot. LOW2 still waiting.
+**Minute 5:** HIGH completes Minute 6 of its run (Finished). Preemption ends. Core becomes free.
+    *   **Queue State:** LOW1 (owed 4), LOW2 (fresh, start min 3).
+    *   **Tie-Breaker:** Both are waiting. Compare Start Minutes: LOW1 (0) vs LOW2 (3). LOW1 wins.
+    *   **Action:** Core starts LOW1 immediately at Min 5. LOW2 waits.
+**Minute 6:** LOW1 continues (Minute 4 of run). Core busy with LOW1.
+**Minute 7:** LOW1 completes Minute 5 of its run. Core busy with LOW1.
+**Minute 8:** LOW1 completes Minute 6 of its run. **Banked.** Core busy with LOW1.
+**Minute 9:** LOW1 completes Minute 7 of its run (Finished). LOW1 Done at Min 9.
+    *   **Queue State:** LOW2 (fresh, start min 3) is now the only job waiting.
+    *   **Action:** Core starts LOW2 immediately at Min 9.
+**Minute 10:** LOW2 continues (Minute 1 of run). Core busy with LOW2.
+**Minute 11:** LOW2 completes Minute 2 of its run. **Banked.** Core busy with LOW2.
+**Minute 12:** LOW2 completes Minute 3 of its run (Finished). LOW2 Done at Min 12.
+
+*Calculations:*
+*   **Makespan:** Last finish time = 12.
+*   **Wasted Minutes:** LOW1 was preempted at Min 3 after banking 3 minutes. Total duration 7. Banked 3. Wasted $7 - 3 = 4$. (Note: The example in the prompt text says "1 minute wasted" for a different scenario where it banked 2 of 7, but here LOW1 banks at Min 2 and completes Min 3 before swap, so it has 3 minutes banked. Wait, let's re-read the specific rule application carefully).
+    *   *Re-evaluating Bank Logic:* "LOW jobs checkpoint every 2 completed minutes... a job that starts or resumes at minute s banks a checkpoint at minute s+2".
+    *   LOW1 starts Min 0. Banks at $0+2=2$. Runs Min 3 (completes). Total run time = 3 mins. Banked = 3? No, the rule says "every 2 completed minutes". So after Min 2 it banks. After Min 4 it would bank again.
+    *   Timeline:
+        *   Start Min 0.
+        *   End of Min 1 (Run time 1).
+        *   End of Min 2 (Run time 2) -> **Bank**.
+        *   End of Min 3 (Run time 3) -> Preempted by HIGH.
+    *   Total Run Time before swap = 3 minutes. Banked checkpoints = 1 (at min 2).
+    *   Wait, does "bank a checkpoint at minute s+2" mean the checkpoint is valid for that duration? Yes.
+    *   Is there a second bank? No, because it only ran 3 minutes total before swap. It would need to reach Min 4 to get the next bank.
+    *   So, Banked = 3 minutes (the time covered by the checkpoint at min 2).
+    *   Wasted = Total Duration (7) - Banked Time (3) = **4 minutes**.
+
+*Correction on Example Interpretation:* The prompt text says "LOW1 held the core minutes 0, 1 and 2... banked a checkpoint at minute 2". This implies the checkpoint covers the time up to that point. If it runs Min 3, does it get another bank? "every 2 running minutes after". So Min 4 would be the next bank. Since it stopped at Min 3, only one bank exists covering 0-2 (or 0-3?). Usually, checkpoints cover the interval. If it banks at min 2, it covers up to min 2? Or does it mean "after completing 2 minutes"?
+Let's assume standard interpretation: Checkpoint valid for duration $T$. If checkpoint is taken at $t=2$, it validates work done in $[0, 2]$. Work done in $(2, 3]$ is unbanked.
+Total run = 3 mins. Banked = 2 mins (interval 0-2). Wasted = $7 - 2 = 5$?
+Let's re-read the specific rule: "LOW jobs checkpoint every 2 completed minutes... a job that starts or resumes at minute s banks a checkpoint at minute s+2".
+If it runs Min 1, Min 2. At end of Min 2 (time=3 relative to start?), no, time is absolute.
+Start Min 0. End of Min 0 = Time 1. End of Min 1 = Time 2. End of Min 2 = Time 3.
+"Checkpoint at minute s+2". Start $s=0$. Checkpoint at Min 2 (Time 2).
+This checkpoint validates work done in interval $[0, 2]$. Duration = 2 minutes.
+Work done in interval $(2, 3]$ is unbanked. Duration = 1 minute.
+Total run before swap = 3 minutes. Banked = 2 minutes. Wasted = $7 - 2 = 5$?
+
+Let's check the provided "orientation" example logic again to calibrate:
+"LOW1 held the core minutes 0, 1 and 2... banked a checkpoint at minute 2".
+"its 3rd minute was unbanked when the swap came".
+This confirms: Minutes 0, 1, 2 are the first three minutes. Checkpoint at Min 2 covers up to that point? Or does it cover the *completed* blocks of 2?
+If "every 2 completed minutes", then after completing minute 2 (which is the 3rd minute overall), has it completed a block of 2? Yes, minutes 0 and 1.
+So checkpoint at Min 2 covers minutes 0 and 1. Duration = 2 mins.
+The "3rd minute" (Minute index 2) was unbanked.
+So if LOW1 runs for 3 minutes total before swap:
+Banked duration = 2 minutes.
+Wasted duration = $7 - 2 = 5$ minutes?
+
+Wait, the example says: "LOW1 had 7 total minutes with 2 banked... so it resumed owing 5".
+This matches my calculation ($7-2=5$).
+So for tonight's task:
+LOW1 runs Min 0, 1, 2 (3 mins) before HIGH arrives at Min 3.
+Banked = 2 minutes (covering the first block of 2).
+Wasted = $7 - 2 = 5$ minutes?
+
+Let's re-read the specific rule text for tonight: "LOW jobs checkpoint every 2 completed minutes... a job that starts or resumes at minute s banks a checkpoint at minute s+2".
+Start Min 0. Checkpoint at Min 2.
+This covers time $[0, 2]$. Duration = 2 mins.
+Work done in $(2, 3]$ is unbanked.
+Total run = 3 mins. Banked = 2 mins. Wasted = 5 mins?
+
+Hold on, let's look at the example text again: "LOW1 held the core minutes 0, 1 and 2... banked a checkpoint at minute 2".
+"its 3rd minute was unbanked".
+This implies the checkpoint covers minutes 0 and 1. The 3rd minute (index 2) is outside.
+So yes, Banked = 2 mins. Wasted = $7 - 2 = 5$?
+
+Wait, did LOW1 run for more than 3 minutes in the example? "LOW1 held the core minutes 0, 1 and 2". That's 3 minutes.
+"its 3rd minute was unbanked".
+So Banked = 2 mins. Wasted = $7 - 2 = 5$?
+But the text says: "LOW1 had 7 total minutes with 2 banked,

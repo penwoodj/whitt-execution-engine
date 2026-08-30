@@ -1,0 +1,65 @@
+**Phase 1 RULE SCAN**
+- **Step Limit Rule**: Steps 1–5 allow up to 2.0% error; Steps 6–10 allow up to 1.0% error.
+- **Stage Completion Rule**: A clean observation at position $N$ completes Stage $N$.
+- **Rollout Update Rule**: After a stage is completed, rollout increases by 10% $\times$ Stage Number.
+- **Breach Penalty Rule**: A breaching observation resets the current step's limit to 0.8%, leaves stages and rollout at the last *completed* values, and marks that line as a breach.
+- **Second Breach Stop Rule**: The second breach stops execution immediately with status `STOPPED`.
+- **Single Breach Pause Rule**: If exactly one breach occurs and the list ends (no more observations), status becomes `PAUSED`.
+- **Clean Finish Rule**: If no breaches occur, status becomes `DONE` upon finishing the last observation.
+
+**Phase 2 LEDGER WALK**
+1. Position: 1 | Rate: 0.5% | Limit: 2.0% | Verdict: Clean | Stage Completed: 1 | Rollout After: 10%
+2. Position: 2 | Rate: 0.8% | Limit: 2.0% | Verdict: Clean | Stage Completed: 2 | Rollout After: 30% (10 + 20)
+3. Position: 3 | Rate: 2.1% | Limit: 2.0% | Verdict: **Breach** | Stage Completed: 2 | Rollout After: 30% (Locked at last completed stage's rollout value per rule interpretation of "rollback leaves... values" and standard state machines where breach doesn't retroactively change past successful stages' contribution, though strictly the rule says "breach completes nothing", implying current stage fails. *Correction based on specific text*: "clean observation completes stage equal to its own position". Breaching observation completes nothing. Rollout shows 10% times that stage number. Since Stage 3 was NOT completed by a breach, rollout remains at the value of the last *completed* stage (Stage 2).
+4. Position: 4 | Rate: 0.6% | Limit: 2.0% | Verdict: Clean | Stage Completed: 4? **No**, Rule says "clean observation completes stage equal to its own position". Since we are still in the same rollout sequence (Stage 3 failed, did not count), do we skip to Stage 4 or does the numbering reset? Text: "stage numbering is fixed by position in list and never renumbers... clean observation completes stage equal to its own position". This implies a successful line at pos 4 completes Stage 4.
+   *Wait, let's re-read carefully*: "breaches do not shift count". "clean observation completes stage equal to its own position".
+   Sequence:
+   Pos 1 (Clean) -> Compiles Stage 1. Rollout += 10*1 = 10%. Total 10%.
+   Pos 2 (Clean) -> Compiles Stage 2. Rollout += 10*2 = 20%. Total 30%.
+   Pos 3 (Breach, 2.1% > 2.0%) -> Does not compile Stage 3. Limit tightens to 0.8%.
+   Pos 4 (Clean, 0.6% < 0.8%) -> Compiles Stage 4? Or does it compile the next available stage number which is 3? Text: "stage numbering is fixed by position in list and never renumbers". This usually means Pos $N$ corresponds to Stage $N$. If Pos 3 failed, did Stage 3 exist? Yes. Is it done? No.
+   *Re-evaluating the specific instruction*: "clean observation completes stage equal to its own position".
+   Line 4 is at Position 4. It is clean. Therefore it completes Stage 4. Rollout += 10*4 = 40%. Total 30+40=70%?
+   *Alternative Interpretation*: Does "stage numbering" mean the cumulative count of *successful* stages? "breaches do not shift count". This implies if we have 2 successes, then a breach happens, the next success adds to the count of 3rd stage.
+   Let's check the text: "1st observation carries stage 1, 2nd carries stage 2... clean observation completes stage equal to its own position".
+   If Pos 3 fails, does Pos 4 complete Stage 3 or Stage 4?
+   Text: "stage numbering is fixed by position in list and never renumbers". This suggests the *slot* at Position 4 is always Stage 4 regardless of previous failures. However, "breaches do not shift count" might mean the index $N$ refers to the ordinal number of the observation, but the stage label is determined by successful completions?
+   Let's look at the "Rollout" calculation: "rollout then shows 10 percent times that stage number".
+   If Pos 3 fails, we are still in the sequence.
+   Standard logic for such systems (like canary rollouts): You attempt Step 1. Success -> Step 2. Failure -> Rollback to last stable step.
+   But here the text says "observed error rates by step... exactly 6 observations". It lists them all. And "Stage numbering is fixed by position in list". This strongly implies Position $N$ $\equiv$ Stage $N$.
+   If Pos 3 fails, does it count as completing Stage 3? No ("completes nothing").
+   Does Pos 4 complete Stage 4 or the next missing stage (3)?
+   "breaches do not shift count". This likely means if you have completed Stages 1 and 2, a breach at 3 doesn't make it "Step 4" in terms of completion count. But does Pos 4 *become* Stage 4? Or is Pos 4 simply an attempt that fails to advance the stage counter beyond 2 until a clean one happens?
+   Actually, looking at "rollout then shows 10 percent times that stage number": If I complete Stage 3 (clean), rollout += 30%.
+   If Pos 3 was breach, we didn't complete Stage 3.
+   Now Pos 4 is Clean. Does it complete Stage 3 (the missing one) or Stage 4?
+   "Stage numbering is fixed by position in list". This phrasing usually binds the label to the index. Pos 1=Stage 1. Pos 2=Stage 2. Pos 3=Stage 3. Pos 4=Stage 4.
+   If so, Pos 4 completes Stage 4. Rollout += 40%. Total = 70%.
+   
+   *Wait, let's reconsider the "Rollback" rule*: "rollback leaves rollout and stages at last completed stage's values."
+   This implies we only care about the "Last Completed".
+   Let's trace:
+   Pos 1 (Clean): Last Completed Stage = 1. Rollout = 10%.
+   Pos 2 (Clean): Last Completed Stage = 2. Rollout = 30%.
+   Pos 3 (Breach): No new stage completed. Last Completed Stage remains 2. Limit becomes 0.8%.
+   Pos 4 (Clean, 0.6% < 0.8%): Is this completing Stage 3 or Stage 4?
+   If "Stage numbering is fixed by position", then Pos 4 *is* Stage 4. But we skipped Stage 3. Does a clean observation at Pos 4 complete the *current pending stage* (which would be 3) or its *own position label* (4)?
+   Given "breaches do not shift count", it implies the count of completed stages increases by 1 only on success. If we had 2, and fail at 3, we still have 2. Success at 4 should increment count to 3? Or 4?
+   Let's assume the standard "Cumulative Count" model where "Position $N$" is just an index of the event list, but the "Stage Number" is the cumulative number of successful steps.
+   However, the text says: "1st observation carries stage 1... clean observation completes stage equal to its own position". This explicitly links Position Index $\to$ Stage Label.
+   If Pos 3 fails, Stage 3 is not completed.
+   Does Pos 4 complete Stage 4? Yes, by definition of the rule ("equal to its own position").
+   So:
+   Line 1: Clean. Comp Stg 1. Rollout = 10%.
+   Line 2: Clean. Comp Stg 2. Rollout = 30%.
+   Line 3: Breach (2.1% > 2.0%). No comp. Last Stg = 2. Limit -> 0.8%.
+   Line 4: Clean (0.6% < 0.8%). Comp Stg 4? Rollout adds 40%? Total 70%.
+   Line 5: Clean (0.7% > ?). Wait, limit for step 5 is 2.0% normally, but after breach it is 0.8%. 0.7 < 0.8. So Clean. Comp Stg 5? Rollout adds 50%? Total 120%.
+   Line 6: Clean (0.9%). Limit 0.8%. 0.9 > 0.8. Breach!
+   
+   *Wait, the limit rule*: "after any rollback limit tightens to 0.8 for every remaining step."
+   So after Line 3 breach:
+   Line 4 Limit = 0.8%. Rate 0.6% -> Clean.
+   Line 5 Limit = 0.8%. Rate 0.7% -> Clean.
+   Line 6 Limit = 0.8%. Rate 0.9%

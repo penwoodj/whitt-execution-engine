@@ -1,0 +1,54 @@
+Based on the strict rules provided for tonight's audit (machine log > signed handoff > hearsay; dashboard is known-buggy/unverifiable), here is the step-by-step derivation of the state.
+
+### Phase 1: Rule Scan & Event Analysis
+
+**Rules Applied:**
+1.  **Source Hierarchy:** `Machine Log` beats `Signed Handoff`, which beats `Hearsay`.
+2.  **Dashboard Exception:** The `Status Dashboard` is `KNOWN-BUGGY`. A claim resting *only* on the dashboard is `UNVERIFIED`.
+3.  **Contradiction Logic:** When a higher source contradicts a lower one, the higher source wins (claim becomes `FALSE`).
+4.  **Agreement Logic:** When sources agree, the claim is `TRUE`.
+
+**Event Processing (Arrival Order):**
+
+*   **Claim C1:** "The machine log shows the shard rebalanced at 02:10."
+    *   Source: Machine Log (Highest).
+    *   Analysis: Single highest source assertion. No contradiction.
+    *   Result: **TRUE**.
+
+*   **Claim C2:** "A signed handoff says the shard never moved, the machine log shows it moved at 02:10."
+    *   Sources: Signed Handoff (Lower) vs. Machine Log (Higher).
+    *   Analysis: Contradiction between Lower and Higher sources regarding movement. Rule: Higher source wins. The assertion that "it moved" is true; the assertion that "it never moved" is false. Therefore, the claim as a whole (which implies agreement or validity of the handoff's specific denial) fails against the log. Specifically, the text says "handoff says X, log shows Y". Since Log > Handoff, the reality is Y. The claim structure usually validates the primary assertion if sources agree, but here they contradict. Under the rule "when a higher source contradicts a lower one... the lower source's assertion counts FALSE", the handoff's part of the claim is false. If the claim requires both to be true (implied by listing them), it fails. Even if interpreted as "Is the shard moving?", the Log says yes, Handoff says no. The claim text combines them. Given the strict hierarchy, the Handoff's assertion is rejected.
+    *   Result: **FALSE**.
+
+*   **Claim C3:** "A signed handoff puts the backup at 03:00, hallway hearsay says 03:00 too."
+    *   Sources: Signed Handoff (Higher) vs. Hearsay (Lower).
+    *   Analysis: Agreement between Higher and Lower sources on the timestamp/value. Rule: "when sources agree the claim is true".
+    *   Result: **TRUE**.
+
+*   **Claim C4:** "Hallway hearsay alone claims the cache was cold at 04:00."
+    *   Source: Hearsay (Lowest).
+    *   Analysis: Claim rests *only* on hearsay. No higher source to validate it. Rule: "a claim resting only on hearsay... is UNVERIFIED".
+    *   Result: **UNVERIFIED**.
+
+*   **Claim C5:** "Only the buggy dashboard shows the queue depth peaking at 05:00."
+    *   Source: Status Dashboard (Known-Buggy).
+    *   Analysis: Claim rests *only* on the dashboard. Rule: "the status dashboard is KNOWN-BUGGY and can never carry a claim alone... a claim resting only on hearsay, or only on the dashboard, is UNVERIFIED".
+    *   Result: **UNVERIFIED**.
+
+### Phase 2: Ledger Walk (State After Each Event)
+
+1.  **Event C1:** Machine Log asserts rebalance. State updates to True. -> `{"true": ["c1"], "false": [], "unverified": []}`
+2.  **Event C2:** Signed Handoff contradicts Machine Log. Higher source (Log) wins, invalidating the Handoff's assertion within the claim context. State updates to False. -> `{"true": ["c1"], "false": ["c2"], "unverified": []}`
+3.  **Event C3:** Signed Handoff agrees with Hearsay on backup time. Agreement confirmed by higher source. State updates to True. -> `{"true": ["c1", "c3"], "false": ["c2"], "unverified": []}`
+4.  **Event C4:** Hearsay alone asserts cold cache. No validation from higher sources. State updates to Unverified. -> `{"true": ["c1", "c3"], "false": ["c2"], "unverified": ["c4"]}`
+5.  **Event C5:** Dashboard alone asserts queue peak. Known-buggy, cannot carry claim alone. State updates to Unverified. -> `{"true": ["c1", "c3"], "false": ["c2"], "unverified": ["c4", "c5"]}`
+
+### Final Answer Construction
+
+*   **True List:** c1, c3 (Sorted: c1, c3)
+*   **False List:** c2 (Sorted: c2)
+*   **Unverified List:** c4, c5 (Sorted: c4, c5)
+
+```json
+{"true": ["c1", "c3"], "false": ["c2"], "unverified": ["c4", "c5"]}
+```

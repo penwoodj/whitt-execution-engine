@@ -1,0 +1,49 @@
+The task requires simulating a scheduling scenario with specific rules for job arrivals, preemption, checkpoints, and state management (budgets, returns, expiry logic) to produce a final JSON output containing `makespan_min`, `wasted_min`, and the completion order of LOW jobs.
+
+**Analysis of Inputs:**
+- **HIGH Job:** 8 minutes duration. Arrives at $t=0$. Preempts instantly. Runs to completion.
+- **LOW1 Job:** 5 minutes duration. Arrives at $t=0$. Checkpoints every 2 completed minutes (i.e., at $t=2, t=4$).
+- **LOW2 Job:** 7 minutes duration. Arrives at $t=2$. Checkpoints every 2 completed minutes (i.e., at $t_{local}=2, 4, 6 \rightarrow t_{global}=4, 6, 8$).
+
+**Simulation Trace (Phase 1: Rules & Events):**
+Events arrive in strict order based on time and arrival definitions.
+1.  **Event A:** Start HIGH ($t=0$), Start LOW1 ($t=0$). Rule: Preemption priority applies immediately upon simultaneous start or immediate preemption trigger.
+2.  **Event B:** HIGH completes at $t=8$. Rule: Job finishes, resources released.
+3.  **Event C:** LOW1 resumes/continues after HIGH leaves (or was preempted and resumed). Rule: Resumption priority vs fresh jobs. Since LOW1 is already running/resuming, it continues. It needs to reach its remaining work.
+    *   Wait, let's re-evaluate the "Preemption" rule from the text: "HIGH preempts instantly and runs to completion." This implies that at $t=0$, if both start, HIGH takes the slot immediately? Or does the system allow concurrent execution until one finishes? The phrase "HIGH preempts instantly" usually suggests displacement. However, standard scheduling problems with a single core (implied by "one core tonight") and immediate preemption for the high-priority job means the low-priority job cannot run while the high-priority job is active.
+    *   Let's assume Single Core behavior: At $t=0$, HIGH starts. LOW1 waits? Or does LOW1 start and get preempted immediately? The text says "LOW jobs checkpoint every 2 completed minutes; work past the last checkpoint is wasted on preemption". This implies LOW1 *did* run some amount before being preempted, or will be preempted later.
+    *   Re-reading: "HIGH runs to completion." If HIGH starts at $t=0$ and takes 8 mins, it occupies the core from $t=0$ to $t=8$.
+    *   Therefore, LOW1 (arriving $t=0$) cannot run while HIGH is active. Does it lose its progress? "work past the last checkpoint is wasted on preemption". If a job starts and then gets preempted before hitting a checkpoint, work is wasted. If it hits a checkpoint first, that saved state remains.
+    *   Since LOW1 arrives at $t=0$ and HIGH occupies the core immediately ($t=0 \to 8$), LOW1 makes **0** progress before preemption (if we assume single core strict displacement). Thus, no checkpoints are hit by LOW1 during HIGH's run.
+    *   At $t=8$, HIGH finishes. Core frees up.
+    *   LOW1 resumes from checkpoint at $t=0$? No, if it made 0 progress, its "checkpoint" is effectively at start (or it restarts). The text says "work past the last checkpoint is wasted". If it did no work, nothing was wasted in terms of "past a checkpoint", but the job must re-run.
+    *   Let's check LOW2: Arrives $t=2$. Since HIGH is active ($0 \to 8$), LOW2 cannot run from $t=2$ to $t=8$. It waits until $t=8$.
+    *   At $t=8$, both LOW1 and LOW2 are waiting. Rule: "a resumed LOW job outranks a fresh one at any tie". LOW1 was running (resumed) before HIGH finished? Or did it just sit? If LOW1 arrived at 0 and couldn't run, is it "fresh" or "resumed"? Usually, in these logic puzzles, if a job is interrupted by a higher priority job that occupies the whole time, the lower priority job waits. Upon release, the one that was *already* present (LOW1) vs the new one (LOW2).
+    *   However, let's look at the "checkpoints" rule again: "work past the last checkpoint is wasted on preemption". This specific phrasing suggests a scenario where work *was done*, then preempted. If HIGH runs $0 \to 8$, and LOW1 arrives $t=0$, does LOW1 run?
+    *   Alternative interpretation: The system allows parallelism? "one core tonight". No, single core.
+    *   Let's reconsider the "Preemption" timing. Maybe HIGH doesn't preempt immediately at start if both arrive? "HIGH preempts instantly". This likely means if there is a conflict, it wins. If they arrive together on a single core, one must go first. High goes first. Low waits.
+    *   If Low waits from 0 to 8: It makes 0 progress. Checkpoints at $t=2,4$ are never reached during HIGH's run.
+    *   At $t=8$: LOW1 (waiting since 0) vs LOW2 (arriving now). Rule: "resumed... outranks fresh". If LOW1 was waiting because it couldn't start, is it resumed or fresh? Usually, a job that arrived and couldn't run is considered "fresh" upon the next opportunity unless it had made progress. BUT, the text emphasizes "work past the last checkpoint is wasted". This implies the intended scenario involves work being done then lost.
+    *   Is it possible HIGH runs on one core, LOW jobs are meant to run *after*? Yes.
+    *   Let's calculate based on Single Core, High First ($0 \to 8$).
+        *   $t=0$: Start HIGH. (LOW1 arrives, waits).
+        *   $t=2$: LOW2 arrives. Waits.
+        *   $t=8$: HIGH finishes.
+        *   Now LOW1 and LOW2 are ready. Order? "Resumed outranks fresh". If LOW1 is considered "resumed" (it was in the queue since 0), it runs first. If it's considered "fresh", then order might differ. But standard interpretation of such constraints: The job that has been waiting since start ($t=0$) retains priority over a new arrival ($t=2$). So LOW1 runs before LOW2.
+        *   **Sequence:** HIGH finishes at 8. LOW1 runs (5 mins). LOW2 runs (7 mins).
+        *   LOW1 completion: $8 + 5 = 13$.
+        *   LOW2 completion: $13 + 7 = 20$.
+        *   Makespan: 20.
+        *   Wasted time for LOW1: Did it run? No, because HIGH preempted instantly at start (or occupied the core). If it didn't run, did it waste "work past a checkpoint"? It made 0 work. So wasted = 0? Or does the prompt imply that the "preemption" happens *after* some work?
+        *   Let's re-read carefully: "LOW jobs checkpoint every 2 completed minutes; work past the last checkpoint is wasted on preemption". This sounds like a trap for when work *is* done. If no work is done, no checkpoints are passed, so no waste? Or is the "checkpoint" logic implying that if you start and get preempted before $t=2$, you lose whatever you did (which is 0).
+        *   Wait, could "HIGH preempts instantly" mean it interrupts LOW1 *if* LOW1 started? But on a single core, only one starts. If HIGH has higher priority, it grabs the resource. LOW1 sits in queue. No work done by LOW1 during HIGH's run. Thus, 0 wasted minutes (in terms of lost progress).
+        *   Let's check the alternative: What if "preemption" implies that LOW1 *started* and then got kicked out? That requires multi-core or a specific rule allowing concurrent start with immediate displacement. But "one core". So it must be queuing.
+        *   If queuing: LOW1 starts at 8. It runs to completion (5 mins). No checkpoints hit during HIGH's run because no progress was made. Waste = 0.
+        *   Makespan = $8 + 5 + 7 = 20$. Order: [LOW1, LOW2].
+
+    *   **Let's try the "Work is wasted" interpretation:** Maybe the problem implies that at $t=0$, both start? No, single core. Maybe HIGH preempts means it takes the slot, pushing LOW1 to wait.
+    *   Is there any scenario where waste > 0? Only if LOW1 ran for some time before HIGH interrupted it. But with "one core" and "HIGH runs instantly", LOW1 cannot run first. Unless... does HIGH arrive at a different time? No, $t=0$.
+    *   Perhaps the "checkpoints" rule is just defining the cost function: If you complete 2 mins, checkpoint saves state. If preemption happens before that, save state is lost (or rather, work since last save is lost). Since start-to-preemption was 0, waste is 0.
+
+    *   **Let's double check LOW2:** Arrives $t=2$. Waits until $t=8$. Runs at 9? No, starts immediately after HIGH finishes. So runs $8 \to 15$? Then LOW1 ran $8 \to 13$. Order: LOW1 then LOW2.
+    *   Wait, if LOW1 is "resumed", does it mean it had state?

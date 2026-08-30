@@ -1,0 +1,49 @@
+To ensure the report balances, I have walked the event list strictly in arrival order, applying only the rules that bind to each specific event (arrival/preemption or completion), carrying the state forward without re-computing from scratch mid-stream.
+
+**Phase 1: Rule Application & State Walk**
+*   **Event 0 (Start LOW1):** `LOW1` starts at min 0. Core busy with `LOW1`. Bank checkpoint set for min 2.
+*   **Event 3 (Start LOW2):** `LOW2` starts at min 3. Core busy with `LOW2` (preempting `LOW1`). Bank checkpoint set for min 5.
+    *   *Note:* At min 2, the banked minute was completed by `LOW1`. No waste occurred yet.
+*   **Event 5 (Arrival HIGH):** `HIGH` arrives at min 5. Preempts current core job (`LOW2`). Core busy with `HIGH`.
+    *   *Note:* At min 4, `LOW2` had a banked checkpoint at min 3 and was running its 2nd minute (unbanked). The preemption happens instantly upon arrival at min 5. Work done in the unbanked window since the last bank is wasted.
+*   **Event 10 (Arrival LOWs):** `HIGH` finishes at min 9 (started 5, runs 4 mins). Core becomes free. Both `LOW1` and `LOW2` are waiting.
+    *   *Ordering:* Start minute tie-breaker applies. `LOW1` started at 0, `LOW2` started at 3. `LOW1` wins the core.
+*   **Event 15 (Completion LOW1):** `LOW1` resumes from its checkpoint at min 2. It owes 5 minutes ($7 - 2$). Runs 5 mins: Min 10, 11, 12, 13, 14. Finishes at min 14.
+    *   *Note:* `LOW1` is first in completion order.
+*   **Event 18 (Completion LOW2):** Core free again. `LOW2` resumes from checkpoint at min 5. It owed 3 minutes ($3 - 0$) when preempted? Wait, let's re-verify the bank logic for `LOW2`.
+    *   `LOW2` started min 3. Runs min 3 (bank), min 4 (unbank). Preempted at min 5. Last bank was min 3. Minutes run between last bank and preemption: Min 4 only (1 minute). This is wasted.
+    *   Total duration of `LOW2` is 3 mins. Banked: 1 min (at min 3). Remaining to do on resume: $3 - 1 = 2$ minutes?
+    *   Let's re-read the rule strictly: "a job that starts or resumes at minute s banks a checkpoint at minute s+2".
+        *   `LOW2` starts min 3. Banks at min 5 ($3+2$).
+        *   `LOW2` runs min 3, min 4. At min 5 it is preempted by arrival of HIGH? The rule says "a bank landing on the exact minute HIGH arrives still counts and nothing is wasted".
+        *   So at min 5, `LOW2` banks a checkpoint immediately upon preemption/arrival of next event? Or does the bank happen after running a full interval?
+        *   Rule: "banked every 2 completed minutes... a job that starts or resumes at minute s banks a checkpoint at minute s+2".
+        *   `LOW2` runs min 3, min 4. That's 2 minutes. Does it bank at min 5? Yes. The rule says if the bank lands on the exact minute HIGH arrives (min 5), nothing is wasted.
+        *   Therefore, `LOW2` has completed 2 minutes safely before preemption effectively "cleans up" or rather, the checkpoint covers up to that point.
+        *   Wait, standard interpretation: You run min 3, you run min 4. At the end of min 4 (start of 5), have you banked? The rule says banks at $s+2$. Start is 3. Bank is at 5. So yes, upon arrival at 5, a checkpoint exists covering up to that moment.
+        *   Thus, `LOW2` resumes with 0 minutes left? No, total duration is 3 mins. If it ran min 3 and 4 (2 mins), it needs 1 more minute.
+        *   Is the work done in min 4 wasted? "on preemption the work past the last checkpoint is wasted". The checkpoint is at 5. Work past 5 is nothing (preemption happens at start of 5). So 0 waste for `LOW2`.
+    *   Let's re-evaluate `LOW1`'s bank.
+        *   `LOW1` started 0. Runs 0, 1. Banks at 2.
+        *   Preempted at min 3 (by start of LOW2). Work past last checkpoint (min 2) is minute 2? No, usually checkpoints cover up to the end of the interval. If bank is at $t$, it covers up to $t$.
+        *   So `LOW1` ran 0, 1. Banked at 2. Preempted at 3. Work past 2 is minute 2? No, if you run min 2, then bank at 4?
+        *   Let's parse: "run minutes 0 and 1... bank a checkpoint at minute 2". This implies the checkpoint covers the completion of minute 1? Or does it cover minute 2 as well?
+        *   Re-reading example: `LOW1` held core min 0, 1, 2. Banked at min 2. 3rd minute unbanked when swap came (min 3). So work in min 2 is wasted.
+        *   Applying to current task:
+            *   **Scenario A:** Current `LOW1` runs min 0, 1. Then LOW2 starts min 3. Preemption happens at start of min 2? No, "LOW jobs take the core in order... a resumed LOW outranks a fresh one". This implies simultaneous arrivals are resolved by priority.
+            *   Timeline:
+                *   Min 0-2: `LOW1` runs. (Duration 3 mins total for this phase).
+                *   Min 3: `LOW2` starts. `LOW1` is preempted? No, "Low jobs take the core in order of their start minutes". Start min 0 beats Start min 3. So `LOW1` keeps core at min 3.
+                *   Min 4: `LOW1` continues.
+                *   Min 5: `HIGH` arrives. Preempts `LOW1`.
+            *   Let's trace banks for this path:
+                *   **LOW1:** Start 0. Banks at $0+2=2$. Runs min 0, 1. (Checkpoint covers end of min 1? Or start of 2?). Example says "held core minutes 0 and 1... banked a checkpoint at minute 2". This suggests the checkpoint is set *after* running 2 minutes (min 0 and 1). The work done in min 2 would be unbanked.
+                *   In current task, `LOW1` runs min 0, 1 (at start of min 2 it has banked? Or does it need to finish min 2?). Example: "held core minutes 0 and 1... banked at minute 2". This implies the checkpoint is established after completing minute 1. So work in minute 2 is unbanked.
+                *   Current `LOW1` runs min 0, 1, then LOW2 starts? No, priority rule: "a resumed LOW outranks a fresh one... start minute tie-breaker".
+                *   Min 3 event: `LOW2` arrives (fresh). Core is occupied by `LOW1`. `LOW1` started at 0. `LOW2` started at 3. `LOW1` wins. No preemption.
+                *   So `LOW1` runs min 0, 1, then presumably min 2? Wait, "LOW jobs take the core in order of their start minutes". This usually means if they overlap, priority is determined by start time. Since `LOW1` started earlier, it holds the core until preemption or completion.
+                *   So `LOW1` runs continuously from min 0 to... when?
+                *   Min 3: `LOW2` starts. Does this preempt? "Low jobs take the core in order of their start minutes". This implies if there is a conflict (both want core), older wins. But they don't overlap in demand unless one finishes or gets preempted. They are sequential here because one holds it.
+                *   So `LOW1` runs min 0, 1. At min 2? It has banked at min 2 (after running 2 mins). So min 2 is safe? Or does the bank happen at the start of min 2 covering up to min 4? "bank a checkpoint at minute s+2". Start 0 -> Bank at 2. This usually means after $t=2$ elapsed time. i.e., end of min 1? No, "minutes 0 and 1" are two minutes. End of min 1 is $t=2$. So bank is set at $t=2$.
+                *   If bank is set at $t=2$, then work done in interval $[2, 4)$ (min 2) is unbanked?
+                *   Example text: "held core minutes 0 and 1... banked a checkpoint at minute 2". Then "3rd minute was unbanked when the swap came" (swap at min 3). This confirms:

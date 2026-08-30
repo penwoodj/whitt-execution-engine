@@ -1,0 +1,78 @@
+The task description contains a contradiction between the procedural instructions (which demand a specific JSON output format with `makespan_min`, `wasted_min`, and `order`) and the "Phase 1 RULE SCAN" instruction block, which lists rules like "expiry", "return", "revocation", etc. These terms do not apply to the provided simulation logic (which involves job scheduling, preemption, and checkpointing). Furthermore, the input text explicitly states: "the morning report only reads JSON," implying that any non-JSON output is invalid.
+
+However, the core of the request is a simulation problem defined in the text:
+1.  **Jobs:** `LOW1` (4 min), `LOW2` (3 min).
+2.  **Start Times:** `LOW1` starts at $t=0$, `LOW2` starts at $t=3$.
+3.  **Event:** `HIGH` arrives at $t=3$ and runs for 6 minutes ($t=3$ to $t=9$).
+4.  **Preemption Rule:** `HIGH` instantly preempts whatever `LOW` job is running. While `HIGH` runs, nothing else runs.
+5.  **Checkpointing:** Jobs checkpoint every 2 completed minutes of *running* time. Work past the last checkpoint on preemption is wasted.
+6.  **Scheduling Rule:** After `HIGH`, jobs resume in order of their start minutes (`LOW1` at $t=0$ beats `LOW2` at $t=3$). A resumed job outranks a fresh one at ties (not applicable here as they have different start times).
+
+**Simulation Walkthrough:**
+
+*   **Time 0-3:**
+    *   `LOW1` starts running. It runs for 3 minutes ($t=0, 1, 2$).
+    *   Checkpoints: A checkpoint is banked at $t=2$ (after 2 mins of running).
+    *   State at $t=3$: `LOW1` has run 3 minutes. It has 1 minute remaining ($4 - 3 = 1$). It has a checkpoint at $t=2$.
+
+*   **Time 3:**
+    *   Event: `HIGH` arrives.
+    *   Action: Preempt current job (`LOW1`).
+    *   Wasted Calculation: `LOW1` ran for 3 minutes. The last checkpoint was at minute 2 of running time. The work done in the interval $(2, 3]$ (i.e., the 3rd minute) is unbanked.
+    *   **Wasted:** 1 minute.
+    *   `LOW1` remaining work: $4 - 2 = 2$ minutes? No, let's re-read carefully: "a job with 5 total minutes and 2 banked resumes with 3 minutes left." This implies the checkpoint saves exactly the time up to that point. So if it ran 3 mins and checkpointed at 2, it saved 2 mins of work. It needs to redo the 1 min past the checkpoint?
+    *   Re-reading: "on preemption the work past the last checkpoint is wasted and redone after resume."
+        *   Total duration needed: 4 minutes.
+        *   Running time achieved before preemption: 3 minutes.
+        *   Checkpoint location: After 2 minutes of running.
+        *   Work saved (banked): The first 2 minutes.
+        *   Work wasted: The work done between minute 2 and minute 3 (the 3rd minute). Duration = $3 - 2 = 1$ minute.
+        *   Work to redo: The total duration minus the banked portion? Or just the wasted portion? "redone after resume". Usually, this means you have to re-earn the time from the checkpoint. So you need to run for $(4 - 2) = 2$ minutes again to complete the job.
+        *   Let's verify with the example provided in the text: "LOW1 runs 7 minutes... banked a checkpoint at minute 2, and its 3rd minute was unbanked when the swap came, so 1 minute wasted." Then it says "LOW1 had 7 total minutes with 2 banked, so it resumed owing 5".
+        *   Logic from example: Total = 7. Banked (saved) = 2. Wasted = 1. Remaining to do = $7 - 2 = 5$.
+        *   Applying to current task: Total = 4. Banked = 2. Wasted = 1. Remaining to do = $4 - 2 = 2$ minutes.
+
+*   **Time 3-9:**
+    *   `HIGH` runs for 6 minutes ($t=3, 4, 5, 6, 7, 8$). Note: The text says "runs 6 minutes to completion". If it starts at $t=3$, does it finish at $t=9$? Yes.
+    *   During this time, `LOW1` is paused.
+
+*   **Time 9:**
+    *   Event: `HIGH` finishes. Core becomes free.
+    *   Waiting Jobs: `LOW1` (needs 2 mins), `LOW2` (needs 3 mins).
+    *   Scheduling Order: Compare start minutes. `LOW1` started at $t=0$. `LOW2` starts at $t=3$ (per the prompt "LOW2 runs 3 minutes starting at minute 3").
+    *   Rule: "LOW jobs take the core in order of their start minutes".
+    *   Winner: `LOW1`.
+
+*   **Time 9-11:**
+    *   `LOW1` resumes. Needs to run 2 minutes.
+    *   Runs at $t=9, 10$. Finishes at end of $t=10$ (or start of $t=11$). Let's assume discrete minutes: finishes after minute 10 runs.
+    *   `LOW1` Complete.
+
+*   **Time 11:**
+    *   Core free. Next job: `LOW2`.
+    *   `LOW2` needs to run its full duration (3 mins). It was waiting since $t=3$.
+    *   Runs at $t=11, 12, 13$. Finishes after minute 13 runs.
+
+*   **Final State:**
+    *   Makespan: The time when the last job finishes. Last job is `LOW2`, finishing at end of minute 13. So makespan = 14? Or does "minute 0" mean duration starts then?
+        *   Example check: "LOW1 runs 7 minutes starting at minute 0... LOW2... starting at minute 1". "makespan 13 minutes from the first start."
+        *   In example: `HIGH` ends at $t=5$. `LOW1` resumes, needs 5 mins. Runs $5 \to 9$ (ends). `LOW2` runs $9 \to 12$ (ends). Total time from $0$ to end of minute 12 is 13 minutes?
+        *   If start at min 0, run for 7 mins: occupies intervals [0,1), [1,2)...[6,7). Finishes at $t=7$.
+        *   Example timeline: `LOW1` (0-2 banked). Preempted. `HIGH` (3-5). Resume `LOW1` (needs 5). Runs 5 mins ($5 \to 9$). Finish `LOW1`. Run `LOW2` (3 mins) ($9 \to 12$). Finish `LOW2`.
+        *   Total duration: $0$ to end of minute 12. That is 13 minutes? No, $0$ to $12$ is 12 units if continuous, but usually "minute 0" implies the first unit ends at time 1.
+        *   Let's count units:
+            1.  `LOW1` initial run: 3 units (ends at $t=3$).
+            2.  `HIGH`: 6 units ($t=3 \to t=9$).
+            3.  `LOW1` resume: 2 units ($t=9 \to t=11$).
+            4.  `LOW2`: 3 units ($t=11 \to t=14$).
+        *   Total time elapsed from $t=0$ to end of last unit is 14 minutes?
+        *   Let's re-read the example calculation: "makespan 13 minutes".
+            *   Example `HIGH` runs 2 mins starting at min 3. So $3 \to 5$.
+            *   Resume `LOW1` (needs 5). Runs $5 \to 9$? Wait, if it needs 5 units, and starts at 5, it occupies [5,6), [6,7)...[8,9). Ends at 9.
+            *   Then `LOW2` (3 units) runs [9,10)...[11,12). Ends at 12.
+            *   Total time from start ($t=0$) to end of last unit is 12 minutes? Why does the text say "makespan 13"?
+            *   Maybe "minute 0" means the job starts at $t=0$ and takes 7 mins, so it occupies [0,7). Finishes at 7.
+            *   `HIGH` arrives at min 3. Occupies [3,5).
+            *   Resume `LOW1`. Needs 5. Starts at 5. Occupies [5,10). Ends at 10.
+            *   Run `LOW2`. Needs 3. Starts at 10. Occupies [10,13). Ends at 13.
+            *   Total time: 

@@ -1,0 +1,126 @@
+### Phase 1 Rule Scan (First Half Only)
+
+Based on the "night desk sy-22" task description for the first crew, here are the rules governing state changes during the event list:
+
+1.  **Arrival Order:** LOW jobs take the core in strict order of their start minutes ($t_{start}$).
+2.  **Resume Priority:** A resumed LOW job outranks a fresh (new) LOW job at any tie in arrival time.
+3.  **Wait Condition:** A LOW job whose start minute arrives while the core is busy simply waits until the core becomes free.
+4.  **No Idle Core:** The core never idles while a LOW job is waiting; the next waiting LOW starts immediately when the current one finishes or is preempted.
+5.  **Preemption Rule:** HIGH arrival instantly preempts whatever LOW job is running and stops all other execution until HIGH completes.
+6.  **Checkpoint Banking:** A job banks a checkpoint every 2 completed minutes of running time (absolute minutes $s, s+2, s+4...$).
+7.  **Wasted Work on Preemption:** On preemption, work past the last banked checkpoint is wasted and must be redone after resume.
+8.  **Resume Calculation:** After resume, a job redoes every minute past its last bank (e.g., if total=5, banked=2, remaining to run = 3).
+
+### Phase 2 Ledger Walk (First Half Only)
+
+**Initial State:**
+*   Time $t=0$. Core free.
+*   Waiting Queue: `LOW1` ($start=0$), `LOW2` ($start=1$).
+*   Active Job: None.
+
+**Minute 0:**
+*   Event: `LOW1` starts (Start minute 0 arrives).
+*   Action: Core runs `LOW1`.
+*   State: Running `LOW1` (Elapsed 0/5). Queue: `LOW2`.
+
+**Minute 1:**
+*   Event: `LOW2` start minute arrives.
+*   Action: Core continues running `LOW1` (Priority: Active > Waiting).
+*   State: Running `LOW1` (Elapsed 1/5). Queue: `LOW2`.
+
+**Minute 2:**
+*   Event: `LOW1` banks checkpoint at $t=2$ (2 mins elapsed).
+*   Action: Core continues running `LOW1`.
+*   State: Running `LOW1` (Elapsed 2/5). Checkpoint Banked. Queue: `LOW2`.
+
+**Minute 3:**
+*   Event: `HIGH` arrives at $t=4$? No, rule says "HIGH arrives at minute 4". Wait, let's re-read carefully: "HIGH arrives at minute 4 and runs 4 minutes to completion".
+    *   Correction: The prompt text says "LOW1 runs 5 minutes starting at minute 0... HIGH arrives at minute 4".
+    *   Let's check the timeline again.
+    *   $t=0$: LOW1 starts.
+    *   $t=1$: LOW2 start time hits (waits).
+    *   $t=2$: LOW1 banks checkpoint.
+    *   $t=3$: Core runs LOW1.
+    *   $t=4$: **HIGH arrives**.
+*   Action: `HIGH` preempts `LOW1`. `LOW1` has 5 total mins, banked at 2. Work done = 2 (banked). Wasted work = Total - Banked = $5 - 2 = 3$ minutes.
+*   State: Running `HIGH` (Elapsed 0/4). Queue: `LOW2`. `LOW1` suspended with 3 mins remaining to redo later.
+
+**Minute 4:**
+*   Event: `HIGH` runs.
+*   Action: Core continues running `HIGH`.
+*   State: Running `HIGH` (Elapsed 1/4). Queue: `LOW2`.
+
+**Minute 5:**
+*   Event: `HIGH` runs.
+*   Action: Core continues running `HIGH`.
+*   State: Running `HIGH` (Elapsed 2/4). Queue: `LOW2`.
+
+**Minute 6:**
+*   Event: `HIGH` runs.
+*   Action: Core continues running `HIGH`.
+*   State: Running `HIGH` (Elapsed 3/4). Queue: `LOW2`.
+
+**Minute 7:**
+*   Event: `HIGH` finishes at $t=8$? Wait, "runs 4 minutes to completion". Starts minute 4. Finishes end of minute 7 ($4+4-1 = 7$)? Or does it occupy minutes 4, 5, 6, 7?
+    *   Standard discrete time: If starts at $t=0$, runs for duration $D$, finishes at $t=D$.
+    *   Prompt: "HIGH arrives at minute 4 and runs 4 minutes".
+    *   Timeline: Minute 4 (1st min), Minute 5 (2nd min), Minute 6 (3rd min), Minute 7 (4th min). Finishes end of Minute 7.
+*   Action: Core finishes `HIGH`.
+*   State: Core free at $t=8$. Queue: `LOW2` ($start=1$), `LOW1` ($start=0$, resumed).
+
+**Minute 8:**
+*   Event: Core becomes free.
+*   Action: Resolve queue order.
+    *   Candidates: `LOW2` (Start time 1, Fresh/Waiting since $t=1$), `LOW1` (Start time 0, Resumed).
+    *   Rule: "A resumed LOW outranks a fresh one at any tie". Here they are not tied in start time for the purpose of queue ordering? No, rule says "take core in order of their start minutes".
+    *   Wait, let's re-read the specific priority rule: "LOW jobs take the core in order of their start minutes... a resumed LOW outranks a fresh one at any tie".
+    *   This implies if Start Times are equal, Resume wins. If Start Times differ? Usually, lower start time wins (FIFO based on arrival).
+    *   However, `LOW1` arrived at 0. `LOW2` arrived at 1.
+    *   Does "order of their start minutes" mean strictly by the integer value ($0 < 1$)? Yes.
+    *   So `LOW1` (Start 0) should go before `LOW2` (Start 1).
+    *   Let's check the orientation story to confirm interpretation: "LOW1 held the core... resumed or not. LOW1 had 7 total minutes with 2 banked, so it resumed owing 5... ran them minutes 5 to 10, and finished first." In that story, `LOW1` (Start 0) went before `LOW2` (Start 1).
+    *   Conclusion: Priority is strictly by Start Minute ($t_{start}$), regardless of resume status unless start times are identical. Resume status only breaks ties for identical start minutes.
+*   Action: Core starts `LOW1` (Resumed, needs to run 3 mins).
+*   State: Running `LOW1`.
+
+**Minute 9:**
+*   Event: `LOW1` runs (1st min of resume).
+*   Action: Core continues `LOW1`.
+*   State: Running `LOW1` (Elapsed 1/3 remaining). Queue: `LOW2`.
+
+**Minute 10:**
+*   Event: `LOW1` runs (2nd min of resume).
+*   Action: Core continues `LOW1`.
+*   State: Running `LOW1` (Elapsed 2/3 remaining). Queue: `LOW2`.
+
+**Minute 11:**
+*   Event: `LOW1` finishes. Total run = $2$ (initial) + $3$ (resume) = $5$.
+*   Action: Core free at $t=12$.
+*   State: Core free. Queue: `LOW2`.
+
+**Minute 12:**
+*   Event: Start `LOW2` (Start minute 1 arrived long ago).
+*   Action: Core starts `LOW2` (Total duration 2 mins).
+*   State: Running `LOW2`.
+
+**Minute 13:**
+*   Event: `LOW2` runs.
+*   Action: Core continues `LOW2`.
+*   State: Running `LOW2` (Elapsed 1/2 remaining).
+
+**Minute 14:**
+*   Event: `LOW2` finishes.
+*   Action: Core free at $t=15$.
+*   State: Core free. All jobs done.
+
+**Final Calculations:**
+*   **Makespan:** Last finish time = End of Minute 14? Or Start of Minute 15?
+    *   LOW2 starts at $t=12$, runs for 2 minutes. Occupies $[12, 13]$ and $[13, 14]$. Finishes at $t=14$ (absolute time).
+    *   Wait, let's trace absolute times carefully.
+    *   LOW1 Initial: Runs $0 \to 2$. Preempted at 4? No, runs $0 \to 2$, then $3 \to 4$ is preempted by HIGH arriving at 4.
+        *   Minute 0: Run (0-1)
+        *   Minute 1: Run (1-2)
+        *   Minute 2: Run (2-3). Bank checkpoint at end of minute 2? "banks a checkpoint every 2 completed minutes". At $t=2$, it has completed 2 mins. Banked.
+        *   Minute 3: Run (3-4).
+        *   Minute 4: HIGH arrives. Preemption happens instantly. Work done = 4 mins? No, "runs 5 minutes starting at minute 0".
+            *  

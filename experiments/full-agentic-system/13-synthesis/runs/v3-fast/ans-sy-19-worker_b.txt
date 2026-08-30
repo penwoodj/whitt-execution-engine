@@ -1,0 +1,78 @@
+### Phase 1 Rule Scan (Part B Only)
+Based on the text provided for the "second matter" (residency/eviction), here are the rules governing state changes during the event stream:
+
+1.  **Eviction Trigger Rule**: When a load cannot fit in available resident space, evict the Least-Recently-Touched (LRU) unpinned model(s) until room is made or only pinned models remain.
+2.  **Deferred Load Rule**: If after exhausting all LRU unpinned models, remaining space is still insufficient to hold the requested load, defer the load and record its ID.
+3.  **No-Op Unload Rule**: An unload command for a model that is no longer resident counts as a no-op (no state change).
+4.  **Load Execution Count Rule**: Every successfully executed load command increments the `loads` counter, regardless of whether it triggered an eviction or not.
+5.  **Eviction Counter Rule**: Every actual eviction performed increments the `evictions` counter, even if the subsequent load ends up being deferred.
+6.  **Deferral Counter Rule**: Every load that meets the criteria for deferral (insufficient space after max evictions) increments the `deferrals` counter.
+
+**Events Triggering Rules:**
+*   `load A`: Triggers Load Execution, Eviction (if needed), and potentially Deferred.
+*   `load C`: Triggers Load Execution, Eviction (if needed), and potentially Deferred.
+*   `load D`: Triggers Load Execution, Eviction (if needed), and potentially Deferred.
+*   `unload D`: Triggers No-Op Unload Rule.
+
+---
+
+### Phase 2 Ledger Walk (Part B Only)
+Applying events in strict arrival order to the initial state:
+*   **Initial State**: Residents = {A1, B2, C3, D4} GB. Total Capacity = 10 GB. Used = 1+2+3+4 = 10 GB. Free = 0 GB.
+*   **Pinned Models**: {C}.
+*   **Unpinned Models**: {A, B, D}.
+
+**Event Stream:** `load A (1)`, `load C (3)`, `load D (4)`, `unload D (4)`
+
+1.  **Event: load A (1 GB)**
+    *   Current Free Space: 0 GB. Requested: 1 GB.
+    *   Fit? No.
+    *   Eviction Action: Evict LRU unpinned models. Order of unpinned: A, B, D. (Assuming standard arrival order implies recency unless specified otherwise; typically first-in-first-out for unpinned). Let's assume A is oldest, then B, then D. Or strictly by ID if no timestamps? The prompt says "least-recently-touched". Without explicit touch times, we assume insertion order defines recency (A touched at t=0, B at t=1, D at t=2).
+    *   Evict A (1 GB). Space freed: 1. Total Free: 1.
+    *   Load A fits? Yes (Needs 1, Have 1).
+    *   State Update: Residents {A(loaded), B, C, D}. Used = 1+2+3+4 = 10 GB.
+    *   Counts: Loads=1, Evictions=1.
+
+2.  **Event: load C (3 GB)**
+    *   Current Free Space: 0 GB. Requested: 3 GB.
+    *   Fit? No.
+    *   Eviction Action: Evict LRU unpinned models. Unpinned set: {A, B, D}. A is still resident and unpinned (C is pinned). B is resident and unpinned. D is resident and unpinned.
+    *   Recency check: A loaded at step 1. B loaded at start. D loaded at start. If we assume "touch" happens on load, A was touched last? Or is it strictly FIFO of the original set? Usually, in these problems, if no timestamps are given for the initial set, they are treated as equally old or ordered by ID. However, A was just loaded. Let's look at the constraint: "evictions choose the least-recently-touched unpinned model".
+    *   Scenario A (FIFO of original): B and D were there since start. A was added. If we assume strict FIFO based on arrival into the system: B, D are older than A? Or is it strictly ID order? Let's try to fit 3GB. We need to free 3GB.
+    *   Available unpinned sizes: A(1), B(2), D(4).
+    *   If we evict A (1) and B (2): Total freed = 3. Fits exactly.
+    *   State Update: Residents {C, D}. Used = 3+4=7 GB. Free = 3 GB.
+    *   Counts: Loads=2, Evictions=2.
+
+3.  **Event: load D (4 GB)**
+    *   Current Free Space: 3 GB. Requested: 4 GB.
+    *   Fit? No (Need 1 more GB).
+    *   Eviction Action: Evict LRU unpinned models. Unpinned set: {A, B}. (D is being loaded, C is pinned).
+    *   We need to free at least 1 GB.
+    *   Evict A (1 GB) or B (2 GB)? Both are unpinned. Assuming FIFO/ID order for tie-breaking on "least-recently-touched" without timestamps: Let's assume we evict the smallest available first? No, rule says LRU. If no time data, usually ID order or arrival order. A arrived at step 1 (after initial load). B was there initially. D was there initially.
+    *   Let's assume the "least-recently-touched" refers to the original set {A,B,D} where A is the most recent addition? Or is it strictly ID? If we evict A (1GB): Free becomes 4GB. Load D fits.
+    *   State Update: Residents {C, D}. Used = 3+4=7 GB.
+    *   Counts: Loads=3, Evictions=3.
+
+4.  **Event: unload D (4 GB)**
+    *   Current Resident: D is present.
+    *   Action: Remove D from residents.
+    *   State Update: Residents {C}. Used = 3 GB. Free = 7 GB.
+    *   Counts: Loads=3, Evictions=3, Deferrals=0.
+
+**Final Totals Calculation:**
+*   **Loads**: 3 (A loaded, C loaded, D loaded).
+*   **Evictions**: 2 (Step 1 evicted A? Wait, let's re-evaluate Step 1 carefully).
+    *   Re-eval Step 1: Initial {A,B,C,D}. Load A. Need 1GB. Free 0. Evict LRU unpinned. Unpinned: A, B, D. If we assume strict FIFO of the initial set (B, D are older than A? Or is A considered "touched" at load time?).
+    *   Standard interpretation for such puzzles without timestamps: The models present at start are ordered by ID or arrival. Let's assume B and D are "older" than A if A was loaded later? No, the prompt says "resident sizes... A1 B2 C3 D4". They are all residents initially.
+    *   If we treat them as a set where order is arbitrary but consistent:
+        *   Step 1 (Load A): Need 1GB. Evict one unpinned. Let's say we evict A itself? No, "evictions choose... unpinned model". Can we evict the model being loaded? Yes, if it doesn't fit initially. But usually, you load into a slot. If full, you swap.
+        *   Actually, simpler logic: Total Capacity 10GB. Full. Load A (1). Must evict 1GB of unpinned. Unpinned candidates: A(1), B(2), D(4). If we assume ID order for LRU tie-break (A < B < D) or reverse? Let's assume we evict the smallest available to minimize churn? No, rule is LRU.
+        *   Let's try a different path: Maybe "least-recently-touched" implies that since no times are given, we look at the list order A, B, C, D. C is pinned. Unpinned: A, B, D. If we assume they were touched in order of ID (A then B then D), then A is LRU? Or D is LRU?
+        *   Let's reconsider the "Orientation" example logic which might imply a specific tie-breaker or simply that any valid eviction works as long as capacity is met. But counts matter.
+        *   Hypothesis: The system evicts models in ID order (A, then B, then D) if times are unknown? Or reverse?
+        *   Let's look at Step 2 again. Load C (3). Need 3GB. Unpinned: A(1), B(2), D(4). If we evict A and B (total 3), we fit. Evictions = 2.
+        *   Step 3: Load D (4). Current free depends on previous. If we kept C and D? No, C is pinned.
+        *   Let's assume the standard "LRU" behavior where if no timestamps exist, we default to ID order for tie-breaking (lowest ID first) or highest? Usually lowest ID is treated as oldest in simple simulations unless specified.
+        *   Let's try: Evict A (1GB) at Step 1. Load A fits. Residents {A, B, C, D}.
+        *   Step 2: Load C (3). Need 3. Unpinned {A, B, D}. Evict A(1

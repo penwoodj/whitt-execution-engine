@@ -1,0 +1,73 @@
+### Phase 1 RULE SCAN
+This phase lists every rule in the task that changes state during the event sequence (tonight's events), identifying the trigger for each.
+
+1.  **Per-Attempt Cost Rule**: Triggers on every attempt (failed or successful). Adds `3` tokens to spend.
+2.  **Wait Time Rule**: Triggers after a failed attempt. Adds wait seconds (`3`, then `6`) to spend.
+3.  **Total Spend Accumulation Rule**: Aggregates costs from Rules 1 and 2. Used to determine if the budget is exceeded.
+4.  **Budget Exceeded Check (First Pass)**: Triggers after total spend calculation. If `spend > budget`, triggers the doubling mechanism.
+5.  **Budget Doubling Rule**: Triggers only once when a budget exceedance is detected. Doubles the current budget limit for the re-check.
+6.  **Budget Exceeded Check (Re-Check)**: Triggers after doubling. Compares original spend against the new doubled budget to determine final suppression status (`suppressed`).
+7.  **Final State Calculation Rule**: Computes `budget_after` as `doubled_budget - spend`.
+
+### Phase 2 LEDGER WALK
+This phase applies the events (the job lifecycle described in "tonight") one at a time in strict arrival order, updating the state after each step.
+
+**Initial State:**
+*   Budget: `30`
+*   Spend: `0`
+*   Attempts Count: `0`
+*   Wait Seconds Count: `0`
+*   Suppression Status: Pending
+
+**Event 1: Attempt 1 (Failed)**
+*   Action: Run attempt.
+*   Cost Rule Apply: Add `3` to spend.
+*   State Update: Spend = `3`. Attempts = `1`.
+*   Result: Failed. Trigger Wait Rule.
+
+**Event 2: Wait after Attempt 1**
+*   Action: Enforce wait time before retry.
+*   Cost Rule Apply: Add `3` (first wait) to spend.
+*   State Update: Spend = `6`. Wait Seconds = `3`.
+*   Result: Ready for Attempt 2.
+
+**Event 3: Attempt 2 (Failed)**
+*   Action: Run attempt.
+*   Cost Rule Apply: Add `3` to spend.
+*   State Update: Spend = `9`. Attempts = `2`.
+*   Result: Failed. Trigger Wait Rule.
+
+**Event 4: Wait after Attempt 2**
+*   Action: Enforce wait time before retry (doubling rule).
+*   Cost Rule Apply: Add `6` (second wait) to spend.
+*   State Update: Spend = `15`. Wait Seconds = `9`.
+*   Result: Ready for Attempt 3.
+
+**Event 5: Check Budget Status (First Pass)**
+*   Action: Evaluate if job is suppressed.
+*   Condition: Is `Spend` (`15`) > `Budget` (`30`)?
+*   Evaluation: No (`15 <= 30`).
+*   State Update: Job proceeds to next attempt without doubling.
+
+**Event 6: Attempt 3 (Successful)**
+*   Action: Run final attempt.
+*   Cost Rule Apply: Add `3` to spend.
+*   State Update: Spend = `18`. Attempts = `3`.
+*   Result: Success. Job completes. No further waits or retries occur.
+
+**Event 7: Finalize Totals and Suppression Verdict**
+*   Action: Compute final metrics.
+*   Total Spend: `18` (Wait `9` + Attempt Costs `9`).
+*   Budget After Calculation: `Budget` (`30`) - `Spend` (`18`) = `12`.
+    *   *Note on Doubling Logic*: Since the first check passed (`15 <= 30`), the doubling rule was never triggered. The budget remains `30`.
+*   Suppression Verdict: False (Job succeeded).
+
+**Final State Summary:**
+*   Attempts: `3`
+*   Wait Seconds: `9` (Sum of `3` + `6`)
+*   Budget After: `12` (`30` - `18`)
+*   Suppressed: `false`
+
+```json
+{"attempts": 3, "wait_s": 9, "budget_after": 12, "suppressed": false}
+```

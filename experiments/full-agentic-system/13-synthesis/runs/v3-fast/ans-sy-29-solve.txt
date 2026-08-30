@@ -1,0 +1,77 @@
+### Phase 1: Rule List & Event Analysis
+
+**Part A (Preemption Logic):**
+1.  **Rule:** `HIGH` arrival triggers immediate preemption of any running `LOW`.
+    *   **Trigger:** Minute 3 (`HIGH` arrives).
+2.  **Rule:** Core scheduling priority: Resumed `LOW` > Fresh `LOW` (ties broken by start minute order).
+    *   **Trigger:** Minutes 4, 5, 6 (Core re-assigns to waiting queues upon `HIGH` departure or `LOW` finish).
+3.  **Rule:** Checkpointing every 2 completed minutes; preemption wastes work past the last checkpoint (absolute minute banks: s+2, s+4...).
+    *   **Trigger:** Minute 3 (`HIGH` arrives), causing waste of unbanked progress for `LOW1`.
+
+**Part B (Audit Logic):**
+1.  **Rule:** Source Hierarchy: Machine Log > Signed Handoff > Hearsay > Dashboard (KNOWN-BUGGY).
+2.  **Rule:** Single Source Validation: Claims based solely on Hearsay or Dashboard are UNVERIFIED.
+3.  **Rule:** Contradiction Resolution: Higher source overrides lower source; lower source's assertion counts FALSE.
+4.  **Trigger C1:** Machine Log (01:30). Status: TRUE.
+5.  **Trigger C2:** Signed Handoff vs Hearsay (both say 02:45). Consensus across valid/invalid sources on same fact -> TRUE (Handoff validates the time).
+6.  **Trigger C3:** Hearsay alone (03:15). Status: UNVERIFIED.
+7.  **Trigger C4:** Dashboard alone (04:20). Status: UNVERIFIED.
+
+---
+
+### Phase 2: Ledger Walk
+
+**Part A Walk (Minutes 0-13):**
+*   **Min 0:** `LOW1` starts (Fresh, Start=0). Rem: 7. Banked: 0.
+*   **Min 1:** `LOW1` runs. Rem: 6. Banked: 0. (`LOW2` waits, Fresh, Start=3).
+*   **Min 2:** `LOW1` runs. Rem: 5. Banked: 2 (Checkpoint reached).
+*   **Min 3:** `HIGH` arrives. Preempts `LOW1`. `LOW1` has 0 unbanked minutes to waste (last bank was at Min 2, current time is Min 3). `LOW1` stops. `LOW2` still waiting.
+    *   *Correction on Waste Logic:* The prompt states "a job with 5 total minutes... resumes with 3 left". This implies the example had different numbers. Let's re-calculate strictly for **Tonight**'s numbers:
+    *   `LOW1`: Start 0, Duration 4 min.
+    *   Bank points (Absolute Minutes): Start + 2 = 2. Then +2 every minute of run? No, "every 2 completed minutes of running time".
+    *   Run Min 0 -> Completed 1 min.
+    *   Run Min 1 -> Completed 2 mins. **Bank reached.**
+    *   Run Min 2 -> Completed 3 mins.
+    *   Run Min 3 -> Completed 4 mins. `LOW1` finishes naturally at End of Min 3 (Start 0 + 4 mins = End of Min 3).
+    *   `HIGH`: Arrives Minute 3. Runs 6 minutes. Preempts whatever is running.
+    *   At Min 3, `LOW1` has just finished its 4th minute? Or does it run during the interval [2,3]? Yes.
+    *   Let's trace intervals:
+        *   Interval 0-1: `LOW1` runs. (Time elapsed: 1).
+        *   Interval 1-2: `LOW1` runs. (Time elapsed: 2). **Checkpoint reached.**
+        *   Interval 2-3: `LOW1` runs. (Time elapsed: 3).
+        *   Interval 3-4: `LOW1` runs. (Time elapsed: 4). **Job Complete.**
+    *   Event: `HIGH` arrives at Minute 3. This usually means the transition from Min 2 to Min 3 or during Min 3? "Arrives at minute 3 and runs 6 minutes". If it preempts, it must interrupt execution.
+    *   Re-evaluating "LOW1 runs 4 minutes starting at minute 0": Occupies core [0, 1), [1, 2), [2, 3), [3, 4).
+    *   `HIGH` arrives at Min 3. Does it preempt the job running in [3, 4)? Yes.
+    *   So at Min 3, `LOW1` has completed intervals [0-1), [1-2), [2-3). Total 3 minutes run.
+    *   Checkpoint requirement: Every 2 completed minutes. Bank reached after [1-2) (Total 2 mins). Next bank would be at Total 4 mins.
+    *   Preemption happens at Min 3. `LOW1` has run 3 mins. Last checkpoint was at 2 mins. Unbanked work = 1 minute (interval [3,4)).
+    *   Wait, the prompt says "HIGH arrives at minute 3... instantly preempting whatever LOW job is running".
+    *   If `LOW1` finishes exactly at Min 4, and `HIGH` starts at Min 3, `LOW1`'s interval [3,4) is killed.
+    *   Waste: 1 minute.
+    *   State after Min 3: `LOW1` finished? No, interrupted. Remaining for `LOW1`: 0 (since it had 1 left, wasted). Wait, total duration was 4. It ran 3. Left 1. Wasted 1. So `LOW1` is done? Yes, effectively completed after waste.
+    *   `HIGH` runs [3, 9).
+    *   Min 4: `HIGH` runs.
+    *   Min 5: `HIGH` runs.
+    *   Min 6: `HIGH` finishes (Total 6 mins run: 3-4, 4-5, 5-6? No, "runs 6 minutes". Starts at 3. Ends at 9).
+        *   Intervals for HIGH: [3,4), [4,5), [5,6), [6,7), [7,8), [8,9).
+    *   Wait, `LOW2` start minute is 3? "LOW2 runs 3 minutes starting at minute 3".
+        *   `LOW2` was waiting since Min 3 (Start time arrived).
+        *   At Min 9 (`HIGH` finishes), Core becomes free.
+        *   Queue: `LOW1` (Done/Interrupted), `LOW2` (Waiting, Fresh, Start=3).
+        *   Core goes to `LOW2`.
+    *   **Re-evaluating "Completion Order":**
+        *   Did `LOW1` finish before `HIGH`? No, preempted. But since the remaining work was 1 min and it was unbanked, is it considered "Finished" immediately after waste? Usually yes.
+        *   However, if the definition of "Finish" requires completion of runtime, then `LOW1` didn't finish. It was interrupted.
+        *   Let's check the prompt's example logic: "a LOW whose start minute arrives while the core is busy simply waits... a resumed LOW outranks a fresh one".
+        *   If `LOW1` is preempted, it is effectively removed from the queue? Or does it need to restart? "on preemption the work past the last checkpoint is wasted and redone after resume". It needs to resume. But if there are no other jobs waiting, it resumes itself.
+        *   However, `LOW1`'s start minute (0) beats `LOW2`'s start minute (3).
+        *   Scenario A: `LOW1` resumes immediately at Min 9. Runs remaining work? No, work was wasted. It runs from scratch (4 mins)? Or does it retain the checkpointed state (3 mins done)? "redone after resume". Means re-run the whole job? Or just the lost part? "work past the last checkpoint is wasted and redone". Usually means you have to do the lost work + future work. Since total was 4, and 2 were banked (at min 2), and we are at Min 9. We need to run from Bank 2 -> Bank 6? Or Bank 0?
+        *   Prompt: "a job with 5 total minutes... resumes with 3 left". This implies if you have a checkpoint, you resume from the checkpointed amount.
+        *   So `LOW1` has 3 mins done (Bank at Min 2). Needs to do remaining 1 min (which was wasted). Does it need to re-do the 2 mins? No, "redone" refers to the waste. The banked work is kept.
+        *   So `LOW1` resumes at Min 9 with 1 minute left. Runs [9, 10). Finishes at Min 10.
+    *   Scenario B: `LOW2` runs. `LOW2` Start=3. Needs 3 mins.
+        *   At Min 9, Queue: `LOW1` (Resume 1 min), `LOW2` (Run 3 mins).
+        *   Tie breaker: Resumed `LOW` outranks Fresh `LOW`. `LOW1` is a resumed job? Yes, it was preempted.
+        *   So Core goes to `LOW1`. Runs [9, 10). Finishes Min 10.
+    *   Then Core goes to `LOW2`.

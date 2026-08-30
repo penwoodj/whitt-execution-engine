@@ -1,0 +1,82 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the "orientation story" provided as a reference for rule shape (which must be applied to tonight's numbers), here are the rules that change state during an event or claim:
+
+1.  **Arrival Rule**: Upon arrival of a job request, `attempts` increments by 1, `wait_s` increases by the current wait duration, and `spend` increases by (current wait duration + attempt cost).
+2.  **Budget Check Rule**: After updating spend, check if `spend > budget`. If true, trigger `budget_doubling`: `budget` doubles exactly once.
+3.  **Re-check Rule**: Immediately after doubling, re-evaluate the condition `spend > new_budget`.
+4.  **Suppression Rule**: If the re-check finds `spend > new_budget`, set `suppressed = true` and terminate the job (no further attempts). Otherwise, set `suppressed = false` and allow the attempt to proceed/succeed.
+5.  **Success Rule**: Upon successful completion of the job (after failed attempts), finalize state: `attempts` is final count, `wait_s` is total sum, `budget_after` is calculated as `final_budget - spend`, `suppressed` reflects the final verdict.
+
+**Triggers:**
+*   Event "Arrival/Attempt" triggers Rules 1 & 2.
+*   State change (Spend > Budget) triggers Rule 3.
+*   Result of Re-check triggers Rule 4.
+*   Job Completion triggers Rule 5.
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   `attempts`: 0
+*   `wait_s`: 0
+*   `budget`: 30 (from "first wait is 3s... attempt budget is 30 tokens")
+*   `spend`: 0
+*   `suppressed`: false
+
+**Event 1: First Attempt Arrival**
+*   **Wait**: 3s.
+*   **Cost Calculation**: Wait cost = 3, Attempt cost = 3. Total Spend increment = 6.
+*   **State Update**:
+    *   `attempts` becomes 1.
+    *   `wait_s` becomes 0 + 3 = 3.
+    *   `spend` becomes 0 + 6 = 6.
+    *   Current Budget: 30. Spend (6) <= Budget (30). No doubling needed yet.
+*   **Result**: Attempt fails (implied by "job needs 3 failed attempts").
+
+**Event 2: Second Attempt Arrival**
+*   **Wait**: Doubles from previous -> 6s.
+*   **Cost Calculation**: Wait cost = 6, Attempt cost = 3. Total Spend increment = 9.
+*   **State Update**:
+    *   `attempts` becomes 2.
+    *   `wait_s` becomes 3 + 6 = 9.
+    *   `spend` becomes 6 + 9 = 15.
+    *   Current Budget: 30. Spend (15) <= Budget (30). No doubling needed yet.
+*   **Result**: Attempt fails.
+
+**Event 3: Third Attempt Arrival**
+*   **Wait**: Doubles from previous -> 12s.
+*   **Cost Calculation**: Wait cost = 12, Attempt cost = 3. Total Spend increment = 15.
+*   **State Update**:
+    *   `attempts` becomes 3.
+    *   `wait_s` becomes 9 + 12 = 21.
+    *   `spend` becomes 15 + 15 = 30.
+    *   Current Budget: 30. Spend (30) <= Budget (30). No doubling needed yet.
+*   **Result**: Attempt fails ("job needs 3 failed attempts before the 4th succeeds").
+
+**Event 4: Fourth Attempt Arrival (Success)**
+*   **Wait**: Doubles from previous -> 24s.
+*   **Cost Calculation**: Wait cost = 24, Attempt cost = 3. Total Spend increment = 27.
+*   **State Update**:
+    *   `attempts` becomes 4.
+    *   `wait_s` becomes 21 + 24 = 45.
+    *   `spend` becomes 30 + 27 = 57.
+    *   Current Budget: 30. Spend (57) > Budget (30). **Budget Doubling Triggered**.
+*   **Doubling Logic**:
+    *   Old Budget: 30. New Budget: 60.
+    *   Re-check Condition: Is `spend` (57) > `new_budget` (60)? No.
+    *   Verdict: Job runs, `suppressed = false`.
+*   **Final Calculation**:
+    *   `attempts`: 4
+    *   `wait_s`: 45
+    *   `budget_after`: New Budget (60) - Spend (57) = 3.
+    *   `suppressed`: false
+
+---
+
+### Final Answer
+
+```json
+{"attempts": 4, "wait_s": 45, "budget_after": 3, "suppressed": false}
+```

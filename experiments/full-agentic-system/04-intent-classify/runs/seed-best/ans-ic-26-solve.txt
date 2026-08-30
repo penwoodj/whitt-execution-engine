@@ -1,0 +1,61 @@
+Based on the strict rules provided for tonight's rotation (8GB card, models A-D), here is the step-by-step state walk and final result.
+
+### Phase 1: Rule List & Triggers
+*   **Load Event:** Adds memory usage; if total > capacity, triggers eviction logic.
+*   **Eviction Logic:** Identifies unpinned LRU model(s) to remove until fit or only pinned remain.
+    *   *Sub-rule:* If load cannot fit even after removing all unpinned models (only pinned left), the event defers instead of evicting further.
+*   **Unload Event:** Removes memory usage if model is resident; otherwise no-op.
+*   **Capacity Constraint:** 8GB total limit.
+*   **Pinning Constraint:** Model C is pinned (never eligible for eviction).
+
+### Phase 2: Ledger Walk (Event by Event)
+
+1.  **Event: Load A (3 GB)**
+    *   Current Usage: 0 GB.
+    *   New Usage: 3 GB.
+    *   Capacity Check: $3 \le 8$. Fits.
+    *   State: `[A(3)]` | Used: 3GB | Free: 5GB
+
+2.  **Event: Load B (3 GB)**
+    *   Current Usage: 3 GB.
+    *   New Usage: $3 + 3 = 6$ GB.
+    *   Capacity Check: $6 \le 8$. Fits.
+    *   State: `[A(3), B(3)]` | Used: 6GB | Free: 2GB
+
+3.  **Event: Load C (1 GB)**
+    *   Current Usage: 6 GB.
+    *   New Usage: $6 + 1 = 7$ GB.
+    *   Capacity Check: $7 \le 8$. Fits.
+    *   State: `[A(3), B(3), C(1)]` | Used: 7GB | Free: 1GB
+
+4.  **Event: Load D (7 GB)**
+    *   Current Usage: 7 GB.
+    *   Required Space: 7 GB.
+    *   Available Space: $8 - 7 = 1$ GB.
+    *   Deficit: Need 6 more GB to fit.
+    *   Eviction Candidates (Unpinned LRU): A and B are unpinned. C is pinned.
+        *   Order of eviction based on "least-recently-touched": Assuming arrival order determines recency for unpinned items, A arrived first, then B. Thus A is the least recently touched among unpinned.
+    *   **Action:** Evict A (3 GB).
+    *   New Usage Calculation: Remove A (-3), Add D (+7) $\rightarrow$ Net change +4. Total $7 - 3 + 7 = 11$. Still > 8.
+    *   Remaining Deficit: Need to remove 3 more GB.
+    *   Next Candidate: B (3 GB). Evict B.
+    *   New Usage Calculation: Remove B (-3), Add D (+7) $\rightarrow$ Net change +4. Total $11 - 3 = 8$. Fits exactly.
+    *   State: `[C(1), D(7)]` | Used: 8GB | Free: 0GB
+    *   *Note:* A and B were evicted. C remains pinned.
+
+5.  **Event: Unload B (3 GB)**
+    *   Target Model: B.
+    *   Resident Check: B was evicted in the previous step. It is no longer resident.
+    *   Rule Application: "An unload for a model no longer resident is a no-op."
+    *   State Change: None.
+    *   State: `[C(1), D(7)]` | Used: 8GB | Free: 0GB
+
+### Final Calculation
+*   **Loads:** A, B, C, D were successfully loaded at some point (A and B evicted later). Count = 4.
+*   **Evictions:** Model A was evicted. Model B was evicted. Count = 2.
+*   **Deferrals:** None occurred (D fit after evicting unpinned models). Count = 0.
+*   **Deferred List:** Empty.
+
+```json
+{"loads": 4, "evictions": 2, "deferrals": 0, "deferred": []}
+```

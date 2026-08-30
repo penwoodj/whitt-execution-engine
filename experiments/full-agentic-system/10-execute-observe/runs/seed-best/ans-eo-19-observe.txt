@@ -1,0 +1,81 @@
+**Phase 1: Rule List**
+Based on the task description and "Residency Discipline", here are the rules governing state changes for each event in the stream `load A`, `load B`, `load C`, `load D`, `unload B`.
+
+1.  **Event: load A (2 GB)**
+    *   **Rule:** Check fit against current free space (`8 - sum(loads)`).
+    *   **Action:** If fits, add to resident set, update recency, increment `loads`.
+    *   **Trigger:** Request arrival.
+
+2.  **Event: load B (2 GB)**
+    *   **Rule:** Check fit against current free space (`8 - sum(loads)`). Note: Model B is pinned.
+    *   **Action:** If fits, add to resident set, update recency, increment `loads`.
+    *   **Trigger:** Request arrival.
+
+3.  **Event: load C (2 GB)**
+    *   **Rule:** Check fit against current free space (`8 - sum(loads)`). Note: Model C is unpinned.
+    *   **Action:** If fits, add to resident set, update recency, increment `loads`.
+    *   **Trigger:** Request arrival.
+
+4.  **Event: load D (7 GB)**
+    *   **Rule:** Check fit against current free space (`8 - sum(loads)`). Note: Model D is unpinned.
+    *   **Action:** If fits, add to resident set, update recency, increment `loads`.
+    *   **Trigger:** Request arrival.
+
+5.  **Event: unload B (2 GB)**
+    *   **Rule:** Check if model B exists in resident set.
+    *   **Action:** If exists, subtract size from free space, remove from resident set, update recency of remaining models. No eviction/deferral logic applies to unloads unless specified (none here).
+    *   **Trigger:** Request arrival.
+
+**Phase 2: Ledger Walk**
+Applying events in strict arrival order with the initial state: `Pool = 8 GB`, `Residents = {}`.
+
+1.  **Event -> load A (2 GB)**
+    *   Current Free: 8 GB. Required: 2 GB. Fits? Yes.
+    *   Action: Load A added.
+    *   State: `event -> resident {A} free 6 recency {A}`
+
+2.  **Event -> load B (2 GB)**
+    *   Current Free: 6 GB. Required: 2 GB. Fits? Yes.
+    *   Action: Load B added.
+    *   State: `event -> resident {A, B} free 4 recency {B}` (B is most recent)
+
+3.  **Event -> load C (2 GB)**
+    *   Current Free: 4 GB. Required: 2 GB. Fits? Yes.
+    *   Action: Load C added.
+    *   State: `event -> resident {A, B, C} free 2 recency {C}` (C is most recent)
+
+4.  **Event -> load D (7 GB)**
+    *   Current Free: 2 GB. Required: 7 GB. Fits? No.
+    *   Eviction Logic: Need to free $7 - 2 = 5$ GB.
+    *   Resident Set: `{A, B, C}`. Sizes: A=2, B=2 (Pinned), C=2.
+    *   Unpinned Models available for eviction: `{A, C}`. Pinned: `{B}`.
+    *   Recency Order (Oldest to Newest): `A` (loaded 1st), then `C` (loaded 3rd). Note: B is pinned and ignored for LRU selection even if it were older, but here A is oldest unpinned anyway.
+    *   Step 4a: Evict Least-Recently-Touched Unpinned Model -> **A** (2 GB).
+        *   Evictions count: 1.
+        *   New Free: $2 + 2 = 4$ GB.
+        *   Remaining Residents: `{B, C}`. Recency Order: `C` (oldest unpinned), `B` (pinned).
+    *   Step 4b: Check fit again. Need 7 GB. Have 4 GB. Still need 3 GB.
+    *   Step 4c: Evict Least-Recently-Touched Unpinned Model -> **C** (2 GB).
+        *   Evictions count: 2.
+        *   New Free: $4 + 2 = 6$ GB.
+        *   Remaining Residents: `{B}`. Recency Order: `B` (Pinned only).
+    *   Step 4d: Check fit again. Need 7 GB. Have 6 GB. Still need 1 GB.
+    *   Step 4e: Evict Least-Recently-Touched Unpinned Model -> None available (Only B remains, which is Pinned).
+    *   Result: Cannot fit. Load D defers.
+    *   State: `event -> resident {B} free 6 recency {B}`
+
+5.  **Event -> unload B (2 GB)**
+    *   Current Free: 6 GB. Model B exists? Yes.
+    *   Action: Remove B, add size to free space.
+    *   State: `event -> resident {} free 8 recency {}`
+
+**Final Calculation:**
+*   **loads**: Successful loads occurred for A, B, C. (D deferred). Count = 3.
+*   **evictions**: Models evicted were A and C during the load D attempt. Count = 2.
+*   **deferrals**: Load D could not fit after exhausting unpinned space. Count = 1.
+*   **deferred**: ID of the deferred load is "D". List = ["D"].
+
+**Final Answer JSON:**
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

@@ -1,0 +1,153 @@
+case_id: flg-05-oi-trb-b-f4
+meta:
+  domain: ops-infra
+  archetype: troubleshoot-diagnose
+  complexity: B
+  class: F4
+  source: case-matrix row 35 (oi-trb-b-f4)
+  words_prompt: ~1180
+task:
+  prompt: |
+    You are the incident analyst for the "Cartographer" deployment platform. At 03:14 UTC a
+    severity-one incident began: fleet-wide deploy jobs began failing, and the on-call rotation
+    has collected the raw evidence below during the sixty-two minutes to mitigation. Your
+    deliverable is the incident analysis that will be attached to the postmortem review — it
+    must reconstruct the timeline, isolate the root cause, scope the blast radius, and propose
+    remediation with owners. The platform VP reads these analyses to decide budget; last
+    quarter an analysis that blamed a symptom rather than the cause led the team to patch the
+    wrong layer, and the same incident recurred within three weeks. Your artifact therefore
+    must distinguish causal evidence from coincidental correlation explicitly.
+
+    RAW EVIDENCE PACK (collected during and after the incident):
+    - 03:02 UTC: scheduled maintenance job "cert-rotator" completed across all 14 regions,
+      logging "rotated 217 certificates" with zero errors. Cert rotation is weekly.
+    - 03:14 UTC: deploy failure alerts begin. First failing job: region eu-west-2, stage
+      "artifact verification". Error: "signature verification failed: certificate chain
+      incomplete (missing intermediate)".
+    - 03:14-03:31 UTC: failures cascade region by region in rolling order matching each
+      region's next-scheduled deploy, not simultaneously: eu-west-2, eu-west-1, us-east-1,
+      us-east-2, us-west-2, ap-south-1 (6 of 14 regions affected at peak).
+    - 03:22 UTC: on-call pulls a failing job's expanded log: the verifier fetched intermediate
+      certs from the internal bundle service at "cert-bundle.internal:8443". That endpoint
+      returned HTTP 200 with an EMPTY bundle (0 certificates) for requests made after 03:02,
+      but a healthy 3-certificate bundle for a log replay captured at 02:59.
+    - 03:29 UTC: bundle service metrics: no errors, no deploy of its own in the window; its
+      backing object store shows a bucket-level event at 03:02:47 — "lifecycle rule
+      'purge-staging-over-30d' executed", deleting 1,142 objects matching prefix
+      "staging/cert-intermediates/". The cert-rotator had been writing new intermediates to
+      that prefix since a config change twelve days earlier.
+    - 03:37 UTC: mitigation begins: on-call restores the prefix from cross-region replica
+      (replication lag 9 minutes, replica intact because lifecycle rules are region-local).
+    - 03:41 UTC: bundle service serving 3-certificate bundles again. Remaining regions never
+      failed (their deploys were not scheduled in the exposure window).
+    - 04:16 UTC: incident mitigated; final count 6 regions affected, 41 deploy jobs failed,
+      0 customer-facing outages (deploys are internal), 1 on-call escalation.
+    - Prior related history: the same lifecycle rule exists in 3 of 14 regions' bucket configs
+      only; the config change 12 days ago that redirected cert-rotator writes to the staging
+      prefix was reviewed by two engineers; neither checked bucket lifecycle rules.
+    - Platform topology note: the bundle service caches bundles in memory for 600 seconds,
+      which explains why some regions' first post-03:02 verification succeeded from cache
+      while later ones failed.
+
+    ADDITIONAL EVIDENCE — COINCIDENTAL EVENTS the analysis must explicitly rule in or out:
+    - 03:05 UTC: an unrelated monitoring-agent migration began rolling to 10% of fleet hosts.
+      Reviewers last quarter dinged an analysis for silently ignoring a coincident change; the
+      board now requires every coincident window event to be addressed. The migration touched
+      only metrics collection daemons, and failing jobs' logs show verification errors on
+      hosts both with and without the new agent.
+    - 03:09 UTC: a DNS maintenance window for internal zones started (planned, announced);
+      resolution tests during the incident show normal latency and correct answers for
+      cert-bundle.internal throughout.
+    - Alerting gap detail: the bundle service emitted no metric for "certificates in bundle";
+      its health check only probed HTTP 200, which the empty-bundle responses satisfied. A
+      stale-content alert existed for a different service.
+
+    POSTMORTEM REQUIREMENTS FROM THE REVIEW BOARD:
+    - Timeline entries need timestamp (ISO 8601 UTC), event description, and evidence source
+      (which log or metric above), in chronological order, including the 12-day-old config
+      change and the 03:02 lifecycle purge as contributing events, and the two coincident
+      window events with their ruled-out status.
+    - Root cause must be a chain: the config change that moved writes, the lifecycle rule that
+      purged them, the cache that delayed symptoms, and the rolling deploy schedule that
+      staggered onset. State which single control would have prevented the incident, and which
+      alerts (that existed but did not fire, or did not exist) would have caught it sooner.
+    - Blast radius: affected regions with first-failure timestamps, counts of failed jobs,
+      customer impact assessment (explicitly including the "none customer-facing" finding with
+      its basis), and near-miss exposure (regions that would have failed had deploys been
+      scheduled in the window).
+    - Remediation items: each with a one-line fix, an owner team drawn from {platform, sre,
+      storage, security}, a priority P0-P3, and a verification step that proves the fix works.
+      At least five remediation items are required, and at least one must address the review
+      process failure (config change reviewed without checking lifecycle rules) rather than
+      only the technical layer.
+    - Correlation discipline: the cert-rotator completing at 03:02 is temporal correlation;
+      your causal claim must run through the object-store deletion event and the cache timing
+      evidence. The analysis must say why the rotator itself was NOT the fault, and why the
+      monitoring-agent migration and DNS window were ruled out, citing the specific evidence
+      that excludes each.
+    - Severity discipline: the board's rubric classifies severity by customer impact, then
+      internal blast radius, then mitigation time. State which factors drove the severity-one
+      classification given zero customer-facing impact, so the classification is auditable.
+
+    YOUR TASK: produce the incident analysis as one JSON object with top-level keys:
+    incident_id (use "INC-2026-0824-CARTO"), timeline (array as specified), root_cause (object
+    with chain array, single_preventing_control, missing_alerts array), blast_radius (object as
+    specified), remediation (array as specified). Every timeline claim must cite its evidence
+    source string from the pack. The root_cause.chain must be ordered causally, earliest first.
+
+    OUTPUT CONTRACT: single JSON object, first character "{", last character "}", no markdown,
+    no prose outside the object, timestamps ISO 8601 with "Z" suffix, every remediation item
+    carrying all four required fields. The postmortem ingestion tool hard-fails on missing
+    keys, timestamps out of chronological order, remediation items lacking owners, or any
+    timeline entry without an evidence citation. Partial or truncated analyses are worse than
+    none: the review board schedules on the assumption the artifact is complete.
+
+    QUALITY BAR: an engineer who lived through the incident should endorse the causal chain,
+    and an engineer who did not should be able to reconstruct the failure story from your
+    timeline and citations alone, including why onset was staggered rather than simultaneous
+    and why the three coincident-window events were excluded rather than ignored.
+  expected_schema:
+    type: object
+    required:
+      - incident_id
+      - timeline
+      - root_cause
+      - blast_radius
+      - remediation
+    properties:
+      incident_id: { type: string }
+      timeline: { type: array }
+      root_cause: { type: object }
+      blast_radius: { type: object }
+      remediation: { type: array }
+  output_contract: |
+    Single JSON object. Timestamps ISO 8601 Z. Every timeline
+    entry cites evidence source; remediation items carry
+    fix/owner/priority/verification. Ingestion tool hard-fails
+    on truncation or missing fields.
+failure:
+  class: F4
+  injection_profile:
+    attempts_failed: [1, 2]
+    notes: |
+      F4 upstream/context failure across attempts 1-2. Attempt 1:
+      output truncates at remediation entry 2 of 5 (upstream
+      length ceiling) with upstream_errors recorded. Attempt 2
+      after replan: complete but the timeline silently drops the
+      two coincident-window events the board requires addressing,
+      and root_cause chain omits the cache-delay link. Attempt 3
+      after second heal produces the complete, citation-complete
+      analysis and passes.
+  signals: [truncated_output, missing_contract_fields, cross_section_inconsistency]
+expected:
+  final: accept
+  path: [attempt, classify, heal_replan, attempt, classify, heal_replan, attempt, classify, judge_gate, accept, report]
+  attempts_to_success: 3
+oracle:
+  llm_calls:
+    worker: 1
+    heavy: 2
+    judge: 0
+  gate_flags: { need_replan: true, need_judge: false, budget_exhausted: false }
+budget:
+  llm_call_ceiling: 6

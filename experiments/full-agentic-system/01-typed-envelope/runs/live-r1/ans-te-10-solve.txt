@@ -1,0 +1,65 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event sequence, including triggers.*
+
+1. **Step Climb Rule**: Triggers on arrival of a new observation; increments rollout percentage by one step (10% per step).
+2. **Limit Check Rule**: Evaluates observed error rate against current limit based on step range (Steps 1-5: ≤2.0%, Steps 6-10: ≤1.0%).
+3. **Breach Handling Rule (First Breach)**: If Limit Check fails, triggers rollback to previous step; sets observation as spent; tightens remaining limits to 0.8%.
+4. **Second Breach Rule**: If a second breach occurs after limit tightening, triggers immediate STOP status; holds current step; no further climbs allowed.
+5. **Completion Rule**: If all steps (1-10) are reached without triggering the Second Breach Rule, sets status to DONE.
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order.*
+
+**Initial State:** Step=0, Rollout=0%, Status=PENDING.
+
+**Event 1: Observation 0.4% arrives (Step 1)**
+- Action: Climb to Step 1. Limit for Step 1 is 2.0%. Observed 0.4% ≤ 2.0%.
+- State: Rollout=10%, Steps Done=1, Status=PENDING.
+
+**Event 2: Observation 0.6% arrives (Step 2)**
+- Action: Climb to Step 2. Limit for Step 2 is 2.0%. Observed 0.6% ≤ 2.0%.
+- State: Rollout=20%, Steps Done=2, Status=PENDING.
+
+**Event 3: Observation 0.9% arrives (Step 3)**
+- Action: Climb to Step 3. Limit for Step 3 is 2.0%. Observed 0.9% ≤ 2.0%.
+- State: Rollout=30%, Steps Done=3, Status=PENDING.
+
+**Event 4: Observation 1.2% arrives (Step 4)**
+- Action: Climb to Step 4. Limit for Step 4 is 2.0%. Observed 1.2% ≤ 2.0%.
+- State: Rollout=40%, Steps Done=4, Status=PENDING.
+
+**Event 5: Observation 1.4% arrives (Step 5)**
+- Action: Climb to Step 5. Limit for Step 5 is 2.0%. Observed 1.4% ≤ 2.0%.
+- State: Rollout=50%, Steps Done=5, Status=PENDING.
+
+**Event 6: Observation 1.9% arrives (Step 6)**
+- Action: Climb to Step 6. Limit for Step 6 is 1.0% (Steps 6-10 limit). Observed 1.9% > 1.0%. **BREACH DETECTED.**
+- Rule Application: First breach triggers rollback one step back (to Step 5). The observation (1.9%) is spent. Limits for remaining steps tighten to 0.8%.
+- State: Rollout=50%, Steps Done=5, Status=PENDING.
+
+**Event 7: Observation 2.0% arrives (Next available slot after rollback)**
+*Note: The prompt lists exactly 6 observations: 0.4, 0.6, 0.9, 1.2, 1.4, 1.9. There is no 7th observation in the input list.*
+- Analysis: The climb resumes from the *next observation*. Since there are only 6 observations provided in the task description ("observed error rates by step, in order: 0.4, 0.6, 0.9, 1.2, 1.4, 1.9 percent"), and we have processed all of them:
+    - We reached Step 5 successfully.
+    - At the attempt for Step 6 (Observation 1.9%), a breach occurred.
+    - The system rolled back to Step 5.
+    - The observation that breached (1.9%) is spent.
+    - The climb resumes from the *next* observation. However, no further observations exist in the provided list.
+- Conclusion: The rollout cannot proceed beyond Step 5 because there are no more data points to attempt Step 6 or higher. The process halts naturally after exhausting the input stream while holding the last valid state (Step 5).
+- State Check: Did a second breach occur? No, only one observation was processed that failed. The system is waiting for more observations but none exist in the list. Therefore, it does not reach "STOPPED" via a second breach, nor does it finish with "DONE". However, standard rollout logic implies if the input stream ends while paused at a valid step due to lack of further events, the final state reflects that pause.
+- Re-evaluating "Status": The rules define status as DONE (if climb finishes) or STOPPED (on second breach). Is there an implicit "PAUSED" state for "waiting for next observation"? The prompt asks for `"status": "PAUSED" | "STOPPED" | "DONE"`. Since the input list ends after the first breach and no subsequent observations are provided to attempt a climb, the rollout is effectively paused at the last successful step.
+- Final State Calculation:
+    - Last successful step: 5 (Rollout 50%).
+    - Breach count: 1.
+    - Status: Since we cannot complete the 10 steps and haven't hit a second breach, but also haven't finished, the state is PAUSED at the last valid checkpoint.
+
+**Final State Verification:**
+- `rollout_pct`: The rollout climbed to Step 5 (50%) before the breach on the attempt for Step 6. It rolled back to 50%. No further steps were attempted because no observations remained.
+- `stages_done`: Steps 1 through 5 are confirmed clean. Total = 5.
+- `status`: The process did not finish (not DONE). It did not hit a second breach (not STOPPED by rule definition, though functionally halted). Given the available options and the fact that it is waiting for more data to resume (which never comes in this specific input set), "PAUSED" is the correct classification for a rollout halted at a valid step after a single breach with no further events.
+
+```json
+{"rollout_pct": 50, "stages_done": 5, "status": "PAUSED"}
+```

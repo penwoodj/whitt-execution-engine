@@ -1,0 +1,85 @@
+The user wants to solve a resource management problem based on strict textual rules provided in the prompt. The scenario involves a "release-token pool" starting with 60 tokens, processing a sequence of requests (r1-r7) with specific token asks, handling partial grants, and managing an expiry rule for request r2 after request r3 completes.
+
+**Rules Breakdown:**
+1.  **Initial State:** Pool = 60.
+2.  **Arrival Order & Denial Logic:** Requests land in strict arrival order. A request is denied *only* if the pool is exactly zero upon arrival (or effectively empty such that even a partial grant isn't possible, though the text says "grants are partial when the pool cannot cover the full ask", implying denial only happens at true emptiness).
+    *   Text: "a request arriving to an empty pool is denied and listed by id".
+    *   Text: "a pool that still holds tokens never denies anyone, not even a request larger than what remains".
+3.  **Grant Logic:** If the pool covers the ask fully, grant = ask. If partially, grant = remaining pool (which then becomes 0).
+4.  **Expiry Rule:** "the grant for r2 expires after request r3 completes".
+    *   Action: Return half of the granted tokens to the pool (rounded down).
+    *   Timing: The return happens immediately after r3 completes (before r4 arrives).
+5.  **Rounding:** `floor(grant / 2)`.
+
+**Sequence Execution:**
+
+*   **Start:** Pool = 60.
+*   **Event r1:** Ask = 6.
+    *   Check: 60 >= 6? Yes.
+    *   Grant: min(6, 60) = 6.
+    *   New Pool: 60 - 6 = 54.
+    *   Log r2 grant = ? (Not yet expired).
+*   **Event r2:** Ask = 10.
+    *   Check: 54 >= 10? Yes.
+    *   Grant: min(10, 54) = 10.
+    *   New Pool: 54 - 10 = 44.
+*   **Event r3:** Ask = 12.
+    *   Check: 44 >= 12? Yes.
+    *   Grant: min(12, 44) = 12.
+    *   New Pool: 44 - 12 = 32.
+    *   **Trigger:** r3 completed. Expiry rule applies to r2's grant.
+    *   r2 Grant was 10.
+    *   Return amount: floor(10 / 2) = 5.
+    *   New Pool: 32 + 5 = 37.
+*   **Event r4:** Ask = 15.
+    *   Check: 37 >= 15? Yes.
+    *   Grant: min(15, 37) = 15.
+    *   New Pool: 37 - 15 = 22.
+*   **Event r5:** Ask = 19.
+    *   Check: 22 >= 19? Yes.
+    *   Grant: min(19, 22) = 19.
+    *   New Pool: 22 - 19 = 3.
+*   **Event r6:** Ask = 21.
+    *   Check: 3 >= 21? No (Pool is not zero, but insufficient to cover full ask).
+    *   Grant Rule: "grants are partial when the pool cannot cover the full ask".
+    *   Grant: min(21, 3) = 3.
+    *   New Pool: 3 - 3 = 0.
+*   **Event r7:** Ask = 24.
+    *   Check: Pool is 0.
+    *   Denial Logic: "a request arriving to an empty pool is denied and listed by id".
+    *   Result: Denied. ID = "r7".
+
+**Totals Calculation:**
+*   **Granted Units:** Sum of grants from r1, r2, r3, r4, r5, r6. (Expiry return adds to pool but doesn't count as a new grant unit in the context of "requests granted", usually. The prompt asks for `granted_units`. Let's re-read carefully: "one line each... showing the state after that event". Usually, totals are sum of positive flows from requests).
+    *   r1: 6
+    *   r2: 10
+    *   r3: 12
+    *   r4: 15
+    *   r5: 19
+    *   r6: 3 (Partial grant)
+    *   Total Granted from Requests = 6 + 10 + 12 + 15 + 19 + 3 = 65.
+*   **Denied:** ["r7"]
+*   **Pool Left:** 0.
+
+Let's double check the "granted_units" definition. Does it include the returned tokens? The prompt says "grant what is there and the pool drops to zero... an expired grant returns half its granted tokens". Usually, `granted_units` refers to the units issued from requests. The return is a restoration of capacity. If I sum 65 + 5 (return), it would be 70. But standard interpretation for these ledger problems distinguishes between "issued" and "returned". Given the explicit separation in rules ("returns half... never any other way"), `granted_units` likely refers to the cumulative issuance from requests.
+
+Let's verify the partial grant rule again: "a request arriving at an empty pool is denied... a pool that still holds tokens never denies anyone, not even a request larger than what remains". r6 arrives with 3 tokens. It is not denied. It grants 3. Correct.
+
+Final Check:
+r1 (6) -> Pool 54
+r2 (10) -> Pool 44
+r3 (12) -> Pool 32. Expiry r2(10)/2=5 returned -> Pool 37.
+r4 (15) -> Pool 22
+r5 (19) -> Pool 3
+r6 (21, partial 3) -> Pool 0
+r7 (24, denied)
+
+Total Granted: 6+10+12+15+19+3 = 65.
+Denied: r7.
+Pool Left: 0.
+
+The JSON output must be exact.
+
+```json
+{"granted_units": 65, "denied": ["r7"], "pool_left": 0}
+```

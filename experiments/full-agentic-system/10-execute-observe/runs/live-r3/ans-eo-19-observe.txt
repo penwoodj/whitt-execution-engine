@@ -1,0 +1,38 @@
+**Phase 1 RULE SCAN**
+- Load Event: Adds a model to resident set if capacity allows; triggers eviction of LRU unpinned models if load size > remaining free space.
+- Eviction Rule: Removes least-recently-touched (LRU) *unpinned* models until enough space exists for the incoming load.
+- Pinned Constraint: Model B is pinned and never evicted.
+- Capacity Check: A load cannot fit only if `load_size > current_total_capacity - load_size`. If it fits, no eviction occurs regardless of other factors.
+- Deferred Load Rule: A load is deferred *only* after all possible LRU unpinned models have been evicted and the load still does not fit. The deferred ID is the load's own ID.
+- Unload Event: Removes a model from resident set if present; no-op if already absent or pinned (though B is pinned, unloading it implies removal of its footprint).
+- Capacity Update Rule: Total capacity decreases by `unload_size` upon successful unload; increases by `load_size` upon successful load.
+- Counting Rule: Evictions count every model removed during the eviction process. Deferrals count only completed deferral events. Loads count total load attempts (successful or deferred).
+
+**Phase 2 LEDGER WALK**
+1. **Event: Load A (2 GB)**
+   - State: Resident={A(2GB)}, Total=2GB, Free=6GB. Fits. No eviction.
+2. **Event: Load B (2 GB)**
+   - State: Resident={A(2GB), B(2GB)}, Total=4GB, Free=4GB. Fits. No eviction.
+3. **Event: Load C (2 GB)**
+   - State: Resident={A(2GB), B(2GB), C(2GB)}, Total=6GB, Free=2GB. Fits. No eviction.
+4. **Event: Load D (7 GB)**
+   - Check Fit: Required 7GB. Available = 8GB - 6GB = 2GB. Does not fit.
+   - Eviction Step: Identify unpinned models for LRU eviction. Unpinned set = {A, C} (B is pinned).
+     - Order by access time (LRU): A was accessed at step 1, C at step 3. A is most LRU.
+     - Evict A (-2GB). Resident={B(2GB), C(2GB)}. Total=4GB. Free=4GB.
+     - Check Fit again: Required 7GB. Available = 8GB - 4GB = 4GB. Still does not fit (Need 3 more GB).
+     - Evict next LRU unpinned: C was accessed at step 3, B is pinned. C is next LRU.
+     - Evict C (-2GB). Resident={B(2GB)}. Total=2GB. Free=6GB.
+     - Check Fit again: Required 7GB. Available = 8GB - 2GB = 6GB. Still does not fit (Need 1 more GB).
+     - No unpinned models remain to evict.
+   - Result: Load D cannot fit even after max evictions. Deferral occurs.
+   - State Update: Resident={B(2GB)}, Total=2GB, Free=6GB. Deferred ID = "D". Evictions count += 2 (A and C).
+5. **Event: Unload B (2 GB)**
+   - Check Presence: B is resident.
+   - Action: Remove B (-2GB).
+   - State Update: Resident={}, Total=0GB, Free=8GB.
+
+**Final Answer JSON**
+```json
+{"loads": 4, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

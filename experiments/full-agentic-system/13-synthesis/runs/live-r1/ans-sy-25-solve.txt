@@ -1,0 +1,70 @@
+Based on the strict rules provided for "tonight's" event list (Night Sy-25) and independent from the orientation story, here is the step-by-step state walk and final report.
+
+### Part A: Core State Walk (Night Sy-25)
+
+**Rules Applied:**
+1.  **Arrival Order:** LOW jobs queue by start minute ($s$). Resumed outranks fresh at ties.
+2.  **Core Usage:** Core runs the highest priority waiting job. If busy, waits until preemption or finish. No idle time if a job is waiting.
+3.  **Preemption (HIGH):** HIGH arrives at $t=4$, runs for 4 minutes ($t=4$ to $8$), instantly preempting the current LOW job. During HIGH run, nothing else runs.
+4.  **Checkpoints:** Every 2 completed running minutes. On preemption, work past the last checkpoint is wasted (redone on resume).
+    *   Checkpoint at start minute ($s+2$) and every subsequent even interval relative to current continuous run time? No, "absolute minutes" implies intervals of 2 from start/resume.
+    *   Bank logic: Banks at $t = s + 2$, then every 2 running minutes after.
+    *   Wasted calculation: Total duration - Banked duration.
+
+**Event Log:**
+
+*   **$t=0$:** **LOW1 arrives.** Duration 5 min. Start $s=0$.
+    *   Queue: [LOW1]. Core runs LOW1.
+    *   Bank Checkpoints at absolute minutes $0+2, 4, \dots$ ($2, 4, 6, 8, \dots$).
+*   **$t=1$:** **LOW2 arrives.** Duration 3 min. Start $s=1$.
+    *   Queue: [LOW1 (running), LOW2]. Core continues LOW1.
+*   **$t=4$:** **HIGH arrives.** Runs until $t=8$.
+    *   Preempts LOW1 immediately at the start of minute 4.
+    *   Current run time for LOW1 was 3 minutes ($0, 1, 2, 3$). It did not reach checkpoint $6$.
+    *   Banks held: Checkpoint at $t=2$, Checkpoint at $t=4$ (banked exactly on arrival, so **not wasted**).
+    *   Wait time for LOW1 resume: $8 \to$ next available.
+*   **$t=5$:** Core becomes free. Queue check: LOW1 (resumed) vs LOW2 (fresh).
+    *   Rule: "a resumed LOW outranks a fresh one".
+    *   Action: Resume LOW1.
+*   **Resume Logic for LOW1:**
+    *   Needs to complete remaining work. Total 5 mins. Banked at $t=2, t=4$.
+    *   Wait, rule says "track banks in absolute minutes; a bank landing on the exact minute HIGH arrives still counts".
+    *   Let's re-read checkpoint banking strictly: "LOW jobs checkpoint every 2 completed minutes of running time... on preemption the work past the last checkpoint is wasted".
+    *   If LOW1 ran $0, 1, 2, 3$ (4 mins). Checkpoints at 2 and 4. Since it was preempted at 4 (arrival), the checkpoint at 4 counts? "a bank landing on the exact minute HIGH arrives still counts". So yes, $t=4$ is safe.
+    *   Work done: 0-1 (check), 1-2 (check), 2-3 (no check). Wait, checkpoints are every 2 minutes. Usually intervals [0,2), [2,4)? Or points? "completed minutes".
+    *   Let's assume standard interval checkpointing: Checkpoint after minute 2 and minute 4.
+    *   If it ran 3 minutes ($t=0$ to $3$). It completed minute 1 (check), minute 2 (check). Minute 3 is unbanked? "LOW jobs checkpoint every 2 completed minutes".
+        *   Minutes completed: 1, 2. Checkpoints triggered at end of min 2 and min 4.
+        *   At $t=4$, it has completed 3 mins. It needs to reach min 4 (total) or is it interval based?
+    *   Let's look at the Orientation story for clarification on "wasted": "LOW1 held core minutes 0, 1 and 2... banked a checkpoint at minute 2, and its 3rd minute was unbanked when swap came". This implies checkpoints are at intervals of 2 from start.
+        *   Start $s=0$. Checkpoints at $t=2, t=4, t=6 \dots$? Or does it mean "every 2 minutes of running"?
+        *   Story: "banked a checkpoint at minute 2". Next would be minute 4.
+        *   If swap comes at $t=3$ (in story), work done is 0-1, 1-2, 2-3. Checkpoint at 2 exists. Work in [2,3) is unbanked? Or does it need to hit 4?
+        *   Story says: "its 3rd minute was unbanked... so 1 minute wasted".
+        *   This implies the checkpoint grid is $0+2=2$, then $2+2=4$. So to be safe, you must reach absolute time 4. If you stop at 3, you have done 3 minutes of work, but only reached safety marker at 2. The interval [2,4) has 2 minutes? No, the story says "1 minute wasted".
+        *   Wait, Story: "LOW1 held core minutes 0, 1 and 2" (duration 3). "banked a checkpoint at minute 2". "its 3rd minute was unbanked". The 3rd minute is interval [2,3). If the next checkpoint is at 4, then [2,4) contains 2 minutes. Why only 1 wasted?
+        *   Alternative interpretation: Checkpoints are every 2 running minutes.
+            *   Run 0-1 (min 1): No checkpoint.
+            *   Run 1-2 (min 2): Checkpoint #1 reached.
+            *   Run 2-3 (min 3): No checkpoint.
+            *   If preemption happens, work since last checkpoint is wasted. Last was at end of min 2. So work in [2,3) = 1 minute. This matches "1 minute wasted".
+    *   **Applying to Tonight ($t=4$ arrival):**
+        *   LOW1 ran $0, 1, 2, 3$. Checkpoint reached at end of min 2. Next checkpoint would be end of min 4.
+        *   Preemption at start of min 4 (time $t=4$).
+        *   Work done since last checkpoint ($t=2$) is interval [2, 4). This is 2 minutes? No, time flows continuously. From $t=2$ to $t=3$ is 1 minute. From $t=3$ to $t=4$ is 1 minute.
+        *   Did it complete the checkpoint at $t=4$? "a bank landing on the exact minute HIGH arrives still counts".
+        *   If LOW1 finished minute 3, did it finish minute 4? No. The event happens at the start of min 4 (transition from 3 to 4). It has not completed minute 4 yet.
+        *   So the checkpoint for "2 mins" is at $t=4$. Since HIGH arrives exactly at $t=4$, does that count as a bank? Yes ("land on exact minute... still counts").
+        *   Therefore, work done in [2, 4) is considered safe/banked because the arrival event itself validates the checkpoint.
+        *   Wait, if it arrived exactly at 4, did it complete the interval? The rule says "bank landing on the exact minute". This implies the state check occurs *at* that minute. If HIGH arrives at $t=4$, the system checks and sees a bank is established there. So no work is wasted in [2, 4).
+        *   **Conclusion:** Work done $0 \to 3$ (3 mins) + Banked status at $t=4$. Wasted = 0?
+        *   Let's re-read carefully: "on preemption the work past the last checkpoint is wasted". Last checkpoint was end of min 2. Next is end of min 4. HIGH arrives at start of min 4 ($t=4$). It has not reached end of min 4 yet. But the rule says "bank landing on exact minute... still counts". Does this mean the bank *exists* for the purpose of safety? Yes.
+        *   However, if the bank exists at $t=4$, then the interval [2,4) is protected. So Wasted = 0 minutes.
+
+    *   **Resume Sequence:**
+        *   LOW1 resumes at $t=5$ (after HIGH finishes at 8? No, HIGH runs 4 to 8). Core free at 8.
+        *   Wait, queue check at $t=5$: "the core never idles while a LOW job is waiting". But HIGH is running until 8. The core is busy with HIGH. It cannot resume LOW1 until $t=8$.
+        *   At $t=8$: Core free. Queue: LOW1 (resumed), LOW2 (waiting).
+            *   Priority: Resumed LOW1 > Fresh LOW2.
+            *   Resume LOW1.
+            *   Work needed for LOW1: Total 5 mins. Banked at $0+2, 4$? Wait, if checkpoint at 4 counted, then it has done 4

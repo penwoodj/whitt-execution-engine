@@ -1,0 +1,77 @@
+### Minute-by-Mute Table Walk
+
+| minute | core | event |
+| :--- | :--- | :--- |
+| 0 | LOW1 | Start (Bank @ 2) |
+| 1 | LOW1 | Run |
+| 2 | HIGH | Arrive (Preempt LOW1). LOW1 finishes at T=2. Banked: 2 mins. Wasted: 0. |
+| 3 | HIGH | Resume LOW1 (Bank @ 5). Start LOW2 (Bank @ 3). |
+| 4 | HIGH | Run LOW1, Run LOW2. |
+| 5 | HIGH | Finish LOW1. Banked for LOW1: 5 mins. Total run: 7 mins. Wasted: 0. |
+| 6 | HIGH | Run LOW2. |
+| 7 | HIGH | Finish LOW2. Banked for LOW2: 3 mins (at T=3). Total run: 4 mins. Wasted: 0. |
+
+**Analysis:**
+1.  **Event 0-2 (LOW1 First Pass):** LOW1 runs from $T=0$ to $T=2$. At $T=2$, HIGH arrives.
+    *   Checkpoint logic: Bank at start ($T=0$) + 2 mins = $T=2$.
+    *   Preemption happens exactly at the bank time ($T=2$).
+    *   Minutes past last bank: $2 - 2 = 0$. Wasted = 0.
+    *   LOW1 is saved and resumed.
+
+2.  **Event 3-5 (LOW1 Second Pass & LOW2 First Pass):** HIGH resumes LOW1 at $T=3$ (Bank @ $3+2=5$). Starts LOW2 at $T=3$ (Bank @ $3+0=3$, effectively immediate since it's a new job, but the rule says "every 2 completed minutes", so bank is at start + 2 = $T=5$ for LOW2? No, let's re-read carefully: "LOW jobs checkpoint every 2 completed minutes".
+    *   **Re-evaluating Checkpoint Logic:**
+        *   Job starts. Bank is established at `Start_Time`.
+        *   Every 2 *running* minutes after start, a bank is added? Or does it mean banks exist at $T_{start} + 2k$?
+        *   Text: "LOW jobs checkpoint every 2 completed minutes". This usually implies checkpoints are available at $T_{start}, T_{start}+2, T_{start}+4...$.
+        *   Let's trace LOW1 again with this interpretation.
+            *   Start $T=0$. Checkpoints at $0, 2, 4, 6...$
+            *   Preempted at $T=2$. Last checkpoint was $T=2$. Wasted = $2-2=0$. Correct.
+        *   Trace LOW2:
+            *   Start $T=3$. Checkpoints at $3, 5, 7...$ (assuming "every 2 completed minutes" means intervals of 2).
+            *   Wait, the text says "LOW jobs checkpoint every 2 completed minutes". Does this mean a bank is created every 2 minutes? Or that valid save points are every 2 minutes?
+            *   Standard interpretation for these problems: A job saves state at $T_{start}$ and then every 2 minutes of execution. So banks at $3, 5, 7$.
+            *   Let's check the HIGH duration. HIGH runs from $T=2$ to $T=8$ (6 mins).
+            *   LOW1 resumes at $T=3$. Needs to run remaining time: Total 4 - Run so far (2) = 2 mins.
+                *   Runs $T=3 \to T=5$. Finishes at $T=5$.
+                *   Banks for LOW1 were at $0, 2, 4$. Last bank before finish was $4$? Or is the bank at start + 2k?
+                *   If banks are at $0, 2, 4$, and it finishes at $5$, did it waste anything? No, because it finished.
+            *   LOW2 starts at $T=3$. Needs to run 3 mins.
+                *   Runs $T=3 \to T=6$. Finishes at $T=6$.
+                *   Banks for LOW2: Start ($3$), then every 2 mins ($5, 7...$).
+                *   It finishes at $6$. Last bank was $5$. Wasted = $6-5=1$?
+                *   Wait, let's re-read the "bank" definition. "LOW jobs checkpoint every 2 completed minutes". This implies checkpoints are valid points to resume from. If a job runs for 3 minutes, and checkpoints are at 0, 2, then running minute 3 (the 3rd minute) is past the last checkpoint (minute 2). So yes, 1 minute wasted.
+                *   However, let's look at LOW1 again. It ran $0 \to 2$. Checkpoints at $0, 2$. Preempted at $2$. Wasted 0. Resumed at $3$. Runs $3 \to 5$ (2 mins). Finishes at $5$. Checkpoints during this run: At start of resume ($3$), and then every 2 mins? Or does the "every 2 completed minutes" apply to the *total* lifetime?
+                *   Usually, checkpoints are relative to the job's existence. If it exists from 0-2, checkpoint at 2. Resume at 3. It runs for 2 more minutes. Does it get a checkpoint at $3+2=5$? Yes. So it finishes exactly on a checkpoint. Wasted = 0.
+                *   LOW2: Starts at 3. Runs 3 mins ($3 \to 6$). Checkpoints at start (3) and then every 2 mins ($5, 7$). It finishes at 6. Last checkpoint was 5. Wasted = $6-5=1$.
+                *   Wait, is the first checkpoint at "start" or "start + 2"? Text: "checkpoint every 2 completed minutes". This implies intervals. So checkpoints at $T_{start}, T_{start}+2, T_{start}+4...$? Or just $T_{start}+2, T_{start}+4...$?
+                *   If it's "every 2", usually the first one is at +2. But you can't checkpoint before running anything? Maybe start is a bank. Let's assume banks at $Start, Start+2, Start+4$.
+                *   LOW1: Banks at $0, 2, 4$. Preempted at $2$ (Bank). Resumed. Runs to $5$. Bank at $4$ was passed? No, it finished at $5$. Did it have a bank at $4$? Yes ($0+4$). So it ran past bank $4$ and finished at $5$. Wasted = $5-4=1$?
+                *   Let's reconsider the "bank" logic. If you run 2 minutes, you hit a bank. If you run 3 minutes, you hit a bank at 2, then run 1 more minute (wasted).
+                *   LOW1 First Pass: Runs 0-2. Hits bank at 2. Preempted. Wasted 0.
+                *   LOW1 Second Pass: Resumes at 3. Needs to run 2 mins. Runs 3-5. Does it hit a bank? It runs for 2 minutes. So it hits a bank at $3+2=5$. Finishes exactly on bank. Wasted 0.
+                *   LOW2 First Pass: Starts at 3. Needs to run 3 mins. Runs 3-6. Hits bank at $3+2=5$. Runs minute 6 (wasted). Wasted = 1.
+                *   Total Wasted = 1.
+
+    *   **Order:** LOW1 finishes first ($T=5$), then LOW2 finishes ($T=6$). Order: [LOW1, LOW2].
+    *   **Makespan:** Last finish is $T=6$.
+    *   **Wasted:** 1 minute (from LOW2).
+
+Let's double check the "bank at start" assumption. If banks are only at $Start+2, Start+4...$:
+*   LOW1 Pass 1: Runs 0-2. Bank at 2. OK.
+*   LOW1 Pass 2: Resumes 3. Runs 3-5. Banks at $3+2=5$. Finishes at 5. OK.
+*   LOW2 Pass 1: Starts 3. Runs 3-6. Banks at $3+2=5$. Wasted minute 6.
+Result is the same.
+
+What if HIGH preemption logic changes things? "HIGH preempts instantly and runs to completion."
+HIGH starts at 2, ends at 8.
+LOW1 resumes at 3. LOW2 starts at 3.
+At $T=5$, LOW1 finishes. Core becomes free for LOW2? No, LOW2 is already running (started at 3).
+Wait, "HIGH preempts instantly". At $T=2$, HIGH takes over.
+$T=2 \to T=8$: HIGH runs.
+During this time ($T=3 \to T=6$), LOW1 and LOW2 are running on the core? No, only one job at a time.
+Sequence:
+$T=0-2$: LOW1 runs.
+$T=2$: Preempt. HIGH starts.
+$T=3$: HIGH resumes LOW1 (since it's resumed). Starts LOW2.
+Wait, can two jobs run on one core? No. "one event at a time".
+So at

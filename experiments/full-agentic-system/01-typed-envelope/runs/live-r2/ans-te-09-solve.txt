@@ -1,0 +1,83 @@
+To ensure accuracy, I will first execute **Phase 1 (Rule Scan)** to explicitly define every state-changing rule and its trigger condition based on the text provided. Then, I will proceed to **Phase 2 (Ledger Walk)**, applying the observed error rates step-by-step to derive the final state. Finally, I will output the strict JSON response.
+
+### Phase 1: RULE SCAN
+*Listing rules that change state during this night's events.*
+
+1.  **Initial Climb Rule**: Applies to steps 1–5 (limit 2.0%) and steps 6–10 (limit 1.0%). Triggered by arrival of observation at current step.
+    *   *Trigger*: Observation $i$ arrives at Step $S$.
+2.  **First Breach Rule**: If observed error rate > limit for current stage, pause climb, rollback to previous step ($S-1$), mark current observation as spent, resume from next observation. Limit tightens to 0.8% for remaining steps. Triggered by Observation exceeding initial limits (or tightened limits if resumed).
+    *   *Trigger*: Error Rate $> \text{Limit}$.
+3.  **Stage Completion Rule**: A clean observation completes its stage; rollout advances to next step ($S+1$) and displays 10% $\times$ Stage Number for the next step's budget context (though budget is fixed by rules, "shows" implies state update of current active step). Triggered by clean observation at Step $S$.
+    *   *Trigger*: Error Rate $\le \text{Limit}$ AND not spent.
+4.  **Second Breach Rule**: If a second breach occurs (total breaches = 2), stop everything immediately, hold current step, status becomes STOPPED. Triggered by Observation exceeding limit while already in "tainted/resumed" state or subsequent to first breach.
+    *   *Trigger*: Total Breaches $= 2$.
+5.  **Night End Rule**: If list ends without second breach and no active rollback pending, status is DONE. Triggered by end of input list.
+
+---
+
+### Phase 2: LEDGER WALK
+*Applying events one at one in strict arrival order.*
+
+**Configuration:**
+-   **Limits (Initial)**: Steps 1–5 $\le$ 2.0%; Steps 6–10 $\le$ 1.0%.
+-   **Observations**: $[0.6, 0.9, 1.4, 2.0, 0.5, 1.1, 1.5]$
+-   **Rules applied**: Initial limit check $\to$ Breach logic $\to$ Limit tightening $\to$ Stop logic.
+
+**Step-by-Step Execution:**
+
+1.  **Event 1: Step 1, Rate 0.6%**
+    -   *Rule Check*: Current Limit (Steps 1-5) = 2.0%. $0.6 \le 2.0$.
+    -   *Action*: Clean observation. Completes Stage 1.
+    -   *State Update*: Step advances to 2. Active Rollout Pct becomes 10% $\times$ 1 = **10**. (Note: The "shows" rule implies the current rollout level reflects completed stages).
+
+2.  **Event 2: Step 2, Rate 0.9%**
+    -   *Rule Check*: Current Limit = 2.0%. $0.9 \le 2.0$.
+    -   *Action*: Clean observation. Completes Stage 2.
+    -   *State Update*: Step advances to 3. Active Rollout Pct becomes 10% $\times$ 2 = **20**.
+
+3.  **Event 3: Step 3, Rate 1.4%**
+    -   *Rule Check*: Current Limit = 2.0%. $1.4 \le 2.0$.
+    -   *Action*: Clean observation. Completes Stage 3.
+    -   *State Update*: Step advances to 4. Active Rollout Pct becomes 10% $\times$ 3 = **30**.
+
+4.  **Event 4: Step 4, Rate 2.0%**
+    -   *Rule Check*: Current Limit = 2.0%. $2.0 \le 2.0$. (Limit is inclusive "up to", so this is clean).
+    -   *Action*: Clean observation. Completes Stage 4.
+    -   *State Update*: Step advances to 5. Active Rollout Pct becomes 10% $\times$ 4 = **40**.
+
+5.  **Event 5: Step 5, Rate 0.5%**
+    -   *Rule Check*: Current Limit = 2.0%. $0.5 \le 2.0$.
+    -   *Action*: Clean observation. Completes Stage 5.
+    -   *State Update*: Step advances to 6. Active Rollout Pct becomes 10% $\times$ 5 = **50**.
+
+6.  **Event 6: Step 6, Rate 1.1%**
+    -   *Rule Check*: Current Limit (Steps 6-10) = 1.0%. $1.1 > 1.0$.
+    -   *Action*: **FIRST BREACH**.
+        -   Rollback to previous step: Step becomes 5.
+        -   Mark current observation (Step 6) spent.
+        -   Tighten limit for remaining steps (including resumed ones) to **0.8%**.
+        -   Status remains PAUSED/CLIMBING, not STOPPED yet (only 1 breach).
+    -   *State Update*: Active Rollout Pct holds at previous clean value: **50** (reflecting completion of Stage 5). Stages Done = 5.
+
+7.  **Event 7: Step 6 (Resume), Rate 1.5%**
+    -   *Context*: We are resuming from the point before the breach occurred (Step 6), but we must re-evaluate against the new tightened limit because the rule states "after any rollback the limit tightens to 0.8 for every remaining step". The observation is the next in line after the spent one.
+    -   *Rule Check*: Current Limit = 0.8% (Tightened). Observed Rate = 1.5%. $1.5 > 0.8$.
+    -   *Action*: **SECOND BREACH**.
+        -   This is the second breach total.
+        -   Rule: "a second breach stops everything, you hold the step you were defending and the status is STOPPED."
+        -   We are at Step 6 (the one we were trying to climb into). The observation failed.
+        -   Status becomes STOPPED.
+    -   *State Update*: Rollout Pct stays at **50** (last successful completion was Stage 5). Stages Done = 5.
+
+**Final State Derivation:**
+-   `rollout_pct`: The last successfully completed stage was 5. The rollout shows $10 \times \text{StageNumber}$. So, $10 \times 5 = 50$.
+-   `stages_done`: Stage 5 was the last one cleanly passed before the stop condition triggered on the attempt to enter Stage 6 (twice). Count = 5.
+-   `status`: The second breach occurred immediately after the first, triggering the STOPPED state.
+
+**JSON Construction:**
+-   Keys: `rollout_pct`, `stages_done`, `status`.
+-   Values: Integers/String as per contract.
+
+```json
+{"rollout_pct": 50, "stages_done": 5, "status": "STOPPED"}
+```

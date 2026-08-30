@@ -1,0 +1,51 @@
+Based on the strict instructions to **re-derive the SECOND HALF** of the task (the residency/eviction logic) and output **ONLY** that specific JSON object (no `part_a`, no merged keys), here is the solution:
+
+### Phase 1: Residency State Analysis
+*   **Capacity:** 8 GB.
+*   **Resident Sizes:** A=2, B=2, C=2, D=7. Total = 13 GB (Over capacity).
+*   **Pinned Models:** Model B is pinned and never evicted.
+*   **Eviction Policy:** LRU among unpinned models.
+*   **Stream:** Load(2), LoadB(2), LoadC(2), LoadD(7), UnloadB(2).
+
+**Step-by-Step Execution:**
+1.  **Load (2 GB):** Fits in remaining space? No (Current free = -5, effectively full of unpinned A=2, C=2, D=7). Wait, let's track actual content.
+    *   Start: Empty (0/8).
+    *   Action: `load 2`. Fits? Yes. Content: {A:2}. Free: 6. Loads: 1. Evictions: 0.
+2.  **Load B (2 GB):** Fits? Yes. Content: {A:2, B:2}. Free: 4. Loads: 2. Evictions: 0.
+3.  **Load C (2 GB):** Fits? Yes. Content: {A:2, B:2, C:2}. Free: 2. Loads: 3. Evictions: 0.
+4.  **Load D (7 GB):** Fits? No (Need 7, have 2).
+    *   Must evict unpinned models to make room for 7GB.
+    *   Current Unpinned: A(2), C(2). Total size = 4.
+    *   Required space = 7. Gap = 3.
+    *   Evict LRU unpinned (A or C, assume order doesn't matter for count, just that they are evicted). Evict A and C.
+    *   New Content: {B:2, D:7}. Total size = 9? **Wait.** Capacity is 8GB.
+    *   Let's re-evaluate capacity constraint strictly.
+    *   Current State before Load D: {A:2, B:2, C:2} -> Size 6. Free space = 2 GB.
+    *   Incoming Load D (7 GB). Needs 7 GB. Available 2 GB. Shortage = 5 GB.
+    *   Eviction candidates (Unpinned): A(2), C(2). Total evictable size = 4 GB.
+    *   Even if we evict ALL unpinned models (A and C), the new state would be {B:2, D:7} -> Size 9 GB. This exceeds capacity (8GB).
+    *   **Conclusion:** The load cannot fit even after maxing out evictions of unpinned models because the pinned model B + Model D alone exceed capacity (2+7=9 > 8).
+    *   Therefore, this load triggers a **Deferral**.
+    *   Evictions performed: 2 (A and C were removed to attempt fit, though it failed).
+    *   Deferrals count: 1. Deferred ID: "load D" (or similar identifier based on stream order).
+
+5.  **Unload B (2 GB):** Model B is resident. Unload executes.
+    *   Content becomes {D:7}. Size = 7. Free space = 1.
+    *   Note: The prompt asks for `loads` count of commands executed. Load D was attempted and deferred, but usually "executed" in these contexts implies the command ran (even if deferred). However, strictly speaking, a deferred load doesn't populate memory. But the metric is "loads counts every load command... that was actually executed". If it defers, did it execute? Yes, the instruction was processed.
+    *   Let's check the `loads` definition again: "loads counts every load command in tonight's stream that was actually executed".
+    *   Stream: Load(2), LoadB(2), LoadC(2), LoadD(7). All 4 commands were issued.
+    *   Did they execute? Yes, all 4 instructions ran. The fact that D deferred means it didn't fit, but the command was executed (and resulted in eviction + deferral).
+    *   Total Loads: 4.
+
+**Final Metrics:**
+*   **Loads:** 4 (All commands processed).
+*   **Evictions:** 2 (A and C evicted during Load D attempt).
+*   **Deferrals:** 1 (Load D deferred because B+D > Capacity).
+*   **Deferred IDs:** ["load_d"] (Identifier for the specific load that failed).
+
+### Phase 2: JSON Output Construction
+The user requested **ONLY** the second-half JSON object (`{"loads": N, "evictions": N, "deferrals": N, "deferred": [ids]}`).
+
+```json
+{"loads": 4, "evictions": 2, "deferrals": 1, "deferred": ["load_d"]}
+```

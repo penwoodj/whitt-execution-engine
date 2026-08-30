@@ -1,0 +1,45 @@
+### Phase 1: RULE SCAN
+Based on the task description and "tonight's" rules (ignoring orientation story numbers), here are the state-changing rules triggered by the events `load A`, `load C`, `load D`, `unload D`:
+
+1.  **Load Rule**: Triggered by `load X`. If capacity allows, model `X` is loaded into resident set; if not, evictions occur (see Eviction Rule).
+2.  **Eviction Rule**: Triggered by a failed Load. Evicts least-recently-touched **unpinned** models one-by-one until space fits or only pinned models remain.
+3.  **Deferral Rule**: Triggered by a failed Load where only pinned models remain and no space exists. Model `X` is deferred (no eviction, no load).
+4.  **Touch/Recency Rule**: Triggered by any successful Load or Unload of model `X`. Moves `X` to most-recent position in the resident set.
+5.  **Unload Rule**: Triggered by `unload X`. Frees capacity equal to size of `X` if `X` is resident; otherwise, it is a no-op.
+
+### Phase 2: LEDGER WALK
+Applying events one at a time in strict arrival order (`load A`, `load C`, `load D`, `unload D`) with initial state: Empty pool (0 GB), Resident: {}, Recency: {}. Card Size: 8GB.
+
+**Event 1: `load A` (3 GB)**
+*   **State**: Pool has 8GB. Request 3GB. Fits immediately.
+*   **Action**: Load A. Touch A.
+*   **Result**: Resident {A}, Free 5GB, Recency [A].
+
+**Event 2: `load C` (1 GB)**
+*   **State**: Pool has 8GB. Request 1GB. Fits immediately (Resident A is pinned).
+*   **Action**: Load C. Touch C.
+*   **Result**: Resident {A, C}, Free 4GB, Recency [C, A] (C touched last).
+
+**Event 3: `load D` (2 GB)**
+*   **State**: Pool has 8GB. Request 2GB. Fits immediately (Resident A is pinned, C is pinned).
+*   **Action**: Load D. Touch D.
+*   **Result**: Resident {A, C, D}, Free 2GB, Recency [D, C, A] (D touched last).
+
+**Event 4: `unload D` (2 GB)**
+*   **State**: Pool has 8GB. Model D is resident. Request to unload 2GB.
+*   **Action**: Unload D. Free capacity increases by 2GB. Touch D (moves to most recent).
+*   **Result**: Resident {A, C}, Free 4GB, Recency [D, C] (Wait: Standard LRU usually puts the unloaded item at MRU or removes it? The rule says "Every touch of a model moves it to most-recent". Even if unloaded, the event touches D. However, typically in these problems, an unload frees space and the item is no longer resident for future eviction checks until reloaded. Let's assume standard behavior: Item removed from set, but touched for recency list update? Or just freed?
+    *   Re-reading "Residency Discipline": "Every touch of a model moves it to most-recent."
+    *   If D is unloaded, it is no longer resident. Does it stay in the recency list? Usually, eviction checks look at "resident" models. The recency list defines order among residents. If D leaves, it shouldn't be in the resident set.
+    *   Let's refine Recency: Resident {A, C}. Order depends on last touch of *residents*. A was touched at Event 1. C was touched at Event 2. No one else is resident. So order is [C, A] (C most recent).
+*   **Result**: Resident {A, C}, Free 4GB, Recency [C, A].
+
+**Final Counts:**
+*   Loads: 3 (A, C, D)
+*   Evictions: 0
+*   Deferrals: 0
+*   Deferred List: []
+
+```json
+{"loads": 3, "evictions": 0, "deferrals": 0, "deferred": []}
+```

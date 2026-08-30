@@ -1,0 +1,48 @@
+### Phase 1 RULE SCAN
+This phase lists every rule in the task that changes state during the event sequence (the "flaky upstream" scenario), identifying the specific trigger for each.
+
+1.  **Per-Attempt Cost Rule**: Triggers on every attempt (failed or successful). Adds `2` tokens to spend.
+2.  **Wait Time Cost Rule**: Triggers after a failed attempt before the next retry. Adds `wait_seconds` to spend.
+3.  **Sequence Generation Rule**: Defines wait times as $W_{n} = W_{n-1} \times 2$, starting at $2$s. Triggers on every failure to determine the cost of the *next* wait.
+4.  **Budget Check Rule (Initial)**: Compares `total_spend` against `budget`. If `total_spend > budget`, triggers suppression logic.
+5.  **Budget Doubling Rule**: If initial check fails, doubles the `budget` exactly once. Triggers on the first failed budget check.
+6.  **Re-Check Budget Rule**: Compares `total_spend` against the *doubled* `budget`. Determines final suppression status (`suppressed`).
+7.  **Final State Calculation Rule**: Computes `budget_after` as `final_budget - total_spend`. Triggers after all events and budget logic are resolved.
+
+---
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at a time in strict arrival order, showing the state accumulation (spend) leading to the final result.
+
+**Event Sequence:**
+1.  **Attempt 1**: Fails.
+    *   Cost: Attempt ($2$) + Wait ($2$). Total Spend = $4$.
+2.  **Attempt 2**: Fails.
+    *   Cost: Attempt ($2$) + Wait ($4$). Total Spend = $4 + 6 = 10$.
+3.  **Attempt 3**: Fails.
+    *   Cost: Attempt ($2$) + Wait ($8$). Total Spend = $10 + 10 = 20$.
+4.  **Budget Check (Initial)**:
+    *   Current Spend ($20$) vs Budget ($24$).
+    *   Result: Under budget. No doubling triggered yet.
+5.  **Attempt 4**: Succeeds.
+    *   Cost: Attempt ($2$). Wait is not incurred after success.
+    *   Total Spend = $20 + 2 = 22$.
+6.  **Final Budget Check**:
+    *   Current Spend ($22$) vs Budget ($24$).
+    *   Result: Under budget. `suppressed` = false.
+
+**State Summary:**
+*   Total Attempts: 4 (3 failed, 1 succeeded).
+*   Wait Seconds Observed: $2 + 4 + 8 = 14$.
+*   Attempt Costs: $2 \times 4 = 8$.
+*   Total Spend: $14 + 8 = 22$.
+*   Budget: $24$.
+*   Budget After: $24 - 22 = 2$.
+
+---
+
+### Final Answer
+
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 2, "suppressed": false}
+```

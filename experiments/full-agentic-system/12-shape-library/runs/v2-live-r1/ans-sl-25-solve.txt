@@ -1,0 +1,88 @@
+Based on the strict rules provided in the "tonight's" section (ignoring the orientation example numbers), here is the step-by-step derivation of the state walk:
+
+**1. Initial State & Rule Application:**
+*   **Events to Process:**
+    *   Start `LOW1` at minute 0, duration 5m.
+    *   Start `LOW2` at minute 2, duration 7m. (Note: The prompt says "starting at minute 2". Since the core is busy with LOW1 until minute 3, this event effectively queues `LOW2`).
+*   **Rule Logic:**
+    *   Core never idles while a job is waiting. The next waiting job starts immediately when the current one finishes or is preempted.
+    *   Checkpoints: Every 2 minutes of running time. On preemption, work past the last checkpoint is wasted.
+    *   Preemption: `HIGH` arrives at minute 3 and runs for 8m (until minute 11). It instantly preempts whatever is running.
+
+**2. Minute-by-Minute Walk:**
+
+*   **Minute 0:** `LOW1` starts (fresh). Running time = 1/5.
+    *   State: Core -> LOW1(rem=4), LOW2(waiting, start=2).
+*   **Minute 1:** `LOW1` continues. Running time = 2/5. **Checkpoint 1 reached.**
+    *   State: Core -> LOW1(rem=3), LOW2(waiting).
+*   **Minute 2:** `LOW1` continues. Running time = 3/5. **Event Trigger:** `LOW2` starts (fresh). It joins the queue behind `LOW1`.
+    *   State: Core -> LOW1(rem=2), Queue: [LOW2(fresh, start=2)].
+*   **Minute 3:** `LOW1` continues. Running time = 4/5. **Event Trigger:** `HIGH` arrives. Preemption occurs immediately.
+    *   `LOW1` finishes its minute of work? Yes, the rule says "a bank landing on the exact minute HIGH arrives still counts". So `LOW1` completes its 5th minute exactly at the moment of preemption. No time wasted for LOW1 yet (it just finished).
+    *   `HIGH` takes core. Duration: 8m (Minutes 3, 4, 5, 6, 7, 8, 9, 10 -> finishes end of min 10/starts 11? Let's trace duration: Start 3, run 8 mins = ends at t=11. So minutes processed are 3,4,5,6,7,8,9,10).
+    *   `LOW2` remains in queue (waiting).
+*   **Minute 4:** `HIGH` runs.
+*   **Minute 5:** `HIGH` runs. (`LOW2` still waiting).
+*   **Minute 6:** `HIGH` runs.
+*   **Minute 7:** `HIGH` runs.
+*   **Minute 8:** `HIGH` runs.
+*   **Minute 9:** `HIGH` runs.
+*   **Minute 10:** `HIGH` finishes (completed 8 minutes). Core becomes free at start of Minute 11.
+    *   Queue: [LOW2(fresh, start=2)].
+*   **Minute 11:** Next job in queue is `LOW2`. It starts. Fresh run. Running time = 1/7.
+*   **Minute 12:** `LOW2` continues. Running time = 2/7. **Checkpoint 1 reached.**
+*   **Minute 13:** `LOW2` continues. Running time = 3/7.
+    *   State: Core -> LOW2(rem=4).
+
+**Wait, let me re-evaluate the "Start Minute" rule for `LOW2`.**
+The prompt says: "a LOW whose start minute arrives while the core is busy simply waits."
+And: "LOW jobs take the core in order of their start minutes".
+`LOW1` started at 0. `LOW2` started at 2.
+When `HIGH` finishes, only `LOW2` is left to run. It resumes as a fresh job (or continues its interrupted run? No, it was never running).
+Wait, did `LOW1` actually finish?
+"LOW1 runs 5 minutes starting at minute 0".
+Min 0: 1st min of LOW1.
+Min 1: 2nd min. Checkpoint 1 (2 mins done).
+Min 2: 3rd min.
+Min 3: 4th min. `HIGH` arrives. "a bank landing on the exact minute HIGH arrives still counts".
+So at the transition from Min 3 to Min 4, `LOW1` has completed 5 minutes of work?
+Let's count: Start t=0. End of work occurs after 5 minutes have passed.
+t=0..1 (1 min)
+t=1..2 (2 mins - Checkpoint)
+t=2..3 (3 mins)
+t=3..4 (4 mins) -> Wait, the prompt says "runs 5 minutes".
+Does "starting at minute 0" mean it occupies [0,1), [1,2), [2,3), [3,4)? That is 4 minutes. Or does it occupy [0,5)?
+Standard scheduling: Start time $S$, duration $D$. Finish time $F = S + D$.
+If it runs for 5 minutes starting at 0, it occupies interval $[0, 5)$.
+Min 0: $t \in [0,1)$
+Min 1: $t \in [1,2)$ -> Checkpoint (2 mins elapsed).
+Min 2: $t \in [2,3)$
+Min 3: $t \in [3,4)$ -> `HIGH` arrives at $t=3$.
+Does it complete the minute starting at 3? "a bank landing on the exact minute HIGH arrives still counts".
+The checkpoint is every 2 completed minutes.
+At $t=3$, exactly 3 minutes have elapsed. The last checkpoint was at $t=2$ (2 mins).
+So if preemption happens *at* $t=3$, has `LOW1` completed the minute starting at 3?
+The rule "bank landing on the exact minute HIGH arrives still counts" usually implies that if a checkpoint falls exactly when the event hits, no work is lost. But here we are talking about the *minute* of work.
+If `HIGH` arrives at $t=3$, and preemption is instantaneous, does it kill the work in progress in the interval $(3, 4)$?
+The prompt says "instantly preempting whatever LOW job is running".
+At $t=3$, exactly 3 minutes are done. The next minute starts. `HIGH` interrupts immediately.
+So `LOW1` never gets to run its 4th and 5th minutes (which would be intervals [3,4) and [4,5)).
+Wait, duration is 5 minutes. Intervals: [0,1), [1,2), [2,3), [3,4), [4,5).
+At $t=3$, we are at the end of interval [2,3). The next interval [3,4) starts. `HIGH` interrupts immediately.
+So `LOW1` completes 3 minutes? Or does "starting at minute 0" imply it runs until $t=5$?
+If it runs for 5 minutes, and is preempted at $t=3$, it has completed 3 minutes of work.
+But the prompt says "runs 5 minutes starting at minute 0". And "LOW1 runs 7 minutes... banked a checkpoint at minute 2, and its 3rd minute was unbanked when the swap came, so 1 minute wasted." (This is the example).
+In the example: Start 0. Run 7 mins. Preempt at 3. Work done: [0,1), [1,2) (CP), [2,3). Total 3 minutes. Next checkpoint would be at $t=4$. Since preemption was at 3, no checkpoint reached for the current run yet? Or is the "3rd minute" referring to the interval starting at 2?
+Let's assume standard interpretation: Work done = min(time_elapsed, duration).
+Time elapsed = 3. Duration = 5. Work done = 3 minutes.
+Remaining work = $5 - 3 = 2$ minutes?
+BUT: The prompt says "on preemption the work past the last checkpoint is wasted".
+Last checkpoint at $t=2$. Current time $t=3$. Time since last checkpoint = 1 minute (interval [2,3)).
+This interval was completed. Is it "past"? No, it's done.
+The work *in progress* would be in [3,4). Since `HIGH` interrupts instantly at 3, no new work is started/accumulated beyond $t=3$.
+So `LOW1` has effectively completed 3 minutes of valid work? Or does it count as "failed" because it didn't reach the full duration?
+Usually in these problems: Work = min(time_passed, duration). Wasted = max(0, time_since_last_checkpoint - (time_passed - checkpoint)). No.
+Wasted = (Time since last checkpoint) if preemption happens before next checkpoint.
+Here: Last CP at 2. Preempt at 3. Time since CP = 1 min.
+Is that wasted? "work past the last checkpoint is wasted". This usually refers to *uncompleted* work accumulated since the last checkpoint. If the interval [2,3) was completed successfully, and preemption happens immediately after, then that minute counts. The work "past" it (i.e., in [3,4)) hasn't been done yet.
+However, if `LOW1` is supposed to run 

@@ -1,0 +1,81 @@
+Phase 1 RULE SCAN
+- Job Arrival Rule: LOW1 arrives at minute 0 (fresh state).
+- Job Arrival Rule: LOW2 arrives at minute 2 (fresh state, queued behind LOW1 due to start time ordering).
+- High Priority Arrival Rule: HIGH arrives at minute 2 (preempts current core usage if any job is running; sets core to busy with only HIGH).
+- Core Execution Rule (HIGH): When HIGH runs, no other jobs run; LOW progress pauses.
+- Checkpointing Rule: Every LOW job checkpoints every 2 completed minutes of *running* time.
+- Preemption Cost Rule: Upon preemption, work past the last checkpoint is wasted and must be redone upon resume.
+- Resume Priority Rule: A resumed LOW outranks a fresh one at any tie (applies to start minute ordering).
+- Completion Order Rule: Jobs complete in order of their finish times; if simultaneous, resumed jobs finish before fresh ones due to priority.
+- Makespan Calculation Rule: Span from first job start (minute 0) to last job finish.
+
+Phase 2 LEDGER WALK
+
+**Event 1: Start LOW1 at Minute 0**
+State: Core busy with LOW1. LOW1 has 0 running minutes elapsed. Checkpoint at T=2 pending.
+- LOW1 Remaining Work: 5 mins.
+- LOW1 Elapsed Running Time: 0.
+- Last Checkpoint: 0 (Start).
+
+**Event 2: Start HIGH at Minute 2**
+State: Core was busy with LOW1 for exactly 2 minutes. LOW1 reaches its first checkpoint immediately upon preemption. Work done = 2 mins. No work wasted yet as it aligns perfectly with checkpoint boundary.
+- Preemption Trigger: HIGH arrives at min 2.
+- LOW1 Status: Paused. Elapsed Running Time = 2. Last Checkpoint = 2. Remaining Work to do upon resume = 3 (Total 5 - 2 done).
+- Wasted Min so far: 0.
+
+**Event 3: Finish HIGH at Minute 11** (Started min 2, duration 9)
+State: Core free at minute 11. LOW jobs are resumed in order of start time (LOW1 started min 0, LOW2 started min 2).
+- Resume Action: LOW1 resumes first. It needs to complete its remaining 3 minutes.
+- Execution: LOW1 runs from min 11 to min 14. Finishes at minute 14.
+- Checkpoint Status for LOW1: It ran 2 mins (preempted) + 3 mins (resumed). Total running time = 5. Final checkpoint was at 2, next would be at 4 (absolute), but it finished before hitting another checkpoint boundary relative to *running* accumulation?
+  - Let's re-evaluate checkpoint logic: "checkpoints every 2 completed minutes of running time".
+  - LOW1 running intervals: [0, 2] -> 2 mins done. Checkpoint at 2.
+  - Resume interval: [11, 14] -> 3 mins done. Total accumulated running time = 5.
+  - Does it hit a checkpoint during the resume? The checkpoints are cumulative based on *running* time.
+    - At end of first interval: Running Time = 2. Checkpoint reached.
+    - During second interval (runs for 3 mins): Running time goes 2 -> 3 -> 4 -> 5.
+    - Does "every 2 completed minutes" mean checkpoints at cumulative totals of 2, 4? Yes.
+    - So LOW1 accumulates running time: 0->2 (checkpoint), then resumes. Runs for 3 mins. Total reaches 5. It does not hit a checkpoint during the resume phase because it jumps from 2 to 5 directly without hitting 4? Wait, "running time" is continuous accumulation.
+    - If I run 0-2 (total 2). Resume at 11. Run 11-14 (adds 3). Total running time becomes 5. Did it pass the "4 minutes of running time" mark? Yes, conceptually in real-time it would have passed the 4th minute of *processing*, but since the job is preempted/resumed, does the system track continuous clock or cumulative runtime?
+    - Rule text: "checkpoints every 2 completed minutes of running time". Usually implies cumulative active processing.
+    - If I process min 0-2 (2 mins). Then pause. Then process min 11-14 (3 mins). Total processed = 5. The threshold for the next checkpoint is 4 minutes total. Since we processed 2, then added 3, we crossed the 4-minute mark instantly at t=11 + (2 mins) = 13?
+    - Let's trace: At T=11, Resume. Needs to do 3 mins of work.
+      - Minute 1 of resume (T=11-12): Total running time = 3.
+      - Minute 2 of resume (T=12-13): Total running time = 4. **Checkpoint Reached**.
+      - Minute 3 of resume (T=13-14): Total running time = 5. **Job Finished**.
+    - Okay, so LOW1 reaches a checkpoint at absolute minute 13 (cumulative run time 4).
+- Status after Event 3: LOW1 finishes at min 14. Wasted = 0.
+
+**Event 4: Start LOW2 at Minute 2?** No, rule says "LOW jobs take the core in order of their start minutes".
+- Correction on Event Sequence: The prompt implies a continuous stream.
+- Re-evaluating Event Order carefully based on "arrivals in order":
+  - T=0: LOW1 starts.
+  - T=2: HIGH arrives. Preempts LOW1. (LOW1 paused).
+  - What about LOW2? "LOW2 runs 7 minutes starting at minute 2".
+  - Does LOW2 start immediately when the core is free or when it arrives? "starting at minute 2" usually means scheduled start, but if preempted, does it wait?
+  - Rule: "a LOW whose start minute arrives while the core is busy simply waits."
+  - At T=2, HIGH arrives. Core becomes busy with HIGH immediately (preemption). LOW2's arrival/start time is also min 2. Since the core is taken by HIGH (higher priority/arrival tie-breaker?), LOW2 must wait for HIGH to finish or queue up?
+  - Rule: "HIGH... instantly preempting whatever LOW job is running, and while HIGH runs nothing else runs."
+  - So at T=2: Core busy with HIGH. LOW1 paused. LOW2 arrives (start time 2) but core is occupied by HIGH. LOW2 waits in queue.
+- Event Sequence Correction:
+  1. **T=0**: LOW1 starts. Runs until T=2. (Cumulative run: 2). Checkpoint at 2 reached exactly before pause? Yes. Wasted = 0.
+  2. **T=2**: HIGH arrives. Preempts LOW1. Core busy with HIGH for 9 mins. LOW2 arrives (start time 2), but core is busy. LOW2 waits in queue.
+     - State at T=11 (HIGH finishes): Core free. Queue: [LOW1(resume), LOW2(fresh)].
+     - Rule: "resumed LOW outranks a fresh one". Order of execution: LOW1 first, then LOW2.
+  3. **Resume LOW1**: Needs to finish remaining work. Total duration 5. Did 2. Remaining 3.
+     - Runs T=11 -> T=14 (3 mins).
+     - Checkpoint logic check again: Cumulative run time goes 2 -> 3 -> 4 -> 5.
+       - At T=11+0 = 2 total run? No, starts at 2.
+       - Interval 1 (T=0-2): Total Run = 2. Checkpoint hit.
+       - Resume starts. Target is to reach 5 mins total work. Next checkpoint at 4 total run.
+       - Needs 2 more minutes of run time to hit checkpoint 4. Then 1 more min to finish.
+       - Execution: T=11-13 (2 mins). Total Run = 4. Checkpoint hit. Wasted between 2 and 4? No, work done was valid.
+       - T=13-14 (1 min). Total Run = 5. Job Complete.
+     - Result: LOW1 finishes at T=14. Wasted by preemption = 0 (since it landed exactly on checkpoint boundary or before crossing to waste zone? Preemption happened at T=2, which was exactly the checkpoint moment. Work done in [0,2] is saved).
+     - Wait, "on preemption the work past the last checkpoint is wasted". If preemption happens *at* minute 2 (end of minute 1), and checkpoint is *every* 2 minutes...
+       - Minute 0-1: Run 1. Total=1.
+       - Minute 1-2: Run 1. Total=2. Checkpoint triggered at the instant T=2.
+       - Preemption occurs "at minute 2". Usually this means the event happens at the transition to minute 2 or during minute 2? "arrives at minute 2 and runs 9 minutes". Start time is discrete.
+       - If LOW1 started at 0 for 5 mins: Interval [0,1], [1,2], [2,3], [3,4], [4,5].
+       - Checkpoints at Total Run = 2 (end of interval [1,2]) and Total Run = 4 (end of interval [3,4]).
+       - HIGH arrives at minute 2. This is the boundary between run interval [0,1] and [1,2]? Or does it mean "at T=2" implies after

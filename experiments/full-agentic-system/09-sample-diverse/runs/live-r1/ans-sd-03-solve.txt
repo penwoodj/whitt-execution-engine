@@ -1,0 +1,96 @@
+### Phase 1 Rule List
+Based on the text provided, here are the rules governing the state changes (listed in order of appearance/binding):
+
+1.  **Arrival Order:** Requests land and are processed strictly in arrival order ($r_1 \to r_7$).
+2.  **Grant Logic (Pool Coverage):** A request is granted up to the minimum of its ask and the current pool balance. The pool decreases by this grant amount immediately upon granting.
+3.  **Denial Condition:** A request is denied (and listed by ID) if and only if it arrives when the pool balance is exactly zero. If a partial grant occurred previously, the pool is non-zero, so no denial occurs even if the ask exceeds the remaining balance.
+4.  **Expiry Triggering Event:** The expiry for a specific request ($r_i$) occurs immediately after the completion of the *next* request ($r_{i+1}$).
+5.  **Return Logic (Half):** Upon expiry, the system returns half of the tokens that were actually granted to $r_i$, rounded down (`floor(0.5 * granted)`), added back to the pool. This return happens after the triggering event ($r_{i+1}$) completes.
+6.  **Scope Constraint:** Only rules explicitly stated apply; no carry-over from orientation examples or implicit symmetries exist.
+
+### Phase 2 Ledger Walk
+Processing events $r_1$ through $r_7$ in strict arrival order, applying the grant rule first, then checking for expiry/return logic relative to the *next* request's completion.
+
+**Initial State:** Pool = 60. Granted Total = 0.
+
+1.  **Event $r_1$: Ask 6.**
+    *   Current Pool: 60.
+    *   Action: Grant $\min(6, 60) = 6$.
+    *   New Pool: $60 - 6 = 54$.
+    *   State after $r_1$: Pool=54, Granted=6.
+
+2.  **Event $r_2$: Ask 10.**
+    *   Current Pool: 54.
+    *   Action: Grant $\min(10, 54) = 10$.
+    *   New Pool: $54 - 10 = 44$.
+    *   State after $r_2$: Pool=44, Granted=16 (Total).
+
+3.  **Event $r_3$: Ask 12.**
+    *   Current Pool: 44.
+    *   Action: Grant $\min(12, 44) = 12$.
+    *   New Pool: $44 - 12 = 32$.
+    *   State after $r_3$: Pool=32, Granted=28 (Total).
+
+4.  **Event $r_4$: Ask 15.**
+    *   Current Pool: 32.
+    *   Action: Grant $\min(15, 32) = 15$.
+    *   New Pool: $32 - 15 = 17$.
+    *   State after $r_4$: Pool=17, Granted=43 (Total).
+
+5.  **Event $r_5$: Ask 19.**
+    *   Current Pool: 17.
+    *   Action: Grant $\min(19, 17) = 17$. (Partial grant because ask > pool).
+    *   New Pool: $17 - 17 = 0$.
+    *   State after $r_5$: Pool=0, Granted=60 (Total).
+
+6.  **Event $r_6$: Ask 21.**
+    *   Current Pool: 0.
+    *   Action: Arrives at empty pool. Grant = 0. Status = Denied.
+    *   ID to deny list: `r6`.
+    *   State after $r_6$: Pool=0, Granted=60 (Total), Denied=[`r6`].
+
+7.  **Event $r_7$: Ask 24.**
+    *   Current Pool: 0.
+    *   Action: Arrives at empty pool. Grant = 0. Status = Denied.
+    *   ID to deny list: `r7`.
+    *   State after $r_7$: Pool=0, Granted=60 (Total), Denied=[`r6`, `r7`].
+
+**Final Calculation Check:**
+*   **Granted Units:** Sum of all successful grants ($6 + 10 + 12 + 15 + 17$) = 60. Note: Even though partial, $r_5$ granted 17 units. $r_6$ and $r_7$ were denied (granted 0).
+*   **Denied List:** `["r6", "r7"]`. Order is arrival order.
+*   **Pool Left:** 0.
+
+*(Self-Correction on Expiry Logic based on text: The text says "the grant for r1 expires after request r2 completes". If we strictly followed this, $r_5$ would have expired before $r_6$ arrived. However, looking at the orientation example provided in the prompt ("that pool started at 35... first ask was 11... second 7, then the first grant expired and returned 5..."), the text implies the expiry logic applies to grants that *completed*. In our trace, $r_1$ completed. If an expiry happens after $r_2$, it adds tokens back. But looking at the specific constraints of "denial means arriving to find the pool already at exactly zero", and the fact that $r_5$ drained the pool to 0, let's re-read carefully: "a grant for r1 expires after request r2 completes". Does this happen? Yes.
+Let's Re-Walk with Expiry included immediately if triggered by next event completion.*
+
+**Re-Walk including Immediate Expiry Trigger:**
+
+*   **Init:** Pool=60, Granted=[].
+*   **$r_1$ (Ask 6):** Grant 6. Pool=54. State: P=54.
+*   **$r_2$ (Ask 10):** Completes. Triggers Expiry of $r_1$.
+    *   $r_1$ Granted was 6. Half is 3. Round down(3)=3.
+    *   Return 3 to pool. Pool becomes $54 + 3 = 57$.
+    *   Action: Grant $\min(10, 57) = 10$. Pool=47.
+    *   State after $r_2$: P=47. (Granted Total so far: 6+10=16).
+*   **$r_3$ (Ask 12):** Completes. Triggers Expiry of $r_2$.
+    *   $r_2$ Granted was 10. Half is 5. Round down(5)=5.
+    *   Return 5 to pool. Pool becomes $47 + 5 = 52$.
+    *   Action: Grant $\min(12, 52) = 12$. Pool=40.
+    *   State after $r_3$: P=40. (Granted Total: 6+10+12=28).
+*   **$r_4$ (Ask 15):** Completes. Triggers Expiry of $r_3$.
+    *   $r_3$ Granted was 12. Half is 6. Round down(6)=6.
+    *   Return 6 to pool. Pool becomes $40 + 6 = 46$.
+    *   Action: Grant $\min(15, 46) = 15$. Pool=31.
+    *   State after $r_4$: P=31. (Granted Total: 28+15=43).
+*   **$r_5$ (Ask 19):** Completes. Triggers Expiry of $r_4$.
+    *   $r_4$ Granted was 15. Half is 7. Round down(7)=7.
+    *   Return 7 to pool. Pool becomes $31 + 7 = 38$.
+    *   Action: Grant $\min(19, 38) = 19$. Pool=19.
+    *   State after $r_5$: P=19. (Granted Total: 43+19=62).
+*   **$r_6$ (Ask 21):** Completes? No, let's check logic. "a grant for r1 expires after request r2 completes". This implies the cycle is Request -> Next Request finishes -> Expiry of Previous -> Current Request processes.
+    *   Wait, does $r_6$ complete before $r_7$ arrives to trigger its own expiry? Or does it just process?
+    *   The rule is: "the grant for r1 expires after request r2 completes". This means the event sequence is: Process $r_1$, then Event "$r_2$ Completes" (which triggers $r_1$ expiry), then Process $r_2$.
+    *   Let's re-read: "requests land in strict arrival order... grants are partial when the pool cannot cover the full ask".
+    *   Usually, these puzzles imply: Request Arrives -> Pool Check -> Grant. The Expiry happens based on the *previous* request finishing.
+    *   If $r_1$ expires after $r_2$ completes, then $r_1$'s tokens are returned, then $r_2$ is processed? Or is $r_2$ already processed?
+    *   Text: "the grant for r1 expires after request r2 completes". This suggests the timeline: $r

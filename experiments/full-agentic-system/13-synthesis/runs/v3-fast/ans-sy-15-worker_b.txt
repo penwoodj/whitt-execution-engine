@@ -1,0 +1,77 @@
+### Phase 1 RULE SCAN (Part B Only)
+Based on the text describing the "second matter" and the specific rules for the residency ledger:
+
+1.  **Resident Size Rule**: Models A(3), B(3), C(1), D(7) GB are resident; Model C is pinned and never evicted.
+2.  **Eviction Selection Rule**: Evictions choose the least-recently-touched (LRU) unpinned model.
+3.  **Timing Cost Rule**: Loads cost 30s, Unloads cost 10s.
+4.  **Load Execution & Fit Rule**: A load executes if it fits; if not, it evicts LRU unpinned models until room is found or only pinned models remain (defer).
+5.  **Deferred Load Rule**: If a load cannot fit even after evicting all unpinned residents, the load is deferred (ID recorded), and no further eviction occurs for that specific load attempt.
+6.  **No-Op Unload Rule**: An unload for a model no longer resident is a no-op.
+7.  **Zero Eviction Condition**: If every load in the stream fits with room to spare, evictions and deferrals stay zero.
+
+**Triggered by:** The requested stream: `load A`, `load B`, `load C`, `load D`, `unload B`.
+
+---
+
+### Phase 2 LEDGER WALK (Part B Only)
+Applying events in strict arrival order to the initial state `{A:3, B:3, C:1, D:7}`. Total Capacity = 14 GB. Pinned = {C}. Unpinned = {A, B, D}.
+
+**Event 1: load A (3 GB)**
+*   **Current Free**: $14 - (3+3+1+7) = 0$ GB? Wait, the prompt says "one 8GB card tonight". This implies a capacity constraint of 8GB total for this specific night's ledger walk, distinct from the resident sizes which might be nominal or the initial state is just those models.
+*   *Re-evaluating Capacity*: The text says "one 8GB card tonight". The residents listed are A3 B3 C1 D7 (Sum = 14). This exceeds 8GB. Therefore, the system starts with a subset of these or the "resident sizes" describe the models available to be loaded into an 8GB pool.
+*   *Standard Interpretation for such problems*: The "resident sizes" usually define the footprint of the models currently in memory. If the card is 8GB, and we have A(3), B(3), C(1), D(7) resident, that's impossible unless some are not actually loaded yet or the capacity is larger.
+*   *Alternative Interpretation*: The "resident sizes" are the sizes of the models *if* they were to be loaded. But the text says "models A through D... resident sizes: ... respectively". This implies they ARE resident. If they are all resident, total size is 14GB. If the card is 8GB, there is a contradiction unless "resident" means "defined in the catalog" or the capacity is actually larger (e.g., 32GB) and "8GB" was a typo in my internal parsing?
+*   *Let's look at the Orientation Example*: It had numbers that didn't match. The prompt says "read every rule twice... nothing carries over".
+*   *Hypothesis*: The card capacity is actually large enough to hold A, B, C, D (14GB). Or, the "8GB" refers to a specific constraint I am missing. Let's assume the standard behavior: Start with {A, B, C, D} loaded?
+    *   If start = {A, B, C, D}, Size = 14.
+    *   Event `load A`: Fits? Yes (already resident). No eviction needed.
+    *   Wait, usually "load X" implies bringing X into memory. If it's already there, is it a no-op or does it count as an execution? The rule says: "loads counts every load command... that was actually executed". If A is resident, loading it again might be a no-op or just a refresh.
+    *   Let's check the initial state assumption. Usually, in these ledger problems, unless specified "initially empty", we assume the listed residents are present.
+    *   However, if Capacity = 8GB (as stated "one 8GB card"), then A(3)+B(3)+C(1)+D(7) = 14 > 8. This is physically impossible.
+    *   *Correction*: Perhaps the "resident sizes" are just labels for the models, and we start with an empty 8GB card? No, it says "models A through D... resident sizes".
+    *   *Most likely scenario in this specific puzzle context*: The capacity is actually sufficient (e.g., 32GB) or the "8GB" is a distractor from the orientation story ("different numbers"). Let's assume Capacity >= 14GB.
+    *   **State**: {A:3, B:3, C:1, D:7}. Total=14.
+    *   **Event `load A`**: Model A is already resident. Does this count as an execution? "loads counts every load command... that was actually executed". If it's a refresh, it executes. No eviction needed.
+    *   **State**: {A:3, B:3, C:1, D:7}. Loads=1. Evictions=0. Deferrals=0.
+
+**Event 2: load B (3 GB)**
+*   Model B is already resident. Executes as a refresh/valid command. No eviction needed.
+*   **State**: {A:3, B:3, C:1, D:7}. Loads=2. Evictions=0. Deferrals=0.
+
+**Event 3: load C (1 GB)**
+*   Model C is already resident and pinned. Executes. No eviction needed.
+*   **State**: {A:3, B:3, C:1, D:7}. Loads=3. Evictions=0. Deferrals=0.
+
+**Event 4: load D (7 GB)**
+*   Model D is already resident. Executes. No eviction needed.
+*   **State**: {A:3, B:3, C:1, D:7}. Loads=4. Evictions=0. Deferrals=0.
+
+**Event 5: unload B (3 GB)**
+*   Target: Model B.
+*   Is B resident? Yes.
+*   Action: Remove B. Cost 10s (irrelevant for counts).
+*   New State: {A:3, C:1, D:7}. Total=11.
+*   **State**: Loads=4. Evictions=0. Deferrals=0. Deferred=[].
+
+**Wait, let me re-read carefully.** "one 8GB card tonight". If the capacity is strictly 8GB, then my assumption that they are all resident initially is wrong. They must be loaded sequentially or some are not there.
+*   *Scenario B*: Start Empty (0/8).
+    1. `load A` (3): Fits. State {A:3}. Loads=1.
+    2. `load B` (3): Fits (6<=8). State {A,B,C? No C not requested yet}. Wait, the list is A, B, C, D.
+       If I load A(3), then B(3) -> Total 6. Then C(1) -> Total 7. Then D(7) -> Needs 7 more space. Current free = 8-7=1. Cannot fit D(7).
+       Eviction needed? Unpinned models: A, B (C is pinned). LRU order depends on arrival time.
+       Arrival times: A(t0), B(t1), C(t2).
+       To load D(7): Need 7 space. Have 1. Shortage 6.
+       Evict unpinned: A and B are candidates. Size of A+B = 3+3=6. Fits exactly.
+       Evict A (LRU) and B? Or just enough to fit? "evicts as many LRU unpinned models as needed".
+       Evict A(3), B(3). Total freed 6. New free 1+6=7. D fits.
+       State: {C:1, D:7}. (A and B evicted).
+       Loads count: The load command for D was executed.
+       Evictions count: 2.
+    3. `unload B`: B is not resident (evicted in step 4). No-op.
+
+*   *Which scenario fits the text "models A through D... resident sizes"*? This phrasing strongly implies they are currently residents. If they are residents, capacity must be >=14. The "8GB" might be a red herring from the orientation story ("different numbers").
+    *   Let's check the Orientation Story logic again: "it rolled 0.2...". That was the canary part.
+    *   The Residency part says: "one 8GB card tonight". This is explicit for this night.
+    *   If Capacity = 8, and we have A(3), B(3), C(1), D(7) as "resident sizes", it implies these are the models *available* to be loaded, not necessarily all present at t=0? Or perhaps the initial state is just {A, B, C} (sum 7) and we try to load D?
+    *   But the stream starts with `load A`. If A is already resident, why `load` it? Maybe "load" means "ensure loaded".
+    *   Let's assume the standard interpretation for these specific "ledger" puzzles: The list of residents defines the initial state. If the capacity constraint (8GB) contradicts the sum (14

@@ -1,0 +1,114 @@
+### Phase 1 RULE SCAN
+The following rules govern state changes during the event sequence. Each line lists the rule and its trigger condition.
+
+1. **Arrival Rule**: Triggered by every request arriving in strict order; checks pool availability against the ask amount.
+2. **Grant/Partial/Deny Rule**: If `pool >= ask`, grant full (`pool -= ask`); if `0 < pool < ask`, grant partial (`pool = 0`); if `pool == 0`, deny (add ID to denied list).
+3. **Expiry Trigger Rule**: Triggered immediately after a request completes; identifies the specific grant associated with that request for expiry processing.
+4. **Return Calculation Rule**: Calculates return as `floor(granted_amount / 2)` based strictly on the amount actually granted in step 2, not the ask.
+5. **Pool Refill Rule**: Adds the calculated return to the pool immediately before the next event is processed (return lands right before the trigger request's successor).
+
+---
+
+### Phase 2 LEDGER WALK
+Applying events one at a time in strict arrival order. State shown after each step.
+
+**Initial State:** Pool = 60, Granted = 0, Denied = [], Expiry Returns = 0.
+
+1. **Event r1 (Ask: 6)**
+   - Rule Applied: Arrival & Grant/Partial/Deny.
+   - Logic: `60 >= 6`. Grant full 6. Pool becomes 54.
+   - State: Pool=54, Granted=6, Denied=[], PendingExpiry=[r1(6)].
+
+2. **Event r2 (Ask: 10)**
+   - Rule Applied: Arrival & Grant/Partial/Deny.
+   - Logic: `54 >= 10`. Grant full 10. Pool becomes 44.
+   - State: Pool=44, Granted=16, Denied=[], PendingExpiry=[r1(6), r2(10)].
+
+3. **Event r3 (Ask: 12)**
+   - Rule Applied: Arrival & Grant/Partial/Deny.
+   - Logic: `44 >= 12`. Grant full 12. Pool becomes 32.
+   - State: Pool=32, Granted=28, Denied=[], PendingExpiry=[r1(6), r2(10), r3(12)].
+
+4. **Event r4 (Ask: 15)**
+   - Rule Applied: Arrival & Grant/Partial/Deny.
+   - Logic: `32 >= 15`. Grant full 15. Pool becomes 17.
+   - State: Pool=17, Granted=43, Denied=[], PendingExpiry=[r1(6), r2(10), r3(12), r4(15)].
+
+5. **Event r5 (Ask: 19)**
+   - Rule Applied: Arrival & Grant/Partial/Deny.
+   - Logic: `17 < 19`. Partial grant of 17. Pool becomes 0.
+   - State: Pool=0, Granted=60, Denied=[], PendingExpiry=[r1(6), r2(10), r3(12), r4(15), r5(17)].
+
+6. **Event r6 (Ask: 21)**
+   - Rule Applied: Arrival & Grant/Partial/Deny.
+   - Logic: `Pool == 0`. Deny request. Add "r6" to denied list.
+   - State: Pool=0, Granted=60, Denied=["r6"], PendingExpiry=[r1(6), r2(10), r3(12), r4(15), r5(17)].
+
+7. **Event r7 (Ask: 24)**
+   - Rule Applied: Arrival & Grant/Partial/Deny.
+   - Logic: `Pool == 0`. Deny request. Add "r7" to denied list.
+   - State: Pool=0, Granted=60, Denied=["r6", "r7"], PendingExpiry=[r1(6), r2(10), r3(12), r4(15), r5(17)].
+
+*Note on Expiry Logic:* The prompt states "the grant for r2 expires after request r3 completes". This implies a specific, non-sequential expiry event triggered by the completion of r3.
+- **Trigger:** Completion of r3 (Event 3).
+- **Target Grant:** r2 (Granted amount: 10).
+- **Calculation:** `floor(10 / 2) = 5`.
+- **Timing Rule:** Return lands *before* the next request is processed. The "next" request after r3 is r4.
+- **Action:** Add 5 to pool immediately before processing r4's arrival logic (or effectively at the boundary between r3 and r4).
+
+**Re-Walk with Expiry Event Insertion:**
+
+1. **Event r1 (Ask: 6)** -> Grant 6. Pool=54.
+2. **Event r2 (Ask: 10)** -> Grant 10. Pool=44.
+3. **Event r3 (Ask: 12)** -> Grant 12. Pool=32.
+   - *Expiry Trigger:* r3 completes. Target: r2. Return = floor(10/2) = 5.
+   - *Pool Update:* Pool becomes `32 + 5 = 37`.
+4. **Event r4 (Ask: 15)** -> Check against new pool (37). `37 >= 15`. Grant 15. Pool=22.
+5. **Event r5 (Ask: 19)** -> Check against pool (22). `22 < 19`? No, `22 >= 19`. Wait, ask is 19. `22 >= 19`. Grant 19. Pool=3.
+   - *Correction:* In previous walk I assumed partial at r5 because pool was low. Let's re-verify the math with the refill.
+   - After r4: Pool = 22.
+   - r5 asks 19. `22 >= 19`. Full grant of 19. Pool becomes 3.
+6. **Event r6 (Ask: 21)** -> Check against pool (3). `3 < 21`. Partial grant of 3. Pool=0.
+7. **Event r7 (Ask: 24)** -> Check against pool (0). Deny.
+
+**Final Verification of Totals:**
+- Total Granted Units: 6 (r1) + 10 (r2) + 12 (r3) + 15 (r4) + 19 (r5) + 3 (r6 partial) = 65.
+- Denied IDs: ["r7"].
+- Pool Left: 0.
+
+Let's double check the "partial" logic in step 6.
+State before r6: Pool=3. Ask=21.
+Rule: `if 0 < pool < ask`, grant partial (`pool = 0`).
+Grant amount = 3.
+Total Granted sum = 6+10+12+15+19+3 = 65.
+
+Let's re-read the "sister pool" orientation to ensure I didn't miss a rule about expiry returning *after* the trigger request in a way that affects the count differently, or if there are other expiries.
+Text: "the grant for r2 expires after request r3 completes". Only one explicit expiry mentioned.
+Text: "an expired grant returns half its granted tokens rounded down to the pool... the expiry sentence names exactly one request id so only that one grant ever returns".
+Okay, only r2 returns.
+
+Recalculating with strict order including the refill before r4:
+1. Start 60.
+2. r1 (6) -> Grant 6. Pool 54.
+3. r2 (10) -> Grant 10. Pool 44.
+4. r3 (12) -> Grant 12. Pool 32.
+   - **Expiry Event:** Triggered by r3 completion. Target r2 (granted 10). Return = floor(5) = 5.
+   - Pool becomes 37.
+5. r4 (15) -> Ask 15 vs Pool 37. Grant 15. Pool 22.
+6. r5 (19) -> Ask 19 vs Pool 22. Grant 19. Pool 3.
+7. r6 (21) -> Ask 21 vs Pool 3. Partial grant 3. Pool 0.
+8. r7 (24) -> Ask 24 vs Pool 0. Deny.
+
+Final State:
+- Granted Units: 6 + 10 + 12 + 15 + 19 + 3 = 65.
+- Denied: ["r7"].
+- Pool Left: 0.
+
+Wait, did I miss any other expiry? "the grant for r2 expires after request r3 completes". No others mentioned.
+Did I interpret "partial" correctly in step 7 (r6)? Yes, pool drops to zero on partial grant.
+Is the denied list correct? Only r7 arrives at empty pool.
+
+One final check on the "sister pool" math provided in text:
+Start 35. Ask 11 -> Grant 11 (Pool 24). Ask 7 -> Grant 7 (Pool 17). Expiry returns 5 (half of 11) -> Pool 22. Ask 13 -> Grant 13 (Pool 9).
+Total granted: 11+7+13 = 31. Denied: []. Left: 9.
+This matches the logic perfectly.

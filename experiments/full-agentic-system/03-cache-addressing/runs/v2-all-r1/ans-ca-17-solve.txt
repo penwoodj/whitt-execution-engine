@@ -1,0 +1,60 @@
+The task requires processing a specific set of events based on strict rules provided in the text, ignoring any "orientation" or example data that contradicts the current night's parameters. The goal is to calculate the final state (`attempts`, `wait_s`, `budget_after`, `suppressed`) after walking through the event list one by one.
+
+**Current Night Parameters (from the text):**
+*   **Wait Sequence:** 2s, 4s, 8s.
+*   **Attempt Cost:** 2 tokens per attempt.
+*   **Wait Cost:** 1 token per second of wait.
+*   **Budget Limit:** 24 tokens.
+*   **Event Count:** The text describes a sequence where waits are observed as 2, 4, and 8. This implies three failed attempts followed by the conditions for the fourth (successful) attempt. However, we must determine if the budget is exceeded *before* or *after* the successful attempt based on the rule "the job needs 3 failed attempts before the 4th succeeds".
+    *   Let's trace the spend:
+        1.  **Attempt 1:** Cost = 2. Wait = 2s (Cost = 2). Total Spend = 4. Remaining Budget = 20.
+        2.  **Attempt 2:** Cost = 2. Wait = 4s (Cost = 4). Total Spend = 4 + 6 = 10. Remaining Budget = 14.
+        3.  **Attempt 3:** Cost = 2. Wait = 8s (Cost = 8). Total Spend = 10 + 10 = 20. Remaining Budget = 4.
+    *   The text states "waits observed: 2, 4, 8". This accounts for the waits associated with the first three attempts.
+    *   Does a fourth attempt occur? The rule says "the job needs 3 failed attempts before the 4th succeeds". If the budget allows it, the system proceeds to the 4th attempt.
+    *   Current Spend = 20. Budget = 24. Remaining = 4.
+    *   Attempt 4 Cost = 2. Wait for Attempt 4? The text does not explicitly list a wait time for the 4th attempt in the "waits observed" list, but standard logic implies a wait occurs before an attempt if it's part of the retry cycle, or the cost is just the attempt itself. However, looking at the pattern: "after each failed attempt the retry waits, then runs".
+        *   Failed 1 -> Wait 2 -> Run Attempt 1 (Fail).
+        *   Failed 2 -> Wait 4 -> Run Attempt 2 (Fail).
+        *   Failed 3 -> Wait 8 -> Run Attempt 3 (Fail).
+        *   Now we are at the start of Attempt 4. Is there a wait? The text says "waits observed: 2, 4, 8". It does not list a 9th or 16th second wait. This suggests either no wait before the final successful attempt, or the observation stops after the third failure.
+        *   Let's assume the spend calculation includes only what is explicitly defined in the "waits observed" and the attempts themselves.
+        *   Total Spend so far (3 fails + 3 waits) = 20 tokens.
+        *   Budget = 24.
+        *   Can Attempt 4 happen? Yes, cost 2 <= remaining 4.
+        *   Does Attempt 4 have a wait? If the pattern holds (Wait doubles), it would be 16s. But "waits observed" only lists 2, 4, 8. This strongly implies that for the purpose of this specific night's arithmetic, we stop counting waits after the third failure, or the final attempt does not incur a wait in this specific scenario description.
+        *   Let's re-read carefully: "after each failed attempt the retry waits... waits observed: 2, 4, 8". This lists exactly three waits. It implies there are exactly three failures recorded with associated waits. The fourth event is the success. Does it have a wait? Usually, retries happen after a wait. But if the list of observed waits ends at 8, we must assume no further wait cost is added to the budget for the final attempt in this specific calculation context, OR the "waits observed" are the only ones that count towards the limit.
+        *   Let's calculate with Spend = 20 (3 attempts + 3 waits).
+        *   Attempt 4 happens. Cost = 2. Total Spend = 22.
+        *   Is there a wait for Attempt 4? If we add it, say $W_4$, then Spend = 22 + $W_4$. If $W_4$ follows the doubling pattern ($8 \times 2 = 16$), Spend = 38 > 24. This would trigger suppression.
+        *   However, the text says "waits observed: 2, 4, 8". It does not say "waits observed: 2, 4, 8, 16". In strict reading tasks like this, if a value is not listed in the observation set, it might not be incurred.
+        *   Let's look at the "orientation" example for comparison logic: "base wait 5s... total waiting 15s... three attempts in all". That example had 3 waits (5+5+5? No, text says "2 failures doubling to 10s"). Wait, orientation text: "base wait 5s, 2 failures doubling to 10s". This implies Wait 1 = 5, Wait 2 = 10. Total waiting = 15. Then it says "three attempts in all". This matches the structure of 3 waits for 3 failures.
+        *   Back to current night: "waits observed: 2, 4, 8". Three waits. Three failures. The fourth attempt is the success. Does it have a wait? If the rule is "after each failed attempt... waits", then after failure 3 (which had wait 8), we run attempt 3 (fail). Then we must wait again to run attempt 4.
+        *   If we assume the doubling pattern continues, Wait 4 = 16s.
+        *   Spend calculation:
+            *   Attempt 1: 2 + 2 = 4.
+            *   Attempt 2: 2 + 4 = 6 (Cumul 10).
+            *   Attempt 3: 2 + 8 = 10 (Cumul 20).
+            *   Wait for Attempt 4: 16? (Cumul 36) -> Suppressed.
+            *   OR, is the "wait" only incurred if it's part of the "observed" list? The text says "waits observed: 2, 4, 8". This sounds like an exhaustive list for this night. If so, no wait cost for attempt 4.
+            *   Spend = 20 (after 3 fails) + 2 (attempt 4) = 22. Budget 24. Not suppressed.
+        *   Let's check the constraint: "if the spend exceeds the budget the job is suppressed".
+        *   Which interpretation fits "waits observed"? Usually, in these puzzles, "observed" implies the set of events that actually happened and were counted. If a 16s wait didn't happen (because it wasn't observed), then we don't count it.
+        *   Let's assume Spend = 22. Budget = 24. `suppressed` = false.
+        *   Total Attempts: The job needs 3 failed attempts before the 4th succeeds. So there are 4 attempts total (1, 2, 3 fail; 4 succeed).
+        *   Wait Seconds: Sum of observed waits = 2 + 4 + 8 = 14.
+        *   Budget After: 24 - (Spend). Spend = (Attempts * 2) + (Waits * 1).
+            *   Attempts = 4. Cost = 8.
+            *   Waits = 3 (based on observed list). Cost = 14.
+            *   Total Spend = 22.
+            *   Budget After = 24 - 22 = 2.
+
+Let's double check the "orientation" logic to see if it hints at a different rule for the final attempt. Orientation: "three attempts in all... spend 30 against a budget of 39".
+Orientation breakdown:
+- Wait 1: 5s (Cost 5). Attempt 1 (Fail, Cost 5). Total 10.
+- Wait 2: 10s (Cost 10). Attempt 2 (Fail, Cost 5). Total 25.
+- Wait 3? Text says "total waiting 15s". 5+10=15. So only 2 waits observed in the orientation story for 3 attempts? Or does it imply a third wait of 0? No, "base wait 5s, 2 failures doubling to 10s". This explicitly names two waits. And "three attempts in all".
+- Spend calculation in Orientation: "plus 3 attempts at 5 each = 15... all spend 15 + 15 = 30".
+    - Wait Cost: 15. Attempt Cost: 15. Total: 30.
+    - This confirms that for the orientation story, there were only 2 waits counted (5 and 10) despite having 3 attempts. The third attempt did not have a preceding wait in that specific calculation model (or the wait was 0/not observed).
+- Applying this pattern to Current Night: "waits observed: 2, 4, 8". Three waits are explicitly listed. This corresponds to three failures. The fourth attempt is the success. Following the

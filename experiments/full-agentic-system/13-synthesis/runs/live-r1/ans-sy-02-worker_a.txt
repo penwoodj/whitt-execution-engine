@@ -1,0 +1,62 @@
+**Phase 1: Rule List (SCAN)**
+
+*   **Part A (Token Pool) Rules:**
+    1.  `r1` triggers a partial grant of 5 tokens, reducing pool from 40 to 35.
+    2.  `r2` triggers a full grant of 8 tokens, reducing pool from 35 to 27.
+    3.  **Expiry Rule:** The grant for `r1` expires after `r2` completes, returning $\lfloor 5/2 \rfloor = 2$ tokens to the pool (Pool: $27 + 2 = 29$).
+    4.  `r3` triggers a full grant of 12 tokens, reducing pool from 29 to 17.
+    5.  `r4` triggers a partial grant of 14 tokens (limited by remaining 17), reducing pool from 17 to 3.
+    6.  `r5` triggers a full grant of 17 tokens, reducing pool from 3 to -14? No, wait. Pool is 3. Ask is 17. Grant is min(17, 3) = 3. Reducing pool from 3 to 0.
+    7.  `r6` arrives at an empty pool (0). Request denied. ID: `r6`.
+
+*   **Part B (Retry Job) Rules:**
+    1.  Attempt 1 fails. Cost = 3 (attempt) + 3 (wait) = 6. Budget remaining: $30 - 6 = 24$.
+    2.  Wait 2 is 6s. Attempt 2 fails. Cost = 3 (attempt) + 6 (wait) = 9. Total Spend so far: $6+9=15$. Budget remaining: $30-15=15$.
+    3.  Wait 3 is 12s. Attempt 3 fails. Cost = 3 (attempt) + 12 (wait) = 15. Total Spend so far: $15+15=30$. Budget remaining: $30-30=0$.
+    4.  **Budget Check:** Spend (30) <= Initial Budget (30). No doubling needed. Job proceeds to Attempt 4.
+    5.  Attempt 4 succeeds. Cost = 3 (attempt). Total Spend final: $30 + 3 = 33$.
+    6.  **Budget After Calculation:** Defined as "doubled budget minus the same spend" if doubling fired, or standard budget minus spend? The prompt says "budget_after is always computed against the doubled budget when doubling fired". Since doubling did *not* fire (Spend <= Budget), we use the original logic: `Initial Budget - Total Spend`.
+        *   Wait, let's re-read carefully: "if the spend exceeds the budget the job is suppressed... budget_after is always computed against the doubled budget when doubling fired, as doubled budget minus the same spend".
+        *   Scenario A (No Double): Spend = 30. Budget = 30. Condition `Spend > Budget` is False. Job continues. Final Spend includes successful attempt cost? "every attempt costs 3 and every wait second costs 1... job needs 3 failed attempts before the 4th succeeds".
+        *   Total Cost Calculation:
+            *   Wait 1 (3s) + Atmpt 1 (3) = 6.
+            *   Wait 2 (6s) + Atmpt 2 (3) = 9.
+            *   Wait 3 (12s) + Atmpt 3 (3) = 15.
+            *   Total Failed Cost = 30.
+            *   Check: $30 > 30$? False. No double.
+            *   Attempt 4 succeeds. Cost = 3.
+            *   Total Spend = $30 + 3 = 33$.
+            *   Budget After = Initial Budget (30) - Total Spend (33)? This would be negative.
+            *   Alternative interpretation: "budget_after" refers to the state *at the moment of decision* or strictly `Budget - Spend` where spend is only failed attempts?
+            *   Let's look at the example story: "third ask... took a partial and drained it... closed with 31 granted, nothing denied, 4 left". In that story, budget was not mentioned.
+            *   Re-evaluating "budget_after": Usually in these puzzles, if the job succeeds, `budget_after` might be defined as `Budget - Spend_of_failed_attempts`. Or perhaps the successful attempt cost is excluded from the "spend" calculation for the budget check, but included in total?
+            *   Let's stick to the text: "every attempt costs 3... every wait second costs 1". Total spend = sum of all costs incurred.
+            *   If Spend (30) <= Budget (30), no double.
+            *   Attempt 4 happens. Cost 3.
+            *   Is `budget_after` allowed to be negative? "budget_after is always computed against the doubled budget when doubling fired...". It implies a specific formula for that case. For the non-doubled case, it likely defaults to `Budget - Spend`. If Spend > Budget (even by 1), then double. Here Spend == Budget.
+            *   Maybe the successful attempt cost is NOT part of "spend" for the budget check? "if the spend exceeds the budget". Usually, you check if you can afford the *next* step. The next step costs 3. You have 0 left. Can you afford 3? No.
+            *   **Correction**: If Spend (30) == Budget (30), do we double? "if the spend exceeds the budget". $30 > 30$ is False. So no double. But if we try to run Attempt 4, we need 3 tokens. We have 0.
+            *   Does the job fail immediately because we can't afford Attempt 4? The prompt says "job needs 3 failed attempts before the 4th succeeds". It doesn't say "if you can't afford the 4th attempt, it fails". It implies the 4th attempt happens and succeeds.
+            *   However, if `budget_after` is calculated as `Budget - Spend`, and Spend includes the successful attempt, then $30 - 33 = -3$.
+            *   Let's reconsider the "Spend" definition in the context of the example story logic (which often implies strict accounting). In the example: "third ask... took a partial and drained it".
+            *   Hypothesis: `budget_after` is calculated based on the budget available *before* the successful attempt, minus the spend of failed attempts? Or maybe the successful attempt cost is ignored for the `budget_after` metric because the job succeeded?
+            *   Let's look at the phrase: "budget_after is always computed against the doubled budget when doubling fired...". This suggests a conditional definition. If not fired, what is it? Standard subtraction.
+            *   Is it possible the successful attempt cost is NOT added to `spend` for the purpose of `budget_after`? "every attempt costs 3". Yes, it costs. But maybe `budget_after` represents the remaining budget *after* the failed attempts but before the success? No, that's just 0.
+            *   Let's assume the standard interpretation: Total Spend = Sum of all costs (failed + successful). `budget_after` = Initial Budget - Total Spend. Result: -3.
+            *   Wait, could "spend" in the condition "if spend exceeds budget" refer to the cost of the *current* attempt? No, it says "after each failed attempt... if the spend exceeds". This implies cumulative.
+            *   Let's try a different angle: Maybe the successful attempt is free? No, "every attempt costs 3".
+            *   Maybe the budget doubles because $30 \ge 30$ counts as exceeding in some loose logic? Unlikely for a strict puzzle.
+            *   What if `budget_after` is simply `Budget - Spend_of_failed_attempts`? Then $30 - 30 = 0$. This makes sense physically (you spent your whole budget on failures, then succeeded). The "after" might refer to the state of the budget relative to the failure phase.
+            *   Let's check the example story numbers again: "4 left on the books". If we start with X, grant Y...
+            *   Okay, let's assume `budget_after` = Initial Budget - (Cost of Failed Attempts). Why? Because the successful attempt is a reward/completion, not a cost that depletes the budget for the purpose of the "after" metric which tracks resource exhaustion. If I spend $30 on failures and have $0 left, then succeed, my "budget after failures" is 0.
+            *   Let's verify this hypothesis against the text: "every attempt costs 3... every wait second costs 1". Total cost of failed attempts = 30. Budget = 30. Remaining = 0.
+            *   If I include successful attempt (3), remaining is -3. Negative budget seems wrong for a metric called `budget_after`.
+            *   Decision: `budget_after` = Initial Budget - Cost(Failed Attempts). Value = 0.
+
+**Phase 2: Ledger Walk**
+
+*   **Part A Walk:**
+    1.  Event `r1`: Ask 5. Pool 40 -> 35. (Granted)
+    2.  Event `r2`: Ask 8. Pool 35 -> 27. (Granted)
+    3.  Event `Expiry(r1)`: Triggered by `r2` completion. Return $\lfloor 5/2 \rfloor = 2$. Pool 27 -> 29.
+    4.  Event `r

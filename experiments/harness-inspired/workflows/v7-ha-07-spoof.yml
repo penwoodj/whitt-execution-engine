@@ -1,0 +1,375 @@
+workflow_id: harness_v7_ha-07_spoof
+name: "Harness v7 SPOOF - ha-07"
+description: "TABLE->GATE->AGGREGATE->JUDGE-V2->LEAK-AUDIT. Case: ha-07 hops=4 route=light"
+version: "7.0.0"
+author: "Experiment"
+tags: [harness, agentic, v7, routing, snapshot, meter, audit ,spoof]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  m_light:
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  m_heavy:
+    name: "Qwen3-5-9B-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  m_judge:
+    name: "Hermes-2-Pro-Mistral-7B.Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  timing:
+    cooldown_after_unload_secs: 0
+    min_tmp_space_mb: 50
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+  steps:
+    s00_screen:
+      generative_entity: "${models.m_light}"
+      prompt: "pre-flight"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/screen-validate.py /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/ha-07.yml"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - skip_step: true
+
+    s01_solve:
+      generative_entity: "${models.m_light}"
+      prompt: |
+        ROLE: on-call operator. Precise. Zero fluff.
+
+                You schedule 5 model runs on one server. Each run takes 4 minutes. The
+        server needs a 2-minute cooldown between consecutive runs, but never after
+        the final run. Mid-suite you must restart the server exactly once, right
+        after run 2, and the restart itself takes 1 minute and replaces that
+        interval's cooldown entirely. A health poller you do not manage pings the
+        server between runs but adds zero wait time. Report total wall-clock minutes
+        for the whole suite and the number of restarts.
+
+        METHOD: for EACH entity below, derive its answer from the rules.
+        Track state step by step in plain text. Entities you do not manage
+        NEVER count. Check deadline/budget rules BEFORE finalizing.
+
+        Entities (one line each, id then question):
+        - run_time: minutes for 5 runs [answer format: a whole number]
+        - cooldowns: cooldown minutes (3 gaps x 2min) [answer format: a whole number]
+        - restart: restart minutes after run 2 (replaces cooldown) [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 3 lines,
+        one per entity above, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines. No JSON. No explanations.
+      model_overrides: { temperature: 0.1, max_tokens: 1280 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/spoof-write.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt --text-file experiments/harness-inspired/fixtures/spoof-v7/ha-07-solve-adv_dup.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/ha-07.yml --out ./docs/benchmarks/outputs/output/spoof-v7/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s02_fix_1
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/spoof-v7/ha-table-result.json check ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl ha-07"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt ./docs/benchmarks/outputs/output/spoof-v7/artifact.solve.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt --stage solve --trace ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl --case ha-07"
+              working_dir: "."
+              fail_on_error: false
+          - skip_step: true
+
+    s02_fix_1:
+      generative_entity: "${models.m_light}"
+      prompt: |
+        ROLE: correction specialist. Entity table failed checks. Fix rows.
+
+        Original task:
+                You schedule 5 model runs on one server. Each run takes 4 minutes. The
+        server needs a 2-minute cooldown between consecutive runs, but never after
+        the final run. Mid-suite you must restart the server exactly once, right
+        after run 2, and the restart itself takes 1 minute and replaces that
+        interval's cooldown entirely. A health poller you do not manage pings the
+        server between runs but adds zero wait time. Report total wall-clock minutes
+        for the whole suite and the number of restarts.
+
+        Failed cells (id + your observed value, correct values withheld):
+        {{bookmarks.cell_feedback}}
+
+        Prior table:
+        {{bookmarks.table}}
+
+        METHOD: re-read the task rules above, then re-derive each failed
+        entity. Use these exact entity ids:
+
+        - run_time: minutes for 5 runs [answer format: a whole number]
+        - cooldowns: cooldown minutes (3 gaps x 2min) [answer format: a whole number]
+        - restart: restart minutes after run 2 (replaces cooldown) [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 3 lines,
+        one per entity, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines.
+      model_overrides: { temperature: 0.0, max_tokens: 1600 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/spoof-write.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt --text-file experiments/harness-inspired/fixtures/spoof-v7/ha-07-fix_1-adv_dup.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/ha-07.yml --out ./docs/benchmarks/outputs/output/spoof-v7/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s03_fix_2
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/spoof-v7/ha-table-result.json fix_1 ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl ha-07"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt ./docs/benchmarks/outputs/output/spoof-v7/artifact.fix_1.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt --stage fix_1 --trace ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl --case ha-07"
+              working_dir: "."
+              fail_on_error: false
+          - skip_step: true
+
+    s03_fix_2:
+      generative_entity: "${models.m_heavy}"
+      prompt: |
+        ROLE: escalation solver. Two attempts wrong. Rebuild table from scratch.
+
+        Original task:
+                You schedule 5 model runs on one server. Each run takes 4 minutes. The
+        server needs a 2-minute cooldown between consecutive runs, but never after
+        the final run. Mid-suite you must restart the server exactly once, right
+        after run 2, and the restart itself takes 1 minute and replaces that
+        interval's cooldown entirely. A health poller you do not manage pings the
+        server between runs but adds zero wait time. Report total wall-clock minutes
+        for the whole suite and the number of restarts.
+
+        Failed cells (id + observed, withheld correct):
+        {{bookmarks.cell_feedback}}
+
+        METHOD: discard prior attempts. Re-derive EVERY entity answer from
+        the rules. Use these exact entity ids:
+
+        - run_time: minutes for 5 runs [answer format: a whole number]
+        - cooldowns: cooldown minutes (3 gaps x 2min) [answer format: a whole number]
+        - restart: restart minutes after run 2 (replaces cooldown) [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 3 lines,
+        one per entity, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines. No prose summaries.
+      model_overrides: { temperature: 0.0, max_tokens: 1600 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/spoof-write.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt --text-file experiments/harness-inspired/fixtures/spoof-v7/ha-07-fix_2-adv_dup.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/ha-07.yml --out ./docs/benchmarks/outputs/output/spoof-v7/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/spoof-v7/ha-table-result.json fix_2 ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl ha-07"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt ./docs/benchmarks/outputs/output/spoof-v7/artifact.fix_2.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt --stage fix_2 --trace ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl --case ha-07"
+              working_dir: "."
+              fail_on_error: false
+          - skip_step: true
+
+    s04_aggregate:
+      generative_entity: "${models.m_light}"
+      prompt: "deterministic-aggregate-noop"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/aggregate.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/ha-07.yml --table-result ./docs/benchmarks/outputs/output/spoof-v7/ha-table-result.json --out ./docs/benchmarks/outputs/output/spoof-v7/ha-final.json"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-deterministic.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-final.json --criteria /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/ha-07.yml --out ./docs/benchmarks/outputs/output/spoof-v7/ha-final-check.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s05_judge
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/spoof-v7/ha-final-check.json final ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl ha-07"
+              working_dir: "."
+              fail_on_error: false
+          - skip_step: true
+
+    s05_judge:
+      generative_entity: "${models.m_judge}"
+      prompt: |
+        ROLE: blind auditor. See only task + result. No author knowledge.
+
+        Task objective: Compute suite wall time with cooldowns and one restart substitution.
+        Result: {{bookmarks.final_json}}
+
+        Answer EXACTLY 6 lines, nothing else:
+        KEYS: yes or no
+        VALUES: yes or no
+        FORMAT: yes or no
+        VERDICT: PASS or FAIL
+        REASON: one sentence
+        SCORE: 1-10
+
+        VERDICT must be PASS only if all three of KEYS, VALUES, FORMAT are yes.
+      model_overrides: { temperature: 0.0, max_tokens: 160 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/spoof-write.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-verdict.txt --text-file experiments/harness-inspired/fixtures/spoof-v7/ha-07-judge.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-judge.py ./docs/benchmarks/outputs/output/spoof-v7/ha-verdict.txt ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl ha-07"
+              working_dir: "."
+              fail_on_error: false
+          - skip_step: true
+
+    s06_end_fail:
+      generative_entity: "${models.m_light}"
+      prompt: "FAIL"
+      model_overrides: { temperature: 0.0, max_tokens: 8 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/failflag.py --result ./docs/benchmarks/outputs/output/spoof-v7/ha-table-result.json --final-check ./docs/benchmarks/outputs/output/spoof-v7/ha-final-check.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s07_fail_trace
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s08_audit
+          - skip_step: true
+
+    s07_fail_trace:
+      generative_entity: "${models.m_light}"
+      prompt: "trace-only"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl end_fail fail case=ha-07"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s08_audit
+
+    s08_audit:
+      generative_entity: "${models.m_light}"
+      prompt: "leak-audit-noop"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/leak-audit.py --run-dir ./docs/benchmarks/outputs/output/spoof-v7 --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/ha-07.yml"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s09_audit_pass
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s10_audit_leak
+          - skip_step: true
+
+    s09_audit_pass:
+      generative_entity: "${models.m_light}"
+      prompt: "audit-pass-trace"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl audit pass case=ha-07"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s_end
+
+    s10_audit_leak:
+      generative_entity: "${models.m_light}"
+      prompt: "audit-leak-trace"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl audit fail leak=true case=ha-07"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s_end
+
+    s_end:
+      generative_entity: "${models.m_light}"
+      prompt: "term"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - skip_step: true

@@ -1,0 +1,58 @@
+### Phase 1 Rule Scan (Part B Only)
+Based on the text provided for the "second matter" (residency rules), here are the active rules and their triggers:
+
+1.  **Capacity Check & Eviction Trigger**: If a requested load does not fit in current resident space, evict the Least-Recently-Touched (LRT) unpinned model until it fits or only pinned models remain.
+    *   *Trigger*: `load D` (7 GB).
+2.  **Deferred Load Rule**: If after exhausting all LRT unpinned models, remaining space is still insufficient, defer the load and record its ID. No further evictions occur for this specific load attempt.
+    *   *Trigger*: `load D` (if it fails to fit even after max evictions).
+3.  **Load Execution Count**: Every successfully executed load command increments the total load count.
+    *   *Trigger*: All valid loads (`A`, `B`, `C`).
+4.  **Unload Rule**: Remove a model from residency if requested and present; costs apply but do not affect eviction/defer counts directly unless space is needed for a subsequent load (handled by rule 1).
+    *   *Trigger*: `unload B`.
+
+### Phase 2 Ledger Walk (Part B Only)
+Applying events in strict arrival order:
+
+*   **Event 1**: `load A` (2 GB)
+    *   Current Residents: Empty.
+    *   Fit Check: 0 + 2 = 2 <= 8. Fits.
+    *   Action: Load A resident.
+    *   State: Loads=1, Evictions=0, Deferrals=0.
+
+*   **Event 2**: `load B` (2 GB)
+    *   Current Residents: {A:2}.
+    *   Fit Check: 2 + 2 = 4 <= 8. Fits.
+    *   Action: Load B resident. (Note: Model B is pinned, but it fits without needing eviction).
+    *   State: Loads=2, Evictions=0, Deferrals=0.
+
+*   **Event 3**: `load C` (2 GB)
+    *   Current Residents: {A:2, B:2}.
+    *   Fit Check: 4 + 2 = 6 <= 8. Fits.
+    *   Action: Load C resident.
+    *   State: Loads=3, Evictions=0, Deferrals=0.
+
+*   **Event 4**: `load D` (7 GB)
+    *   Current Residents: {A:2, B:2, C:2}. Total Space = 6 GB.
+    *   Fit Check: 6 + 7 = 13 > 8. Does not fit.
+    *   Eviction Logic: Need to free at least (13 - 8) = 5 GB? No, need to reduce total resident size such that `TotalSize + 7 <= 8`. Max allowed resident size is 1 GB. Current is 6 GB. Must evict 5 GB.
+    *   Available for Eviction: Models A (2), C (2). Model B (2) is pinned and cannot be evicted.
+    *   LRT Selection: Assuming standard FIFO/LRT order among unpinned {A, C}. Let's assume A was loaded first, then C. LRT is likely C or A depending on exact touch time, but both are 2GB. Evicting one (2GB) leaves 4GB resident space. Still need to fit D (7GB). Total would be 11GB > 8GB.
+    *   Eviction Step 1: Evict LRT unpinned model (say C, 2GB). Residents: {A:2, B:2}. Space freed: 2. Current Resident Size: 4.
+    *   Fit Check again: 4 + 7 = 11 > 8. Still doesn't fit. Need to free more space. Max resident size allowed is 1GB (since D is 7). We need to evict until only models fitting in 1GB remain or we run out of unpinned.
+    *   Eviction Step 2: Evict next LRT unpinned model (A, 2GB). Residents: {B:2}. Space freed: another 2. Current Resident Size: 2.
+    *   Fit Check again: 2 + 7 = 9 > 8. Still doesn't fit.
+    *   Status of Unpinned Models: A and C are now evicted. Only B remains, which is pinned.
+    *   Rule Application: "if only pinned models remain and it still does not fit it defers."
+    *   Action: Load D cannot execute. It is deferred.
+    *   State Update: Loads=3 (only A, B, C executed), Evictions=2 (A and C evicted), Deferrals=1 (ID "load D").
+
+*   **Event 5**: `unload B` (2 GB)
+    *   Current Residents: {B:2}.
+    *   Action: Remove B.
+    *   State Update: Loads remains 3, Evictions remains 2, Deferrals remains 1.
+
+### Final Output (Part B Only)
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["load D"]}
+```

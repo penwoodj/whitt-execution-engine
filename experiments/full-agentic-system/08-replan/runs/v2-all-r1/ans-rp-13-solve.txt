@@ -1,0 +1,84 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the "whole law for tonight", here are the rules that change state during the event sequence:
+
+1.  **Arrival Rule**: Triggers on every attempt arrival (including failed ones). Adds `wait_seconds` to total spend, adds `attempt_cost` to total spend.
+2.  **Budget Check Rule**: Triggers after each Arrival rule application. Compares current `total_spend` against `budget`. If `total_spend > budget`, triggers the doubling mechanism.
+3.  **Doubling Rule**: Triggers only if Budget Check Rule fires (spend exceeds budget). Doubles the `budget` value exactly once. Sets a flag that the budget has been doubled for this session.
+4.  **Re-Check Rule**: Triggers immediately after Doubling Rule application. Re-evaluates the condition `total_spend > new_budget`. If still true, sets `suppressed = true`. If false, sets `suppressed = false` and allows the job to proceed (or completes if this was the success attempt).
+5.  **Success Completion Rule**: Triggers on the specific event where the job succeeds (4th attempt). Marks the sequence as complete.
+
+**Trigger Mapping:**
+*   Event 1 (Attempt 1, Fail): Triggers Arrival Rule -> Budget Check Rule.
+*   Event 2 (Attempt 2, Fail): Triggers Arrival Rule -> Budget Check Rule.
+*   Event 3 (Attempt 3, Fail): Triggers Arrival Rule -> Budget Check Rule.
+*   Event 4 (Attempt 4, Success): Triggers Arrival Rule -> Budget Check Rule -> (If doubled previously) Re-Check Rule.
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   `budget`: 24 tokens
+*   `total_spend`: 0
+*   `suppressed`: false
+*   `attempts_count`: 0
+*   `wait_s_total`: 0
+
+**Event 1: Attempt 1 (Fail)**
+*   **Wait**: 2s. Cost = 2.
+*   **Attempt**: Fail. Cost = 2.
+*   **Spend Calculation**: `total_spend` += 2 (wait) + 2 (attempt) = 4.
+*   **Budget Check**: Is 4 > 24? No.
+*   **State After Event 1**:
+    *   `attempts`: 1
+    *   `wait_s`: 2
+    *   `budget_after` (conceptual): 20
+
+**Event 2: Attempt 2 (Fail)**
+*   **Wait**: 4s. Cost = 4.
+*   **Attempt**: Fail. Cost = 2.
+*   **Spend Calculation**: `total_spend` += 4 + 2 = 6. New Total Spend = 10.
+*   **Budget Check**: Is 10 > 24? No.
+*   **State After Event 2**:
+    *   `attempts`: 2
+    *   `wait_s`: 6 (2+4)
+
+**Event 3: Attempt 3 (Fail)**
+*   **Wait**: 8s. Cost = 8.
+*   **Attempt**: Fail. Cost = 2.
+*   **Spend Calculation**: `total_spend` += 8 + 2 = 10. New Total Spend = 20.
+*   **Budget Check**: Is 20 > 24? No.
+*   **State After Event 3**:
+    *   `attempts`: 3
+    *   `wait_s`: 14 (6+8)
+
+**Event 4: Attempt 4 (Success)**
+*   **Wait**: The prompt states "Waits observed: 2, 4, 8". It implies the sequence stops after the success or we only account for the waits listed. However, standard retry logic usually includes a wait before an attempt. Let's re-read carefully: "after each failed attempt the retry waits... the job needs 3 failed attempts before the 4th succeeds."
+    *   Wait before Attempt 1: 2s (Observed)
+    *   Wait before Attempt 2: 4s (Observed)
+    *   Wait before Attempt 3: 8s (Observed)
+    *   Wait before Attempt 4? The prompt lists "Waits observed: 2, 4, 8". This suggests we do not add a wait for the successful attempt in this specific calculation context, or the list is exhaustive. Given the strict instruction "nothing carries over... read every rule twice", and the explicit list of waits, I will sum only the observed waits (2+4+8=14).
+*   **Attempt**: Success. Cost = 2.
+*   **Spend Calculation**: `total_spend` += 0 (wait) + 2 (attempt) = 2. New Total Spend = 22.
+    *   *Self-Correction/Verification*: Does the success attempt incur a wait? "after each failed attempt the retry waits". The 4th attempt is not preceded by a "failed attempt" in the sequence of failures, but it is an attempt. Usually, there is a wait before any attempt except potentially the first. But the list says "Waits observed: 2, 4, 8". This strongly implies only these three waits occurred or are to be counted.
+    *   Let's check the budget constraint again with Total Spend = 22 vs Budget = 24. 22 < 24. No doubling needed.
+*   **Budget Check**: Is 22 > 24? No.
+*   **State After Event 4**:
+    *   `attempts`: 4
+    *   `wait_s`: 14
+
+**Final Calculation Verification:**
+*   Total Attempts: 4 (3 failed + 1 success).
+*   Total Wait Seconds: 2 + 4 + 8 = 14.
+*   Total Attempt Costs: 2 * 4 = 8.
+*   Total Spend: 14 + 8 = 22.
+*   Initial Budget: 24.
+*   Budget After: 24 - 22 = 2.
+*   Suppressed: false (Spend never exceeded budget).
+
+**Final Answer JSON:**
+
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 2, "suppressed": false}
+```

@@ -1,0 +1,816 @@
+workflow_id: harness_v7_hb-03_spoof
+name: "Harness v7 SPOOF - hb-03"
+description: "TABLE->GATE->AGGREGATE->JUDGE-V2->LEAK-AUDIT. Case: hb-03 hops=3 route=light"
+version: "7.0.0"
+author: "Experiment"
+tags: [harness, agentic, v7, routing, snapshot, meter, audit ,spoof]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  m_light:
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  m_heavy:
+    name: "Qwen3-5-9B-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  m_judge:
+    name: "Hermes-2-Pro-Mistral-7B.Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  timing:
+    cooldown_after_unload_secs: 0
+    min_tmp_space_mb: 50
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+  steps:
+    s00_screen:
+      generative_entity: "${models.m_light}"
+      prompt: "pre-flight"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/screen-validate.py /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-03.yml"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - skip_step: true
+
+    s01_solve:
+      generative_entity: "${models.m_light}"
+      prompt: |
+        ROLE: on-call operator. Precise. Zero fluff.
+
+                You are the incident coordinator who closed out last night's shift at the
+        monitoring desk, and the morning reliability review starts in twenty
+        minutes. Your job before that meeting is to convert the raw alert firehose
+        from the night into the official incident count, because the raw number of
+        alerts — twenty-one pages of scrolling noise in the console — is not the
+        number anyone cares about. Incidents are what the review tracks, and
+        incidents are built from alerts by a deduplication rule that the team
+        agreed on after the great alert-storm of last spring.
+        
+        The deduplication rule works like this. Alerts arrive from monitored
+        sources, and each alert carries the source it came from, a timestamp, and a
+        severity. Two alerts from the SAME source that fire within five minutes of
+        each other — meaning the gap between their timestamps is five minutes or
+        less — belong to the same incident; they are one problem flaring, not two
+        problems. Chains merge transitively: if alert one and alert two are within
+        five minutes, and alert two and alert three are within five minutes, then
+        all three are one incident even if alert one and alert three are more than
+        five minutes apart. Alerts from DIFFERENT sources never merge with each
+        other, no matter how close in time they fire or how similar their symptoms
+        look — a cache problem and a database problem are different incidents even
+        if they scream simultaneously. Once a group of alerts has been merged into
+        an incident, the incident's severity is the maximum severity among its
+        member alerts. An alert that fired with no same-source neighbor within five
+        minutes in either direction is simply an incident of one, carrying its own
+        severity.
+        
+        Last night, exactly three sources produced alerts worth counting, and here
+        is the complete timeline, reconstructed from the console export with the
+        noise filters already applied.
+        
+        The cache service was first. At 00:04 the shared session cache tripped its
+        eviction-rate monitor at SEV2. At 00:06, two minutes later, the same cache
+        service tripped the same monitor again at SEV2 when the rate briefly
+        climbed higher. Those two alerts are from one source with a two-minute gap,
+        comfortably inside the five-minute window, so they merge into a single
+        incident, and the incident's severity is the max of the two — both were
+        SEV2, so the cache incident is a SEV2.
+        
+        The database was louder. At 00:01 the replication lag monitor on the
+        primary database fired at SEV1, because for eleven glorious minutes the
+        replicas were falling behind during a bulk import. That alert recovered on
+        its own and the monitor went quiet. Then at 00:20 the same database's
+        connection-pool saturation monitor fired at SEV3 — connections piled up
+        after a misconfigured client started leaking them. At 00:23, three minutes
+        later, the pool was still saturated and the monitor re-fired at SEV2 as
+        the situation degraded. Working the rule: the 00:01 alert is nineteen
+        minutes away from the 00:20 alert, far outside five minutes, so it can
+        never merge with anything — it stands alone as its own incident, a SEV1
+        incident by its lone severity. The 00:20 and 00:23 alerts are three minutes
+        apart, same source, inside the window, so they merge into one incident,
+        and the severity of that incident is the maximum of SEV3 and SEV2, which
+        is SEV3. The database therefore contributed two separate incidents
+        overnight: one SEV1 and one SEV3.
+        
+        The edge proxy fired exactly once: at 02:47 its certificate-expiry warning
+        triggered at SEV1 because someone had let a staging certificate reach its
+        final forty-eight hours. No other edge alert occurred all night, so this
+        lone alert is an incident of one at SEV1.
+        
+        For completeness, three things that must NOT be counted, each of which
+        fooled a different intern at one point. First, the synthetic canary suite
+        runs checks every minute and logs the results, but canary checks are not
+        alerts — they are measurements, and you do not manage the canary suite
+        anyway. Second, a scheduled maintenance window opened at 03:00 for the
+        search cluster, which suppressed that cluster's alerts entirely for an
+        hour; nothing from search appears in the export, and suppressed alerts are
+        not incidents. Third, an upstream status page for a third-party email
+        provider reported degradation overnight; that is their incident, on their
+        console, and it never entered your monitoring at all.
+        
+        The review wants the official tallies: how many incidents came out of the
+        cache source, the database source, and the edge source respectively, and
+        then the totals — how many incidents at SEV1, how many at SEV2, how many
+        at SEV3, and the overall incident count.
+        
+        The deduplication discipline this rotation follows was paid for in an
+        uncomfortable way. Fourteen months ago the fledgling pipeline saw a flapping
+        health check generate eleven distinct incidents in forty minutes, and the
+        on-call of that night dutifully treated each as its own fire — eleven
+        channels, eleven timelines, eleven postmortem threads that all turned out
+        to describe one degraded network switch. The retrospective counted the
+        waste in engineer-hours and in trust, because leadership reading the
+        incident report initially believed the platform had suffered eleven
+        separate failures in under an hour. Out of that embarrassment came the
+        three-source rule now in force — each source gets exactly one chance to
+        speak per event, and the pipeline trusts the noisiest source, the live
+        alert stream, above the quieter ones.
+        
+        Your shift begins the way every shift begins here, with a handoff read of
+        the open-incident board and a check that the correlation engine finished
+        its overnight grouping run. The engine's output is a suggestion, never a
+        verdict — it clusters raw events by service and time window and hands you
+        the clusters as a starting draft. From there the work is judgment —
+        reading each cluster's member events, deciding which represent the same
+        underlying fault, merging what belongs together, and splitting what the
+        engine glued too eagerly. Every merge and split writes an audit line, so
+        that the morning review can see not just what you concluded but how you
+        got there, one decision at a time.
+        
+        The observability stack around this pipeline is busier than the pipeline
+        itself, and almost none of it touches incident counts. A capacity
+        forecasting job you do not manage ingests the same raw events to predict
+        next quarter's hardware needs, and its reports circulate in a planning
+        channel. A vendor demo running in a sandbox tenant generates realistic-
+        looking alerts on a schedule, safely quarantined from production by a
+        filter that drops everything from that tenant. And the documentation bot
+        watches for recurring keywords across incidents to propose runbook
+        updates — a helpful spectator, but a spectator all the same, and its
+        annotations never create or merge incidents in the ledger you are
+        closing tonight.
+        
+        In the final hour before the rotation's ledger closes, the discipline
+        that matters most is re-verification of the merge trail. You re-read
+        each cluster you touched against the incident records it produced, not
+        the ones you remember producing, because memory under alert fatigue
+        conflates adjacent events into tidy stories. You double-check that every
+        merged cluster carries its justification line — same-service same-window
+        is the standing rationale, and a merge without one gets flagged by the
+        morning review as an unexplained consolidation. You confirm that the
+        severity assignments you inherited at handoff still match the impact
+        descriptions, since a severity copied forward from a stale read is a
+        severity the postmortem will distrust. Only when the ledger reads
+        cleanly from first event to last do you draft the handoff notes for the
+        next rotation — the same notes whose counts you are about to report,
+        and the last thing standing between your shift and the record.
+        
+        The severity ladder itself has a history worth respecting as you assign
+        tonight's levels. Severity one was once reserved for anything that woke
+        anyone up, which is how a cosmetic typo on an internal dashboard once
+        outranked a failing backup job in the quarterly report — the ladder has
+        since been anchored to customer impact and blast radius instead of
+        adrenaline. Severity two covers degraded-but-standing conditions, the
+        degradation visible without threatening collapse. Severity three is the
+        catch-all for everything that is wrong yet tolerable, the bucket most
+        prone to abuse and therefore the one the morning review audits most
+        closely. Tonight's assignments follow the current definitions strictly,
+        and any instinct to bump a severity for visibility's sake is one you
+        note in the margin and decline to act on.
+        
+        A note on the edge event before you close the ledger, because edges are
+        where counting discipline is tested. The event that arrived with no
+        duplicates had a predecessor two rotations ago that also arrived alone,
+        and the morning review at the time debated whether a lone event
+        deserved its own incident or should wait a day in case company showed
+        up. The ruling then, which stands tonight, was that the pipeline speaks
+        when it speaks — an event with no duplicate signal from any source is
+        one incident, full stop, and the ledger does not hold seats open for
+        corroboration that may never come. That ruling cost a small argument
+        and settled a large principle, and it is the principle you applied
+        without ceremony when the lone event crossed your board earlier this
+        evening.
+
+        METHOD: for EACH entity below, derive its answer from the rules.
+        Track state step by step in plain text. Entities you do not manage
+        NEVER count. Check deadline/budget rules BEFORE finalizing.
+
+        Entities (one line each, id then question):
+        - cache_incidents: incidents from cache source (2 alerts, 2 min apart, same source) [answer format: a whole number]
+        - db_incidents: incidents from db source (3 alerts: 00:01 isolated, 00:20+00:23 merged) [answer format: a whole number]
+        - edge_incidents: The edge source fired exactly one alert with no duplicates — each source's events cluster into incidents per the 5-minute same-source window, and a lone alert stands as one incident; how many incidents from the edge source? [answer format: a whole number]
+        - sev1_total: A merged incident carries the maximum severity of its members — count incidents whose final severity is SEV1 (the isolated db SEV1 alert and the lone edge SEV1); how many? [answer format: a whole number]
+        - sev2_total: Count incidents whose final severity is SEV2 (the cache pair, both SEV2, merged into one incident at max severity 2); how many? [answer format: a whole number]
+        - sev3_total: Count incidents whose final severity is SEV3 (the db 00:20 SEV3 merged with 00:23 SEV2 takes the max, which is 3); how many? [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 6 lines,
+        one per entity above, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines. No JSON. No explanations.
+      model_overrides: { temperature: 0.1, max_tokens: 1280 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/spoof-write.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt --text-file experiments/harness-inspired/fixtures/spoof-v7/hb-03-solve-wind0.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-03.yml --out ./docs/benchmarks/outputs/output/spoof-v7/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s02_fix_1
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/spoof-v7/ha-table-result.json check ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl hb-03"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt ./docs/benchmarks/outputs/output/spoof-v7/artifact.solve.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt --stage solve --trace ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl --case hb-03"
+              working_dir: "."
+              fail_on_error: false
+          - skip_step: true
+
+    s02_fix_1:
+      generative_entity: "${models.m_light}"
+      prompt: |
+        ROLE: correction specialist. Entity table failed checks. Fix rows.
+
+        Original task:
+                You are the incident coordinator who closed out last night's shift at the
+        monitoring desk, and the morning reliability review starts in twenty
+        minutes. Your job before that meeting is to convert the raw alert firehose
+        from the night into the official incident count, because the raw number of
+        alerts — twenty-one pages of scrolling noise in the console — is not the
+        number anyone cares about. Incidents are what the review tracks, and
+        incidents are built from alerts by a deduplication rule that the team
+        agreed on after the great alert-storm of last spring.
+        
+        The deduplication rule works like this. Alerts arrive from monitored
+        sources, and each alert carries the source it came from, a timestamp, and a
+        severity. Two alerts from the SAME source that fire within five minutes of
+        each other — meaning the gap between their timestamps is five minutes or
+        less — belong to the same incident; they are one problem flaring, not two
+        problems. Chains merge transitively: if alert one and alert two are within
+        five minutes, and alert two and alert three are within five minutes, then
+        all three are one incident even if alert one and alert three are more than
+        five minutes apart. Alerts from DIFFERENT sources never merge with each
+        other, no matter how close in time they fire or how similar their symptoms
+        look — a cache problem and a database problem are different incidents even
+        if they scream simultaneously. Once a group of alerts has been merged into
+        an incident, the incident's severity is the maximum severity among its
+        member alerts. An alert that fired with no same-source neighbor within five
+        minutes in either direction is simply an incident of one, carrying its own
+        severity.
+        
+        Last night, exactly three sources produced alerts worth counting, and here
+        is the complete timeline, reconstructed from the console export with the
+        noise filters already applied.
+        
+        The cache service was first. At 00:04 the shared session cache tripped its
+        eviction-rate monitor at SEV2. At 00:06, two minutes later, the same cache
+        service tripped the same monitor again at SEV2 when the rate briefly
+        climbed higher. Those two alerts are from one source with a two-minute gap,
+        comfortably inside the five-minute window, so they merge into a single
+        incident, and the incident's severity is the max of the two — both were
+        SEV2, so the cache incident is a SEV2.
+        
+        The database was louder. At 00:01 the replication lag monitor on the
+        primary database fired at SEV1, because for eleven glorious minutes the
+        replicas were falling behind during a bulk import. That alert recovered on
+        its own and the monitor went quiet. Then at 00:20 the same database's
+        connection-pool saturation monitor fired at SEV3 — connections piled up
+        after a misconfigured client started leaking them. At 00:23, three minutes
+        later, the pool was still saturated and the monitor re-fired at SEV2 as
+        the situation degraded. Working the rule: the 00:01 alert is nineteen
+        minutes away from the 00:20 alert, far outside five minutes, so it can
+        never merge with anything — it stands alone as its own incident, a SEV1
+        incident by its lone severity. The 00:20 and 00:23 alerts are three minutes
+        apart, same source, inside the window, so they merge into one incident,
+        and the severity of that incident is the maximum of SEV3 and SEV2, which
+        is SEV3. The database therefore contributed two separate incidents
+        overnight: one SEV1 and one SEV3.
+        
+        The edge proxy fired exactly once: at 02:47 its certificate-expiry warning
+        triggered at SEV1 because someone had let a staging certificate reach its
+        final forty-eight hours. No other edge alert occurred all night, so this
+        lone alert is an incident of one at SEV1.
+        
+        For completeness, three things that must NOT be counted, each of which
+        fooled a different intern at one point. First, the synthetic canary suite
+        runs checks every minute and logs the results, but canary checks are not
+        alerts — they are measurements, and you do not manage the canary suite
+        anyway. Second, a scheduled maintenance window opened at 03:00 for the
+        search cluster, which suppressed that cluster's alerts entirely for an
+        hour; nothing from search appears in the export, and suppressed alerts are
+        not incidents. Third, an upstream status page for a third-party email
+        provider reported degradation overnight; that is their incident, on their
+        console, and it never entered your monitoring at all.
+        
+        The review wants the official tallies: how many incidents came out of the
+        cache source, the database source, and the edge source respectively, and
+        then the totals — how many incidents at SEV1, how many at SEV2, how many
+        at SEV3, and the overall incident count.
+        
+        The deduplication discipline this rotation follows was paid for in an
+        uncomfortable way. Fourteen months ago the fledgling pipeline saw a flapping
+        health check generate eleven distinct incidents in forty minutes, and the
+        on-call of that night dutifully treated each as its own fire — eleven
+        channels, eleven timelines, eleven postmortem threads that all turned out
+        to describe one degraded network switch. The retrospective counted the
+        waste in engineer-hours and in trust, because leadership reading the
+        incident report initially believed the platform had suffered eleven
+        separate failures in under an hour. Out of that embarrassment came the
+        three-source rule now in force — each source gets exactly one chance to
+        speak per event, and the pipeline trusts the noisiest source, the live
+        alert stream, above the quieter ones.
+        
+        Your shift begins the way every shift begins here, with a handoff read of
+        the open-incident board and a check that the correlation engine finished
+        its overnight grouping run. The engine's output is a suggestion, never a
+        verdict — it clusters raw events by service and time window and hands you
+        the clusters as a starting draft. From there the work is judgment —
+        reading each cluster's member events, deciding which represent the same
+        underlying fault, merging what belongs together, and splitting what the
+        engine glued too eagerly. Every merge and split writes an audit line, so
+        that the morning review can see not just what you concluded but how you
+        got there, one decision at a time.
+        
+        The observability stack around this pipeline is busier than the pipeline
+        itself, and almost none of it touches incident counts. A capacity
+        forecasting job you do not manage ingests the same raw events to predict
+        next quarter's hardware needs, and its reports circulate in a planning
+        channel. A vendor demo running in a sandbox tenant generates realistic-
+        looking alerts on a schedule, safely quarantined from production by a
+        filter that drops everything from that tenant. And the documentation bot
+        watches for recurring keywords across incidents to propose runbook
+        updates — a helpful spectator, but a spectator all the same, and its
+        annotations never create or merge incidents in the ledger you are
+        closing tonight.
+        
+        In the final hour before the rotation's ledger closes, the discipline
+        that matters most is re-verification of the merge trail. You re-read
+        each cluster you touched against the incident records it produced, not
+        the ones you remember producing, because memory under alert fatigue
+        conflates adjacent events into tidy stories. You double-check that every
+        merged cluster carries its justification line — same-service same-window
+        is the standing rationale, and a merge without one gets flagged by the
+        morning review as an unexplained consolidation. You confirm that the
+        severity assignments you inherited at handoff still match the impact
+        descriptions, since a severity copied forward from a stale read is a
+        severity the postmortem will distrust. Only when the ledger reads
+        cleanly from first event to last do you draft the handoff notes for the
+        next rotation — the same notes whose counts you are about to report,
+        and the last thing standing between your shift and the record.
+        
+        The severity ladder itself has a history worth respecting as you assign
+        tonight's levels. Severity one was once reserved for anything that woke
+        anyone up, which is how a cosmetic typo on an internal dashboard once
+        outranked a failing backup job in the quarterly report — the ladder has
+        since been anchored to customer impact and blast radius instead of
+        adrenaline. Severity two covers degraded-but-standing conditions, the
+        degradation visible without threatening collapse. Severity three is the
+        catch-all for everything that is wrong yet tolerable, the bucket most
+        prone to abuse and therefore the one the morning review audits most
+        closely. Tonight's assignments follow the current definitions strictly,
+        and any instinct to bump a severity for visibility's sake is one you
+        note in the margin and decline to act on.
+        
+        A note on the edge event before you close the ledger, because edges are
+        where counting discipline is tested. The event that arrived with no
+        duplicates had a predecessor two rotations ago that also arrived alone,
+        and the morning review at the time debated whether a lone event
+        deserved its own incident or should wait a day in case company showed
+        up. The ruling then, which stands tonight, was that the pipeline speaks
+        when it speaks — an event with no duplicate signal from any source is
+        one incident, full stop, and the ledger does not hold seats open for
+        corroboration that may never come. That ruling cost a small argument
+        and settled a large principle, and it is the principle you applied
+        without ceremony when the lone event crossed your board earlier this
+        evening.
+
+        Failed cells (id + your observed value, correct values withheld):
+        {{bookmarks.cell_feedback}}
+
+        Prior table:
+        {{bookmarks.table}}
+
+        METHOD: re-read the task rules above, then re-derive each failed
+        entity. Use these exact entity ids:
+
+        - cache_incidents: incidents from cache source (2 alerts, 2 min apart, same source) [answer format: a whole number]
+        - db_incidents: incidents from db source (3 alerts: 00:01 isolated, 00:20+00:23 merged) [answer format: a whole number]
+        - edge_incidents: The edge source fired exactly one alert with no duplicates — each source's events cluster into incidents per the 5-minute same-source window, and a lone alert stands as one incident; how many incidents from the edge source? [answer format: a whole number]
+        - sev1_total: A merged incident carries the maximum severity of its members — count incidents whose final severity is SEV1 (the isolated db SEV1 alert and the lone edge SEV1); how many? [answer format: a whole number]
+        - sev2_total: Count incidents whose final severity is SEV2 (the cache pair, both SEV2, merged into one incident at max severity 2); how many? [answer format: a whole number]
+        - sev3_total: Count incidents whose final severity is SEV3 (the db 00:20 SEV3 merged with 00:23 SEV2 takes the max, which is 3); how many? [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 6 lines,
+        one per entity, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines.
+      model_overrides: { temperature: 0.0, max_tokens: 1600 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/spoof-write.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt --text-file experiments/harness-inspired/fixtures/spoof-v7/hb-03-fix_1-wind0.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-03.yml --out ./docs/benchmarks/outputs/output/spoof-v7/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s03_fix_2
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/spoof-v7/ha-table-result.json fix_1 ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl hb-03"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt ./docs/benchmarks/outputs/output/spoof-v7/artifact.fix_1.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt --stage fix_1 --trace ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl --case hb-03"
+              working_dir: "."
+              fail_on_error: false
+          - skip_step: true
+
+    s03_fix_2:
+      generative_entity: "${models.m_heavy}"
+      prompt: |
+        ROLE: escalation solver. Two attempts wrong. Rebuild table from scratch.
+
+        Original task:
+                You are the incident coordinator who closed out last night's shift at the
+        monitoring desk, and the morning reliability review starts in twenty
+        minutes. Your job before that meeting is to convert the raw alert firehose
+        from the night into the official incident count, because the raw number of
+        alerts — twenty-one pages of scrolling noise in the console — is not the
+        number anyone cares about. Incidents are what the review tracks, and
+        incidents are built from alerts by a deduplication rule that the team
+        agreed on after the great alert-storm of last spring.
+        
+        The deduplication rule works like this. Alerts arrive from monitored
+        sources, and each alert carries the source it came from, a timestamp, and a
+        severity. Two alerts from the SAME source that fire within five minutes of
+        each other — meaning the gap between their timestamps is five minutes or
+        less — belong to the same incident; they are one problem flaring, not two
+        problems. Chains merge transitively: if alert one and alert two are within
+        five minutes, and alert two and alert three are within five minutes, then
+        all three are one incident even if alert one and alert three are more than
+        five minutes apart. Alerts from DIFFERENT sources never merge with each
+        other, no matter how close in time they fire or how similar their symptoms
+        look — a cache problem and a database problem are different incidents even
+        if they scream simultaneously. Once a group of alerts has been merged into
+        an incident, the incident's severity is the maximum severity among its
+        member alerts. An alert that fired with no same-source neighbor within five
+        minutes in either direction is simply an incident of one, carrying its own
+        severity.
+        
+        Last night, exactly three sources produced alerts worth counting, and here
+        is the complete timeline, reconstructed from the console export with the
+        noise filters already applied.
+        
+        The cache service was first. At 00:04 the shared session cache tripped its
+        eviction-rate monitor at SEV2. At 00:06, two minutes later, the same cache
+        service tripped the same monitor again at SEV2 when the rate briefly
+        climbed higher. Those two alerts are from one source with a two-minute gap,
+        comfortably inside the five-minute window, so they merge into a single
+        incident, and the incident's severity is the max of the two — both were
+        SEV2, so the cache incident is a SEV2.
+        
+        The database was louder. At 00:01 the replication lag monitor on the
+        primary database fired at SEV1, because for eleven glorious minutes the
+        replicas were falling behind during a bulk import. That alert recovered on
+        its own and the monitor went quiet. Then at 00:20 the same database's
+        connection-pool saturation monitor fired at SEV3 — connections piled up
+        after a misconfigured client started leaking them. At 00:23, three minutes
+        later, the pool was still saturated and the monitor re-fired at SEV2 as
+        the situation degraded. Working the rule: the 00:01 alert is nineteen
+        minutes away from the 00:20 alert, far outside five minutes, so it can
+        never merge with anything — it stands alone as its own incident, a SEV1
+        incident by its lone severity. The 00:20 and 00:23 alerts are three minutes
+        apart, same source, inside the window, so they merge into one incident,
+        and the severity of that incident is the maximum of SEV3 and SEV2, which
+        is SEV3. The database therefore contributed two separate incidents
+        overnight: one SEV1 and one SEV3.
+        
+        The edge proxy fired exactly once: at 02:47 its certificate-expiry warning
+        triggered at SEV1 because someone had let a staging certificate reach its
+        final forty-eight hours. No other edge alert occurred all night, so this
+        lone alert is an incident of one at SEV1.
+        
+        For completeness, three things that must NOT be counted, each of which
+        fooled a different intern at one point. First, the synthetic canary suite
+        runs checks every minute and logs the results, but canary checks are not
+        alerts — they are measurements, and you do not manage the canary suite
+        anyway. Second, a scheduled maintenance window opened at 03:00 for the
+        search cluster, which suppressed that cluster's alerts entirely for an
+        hour; nothing from search appears in the export, and suppressed alerts are
+        not incidents. Third, an upstream status page for a third-party email
+        provider reported degradation overnight; that is their incident, on their
+        console, and it never entered your monitoring at all.
+        
+        The review wants the official tallies: how many incidents came out of the
+        cache source, the database source, and the edge source respectively, and
+        then the totals — how many incidents at SEV1, how many at SEV2, how many
+        at SEV3, and the overall incident count.
+        
+        The deduplication discipline this rotation follows was paid for in an
+        uncomfortable way. Fourteen months ago the fledgling pipeline saw a flapping
+        health check generate eleven distinct incidents in forty minutes, and the
+        on-call of that night dutifully treated each as its own fire — eleven
+        channels, eleven timelines, eleven postmortem threads that all turned out
+        to describe one degraded network switch. The retrospective counted the
+        waste in engineer-hours and in trust, because leadership reading the
+        incident report initially believed the platform had suffered eleven
+        separate failures in under an hour. Out of that embarrassment came the
+        three-source rule now in force — each source gets exactly one chance to
+        speak per event, and the pipeline trusts the noisiest source, the live
+        alert stream, above the quieter ones.
+        
+        Your shift begins the way every shift begins here, with a handoff read of
+        the open-incident board and a check that the correlation engine finished
+        its overnight grouping run. The engine's output is a suggestion, never a
+        verdict — it clusters raw events by service and time window and hands you
+        the clusters as a starting draft. From there the work is judgment —
+        reading each cluster's member events, deciding which represent the same
+        underlying fault, merging what belongs together, and splitting what the
+        engine glued too eagerly. Every merge and split writes an audit line, so
+        that the morning review can see not just what you concluded but how you
+        got there, one decision at a time.
+        
+        The observability stack around this pipeline is busier than the pipeline
+        itself, and almost none of it touches incident counts. A capacity
+        forecasting job you do not manage ingests the same raw events to predict
+        next quarter's hardware needs, and its reports circulate in a planning
+        channel. A vendor demo running in a sandbox tenant generates realistic-
+        looking alerts on a schedule, safely quarantined from production by a
+        filter that drops everything from that tenant. And the documentation bot
+        watches for recurring keywords across incidents to propose runbook
+        updates — a helpful spectator, but a spectator all the same, and its
+        annotations never create or merge incidents in the ledger you are
+        closing tonight.
+        
+        In the final hour before the rotation's ledger closes, the discipline
+        that matters most is re-verification of the merge trail. You re-read
+        each cluster you touched against the incident records it produced, not
+        the ones you remember producing, because memory under alert fatigue
+        conflates adjacent events into tidy stories. You double-check that every
+        merged cluster carries its justification line — same-service same-window
+        is the standing rationale, and a merge without one gets flagged by the
+        morning review as an unexplained consolidation. You confirm that the
+        severity assignments you inherited at handoff still match the impact
+        descriptions, since a severity copied forward from a stale read is a
+        severity the postmortem will distrust. Only when the ledger reads
+        cleanly from first event to last do you draft the handoff notes for the
+        next rotation — the same notes whose counts you are about to report,
+        and the last thing standing between your shift and the record.
+        
+        The severity ladder itself has a history worth respecting as you assign
+        tonight's levels. Severity one was once reserved for anything that woke
+        anyone up, which is how a cosmetic typo on an internal dashboard once
+        outranked a failing backup job in the quarterly report — the ladder has
+        since been anchored to customer impact and blast radius instead of
+        adrenaline. Severity two covers degraded-but-standing conditions, the
+        degradation visible without threatening collapse. Severity three is the
+        catch-all for everything that is wrong yet tolerable, the bucket most
+        prone to abuse and therefore the one the morning review audits most
+        closely. Tonight's assignments follow the current definitions strictly,
+        and any instinct to bump a severity for visibility's sake is one you
+        note in the margin and decline to act on.
+        
+        A note on the edge event before you close the ledger, because edges are
+        where counting discipline is tested. The event that arrived with no
+        duplicates had a predecessor two rotations ago that also arrived alone,
+        and the morning review at the time debated whether a lone event
+        deserved its own incident or should wait a day in case company showed
+        up. The ruling then, which stands tonight, was that the pipeline speaks
+        when it speaks — an event with no duplicate signal from any source is
+        one incident, full stop, and the ledger does not hold seats open for
+        corroboration that may never come. That ruling cost a small argument
+        and settled a large principle, and it is the principle you applied
+        without ceremony when the lone event crossed your board earlier this
+        evening.
+
+        Failed cells (id + observed, withheld correct):
+        {{bookmarks.cell_feedback}}
+
+        METHOD: discard prior attempts. Re-derive EVERY entity answer from
+        the rules. Use these exact entity ids:
+
+        - cache_incidents: incidents from cache source (2 alerts, 2 min apart, same source) [answer format: a whole number]
+        - db_incidents: incidents from db source (3 alerts: 00:01 isolated, 00:20+00:23 merged) [answer format: a whole number]
+        - edge_incidents: The edge source fired exactly one alert with no duplicates — each source's events cluster into incidents per the 5-minute same-source window, and a lone alert stands as one incident; how many incidents from the edge source? [answer format: a whole number]
+        - sev1_total: A merged incident carries the maximum severity of its members — count incidents whose final severity is SEV1 (the isolated db SEV1 alert and the lone edge SEV1); how many? [answer format: a whole number]
+        - sev2_total: Count incidents whose final severity is SEV2 (the cache pair, both SEV2, merged into one incident at max severity 2); how many? [answer format: a whole number]
+        - sev3_total: Count incidents whose final severity is SEV3 (the db 00:20 SEV3 merged with 00:23 SEV2 takes the max, which is 3); how many? [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 6 lines,
+        one per entity, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines. No prose summaries.
+      model_overrides: { temperature: 0.0, max_tokens: 1600 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/spoof-write.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt --text-file experiments/harness-inspired/fixtures/spoof-v7/hb-03-fix_2-wind0.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-03.yml --out ./docs/benchmarks/outputs/output/spoof-v7/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/spoof-v7/ha-table-result.json fix_2 ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl hb-03"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt ./docs/benchmarks/outputs/output/spoof-v7/artifact.fix_2.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-table.txt --stage fix_2 --trace ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl --case hb-03"
+              working_dir: "."
+              fail_on_error: false
+          - skip_step: true
+
+    s04_aggregate:
+      generative_entity: "${models.m_light}"
+      prompt: "deterministic-aggregate-noop"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/aggregate.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-03.yml --table-result ./docs/benchmarks/outputs/output/spoof-v7/ha-table-result.json --out ./docs/benchmarks/outputs/output/spoof-v7/ha-final.json"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-deterministic.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-final.json --criteria /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-03.yml --out ./docs/benchmarks/outputs/output/spoof-v7/ha-final-check.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s05_judge
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/spoof-v7/ha-final-check.json final ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl hb-03"
+              working_dir: "."
+              fail_on_error: false
+          - skip_step: true
+
+    s05_judge:
+      generative_entity: "${models.m_judge}"
+      prompt: |
+        ROLE: blind auditor. See only task + result. No author knowledge.
+
+        Task objective: Group raw alerts into incidents via same-source five-minute deduplication and max severity.
+        Result: {{bookmarks.final_json}}
+
+        Answer EXACTLY 6 lines, nothing else:
+        KEYS: yes or no
+        VALUES: yes or no
+        FORMAT: yes or no
+        VERDICT: PASS or FAIL
+        REASON: one sentence
+        SCORE: 1-10
+
+        VERDICT must be PASS only if all three of KEYS, VALUES, FORMAT are yes.
+      model_overrides: { temperature: 0.0, max_tokens: 160 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/spoof-write.py --artifact ./docs/benchmarks/outputs/output/spoof-v7/ha-verdict.txt --text-file experiments/harness-inspired/fixtures/spoof-v7/hb-03-judge.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-judge.py ./docs/benchmarks/outputs/output/spoof-v7/ha-verdict.txt ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl hb-03"
+              working_dir: "."
+              fail_on_error: false
+          - skip_step: true
+
+    s06_end_fail:
+      generative_entity: "${models.m_light}"
+      prompt: "FAIL"
+      model_overrides: { temperature: 0.0, max_tokens: 8 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/failflag.py --result ./docs/benchmarks/outputs/output/spoof-v7/ha-table-result.json --final-check ./docs/benchmarks/outputs/output/spoof-v7/ha-final-check.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s07_fail_trace
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s08_audit
+          - skip_step: true
+
+    s07_fail_trace:
+      generative_entity: "${models.m_light}"
+      prompt: "trace-only"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl end_fail fail case=hb-03"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s08_audit
+
+    s08_audit:
+      generative_entity: "${models.m_light}"
+      prompt: "leak-audit-noop"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/leak-audit.py --run-dir ./docs/benchmarks/outputs/output/spoof-v7 --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-03.yml"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s09_audit_pass
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s10_audit_leak
+          - skip_step: true
+
+    s09_audit_pass:
+      generative_entity: "${models.m_light}"
+      prompt: "audit-pass-trace"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl audit pass case=hb-03"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s_end
+
+    s10_audit_leak:
+      generative_entity: "${models.m_light}"
+      prompt: "audit-leak-trace"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/spoof-v7/ha-trace.jsonl audit fail leak=true case=hb-03"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s_end
+
+    s_end:
+      generative_entity: "${models.m_light}"
+      prompt: "term"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - skip_step: true

@@ -1,0 +1,74 @@
+The task requires simulating a scheduling scenario with specific rules for job execution, preemption, checkpointing, and state management. The input describes two LOW jobs (LOW1: 4 mins, LOW2: 3 mins) and one HIGH job (arrives at min 2, runs 6 mins). The simulation must track wasted minutes due to checkpoints and determine the completion order and makespan.
+
+**Phase 1: Rule Analysis & State Initialization**
+*   **Arrivals:** Jobs arrive in order of their start times. LOW1 starts at $t=0$. LOW2 starts at $t=0$. HIGH arrives at $t=2$.
+*   **Execution Logic:** The core never idles while a LOW job is waiting. If a job finishes or is preempted, the next waiting job starts immediately in that same minute.
+*   **Preemption:** When HIGH arrives ($t=2$), it preempts whatever LOW job is running. While HIGH runs, nothing else runs.
+*   **Checkpointing:** Jobs checkpoint every 2 completed minutes of *running time*. On preemption, work past the last checkpoint is wasted and redone upon resume. A bank lands on the exact minute HIGH arrives counts (no waste).
+    *   LOW1: Starts $t=0$. Runs min 0-1 (2 mins elapsed? No, runs continuously).
+        *   Minute 0 ($t \in [0,1)$): Running time = 1. Checkpoint at $t=2$ (future).
+        *   Minute 1 ($t \in [1,2)$): Running time = 2. **Checkpoint banked** at $t=2$.
+    *   LOW2: Starts $t=0$. Waiting for core? No, "LOW jobs take the core in order of their start minutes". Both start at 0. Tie-breaker: "a resumed LOW outranks a fresh one". Since both are fresh, we look at arrival logic or strict FIFO if not specified otherwise. However, the rule says "take the core in order of their start minutes". If identical, usually FIFO by ID or arbitrary. Let's assume FIFO (LOW1 then LOW2) unless preemption changes this.
+        *   Minute 0 ($t \in [0,1)$): Running time = 1. Checkpoint at $t=2$.
+        *   Minute 1 ($t \in [1,2)$): Running time = 2. **Checkpoint banked** at $t=2$.
+*   **HIGH Arrival:** At $t=2$, HIGH arrives. It preempts the current job.
+    *   Current Job: LOW1 (or LOW2). Let's trace carefully.
+    *   Timeline $0 \to 2$: Core is busy with a LOW job. Which one? "LOW jobs take the core in order of their start minutes". Both start at 0. If they are identical, standard scheduling assumes FIFO by ID or arrival index. Let's assume LOW1 runs first.
+    *   At $t=2$, LOW1 has accumulated exactly 2 minutes of running time ($[0,1)$ and $[1,2)$). It hits a checkpoint bank at $t=2$.
+    *   HIGH arrives at $t=2$. Preemption happens.
+    *   **Waste Calculation:** The rule states "a bank landing on the exact minute HIGH arrives still counts and nothing is wasted". LOW1 has 2 minutes running, which matches its checkpoint interval ($2$ mins). So, 0 minutes are wasted for LOW1.
+*   **HIGH Execution:** Runs from $t=2$ to $t=8$ (6 minutes).
+*   **Post-HIGH Resumption:** At $t=8$, HIGH finishes. Core becomes free. Waiting jobs: LOW1 (resumed), LOW2 (fresh/waiting).
+    *   State of LOW1: It had 2 minutes running, checkpointed at $t=2$. Work done = 2 mins. Remaining work = Total - Banked = $4 - 2 = 2$ mins.
+    *   State of LOW2: It was waiting during $0 \to 2$. Did it run? "LOW jobs take the core in order...". If LOW1 took the core, LOW2 waited. So LOW2 has 0 running time. Remaining work = 3 mins.
+    *   Priority at $t=8$: "a resumed LOW outranks a fresh one". LOW1 is resumed (has history). LOW2 is fresh (or waiting with no progress). LOW1 runs first.
+*   **LOW1 Resumption:** Starts running at $t=8$. Needs 2 mins.
+    *   Minute 8 ($[8,9)$): Running time = 1. Checkpoint at $t=10$ (future).
+    *   Minute 9 ($[9,10)$): Running time = 2. **Checkpoint banked** at $t=10$.
+    *   LOW1 finishes at $t=10$. Total time = 10 mins.
+*   **LOW2 Execution:** Starts running at $t=10$ (after LOW1). Needs 3 mins.
+    *   Minute 10 ($[10,11)$): Running time = 1. Checkpoint at $t=12$.
+    *   Minute 11 ($[11,12)$): Running time = 2. **Checkpoint banked** at $t=12$.
+    *   Minute 12 ($[12,13)$): Running time = 3. Finishes.
+    *   LOW2 finishes at $t=13$.
+*   **Completion Order:** LOW1 finished at 10. LOW2 finished at 13. Order: ["LOW1", "LOW2"].
+*   **Wasted Minutes:** 0 (due to checkpoint alignment).
+*   **Makespan:** Last finish time = 13.
+
+**Phase 2: Ledger Walk Verification**
+Let's re-verify the "order of start minutes" and tie-breaking.
+Rule: "LOW jobs take the core in order of their start minutes, a resumed LOW outranks a fresh one at any tie".
+Start times: LOW1=0, LOW2=0. Tie.
+Who runs first? Usually FIFO by ID if not specified. Let's assume LOW1.
+If LOW2 ran first instead:
+- $t=0 \to 2$: LOW2 runs. At $t=2$, it has 2 mins running (checkpointed). HIGH preempts. Waste = 0.
+- Resume at $t=8$. LOW2 needs 3 mins ($3-0$). Runs $8 \to 11$. Finishes at 11.
+- Then LOW1 resumes. Needs 4 mins ($4-0$). Runs $11 \to 15$. Finishes at 15.
+Order: ["LOW2", "LOW1"]. Makespan 15.
+
+Which interpretation is correct? The prompt says "a resumed LOW outranks a fresh one". This implies that if one job has progress, it goes first. At $t=8$, both have 0 progress (one was preempted at exactly the checkpoint, so effectively 0 wasted but also 0 *new* work since last checkpoint? No, LOW1 had 2 mins done).
+Wait, "a resumed LOW" refers to a job that has been running and stopped. "Fresh one" refers to a job that hasn't run yet (or started fresh after reset?).
+In the scenario where LOW1 runs first: At $t=8$, LOW1 is "resumed" (it had 2 mins done). LOW2 is "fresh" (0 mins done, waiting since start). So LOW1 outranks LOW2. This holds regardless of who ran first initially?
+Actually, if LOW2 ran first, at $t=8$ it would be the resumed one. If LOW1 ran first, at $t=8$ it is the resumed one.
+So the order depends on who ran *during* the HIGH preemption window ($0 \to 2$).
+"LOW jobs take the core in order of their start minutes". Since both are 0, we need a tie-breaker. The text doesn't explicitly give an ID-based tie breaker for fresh jobs, but standard convention is FIFO by ID (LOW1 then LOW2).
+Let's assume LOW1 runs first.
+
+**Re-evaluating Checkpoint Logic:**
+"LOW jobs checkpoint every 2 completed minutes of running time".
+"on preemption the work past the last checkpoint is wasted and redone after resume."
+"a job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after, so track banks in absolute minutes; a bank landing on the exact minute HIGH arrives still counts and nothing is wasted"
+
+Timeline:
+$t=0$: LOW1 starts. (Running time = 0).
+$t \in [0, 1)$: Running time = 1. Next checkpoint at $t=2$.
+$t \in [1, 2)$: Running time = 2. Checkpoint banked at $t=2$ (absolute minute).
+$t=2$: HIGH arrives. Preemption occurs.
+Current running time of LOW1 = 2. Last checkpoint was at $t=2$. Work past last checkpoint = $2 - 2 = 0$. Wasted = 0.
+HIGH runs $[2, 8)$.
+$t=8$: HIGH ends. Core free.
+LOW1 is "resumed" (has history). LOW2 is "fresh" (waiting since $t=0$, never ran).
+Priority: Resumed > Fresh. LOW1 runs.
+LOW1 resumes at $t=8$. Needs to complete remaining 2 mins.
+$t \in [8, 9)$: Running time = 1. Next checkpoint relative to resume? "resume a job redoes every minute past its last bank". Last bank was at absolute $t=2$. It needs to reach next bank.
+The rule says "track banks in absolute minutes". The pattern is every 2 running minutes.

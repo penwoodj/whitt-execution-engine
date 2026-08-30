@@ -1,0 +1,86 @@
+The state is walked clean below. Each event is applied strictly in arrival order using tonight's rules (8GB card, models A-D, B pinned). The orientation story numbers are ignored; only its shape of logic is used to verify the process.
+
+**Phase 1: Rule List & Triggers**
+*   **Rule:** Load Event triggers state change.
+    *   **Trigger:** `load A` (Arrival)
+    *   **Trigger:** `load B` (Arrival)
+    *   **Trigger:** `load C` (Arrival)
+    *   **Trigger:** `load D` (Arrival)
+*   **Rule:** Unload Event triggers state change.
+    *   **Trigger:** `unload B` (Departure/No-op check)
+*   **Rule:** Capacity Check triggers Eviction or Deferral if Load > Remaining Space.
+    *   **Trigger:** None (All loads fit sequentially).
+
+**Phase 2: Ledger Walk**
+1.  **Event:** `load A` (1 GB)
+    *   **State:** Pool = 7 GB free. Loads = [A]. Evictions = 0. Deferrals = 0.
+2.  **Event:** `load B` (4 GB)
+    *   **State:** Pool = 3 GB free. Loads = [A, B]. Evictions = 0. Deferrals = 0.
+3.  **Event:** `load C` (2 GB)
+    *   **State:** Pool = 1 GB free. Loads = [A, B, C]. Evictions = 0. Deferrals = 0.
+4.  **Event:** `load D` (6 GB)
+    *   **Check:** Required 6 GB. Available 1 GB. Shortfall exists.
+    *   **Eviction Logic:** Must evict LRU unpinned models to fit.
+        *   Current Loads: A(1), B(4), C(2). Total used = 7 GB.
+        *   Target State for D: Needs space for D (6 GB) + keep existing? No, standard LRU replacement logic applies to the set of resident models. The load request implies adding D. If capacity is exceeded, we evict until `Total Resident Size <= Card Capacity`.
+        *   Current Total Resident = 7 GB. Card = 8 GB.
+        *   Wait, re-evaluating "fit": Does "load D" mean "Add D to the set"? Yes.
+        *   If we add D (6GB) to current [A,B,C] (7GB), total becomes 13GB > 8GB.
+        *   We must evict until Total <= 8GB.
+        *   LRU Order: A was loaded first, then B, then C. So A is Least Recently Used? Or is it based on access time? "Least-recently-touched". Assuming load order = touch order unless specified otherwise.
+        *   Models: A (1), B (4), C (2). All unpinned except B.
+        *   Eviction Candidates: A, C (Unpinned). B is Pinned.
+        *   We need to make room for D (6GB).
+        *   Current Free Space = 1 GB. Needed = 6 GB. Gap = 5 GB.
+        *   Evict A (1 GB) -> Free becomes 2 GB. Total Resident = 6 GB (B+C). Still < 8 GB? No, we are adding D.
+        *   Let's calculate strictly: `New_Total = Old_Total - Evicted_Size + Load_Size`.
+        *   Constraint: `New_Total <= Card_Capacity` (8 GB).
+        *   Current Total (A+B+C) = 7 GB. Add D(6GB) -> 13 GB.
+        *   Need to reduce by at least 5 GB.
+        *   Evict A (1 GB): New Total = 12 GB. Still > 8.
+        *   Evict C (2 GB): New Total = 10 GB. Still > 8.
+        *   Wait, is B pinned? Yes. Can we evict B? No ("evictions choose the least-recently-touched unpinned model").
+        *   If only pinned models remain and it still does not fit -> Deferral.
+        *   Let's re-read the specific rule: "a load that cannot fit evicts as many LRU unpinned models as needed".
+        *   Available Unpinned: A (1GB), C (2GB). Total Unpinned = 3 GB.
+        *   Max we can evict without touching B is 3 GB.
+        *   If we evict A and C, Resident set becomes {B}. Size = 4 GB.
+        *   Add D (6 GB). New Set {B, D}. Total Size = 10 GB.
+        *   10 GB > 8 GB. Still does not fit.
+        *   Only pinned model remains (B). Cannot evict B.
+        *   Result: **Deferral**.
+    *   **State:** Loads = [A, B, C] (Attempted D failed). Evictions = 2 (A and C evicted? Or did we stop earlier?).
+        *   Correction on Logic: Usually, in these problems, if a load cannot fit even after max possible eviction of unpinned models, it defers. The "evictions" count increments for every model removed during the attempt.
+        *   Did A and C get evicted? Yes, to try to make room.
+        *   Eviction Count = 2 (A and C).
+        *   Deferral Count = 1 (D deferred).
+        *   Deferred List = ["D"].
+5.  **Event:** `unload B` (4 GB)
+    *   **State Check:** Is B resident? Yes.
+    *   **Action:** Remove B from pool. Add 4 GB to free space.
+    *   **Pool State:** Free was 1 GB (from previous step where D deferred, A/C evicted). Wait, if D deferred, the state is frozen at the moment of failure? Or does the eviction happen and then it defers?
+        *   Standard interpretation: The system attempts to load. It evicts A and C. Now resident is {B}. Free space = 8 - 4 (B) = 4 GB.
+        *   Load D (6GB) requested. Fits in 4GB? No. Defers.
+        *   State after deferral: Resident {B, D}? Or just {B} waiting for next slot?
+        *   Rule: "Q deferred... Q on the deferred list". Usually, the item is not loaded yet. It sits in a queue. The resident set remains what it was before the load (minus evictions). So Resident = {B}.
+        *   Now `unload B`. Remove B.
+        *   Resident Set becomes empty {}. Free space = 8 GB.
+    *   **State:** Loads = []. Evictions = 2. Deferrals = 1. Deferred = ["D"].
+
+**Final Totals Check:**
+*   Loads (successful additions): A, B, C were added. D failed. Total successful loads = 3? Or does "loads" in the JSON refer to the count of load events processed? The prompt asks for `{"loads": N, ...}`. In similar contexts (like the orientation story), "loads" often refers to the number of items currently resident or total load operations. Given the output format `{"loads": N}`, and the narrative "three loads", it likely means the count of successful load events.
+    *   Successful Loads: A, B, C. Count = 3.
+*   Evictions: A and C were evicted to try D. Count = 2.
+*   Deferrals: D deferred. Count = 1.
+*   Deferred List: ["D"].
+
+Let's double check the "loads" definition in the orientation story: "three loads, two evictions, one deferral". The JSON output for that would be `{"loads": 3, ...}`.
+So for tonight: A, B, C loaded successfully. D deferred.
+Loads = 3.
+
+**Final Answer Construction:**
+`{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}`
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

@@ -1,0 +1,49 @@
+**Phase 1 RULE SCAN**
+1. **Load Rule**: A load request attempts to place a model of specific size into the pool; if it fits (total used + new size <= capacity), it succeeds immediately.
+2. **Eviction Rule**: If a load does not fit, evict the Least-Recently-Touched (LRT) *unpinned* models one by one until there is room for the requested model. Each eviction increments the eviction counter and updates recency.
+3. **Deferral Rule**: If a load cannot fit even after evicting all unpinned models (only pinned models remain), the load is deferred; no further evictions occur, and the load ID is recorded as deferred.
+4. **Touch/Recency Rule**: Every successful load or eviction of a model updates that model's recency to "most recent". Unloaded models are removed from the pool.
+5. **Capacity Constraint**: The total size of resident models must not exceed the card capacity (8 GB).
+
+**Phase 2 LEDGER WALK**
+*Initial State*: Pool = {} (0/8 GB used), Recency = {}.
+*Event 1: load A (3 GB)*
+- Check fit: 0 + 3 <= 8. Fits.
+- Action: Load A.
+- State: Resident {A}, Used 3/8, Recency {A}.
+
+*Event 2: load B (3 GB)*
+- Check fit: 3 + 3 = 6 <= 8. Fits.
+- Action: Load B.
+- State: Resident {A, B}, Used 6/8, Recency {B, A} (B is most recent).
+
+*Event 3: load C (1 GB)*
+- Check fit: 6 + 1 = 7 <= 8. Fits.
+- Action: Load C.
+- State: Resident {A, B, C}, Used 7/8, Recency {C, B, A} (C is most recent).
+
+*Event 4: load D (7 GB)*
+- Check fit: 7 + 7 = 14 > 8. Does not fit.
+- Eviction Phase: Need to free at least 6 GB (to reach 8 total capacity for the new 7GB model? No, need to make room for 7GB. Current used is 7. Target used must be <= 8 - 7 = 1? Wait. Capacity is 8. New load is 7. Max allowed used before load is 8-7=1 GB).
+- Current Used: 7 GB. Need to free >= 6 GB.
+- Unpinned Models: A (3), B (3), C (1). All unpinned.
+- LRT Order: A (oldest), then B, then C.
+- Evict A (3 GB): Free 3. Used becomes 4. Still need to free >= 6? No, target is <= 1 GB used. Current 4 > 1. Need more space.
+- Evict B (3 GB): Free 3. Used becomes 1. Now 1 <= 1. Fits.
+- Action: Load D. Evict A and B.
+- State: Resident {C, D}, Used 8/8 (1+7), Recency {D, C} (D is most recent).
+
+*Event 5: unload B (3 GB)*
+- Check resident: B was evicted in Event 4. Not resident.
+- Action: No-op.
+- State: Resident {C, D}, Used 8/8, Recency {D, C}.
+
+**Final Counts**:
+- Loads: A, B, C, D were successfully loaded. Total = 4.
+- Evictions: A and B were evicted to make room for D. Total = 2.
+- Deferrals: None.
+- Deferred IDs: [].
+
+```json
+{"loads": 4, "evictions": 2, "deferrals": 0, "deferred": []}
+```

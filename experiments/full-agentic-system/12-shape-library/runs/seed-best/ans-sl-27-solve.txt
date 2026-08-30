@@ -1,0 +1,64 @@
+The task requires a two-phase analysis (Rule Scan and Ledger Walk) followed by a specific JSON output containing only `makespan_min`, `wasted_min`, and `order`. The input text describes a scheduling scenario with jobs LOW1, LOW2, and an interrupting job HIGH.
+
+**Phase 1: Rule Scan & State Logic**
+Based on the description, the system operates under these rules:
+1.  **Arrival Order:** Jobs are queued by start minute ($s$). Lower $s$ has higher priority. If a job is resumed vs fresh at the same tie, resumed wins (though here they have distinct start times).
+2.  **Preemption:** HIGH arrives at $t=2$. It preempts whatever LOW job is running immediately. While HIGH runs ($t=2$ to $11$), no other work proceeds.
+3.  **Checkpointing/Banking:** A job banks a checkpoint every 2 minutes of *running* time.
+    *   LOW1 starts at $t=0$. Runs for 5 mins total.
+        *   Minute 0-1: Running (1 min). No bank yet.
+        *   Minute 2: Preempted by HIGH arrival.
+        *   Total running before preemption: 2 minutes.
+        *   Banks at $t=2$ (since it completed 2 mins of work).
+    *   LOW2 starts at $t=2$. Queued behind LOW1.
+4.  **Resumption Logic:**
+    *   HIGH finishes at $t = 2 + 9 = 11$.
+    *   At $t=11$, the core becomes free.
+    *   Queue check: LOW1 is waiting (preempted). LOW2 is waiting (started but hasn't run yet, or has it?).
+        *   Rule: "LOW jobs take the core in order of their start minutes".
+        *   LOW1 start = 0. LOW2 start = 2.
+        *   LOW1 has priority over LOW2 regardless of whether LOW2 started while HIGH was running? The text says "a resumed LOW outranks a fresh one at any tie". Here the tie is not on start minute, but on availability. However, the rule explicitly states order by start minutes. So LOW1 (start 0) > LOW2 (start 2).
+    *   **LOW1 Resumption:**
+        *   Total duration: 5 mins.
+        *   Banked at $t=2$ (completed 2 mins).
+        *   Work remaining: $5 - 2 = 3$ mins.
+        *   LOW1 resumes at $t=11$. Runs for 3 minutes ($11, 12, 13$). Finishes at end of minute 13 (start time 14? Or duration based?). Let's trace minutes:
+            *   Start run: Minute 11. End of Min 11 = 1 min done.
+            *   Start run: Minute 12. End of Min 12 = 2 mins done.
+            *   Start run: Minute 13. End of Min 13 = 3 mins done. Total 5 mins. Finished at $t=14$.
+    *   **LOW2 Execution:**
+        *   LOW1 finishes at $t=14$.
+        *   LOW2 starts at $t=14$. Duration: 7 minutes.
+        *   Runs $14, 15, 16, 17, 18, 19, 20$. Finishes at end of minute 20 (start time 21).
+    *   **Wasted Calculation:**
+        *   LOW1 was preempted at $t=2$ after completing exactly 2 minutes.
+        *   Checkpoint banked at $t=2$.
+        *   Work past checkpoint = 0. Wasted = 0.
+        *   (Note: The prompt says "a job that starts or resumes... banks a checkpoint at minute s+2". For LOW1, start $s=0$, bank at $0+2=2$. It ran exactly until $t=2$ before HIGH arrived. So it hit the bank. No waste.)
+    *   **Makespan:**
+        *   Start of first job: $t=0$.
+        *   End of last job (LOW2): $t=21$ (duration 7 mins starting at 14 ends at 21).
+        *   Makespan = $21 - 0 = 21$ minutes.
+
+**Phase 2: Ledger Walk Verification**
+*   **Event 1:** LOW1 starts ($t=0$). Runs Min 0, 1. (State: Running LOW1).
+*   **Event 2:** HIGH arrives ($t=2$). Preempts LOW1.
+    *   LOW1 ran 2 mins. Banked at $t=2$.
+    *   Wasted = 0.
+    *   Core busy with HIGH until $t=11$.
+*   **Event 3:** HIGH finishes ($t=11$). Core free.
+    *   Queue: LOW1 (Start 0), LOW2 (Start 2).
+    *   Select LOW1.
+*   **Event 4:** LOW1 resumes. Needs 3 mins. Runs Min 11, 12, 13. Finishes $t=14$.
+*   **Event 5:** LOW2 starts ($t=14$). Needs 7 mins. Runs Min 14..20. Finishes $t=21$.
+
+**Final State Values:**
+*   Makespan: 21 min.
+*   Wasted: 0 min.
+*   Order: ["LOW1", "LOW2"].
+
+The JSON must contain ONLY these keys.
+
+```json
+{"makespan_min": 21, "wasted_min": 0, "order": ["LOW1", "LOW2"]}
+```

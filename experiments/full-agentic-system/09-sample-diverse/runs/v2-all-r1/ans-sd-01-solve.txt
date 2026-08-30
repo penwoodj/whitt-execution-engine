@@ -1,0 +1,95 @@
+### Phase 1 RULE SCAN
+*List of rules changing state during the event or claim list:*
+
+1.  **Arrival Rule**: A request arrives in strict arrival order asking for a fixed number of tokens.
+2.  **Grant/Partial/Deny Rule**: If the pool has tokens, grant `min(ask, pool)`. The pool drops by the granted amount. If the pool is exactly zero upon arrival, deny the request (add ID to denied list). A partial grant is still a "granted" state, not denied.
+3.  **Expiry Trigger Rule**: Upon completion of request $R_{trigger}$, any grant associated with $R_{trigger}$ expires.
+4.  **Return Rule**: The expired grant returns `floor(granted_amount / 2)` to the pool immediately before the next event is processed (or effectively right after the trigger completes).
+5.  **State Update Rule**: Pool balance updates sequentially: `Pool = Pool - Grant + Return`.
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order:*
+
+**Initial State:**
+`Pool = 50`, `Granted List = []`, `Denied List = []`
+
+**Event 1: Request r1 asks for 4.**
+*   **Rule Applied**: Arrival & Grant.
+*   **Calculation**: Ask=4, Pool=50. Grant = min(4, 50) = 4.
+*   **State Update**: `Pool` becomes $50 - 4 = 46$.
+*   **Ledger Line**: r1 granted 4 (Pool: 46).
+
+**Event 2: Request r2 asks for 6.**
+*   **Rule Applied**: Arrival & Grant.
+*   **Calculation**: Ask=6, Pool=46. Grant = min(6, 46) = 6.
+*   **State Update**: `Pool` becomes $46 - 6 = 40$.
+*   **Ledger Line**: r2 granted 6 (Pool: 40).
+
+**Event 3: Request r3 asks for 9.**
+*   **Rule Applied**: Arrival & Grant.
+*   **Calculation**: Ask=9, Pool=40. Grant = min(9, 40) = 9.
+*   **State Update**: `Pool` becomes $40 - 9 = 31$.
+*   **Ledger Line**: r3 granted 9 (Pool: 31).
+
+**Event 4: Request r4 asks for 13.**
+*   **Rule Applied**: Arrival & Grant.
+*   **Calculation**: Ask=13, Pool=31. Grant = min(13, 31) = 13.
+*   **State Update**: `Pool` becomes $31 - 13 = 18$.
+*   **Ledger Line**: r4 granted 13 (Pool: 18).
+
+**Event 5: Request r5 asks for 15.**
+*   **Rule Applied**: Arrival & Grant.
+*   **Calculation**: Ask=15, Pool=18. Grant = min(15, 18) = 15.
+*   **State Update**: `Pool` becomes $18 - 15 = 3$.
+*   **Ledger Line**: r5 granted 15 (Pool: 3).
+
+**Post-Event Processing (Expiry & Returns):**
+The task states: "the grant for r1 expires after request r2 completes".
+*   **Trigger**: Completion of r2.
+*   **Target Grant**: The grant associated with r1 (which was granted in Event 1).
+*   **Amount Granted to r1**: 4.
+*   **Return Calculation**: `floor(4 / 2)` = 2.
+*   **Timing Rule**: "The return lands right before the request the trigger names". The trigger is r2's completion. The next event in the stream is r3 (Event 3). However, looking at the sequence:
+    *   Event 1 (r1) happens.
+    *   Event 2 (r2) happens.
+    *   Expiry of r1 triggers upon r2 completion. Return adds to pool.
+    *   Event 3 (r3) happens.
+
+Let's re-read the specific timing constraint carefully: "the return arrives right before the request the trigger names, not after it."
+*   Trigger Name: The request whose completion causes the expiry? Or the request that is expiring?
+    *   Text: "the grant for r1 expires after request r2 completes".
+    *   This implies the event sequence is: [r2 Arrives] -> [r2 Completes/Grants] -> [Expiry Trigger Fires].
+    *   The text says "return arrives right before the request the trigger names".
+    *   Does "trigger names" refer to r1 (the one expiring) or r2 (the one completing)?
+    *   Standard interpretation of "expiry after X completes": X is the event. The return happens immediately following X's completion.
+    *   Let's check the orientation story for clarity on timing: "third ask... landed against only 12... took a partial". This implies sequential processing.
+    *   Re-evaluating "return arrives right before the request the trigger names":
+        *   If Trigger = r2 completion, and it returns to pool. The next logical step is r3 arrival.
+        *   Is there an interpretation where the return happens *before* r2 even completes? No, that contradicts "after request r2 completes".
+        *   Perhaps "trigger names" refers to r1? "The grant for r1 expires... return arrives right before [r1]?" That makes no sense in a stream.
+        *   Let's assume the standard flow: Event 2 finishes -> Return happens -> Event 3 starts.
+        *   Wait, let's look at the phrase "right before the request the trigger names". If the trigger is defined by r2 completing, maybe it means right before r3? Or does it mean the return happens to the pool *before* we process the next arrival? Yes, that is standard state management.
+        *   Let's calculate with this flow:
+            1.  Process r1 (Grant 4). Pool=46.
+            2.  Process r2 (Grant 6). Pool=40. **Trigger Fires**: Return floor(4/2)=2 added to pool. Pool becomes 42.
+            3.  Process r3 (Ask 9). Grant min(9, 42) = 9. Pool=33.
+            4.  Process r4 (Ask 13). Grant min(13, 33) = 13. Pool=20.
+            5.  Process r5 (Ask 15). Grant min(15, 20) = 15. Pool=5.
+
+    *   Alternative Interpretation Check: Could "trigger names" mean the request that is expiring (r1)? If so, does it return before r1? No, r1 already happened.
+    *   Could it mean the return happens *before* r2 completes? "after request r2 completes". No.
+    *   Conclusion: The return happens immediately after r2's grant is applied to the pool, increasing the balance for subsequent requests (r3).
+
+**Final State Calculation:**
+*   **Total Granted**: $4 + 6 + 9 + 13 + 15 = 47$.
+*   **Return Amount**: 2.
+*   **Net Depletion**: $47 - 2 = 45$.
+*   **Initial Pool**: 50.
+*   **Final Pool Left**: $50 - 45 = 5$.
+
+**Denied List**: Empty (Pool never hit zero upon arrival).
+
+### Final Answer JSON
+```json
+{"granted_units": 47, "denied": [], "pool_left": 5}
+```

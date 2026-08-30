@@ -1,0 +1,76 @@
+### Phase 1 RULE SCAN
+*Rules that change state during tonight's event sequence:*
+
+1.  **Limit Check (Steps 1–5):** If observed error rate > 2.0%, trigger rollback, consume observation, tighten limit to 0.8 for remaining steps. Triggers on Step 4 (value 2.0 is not a breach; limit applies to "up to", implying strictly greater than).
+2.  **Limit Check (Steps 6–10):** If observed error rate > 1.0%, trigger rollback, consume observation, tighten limit to 0.8 for remaining steps. Triggers on Step 7 and Step 9.
+3.  **Rollback Logic:** On breach, pause climb, roll back to previous step count (or hold current if logic implies holding the failed state? Re-reading: "rolls back to the previous step". The observation that breached is spent). Triggers on Step 4 (False), Step 7 (True), Step 9 (True).
+4.  **Second Breach Stop:** If a second breach occurs after tightening, status becomes STOPPED, hold current step (which was defended/attempted before the stop? "hold the step you were defending" usually means the last successfully completed state or the one being tested? Text: "a second breach stops everything, you hold the step you were defending". In Step 7 scenario, we rolled back to Step 6. Step 8 is next. If Step 9 breaches, do we hold Step 8 or Step 6? Standard interpretation: The system is at a state where `current_step` is the highest *successful* step completed before the breach attempt that failed. When it says "holds the step you were defending", in the context of a rollout climb, if Step 7 passed and we are climbing to 8, then 9 breaches, we hold 8? Or does "defending" mean the specific step being tested? Let's re-read carefully: "climbs in 10 percent steps... one observed error rate per step". Steps are discrete levels. If Step 6 passed (limit 0.8). We attempt Step 7. Value 1.5 > 0.8. Breach #2. Stop everything. Hold the step you were defending. The "step being defended" is usually the target of the climb or the last stable state? Given "hold", it implies staying at the result of the previous successful rollbacks. Previous success was Step 6 (10%). So we hold 10%.
+5.  **Status Update:** Updates to PAUSED, STOPPED, or DONE based on breach count and final step completion. Triggers on Breach #2.
+
+### Phase 2 LEDGER WALK
+*Applying events in strict arrival order:*
+
+**Initial State:**
+-   `current_step`: 0 (implies rollout at 0%? Or does Step 1 mean 10%?) Text: "climbs in 10 percent steps". Usually, Step 1 = 10%, Step 2 = 20%. Let's assume `rollout_pct` corresponds to the step index * 10.
+-   `limit`: Steps 1-5 (10%-50%) limit is 2.0. Steps 6-10 (60%-100%) limit is 1.0.
+-   `breach_count`: 0.
+-   `status`: "Climbing".
+
+**Event 1: Step 1, Observed 0.6%**
+-   Target: Step 1 (10%). Limit: 2.0%.
+-   Check: 0.6 <= 2.0? Yes.
+-   Action: Proceed to next step.
+-   State Update: `current_step` becomes 1 (`rollout_pct` = 1).
+
+**Event 2: Step 2, Observed 0.9%**
+-   Target: Step 2 (20%). Limit: 2.0%.
+-   Check: 0.9 <= 2.0? Yes.
+-   Action: Proceed.
+-   State Update: `current_step` becomes 2 (`rollout_pct` = 2).
+
+**Event 3: Step 3, Observed 1.4%**
+-   Target: Step 3 (30%). Limit: 2.0%.
+-   Check: 1.4 <= 2.0? Yes.
+-   Action: Proceed.
+-   State Update: `current_step` becomes 3 (`rollout_pct` = 3).
+
+**Event 4: Step 4, Observed 2.0%**
+-   Target: Step 4 (40%). Limit: 2.0%.
+-   Check: "up to 2.0 percent". Does 2.0 breach? Usually "up to X" means <= X is safe. Breach is > X.
+-   Interpretation: 2.0 is not a breach. It is the boundary allowed.
+-   Action: Proceed.
+-   State Update: `current_step` becomes 4 (`rollout_pct` = 4).
+
+**Event 5: Step 5, Observed 0.5%**
+-   Target: Step 5 (50%). Limit: 2.0%.
+-   Check: 0.5 <= 2.0? Yes.
+-   Action: Proceed.
+-   State Update: `current_step` becomes 5 (`rollout_pct` = 5).
+
+**Event 6: Step 6, Observed 1.1%**
+-   Target: Step 6 (60%). Limit switches to 1.0% for steps 6-10.
+-   Check: 1.1 <= 1.0? No. (1.1 > 1.0).
+-   Action: Breach #1 occurs.
+    -   Rollback: "rolls back to the previous step". Previous successful step was Step 5.
+    -   Observation spent: The 1.1% observation is consumed and ignored for future checks against the *new* limit? Text: "the observation that breached is spent... the climb resumes from the next observation." And "the breach observation is spent, it does not re-test against the tighter limit, the NEXT observation does."
+    -   State Reset: `current_step` goes back to 5.
+    -   Limit Update: Tighten limit for *every remaining step* to 0.8%.
+-   State Update: `rollout_pct` = 5 (backed out). `breach_count` = 1. `limit` becomes 0.8% for steps > 5.
+
+**Event 7: Step 7, Observed 1.5%** (Note: Logic dictates we try the next step in sequence, which is Step 6? Or does "next observation" mean the next event in the list regardless of step index?)
+-   *Correction on Climb Mechanism:* The task says "climbs... one observed error rate per step". It lists 10 observations. We successfully did Steps 1-5. Then we hit Step 6 and failed. The text says "rolls back to the previous step". This implies the system is now at Step 5 state. The next event in the list corresponds to the *next attempt* in the climb sequence.
+-   Does the list index map strictly to the global step number (1..10) or sequential attempts?
+    -   Scenario A: Global Steps. We are at Step 5. Next is Step 6 again? But we already observed an error for Step 6 (the 1.1%). The text says "one observed error rate per step". If the observation is spent, do we re-observe? Usually, in these problems, the list provided *is* the stream of observations arriving as the system tries to climb.
+    -   Let's re-read: "climb resumes from the next observation." This implies the sequence of events provided are the attempts.
+    -   If I fail Step 6 (Attempt 1), and rollback, do I try Step 6 again with a new observation? Or does the list provide the observation for the *next target*?
+    -   Re-reading carefully: "observed error rates by step, in order: ...". This phrasing suggests the observations are tied to specific steps (Step 1 has rate X, Step 2 has rate Y). If we rollback to Step 5, and the next event is "Step 6" with a value... wait.
+    -   Alternative Interpretation (Standard Canary Logic): The system attempts Step N. Observation arrives. If fail -> Rollback to N-1. Next attempt is for Step N again? Or does it skip? Text: "climb resumes from the next observation". This implies sequential processing of the list.
+    -   Let's look at the "Orientation" story: "rolled 0.2, 0.75, 2.5... third step breached... one rollback... climb paused at 20 percent holding a pair of clean stages".
+        -   Story Steps: 1 (0.2), 2 (0.75), 3 (2.5). Breach on Step 3. Rollback to Step 2. Status Paused.
+        -   This implies the "observations" are tied to the *attempts* at specific steps, or the list simply enumerates the attempts made until a stop.
+    -   Crucial Sentence: "after any rollback the limit tightens... a second breach stops everything".
+    -   Let's assume the provided list is the stream of *attempts*.
+        -   Attempt 1 (Target Step 1): 0.6% -> Pass. Current Level: 1.
+        -   Attempt 2 (Target Step 2): 0.9% -> Pass. Current Level: 2.
+        -   Attempt 3 (Target Step 3): 1.4% -> Pass. Current Level: 3.
+        -   Attempt 4 (Target Step 4): 2.0% -> Pass (<=2

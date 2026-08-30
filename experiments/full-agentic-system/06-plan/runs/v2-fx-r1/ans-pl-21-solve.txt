@@ -1,0 +1,101 @@
+Based on the rules and events provided for "tonight", here is the step-by-step derivation of the state.
+
+### Phase 1: Rule List & Trigger Identification
+The following rules govern the system state changes during the event stream:
+
+1.  **Arrival/Load Rule**: A request to load a model attempts to place it in memory. If the available space (Total Capacity - Current Occupied) is less than the requested size, an eviction process is triggered.
+2.  **Eviction Selection Rule**: Evictions target the Least-Recently-Touched (LRT) unpinned models first. Pinned models are never evicted unless absolutely necessary to fit a load that cannot otherwise be placed (which leads to deferral).
+3.  **Deferred Load Rule**: If, after evicting all eligible unpinned models, there is still insufficient space for the requested model, the load is deferred. The `deferred` list records this ID.
+4.  **Unload Rule**: A request to unload a model removes it from memory if present (releasing its space). If not present, it is a no-op.
+5.  **Expiry/Return Rule**: Upon completion of the event stream (or specific trigger), expired grants return half their granted tokens rounded down to the pool *before* the next request. (Note: In this specific linear stream without explicit expiry triggers mentioned in the "tonight" events, no returns occur).
+
+**Triggers:**
+*   **Event 1**: `load A` -> Triggers Arrival/Load Rule. Fits immediately.
+*   **Event 2**: `load B` -> Triggers Arrival/Load Rule. Fits immediately (Space: $8 - 1 = 7 \ge 4$).
+*   **Event 3**: `load C` -> Triggers Arrival/Load Rule. Fits immediately (Space: $8 - 5 = 3 < 2$? No, $3 \ge 2$. Wait, occupied is A(1)+B(4)=5. Space=3. Request=2. Fits).
+*   **Event 4**: `load D` -> Triggers Arrival/Load Rule. Occupied: A(1)+B(4)+C(2)=7. Space: $8-7=1$. Request: 6. Does not fit. Triggers Eviction Selection Rule (Target LRT unpinned).
+    *   Current Residents: A, B, C, D (pending).
+    *   Pinned: B.
+    *   Unpinned: A, C.
+    *   LRT among unpinned: Depends on access history. Order of arrival: A(1st), B(2nd), C(3rd). Access times: A(t=0), B(t=1), C(t=2). D is requested at t=3 but cannot fit.
+    *   Candidates for eviction: A and C.
+    *   LRT is **A** (accessed earliest).
+    *   Evict A (Size 1). New Occupied: $7-1=6$. Space available: 2. Request D(6) still doesn't fit ($2 < 6$).
+    *   Next candidate: C (Accessed at t=2, later than A).
+    *   Evict C (Size 2). New Occupied: $6-2=4$. Space available: 4. Request D(6) still doesn't fit ($4 < 6$).
+    *   Remaining Residents: B (Pinned), D (Pending/Failed to load yet? Or does the system hold it?). The rule says "evicts as many... as needed". If pinned models remain and it still does not fit, it defers.
+    *   Can we evict B? No, B is pinned.
+    *   Result: Load D cannot be placed even after exhausting unpinned residents. **Deferral occurs**.
+*   **Event 5**: `unload B` -> Triggers Unload Rule. Removes B (Size 4).
+
+### Phase 2: Ledger Walk (State Application)
+
+**Initial State:** Capacity = 8 GB. Occupied = 0. Loads = 0, Evictions = 0, Deferrals = 0. Deferred List = [].
+
+1.  **Event**: `load A` (1 GB)
+    *   Check Fit: Space $8 \ge 1$. OK.
+    *   Action: Add A to memory.
+    *   State: Occupied {A(1)}. Total Used: 1.
+2.  **Event**: `load B` (4 GB)
+    *   Check Fit: Space $(8-1)=7 \ge 4$. OK.
+    *   Action: Add B to memory. Mark B as Pinned.
+    *   State: Occupied {A(1), B(4)}. Total Used: 5.
+3.  **Event**: `load C` (2 GB)
+    *   Check Fit: Space $(8-5)=3 \ge 2$. OK.
+    *   Action: Add C to memory.
+    *   State: Occupied {A(1), B(4), C(2)}. Total Used: 7.
+4.  **Event**: `load D` (6 GB)
+    *   Check Fit: Space $(8-7)=1 < 6$. Overflow.
+    *   Action: Initiate Eviction. Target LRT Unpinned.
+        *   Residents: A, B(Pinned), C.
+        *   Unpinned Candidates: A (Accessed 1st), C (Accessed 3rd).
+        *   Evict A (Size 1). Used becomes $7-1=6$. Space available: 2. Request D(6) still fails ($2 < 6$). Count Evictions = 1.
+        *   Next Candidate: C (Unpinned, LRT relative to remaining unpinned? Yes, A is gone. C was accessed after B and before this request attempt).
+        *   Evict C (Size 2). Used becomes $6-2=4$. Space available: 4. Request D(6) still fails ($4 < 6$). Count Evictions = 2.
+    *   Check Pinned Constraint: Only B remains, and B is Pinned. Cannot evict B.
+    *   Result: Load cannot fit. **Deferral**.
+    *   Action: Record Deferral for D.
+    *   State: Occupied {A(removed), C(removed), B(4)}. Total Used: 4. (Note: A and C are gone).
+5.  **Event**: `unload B` (4 GB)
+    *   Check Presence: B is in memory.
+    *   Action: Remove B. Release space.
+    *   State: Occupied {}. Total Used: 0.
+
+**Final Totals Calculation:**
+*   **Loads**: The system successfully loaded A, B, and C. D was deferred (not a successful load). Unload is not a "load". Count = 3? Or does "loads" refer to the `loads` key in the JSON which typically counts successful placements? Let's re-read the contract keys: `{"loads": N, ...}`. Usually, this implies successful loads. A, B, C were loaded. D was deferred.
+    *   Wait, let's look at the "orientation" example logic provided in the prompt text to ensure interpretation of "loads". In the orientation story: "three loads, two evictions, one deferral... Q on the deferred list". The count "three loads" referred to M, N, P (successful) + Q (deferred)? Or just successful?
+    *   Text: "M and N loaded clean. P's 3GB did not fit... so it evicted... and loaded." -> P is a load. "Q's 4GB... deferred".
+    *   The prompt asks for `{"loads": N, ...}`. In standard system metrics, this usually counts successful insertions. However, sometimes it counts total load requests processed. Let's look at the specific phrasing: "Request stream: load A..., load B..., load C..., load D...".
+    *   If I count successful placements: A, B, C = 3.
+    *   If I count all load events attempted: A, B, C, D = 4.
+    *   Let's check the orientation text again: "three loads, two evictions, one deferral". The sequence was Load M (ok), Load N (ok), Load P (evict+load), Load Q (defer). That is 3 successful loads and 1 deferred load. The text says "three loads". This strongly implies `loads` = count of successfully placed models.
+    *   Therefore, for tonight: A, B, C were placed. D was deferred. Total Loads = 3.
+
+*   **Evictions**: We evicted A (1st) and C (2nd). Total Evictions = 2.
+*   **Deferrals**: We deferred D. Total Deferrals = 1.
+*   **Deferred List**: Contains the ID of the deferred load: `["D"]`.
+
+**Verification against "Orientation" logic:**
+*   Orientation: Load M (ok), Load N (ok), Load P (evict M, load P), Load Q (defer).
+    *   Evictions: 1 (M).
+    *   Deferrals: 1 (Q).
+    *   Loads: 3 (M, N, P).
+*   Tonight: Load A (ok), Load B (ok), Load C (ok), Load D (evict A, evict C, defer D).
+    *   Evictions: 2.
+    *   Deferrals: 1.
+    *   Loads: 3.
+
+The logic holds.
+
+### Final Answer Construction
+
+```json
+{
+  "loads": 3,
+  "evictions": 2,
+  "deferrals": 1,
+  "deferred": [
+    "D"
+  ]
+}
+```

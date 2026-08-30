@@ -1,0 +1,81 @@
+### Phase 1 RULE SCAN
+Based on the task description and "residency discipline", here are the rules that change state during the event stream:
+
+1.  **Load Rule**: A request to load a model attempts to place it in memory. If the available free space is sufficient, the model loads immediately (state changes: `free` decreases by model size, `loads` count increments).
+2.  **Eviction Rule**: If a requested model cannot fit due to insufficient free space, the system evicts models one-by-one starting with the Least-Recently-Touched (LRT) *unpinned* models until enough space is created or only pinned models remain. Each eviction decrements `evictions` count and frees the model's size.
+3.  **Deferral Rule**: If a requested model cannot fit even after evicting all available unpinned models (because only pinned models remain), the load request is deferred. The specific model ID is recorded in the `deferred` list, and no state change occurs for this event (`deferrals` count increments).
+4.  **Touch Rule**: Every time a model is loaded or touched during an eviction sequence, its recency is updated to "Most-Recently-Touched".
+5.  **Unload Rule**: A request to unload a specific model frees its size from memory (state changes: `free` increases by model size).
+
+**Trigger Mapping:**
+*   Event "load A" triggers the Load Rule.
+*   Event "load B" triggers the Load Rule.
+*   Event "load C" triggers the Load Rule.
+*   Event "load D" triggers the Load Rule (potentially triggering Eviction or Deferral rules depending on state).
+*   Event "unload B" triggers the Unload Rule.
+
+---
+
+### Phase 2 LEDGER WALK
+Applying events in strict arrival order to an initial empty pool (0 GB free) with a capacity of 8 GB.
+*   **Models**: A=1GB, B=2GB, C=3GB, D=4GB.
+*   **Pinned**: Model C is pinned (never evicted).
+*   **Policy**: Evict LRT *unpinned*. If only pinned remain -> Deferral.
+
+**Initial State:** Free = 8 GB. Residents: []. Recency: [].
+
+1.  **Event: load A**
+    *   Request: Load Model A (1 GB).
+    *   Check Fit: 8 >= 1? Yes.
+    *   Action: Load A.
+    *   State Update: Free = 7 GB. Residents: [A]. Recency: [A].
+    *   Result: `loads` = 1, `evictions` = 0.
+
+2.  **Event: load B**
+    *   Request: Load Model B (2 GB).
+    *   Check Fit: 7 >= 2? Yes.
+    *   Action: Load B.
+    *   State Update: Free = 5 GB. Residents: [A, B]. Recency: [B] (B is newer than A).
+    *   Result: `loads` = 1, `evictions` = 0.
+
+3.  **Event: load C**
+    *   Request: Load Model C (3 GB).
+    *   Check Fit: 5 >= 3? Yes.
+    *   Action: Load C.
+    *   State Update: Free = 2 GB. Residents: [A, B, C]. Recency: [C] (C is newest). Note: C is pinned.
+    *   Result: `loads` = 1, `evictions` = 0.
+
+4.  **Event: load D**
+    *   Request: Load Model D (4 GB).
+    *   Check Fit: 2 >= 4? No. Need 2 more GB.
+    *   Eviction Phase: Identify LRT *unpinned* models.
+        *   Residents: A (1GB, unpinned), B (2GB, unpinned), C (3GB, pinned).
+        *   Unpinned set: {A, B}.
+        *   Recency Order (Oldest to Newest): A -> B -> C.
+        *   LRT Unpinned is **A**.
+    *   Evict A (1 GB). Free becomes 2 + 1 = 3 GB. `evictions` count increments. Residents: [B, C]. Recency: [C] (B was touched during eviction check? No, only evicted models move to MRU in standard LRU logic unless specified otherwise; however, the rule says "Every touch of a model moves it to most-recent". Eviction is an action on A. Does checking B count as a touch? Usually no. Let's assume standard LRU where only the evicted or loaded item updates recency relative to others, but strictly speaking, if we just remove A, B becomes the oldest unpinned).
+        *   Current Free: 3 GB. Need: 4 GB. Still short by 1 GB.
+    *   Evict next LRT Unpinned.
+        *   Unpinned set: {B}. (C is pinned).
+        *   Oldest Unpinned is **B**.
+    *   Evict B (2 GB). Free becomes 3 + 2 = 5 GB. `evictions` count increments. Residents: [C]. Recency: [C].
+    *   Check Fit again: 5 >= 4? Yes.
+    *   Action: Load D.
+    *   State Update: Free = 1 GB. Residents: [C, D]. Recency: [D] (D is newest).
+    *   Result: `loads` = 2, `evictions` = 2.
+
+5.  **Event: unload B**
+    *   Request: Unload Model B (2 GB).
+    *   Check Existence: Is B in memory? No (B was evicted in step 4).
+    *   Action: Cannot unload non-existent model. State remains unchanged regarding counts or free space.
+    *   Result: `loads` = 2, `evictions` = 2.
+
+**Final Totals:**
+*   Loads: 2 (A and D loaded successfully).
+*   Evictions: 2 (A and B evicted to make room for D).
+*   Deferrals: 0.
+*   Deferred IDs: [].
+
+```json
+{"loads": 2, "evictions": 2, "deferrals": 0, "deferred": []}
+```

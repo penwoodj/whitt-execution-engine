@@ -1,0 +1,59 @@
+### Phase 1 RULE SCAN
+This phase lists every rule in the task that changes state during the event sequence (tonight's events), including expiry, return, revocation, refill, promotion, fallback, or source-ranking rules. Each line marks which event triggers it.
+
+1.  **Arrival & Budget Check Rule**: Triggered by `Attempt 1`. Checks if current spend ($0) $\le$ budget ($24). If true, allows attempt; if false, triggers doubling logic.
+2.  **Cost Accumulation Rule (Wait)**: Triggered by `Attempt 1` (and subsequent attempts). Adds wait seconds to total spend immediately upon entering the retry cycle for that attempt.
+3.  **Cost Accumulation Rule (Attempt Cost)**: Triggered by `Attempt 1`. Adds per-attempt cost ($2) to total spend immediately upon entering the retry cycle for that attempt.
+4.  **Failure Counting Rule**: Triggered by `Attempt 1` failing. Increments failure counter; if failures $< 2$, schedules next wait; if failures $\ge 2$ (after this one), marks as success.
+5.  **Doubling Rule (Budget)**: Triggered by `Attempt 1` exceeding budget ($4 > 24$ is false, so not triggered here). *Note: This rule only triggers if spend $>$ budget.*
+6.  **Re-check Rule**: Triggered by the completion of the doubling logic (if applicable). Re-evaluates spend against the new doubled budget to determine final suppression status.
+7.  **Suppression Rule**: Triggered by `Attempt 1` failing AND re-check confirming spend $>$ doubled budget. Sets `suppressed = true`.
+8.  **Success Termination Rule**: Triggered by `Attempt 2` succeeding (since job needs 2 failed attempts before the 3rd succeeds). Stops processing further waits/costs for this job instance.
+
+---
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at a time in strict arrival order, showing the state after each event.
+
+**Event 1: Attempt 1 Arrival & Execution**
+*   **Rule Applied**: Cost Accumulation (Wait + Attempt).
+    *   Wait observed for this attempt: $2$s.
+    *   Attempt cost: $2$ tokens.
+    *   Total Spend so far: $0 (\text{start}) + 2 (\text{wait}) + 2 (\text{attempt}) = 4$.
+*   **Rule Applied**: Failure Counting.
+    *   Result: Failed (implied by "job needs 2 failed attempts before the 3rd succeeds").
+    *   Failures count: $1$.
+*   **State Check**: Spend ($4$) $\le$ Budget ($24$). No doubling triggered. Job continues.
+
+**Event 2: Attempt 2 Arrival & Execution**
+*   **Rule Applied**: Cost Accumulation (Wait + Attempt).
+    *   Wait observed for this attempt: $4$s (doubles from previous wait of 2s).
+    *   Attempt cost: $2$ tokens.
+    *   Total Spend so far: $4 (\text{prev}) + 4 (\text{wait}) + 2 (\text{attempt}) = 10$.
+*   **Rule Applied**: Failure Counting.
+    *   Result: Failed (implied by "job needs 2 failed attempts before the 3rd succeeds").
+    *   Failures count: $2$.
+*   **State Check**: Spend ($10$) $\le$ Budget ($24$). No doubling triggered. Job continues to next attempt.
+
+**Event 3: Attempt 3 Arrival & Execution (Success)**
+*   **Rule Applied**: Cost Accumulation (Wait + Attempt).
+    *   Wait observed for this attempt: $8$s (doubles from previous wait of 4s).
+    *   Attempt cost: $2$ tokens.
+    *   Total Spend so far: $10 (\text{prev}) + 8 (\text{wait}) + 2 (\text{attempt}) = 20$.
+*   **Rule Applied**: Success Termination.
+    *   Result: Succeeds (this is the 3rd attempt, following 2 failures).
+    *   Job completes. No further waits or costs added.
+
+**Final State Calculation:**
+*   Total Attempts ($N$): $3$.
+*   Total Wait Seconds ($wait\_s$): $2 + 4 + 8 = 14$.
+*   Total Spend: $14 (\text{waits}) + 6 (\text{attempt costs } 2 \times 3) = 20$.
+*   Budget After: $24 - 20 = 4$.
+*   Suppressed: `false` (Spend never exceeded budget).
+
+---
+
+### Final Answer JSON
+```json
+{"attempts": 3, "wait_s": 14, "budget_after": 4, "suppressed": false}
+```

@@ -1,0 +1,82 @@
+The task requires processing two independent parts: `part_a` (the core scheduling logic) and `part_b` (the audit claim ranking). The final output must be a single JSON object containing both parts with specific keys, derived strictly from the provided rules and events for "tonight" (not the orientation example).
+
+### Part A Analysis (Core Scheduling)
+**Rules & Events:**
+1.  **LOW1**: Starts minute 0, runs 5 minutes total. Checkpoints every 2 running minutes.
+2.  **LOW2**: Starts minute 1, runs 2 minutes total.
+3.  **HIGH**: Arrives minute 4, runs 4 minutes. Preempts current LOW job instantly. While HIGH runs, nothing else runs.
+4.  **Resumption Logic**: A resumed job redoes work past the last checkpoint.
+5.  **Ordering**: Jobs take the core in order of start minutes (LOW1 < LOW2). If a job is waiting, it starts immediately when the core frees up.
+
+**Walkthrough:**
+*   **Minute 0**: `LOW1` starts. (Running time: 0/5). Checkpoint banked at $0+2=2$.
+*   **Minute 1**: `LOW1` continues. (Running time: 1/5). Checkpoint banked at $1+2=3$? No, checkpoints are based on *completed* running minutes.
+    *   Rule: "checkpoint every 2 completed minutes".
+    *   Minute 0 completes -> Time = 1.
+    *   Minute 1 completes -> Time = 2. **Checkpoint Banked**. (Bank at absolute minute 2).
+    *   `LOW2` starts? No, LOW1 is running. Rule: "the core never idles while a LOW job is waiting". But LOW2 hasn't started yet because the rule says "LOW jobs take the core in order of their start minutes". Does this mean they queue up? Yes. "a resumed LOW outranks a fresh one at any tie, and a LOW whose start minute arrives while the core is busy simply waits."
+    *   So `LOW2` enters the waiting queue at Minute 1.
+*   **Minute 2**: `LOW1` continues. (Running time: 3/5). Checkpoint banked? Completed minutes = 3. Next checkpoint at $2+2=4$? Or is it every 2 minutes? "checkpoint every 2 completed minutes". So checkpoints occur after completing minute 2, and minute 4.
+    *   Current state: `LOW1` has completed 3 minutes. Last checkpoint was at completion of minute 2 (absolute time 2).
+*   **Minute 3**: `LOW1` continues. (Running time: 4/5). Completed minutes = 4. **Checkpoint Banked**. (Bank at absolute time 4).
+    *   Queue status: `LOW2` is waiting.
+*   **Minute 4**: `HIGH` arrives.
+    *   Action: Preempt `LOW1`.
+    *   State of `LOW1`: It had completed 4 minutes. Last checkpoint was at completion of minute 4 (absolute time 4).
+    *   Rule: "on preemption the work past the last checkpoint is wasted". Work done since checkpoint = $5 - 4 = 1$ minute? Wait, let's re-read carefully.
+    *   "LOW jobs checkpoint every 2 completed minutes of running time... a job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after".
+    *   Start Minute 0.
+        *   End Min 1 (Completed 1).
+        *   End Min 3 (Completed 3)? No, "every 2 completed minutes". So checkpoints happen after completing 2 minutes, then 4 minutes.
+        *   Timeline:
+            *   T=0 to T=1: Running 1st min.
+            *   T=1 to T=2: Running 2nd min. **Checkpoint #1** (after completing 2 mins). Absolute time = 2.
+            *   T=2 to T=3: Running 3rd min.
+            *   T=3 to T=4: Running 4th min. **Checkpoint #2** (after completing 4 mins). Absolute time = 4.
+    *   At Minute 4, `HIGH` arrives. `LOW1` is currently running its 5th minute (T=4 to T=5).
+    *   Preemption happens instantly at the start of Minute 4? Or does it interrupt the current run? "instantly preempting whatever LOW job is running".
+    *   If `HIGH` arrives at minute 4, and `LOW1` is in its 5th minute (which started at T=3), `LOW1` has completed 4 minutes. The last checkpoint was at completion of minute 4 (T=4).
+    *   Work wasted: "work past the last checkpoint". Since the checkpoint landed exactly on the arrival minute, work done since then is 0? Or does the preemption happen before the checkpoint logic applies to the current second?
+    *   Let's check the orientation example for clarity on this specific mechanic.
+        *   Example: LOW1 (7 mins), HIGH arrives min 3.
+        *   Walk: "LOW1 held core minutes 0, 1 and 2... banked a checkpoint at minute 2". (So checkpoints are at T=2).
+        *   "its 3rd minute was unbanked when the swap came". (Swap happens at start of min 3? Or end?).
+        *   "so 1 minute wasted".
+        *   In the example: LOW1 ran mins 0, 1, 2. Checkpoint at T=2. Min 3 starts. HIGH arrives at T=3. The swap interrupts the run of min 3. Work done in min 3 is wasted. That is 1 minute.
+    *   Applying to Tonight:
+        *   LOW1 runs mins 0, 1, 2 (Checkpoint), 3, 4. Checkpoint at T=4?
+        *   Wait, "every 2 completed minutes".
+            *   Completed 2 mins -> Checkpoint.
+            *   Completed 4 mins -> Checkpoint.
+        *   LOW1 runs:
+            *   Min 0 (T0-1)
+            *   Min 1 (T1-2). **Checkpoint**.
+            *   Min 2 (T2-3)
+            *   Min 3 (T3-4). **Checkpoint**.
+            *   Min 4 (T4-5).
+        *   HIGH arrives at Minute 4. This corresponds to the start of T=4? Or does "Minute 4" mean the interval [4, 5]?
+        *   Standard interpretation: "Arrives at minute X" means it interrupts the job currently running during the interval starting at X.
+        *   If LOW1 is in its 5th minute (interval T=4 to T=5), and HIGH arrives at Minute 4, it preempts immediately.
+        *   Has LOW1 completed the checkpoint for this interval? No, checkpoints are after completion.
+        *   Work done since last checkpoint (T=4): The job has not finished minute 4 yet. It is in the middle of it.
+        *   Wait, if HIGH arrives at Minute 4, does it mean T=4 starts? Yes.
+        *   So LOW1 is running its 5th minute. Last checkpoint was at T=2 (after min 1) and T=4 (after min 3)? No.
+            *   Checkpoint logic: "every 2 completed minutes".
+            *   After Min 0, 1 -> Completed 2 mins. Checkpoint. Time = 2.
+            *   After Min 2, 3 -> Completed 4 mins. Checkpoint. Time = 4.
+        *   So at T=4 (start of minute 4), LOW1 has completed 4 minutes. The checkpoint for "completed 4" happens exactly when the job finishes minute 3? No, "every 2 completed minutes".
+            *   Run Min 0 (finish T=1). Total 1.
+            *   Run Min 1 (finish T=2). Total 2. **Checkpoint**.
+            *   Run Min 2 (finish T=3). Total 3.
+            *   Run Min 3 (finish T=4). Total 4. **Checkpoint**.
+        *   So at the start of Minute 4 (T=4), LOW1 has just finished its 4th minute and banked a checkpoint? Or does it bank it after finishing? "banks a checkpoint... every 2 running minutes". Usually implies upon completion.
+        *   If HIGH arrives at Minute 4, it interrupts the job *at* T=4.
+        *   Did LOW1 complete the interval [3, 4]? Yes, to reach T=4.
+        *   So LOW1 has completed 4 minutes. Checkpoint is banked.
+        *   Work wasted: "work past the last checkpoint". Since the checkpoint was just banked at T=4, and HIGH arrives at T=4, work done since then is 0?
+        *   Let's re-read the orientation example carefully again.
+            *   "LOW1 held core minutes 0, 1 and 2... banked a checkpoint at minute 2". (So min 0, 1 completed).
+            *   "its 3rd minute was unbanked when the swap came". (Swap comes at min 3).
+            *   "so 1 minute wasted".
+            *   This implies that if you are in your Nth minute and get swapped, and you haven't banked a checkpoint for this specific minute's completion yet, you lose the current minute.
+            *   In Tonight: LOW1 runs mins 0, 1, 2, 3, 

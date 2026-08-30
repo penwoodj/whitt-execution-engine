@@ -1,0 +1,112 @@
+Phase 1 RULE SCAN:
+Rule: LOW job execution (duration = start_minute + duration). Trigger: Event "LOW1 starts".
+Rule: LOW job checkpoint creation (every 2 minutes of running time, lands instantly at minute t). Trigger: Time tick reaching multiple of 2 for an active LOW job.
+Rule: HIGH job arrival and preemption (instantly stops current LOW, wastes unbanked work). Trigger: Event "HIGH arrives".
+Rule: Core release upon HIGH completion. Trigger: Event "HIGH finishes".
+Rule: Core scheduling priority (Lower start_minute wins tie-break; resumed status irrelevant for initial selection between idle jobs). Trigger: State transition from "Busy" to "Idle".
+Rule: LOW job resumption (re-executes work past last checkpoint). Trigger: Event "LOW starts/resumes after HIGH".
+Rule: LOW job completion. Trigger: Job duration counter reaches 0.
+Rule: Makespan calculation (max end_time of all jobs). Trigger: Final event completion.
+
+Phase 2 LEDGER WALK:
+
+**State Initialization:**
+Time = 0. Core Status = Idle. Pending LOWs = [LOW1(start=0, dur=4), LOW2(start=3, dur=3)]. Active LOW = None. HIGH Job = None. Last Checkpoint Banked = {} (empty).
+
+---
+
+**Event 1: Time 0 - LOW1 Starts**
+- Action: Core assigns to LOW1.
+- State Update: Active LOW = LOW1. Remaining LOW1 duration = 4. Current Time = 0.
+- Ledger Line: t=0, Active=LOW1(rem=4), Pending=[LOW2(start=3)], High=None
+
+**Event 2: Time Tick to 1 (LOW1 runs minute 0->1)**
+- Action: LOW1 completes minute 1 of work. Total run = 1.
+- Ledger Line: t=1, Active=LOW1(rem=3), CumRun(LOW1)=1
+
+**Event 3: Time Tick to 2 (LOW1 runs minute 1->2)**
+- Action: LOW1 completes minute 2 of work. Checkpoint triggered and saved immediately at t=2.
+- State Update: Last Banked for LOW1 = 2 minutes. Remaining needed = 4 - 2 = 2 minutes.
+- Ledger Line: t=2, Active=LOW1(rem=2), CumRun(LOW1)=2, CheckpointSaved={LOW1:2}
+
+**Event 4: Time Tick to 3 (LOW1 runs minute 2->3)**
+- Action: LOW1 completes minute 3 of work.
+- Ledger Line: t=3, Active=LOW1(rem=1), CumRun(LOW1)=3.
+- Note: Event "HIGH arrives at minute 5" has not occurred yet. However, the prompt says "LOW2 runs 3 minutes starting at minute 3". LOW2 is pending. Does LOW2 start now? The rule says "arrivals in order... LOW jobs take the core in order of their start minutes... a LOW whose start minute arrives while the core is busy simply waits."
+- Interpretation: LOW2's start event happens at t=3. Since Core is busy with LOW1, LOW2 enters "Pending/Waiting" state. It does not displace LOW1 unless preempted by HIGH.
+- Ledger Line: t=3, Active=LOW1(rem=1), Pending=[LOW2(start=3)], High=None
+
+**Event 5: Time Tick to 4 (LOW1 runs minute 3->4)**
+- Action: LOW1 completes minute 4 of work. Job finishes!
+- State Update: LOW1 Finished at t=4. Wasted for LOW1 = 0.
+- Ledger Line: t=4, Active=None, LOW1_Finished_At=4, Pending=[LOW2(start=3)], High=None
+
+**Event 6: Time Tick to 5 (HIGH Arrives)**
+- Action: HIGH arrives at minute 5. Core is currently Idle (LOW1 finished).
+- Rule Application: "while HIGH runs nothing else runs". Core becomes Busy with HIGH.
+- State Update: Active = HIGH. Duration = 4. Start = 5. Finish = 9.
+- Ledger Line: t=5, Active=HIGH(rem=4), Pending=[LOW2(start=3)], Low1_Finished_At=4
+
+**Event 7: Time Tick to 6 (HIGH runs)**
+- Action: HIGH executes minute 5->6.
+- Ledger Line: t=6, Active=HIGH(rem=3)
+
+**Event 8: Time Tick to 7 (HIGH runs)**
+- Action: HIGH executes minute 6->7.
+- Ledger Line: t=7, Active=HIGH(rem=2)
+
+**Event 9: Time Tick to 8 (HIGH runs)**
+- Action: HIGH executes minute 7->8.
+- Ledger Line: t=8, Active=HIGH(rem=1)
+
+**Event 10: Time Tick to 9 (HIGH finishes)**
+- Action: HIGH completes work at t=9. Core becomes Idle.
+- State Update: Low2 was waiting since t=3. Its start minute is 3 (< current time). It resumes execution.
+- Ledger Line: t=9, Active=None, Pending=[LOW2(start=3)], High_Finished_At=9
+
+**Event 11: LOW2 Resumes (Start Minute Logic)**
+- Action: Core assigns to LOW2. Since LOW1 finished at 4 and HIGH ran 5->9, the lowest start minute available is LOW2 (start=3).
+- State Update: Active = LOW2. Original Duration = 3. Last Checkpoint for LOW2? None existed yet because it never started running before preemption.
+- Current Run Time for LOW2 = 0. Remaining to run = 3.
+- Ledger Line: t=9, Active=LOW2(rem=3), CumRun(LOW2)=0
+
+**Event 12: Time Tick to 10 (LOW2 runs minute 0->1)**
+- Action: LOW2 completes first minute of work. Total run = 1. No checkpoint yet (needs 2 mins).
+- Ledger Line: t=10, Active=LOW2(rem=2), CumRun(LOW2)=1
+
+**Event 13: Time Tick to 11 (LOW2 runs minute 1->2)**
+- Action: LOW2 completes second minute of work. Checkpoint triggered at t=11.
+- State Update: Last Banked for LOW2 = 2 minutes. Remaining needed = 3 - 2 = 1 minute.
+- Ledger Line: t=11, Active=LOW2(rem=1), CumRun(LOW2)=2, CheckpointSaved={LOW2:2}
+
+**Event 14: Time Tick to 12 (LOW2 runs minute 2->3)**
+- Action: LOW2 completes third and final minute of work. Job finishes!
+- State Update: LOW2 Finished at t=12. Wasted for LOW2 = 0.
+- Ledger Line: t=12, Active=None, LOW2_Finished_At=12
+
+---
+
+**Final State Aggregation:**
+- Makespan: Max finish time = max(LOW1_finish=4, HIGH_finish=9, LOW2_finish=12) = 12 minutes.
+- Wasted Minutes:
+    - LOW1: Finished naturally before HIGH arrived (or while running). Checkpoint at t=2 was safe. No preemption loss for LOW1. Waste = 0.
+    - LOW2: Never started before HIGH ran. When it started, it had no previous work to waste. It ran fresh. Waste = 0.
+    - Total Wasted = 0.
+- Completion Order (by finish minute):
+    1. LOW1 finished at t=4.
+    2. HIGH finished at t=9 (not a LOW job).
+    3. LOW2 finished at t=12.
+    - Order of LOW jobs: ["LOW1", "LOW2"].
+
+Double Check against "Orientation" trap logic:
+- Did LOW2 get preempted? No, it never started.
+- Did LOW1 lose work? No, it finished at t=4. HIGH arrived at t=5.
+- Is the makespan correct? Yes, driven by LOW2 finishing at 12.
+- Are there any "resumed" jobs with wasted minutes? No. LOW2 was fresh when it started after HIGH left.
+
+Final JSON Construction:
+makespan_min: 12
+wasted_min: 0
+order: ["LOW1", "LOW2"]
+
+{"makespan_min": 12, "wasted_min": 0, "order": ["LOW1", "LOW2"]}

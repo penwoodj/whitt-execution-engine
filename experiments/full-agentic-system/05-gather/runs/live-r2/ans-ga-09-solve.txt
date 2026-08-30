@@ -1,0 +1,51 @@
+Based on the source material provided ("TONIGHT'S EVENTS"), here is the step-by-step derivation of the final state.
+
+**1. Event Analysis:**
+The list contains 6 observations in order:
+*   **Step 1 (Pos 1):** Rate 0.5%. Limit for Pos 1-5 is 2.0%. Verdict: Clean. Stage Completed = 1. Rollout after = $1 \times 10\% = 10\%$.
+*   **Step 2 (Pos 2):** Rate 0.8%. Limit for Pos 2-6 is still governed by the step range rule? No, the rule says "steps 1 through 5 may show up to 2.0 percent". Step 2 falls in this range. Verdict: Clean. Stage Completed = 2. Rollout after = $2 \times 10\% = 20\%$.
+*   **Step 3 (Pos 3):** Rate 2.1%. Limit for Pos 3 is 2.0%. Since $2.1 > 2.0$, this is a Breach. Verdict: Breach. Stage Completed remains at last valid stage (2). Rollout resets to last completed value ($2 \times 10\% = 20\%$).
+*   **Step 4 (Pos 4):** Rate 0.6%. Limit for Pos 4 is 2.0% (since it is a step $\le 5$). Verdict: Clean. Stage Completed increments to 3? No, the rule states "breaching observation completes nothing... clean observation completes stage equal to its own position".
+    *   *Correction on Stage Logic:* The rule says "clean observation completes stage equal to its own position in list".
+        *   Pos 1 Clean -> Completes Stage 1.
+        *   Pos 2 Clean -> Completes Stage 2.
+        *   Pos 3 Breach -> Completes nothing. Last completed is still 2.
+        *   Pos 4 Clean -> Completes Stage 4? Or does it continue the sequence? The rule says "completes stage equal to its own position". This implies a direct mapping for clean steps. However, usually in such rolling logs, if you missed a step due to breach, do you skip that number or fill it?
+        *   Let's re-read carefully: "clean observation completes stage equal to its own position in list".
+            *   Step 1 (Pos 1) Clean -> Stage = 1. Rollout = $1 \times 10\%$.
+            *   Step 2 (Pos 2) Clean -> Stage = 2. Rollout = $2 \times 10\%$.
+            *   Step 3 (Pos 3) Breach -> Stage remains 2. Rollout resets to last completed ($20\%$).
+            *   Step 4 (Pos 4) Clean -> Completes Stage 4? Or does it complete the next available stage number? The rule says "completes stage equal to its own position". This phrasing suggests $Stage = Position$. If Pos 3 was a breach, we didn't get to record a clean completion for Pos 3. Now at Pos 4, if clean, do we set Stage=4 or Stage=3?
+            *   Let's look at the "Rollout" logic: "rollout then shows 10 percent times that stage number". If Step 4 is clean and Position is 4, does it imply Stage becomes 4 immediately? Or does it continue from where we left off (Stage 2)?
+            *   Standard interpretation for this specific constraint style ("completes stage equal to its own position"): The successful event at Pos $N$ sets the state variable "Stages Done" to $N$. If there was a breach, that step didn't happen. But wait, if I have a clean observation at Step 4, and the previous valid stage was 2, does Step 4 become Stage 4?
+            *   Actually, looking at the limits: "steps 1 through 5 may show up to 2.0 percent". This is a global limit for steps 1-5. It doesn't imply stages 1-5 exist independently of sequence, but rather that the threshold drops after Step 5.
+            *   Let's re-evaluate the Stage counter. "clean observation completes stage equal to its own position in list". This sounds like $Stage = Position$. If Pos 3 failed, we have no clean completion for Pos 3. At Pos 4, if clean, do we claim Stage 4? Or does the system try to fill Stage 3 first?
+            *   Hypothesis A: The counter simply tracks the highest Position that was Clean so far. (Pos 1->1, Pos 2->2, Pos 3(Breach)->Stay 2, Pos 4(Clean)->Go back to 3? No, "completes stage equal to its own position" implies $Stage = Pos$). If $Stage=Pos$, then at Pos 4, Stage becomes 4.
+            *   Hypothesis B: The counter tracks the sequence of successful completions. (1, 2, [skip], 3...). But the rule explicitly links "stage" to "position". Let's assume strict mapping: $Stage = Position$ for clean events.
+                *   Pos 1 Clean -> Stage=1. Rollout=10%.
+                *   Pos 2 Clean -> Stage=2. Rollout=20%.
+                *   Pos 3 Breach -> No change to Stage. Stage stays 2. Rollout resets to last completed ($2 \times 10\% = 20\%$). Note: The rule says "rollback leaves rollout and stages at last completed stage's values". So after breach, State is (Stage=2, Rollout=20%).
+                *   Pos 4 Clean -> Completes Stage equal to its own position (4)? Or does it complete the next valid slot? If it completes Stage 4, then we skipped Stage 3. That seems odd for a "rollout" that climbs in steps. Usually, you climb step-by-step.
+                *   Let's reconsider the text: "it climbs in 10 percent steps with one observed error rate per step." This implies sequential progression. If Step 3 failed, we are still at Step 2? Or do we move to Step 4?
+                *   Re-reading: "breaching observation completes nothing... rollback leaves rollout and stages at last completed stage's values". This confirms that after a breach, the state is frozen at the last success. The next clean event should ideally complete the *next* logical step (which would be Stage 3) to resume climbing?
+                *   BUT the rule says: "clean observation completes stage equal to its own position in list". This is a very specific constraint. It forces $Stage = Position$. If so, at Pos 4, Stage becomes 4.
+                *   Let's check Step 5 (Pos 5). Rate 0.7%. Limit for steps 1-5 is 2.0%. Clean. If the rule holds ($Stage=Position$), then Stage becomes 5. Rollout = $5 \times 10\% = 50\%$.
+                *   Let's check Step 6 (Pos 6). Rate 0.9%. Limit for steps 6-10 is 1.0%. Since $0.9 < 1.0$, this is Clean. Position is 6. If rule holds ($Stage=Position$), Stage becomes 6. Rollout = $6 \times 10\% = 60\%$.
+
+    *   **Alternative Interpretation (Sequential Climbing):** The "stage" represents the current level of rollout completed.
+        *   Pos 1 Clean -> Level 1.
+        *   Pos 2 Clean -> Level 2.
+        *   Pos 3 Breach -> Stay at Level 2.
+        *   Pos 4 Clean -> Does this complete Level 3? Or does the rule "completes stage equal to its own position" override and make it Level 4?
+        *   Let's look at the phrase "stage numbering is fixed by position in list". This suggests Stage Number = List Position. If so, a breach at Pos 3 means we never completed Pos 3? But then what is the value of "Stages Done"? Is it the count of successful lines (5) or the max position reached (6)?
+        *   The rule says: "clean observation completes stage equal to its own position in list". This implies that if I have a clean line at Pos 4, I complete Stage 4. It does not say "completes the next available stage". Therefore, the gap remains.
+        *   However, let's look at the limit change: "after any rollback limit tightens to 0.8 for every remaining step." This applies if there is a breach? The text says "breaching observation completes nothing... after any rollback limit tightens". Wait, "rollback" usually refers to reverting state. But here it might mean "after a breach occurs (which acts like a reset)".
+        *   Let's re-read the specific condition for Step 3: Rate 2.1%. Limit is 2.0%. This is a Breach.
+        *   Condition for Step 6: Rate 0.9%. Limit is 1.0% (Steps 6-10). This is Clean.
+
+    *   **Decision on State Update Logic:**
+        If the rule "completes stage equal to its own position" is strict, then:
+        Pos 1 -> Stage 1.
+        Pos 2 -> Stage 2.
+        Pos 3 (Breach) -> No change. Stage remains 2.
+        Pos 4 -> Completes Stage 4? Or does it complete the "missing" stage to maintain continuity? The text says "stage numbering is fixed by position in list". This strongly implies $Stage = Position$. If so, Step 5 completes Stage 

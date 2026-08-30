@@ -1,0 +1,76 @@
+### Phase 1 RULE SCAN
+Based on the task description and the specific "CANARY DISCIPLINE" provided in the failure analysis section (which overrides the narrative contradictions), here are the rules governing state changes:
+
+1.  **Limit Assignment Rule**: Steps 1-5 have a limit of 2.0%; Steps 6-10 have a limit of 1.0%.
+2.  **Breach Detection Rule**: An observation is a breach if `observed > limit`.
+3.  **First Breach Action (Rollback)**: Upon the first breach, the current step is rolled back (SPENT), and the limit for all *remaining* steps tightens to 0.8%.
+4.  **Second Breach Action (Stop)**: Upon a second breach (after rollback), the climb stops permanently with status `STOPPED`. The rollout is set to $10 \times$ the step being defended, and stages are set to observations consumed so far.
+5.  **No Breach Completion Rule**: If no breaches occur, the climb completes with status `DONE`, rollout = $10 \times$ steps, stages = steps.
+
+### Phase 2 LEDGER WALK
+Processing the 5 observations in strict arrival order against the rules above:
+
+*   **Step 1**: Observed 0.4 vs Limit 2.0 -> OK (Clean). State advances to Step 2.
+*   **Step 2**: Observed 1.9 vs Limit 2.0 -> OK (Clean). State advances to Step 3.
+*   **Step 3**: Observed 0.5 vs Limit 2.0 -> OK (Clean). State advances to Step 4.
+*   **Step 4**: Observed 2.2 vs Limit 2.0 -> BREACH.
+    *   Action: First breach detected. Current step (4) is SPENT.
+    *   New Rule: Limit for remaining steps tightens to 0.8%.
+    *   State Update: Rollout = $10 \times$ Step 3 (last completed clean step) = 30? **Correction based on standard canary logic and the "STOPPED" definition**: The prompt defines `rollout_pct` as "$10 \times$ the step you were defending". In a rollback scenario, we are still trying to defend Step 4. However, usually, if a step fails, we revert to the last *successful* stage. Let's re-read the specific "CANARY DISCIPLINE" text provided in the failure block: "Second breach... rollout_pct = 10 × the step you were defending". This implies for the first breach, we haven't stopped yet, but we have rolled back.
+    *   Wait, let's look at the "No Breach Completion Rule": "rollout_pct = 10 × steps". If Step 4 fails, we are not at "steps" (which would be 5). We are at step 3 completed? Or do we hold the state of step 3?
+    *   Let's re-evaluate the specific text: "First breach... that observation spent... next observation resumes the climb." This implies we try Step 4 again with the new limit (0.8%).
+    *   **Step 4 Retry**: Observed 2.2 vs Limit 0.8 -> BREACH.
+        *   Action: Second breach detected. Climb stops permanently. Status `STOPPED`.
+        *   Calculation for STOPPED state: "holding the rollout and stages of the last completed stage".
+        *   Last completed stage was Step 3 (where we observed 0.5).
+        *   Rollout = $10 \times$ 3 = 30? Or does it mean the step number itself? The text says "$10 \times$ the step you were defending" for the STOPPED case. We were defending Step 4 (twice). But we hold the state of the last *completed* stage.
+        *   Let's check the math on "stages_done": "observations consumed so far". We consumed Step 1, 2, 3, and two attempts at Step 4? Or just up to the failure point? Usually, it means observations processed until the stop condition.
+        *   However, looking at the provided example in the text: "position 3 rolled 2.5... breach one... rollout and stages hold the last completed stage, 20 and 2". Here, position 1 (stage 1) was clean. Position 2 (stage 2) was clean. Position 3 failed. They held Stage 2 (value 20).
+        *   Applying this to our case: Step 1 (Clean), Step 2 (Clean), Step 3 (Clean). Step 4 (Fail). We hold the state of Step 3.
+        *   Rollout = $10 \times$ 3 = 30? Or is it just the step number? The example says "rollout 20" for stage 2. So rollout = $10 \times$ stages_done.
+        *   Stages done = 3 (observations 1, 2, 3 were clean).
+        *   Rollout = 30.
+        *   Status = STOPPED.
+
+    *Wait, let's re-read the "CANARY DISCIPLINE" failure block carefully:* "Second breach... rollout_pct = 10 × the step you were defending". In our case, we defended Step 4 twice. But the state held is from the last completed stage (Step 3).
+    Let's assume the standard interpretation: We successfully passed steps 1, 2, and 3. We failed step 4. The system rolls back to the last stable state.
+    Stable State: Steps Done = 3. Rollout = 30. Status = STOPPED (because we hit a second breach).
+
+    *Alternative Interpretation Check*: Did Step 4 fail immediately? "First breach... that observation spent". This means we don't stop, we just mark it spent and try again with the new limit.
+    So:
+    1. Step 1 OK.
+    2. Step 2 OK.
+    3. Step 3 OK.
+    4. Step 4 (Limit 2.0) -> Fail (Breach). Mark spent. Limit becomes 0.8 for remaining.
+    5. Step 4 Retry (Limit 0.8) -> Observed 2.2 > 0.8 -> Fail (Second Breach). Stop.
+    
+    State at Stop:
+    - Last completed stage was Step 3.
+    - Stages Done = 3.
+    - Rollout = $10 \times$ 3 = 30.
+    - Status = STOPPED.
+
+    *Wait, is it possible the "step you were defending" refers to the step number (4)?* If so, rollout would be 40? But the example says "hold the last completed stage". The example held stage 2 (value 20) after failing stage 3. It did not hold stage 3 (value 30). So we must hold the value of the last *successful* step.
+    Last successful step = Step 3. Value = 30.
+
+    Let's double check the "stages_done" definition in the STOPPED case: "holding the rollout and stages of the last completed stage".
+    If Stage 1 is done, Stages Done = 1. Rollout = 10.
+    If Stage 2 is done, Stages Done = 2. Rollout = 20.
+    Here, Step 3 is done. Stages Done = 3. Rollout = 30.
+
+    Final check on the inputs:
+    Step 1: 0.4 (Limit 2.0) -> OK
+    Step 2: 1.9 (Limit 2.0) -> OK
+    Step 3: 0.5 (Limit 2.0) -> OK
+    Step 4: 2.2 (Limit 2.0) -> BREACH #1. Limit -> 0.8. Spent.
+    Step 4 Retry: 2.2 (Limit 0.8) -> BREACH #2. STOPPED.
+
+    Resulting State:
+    Rollout = 30.
+    Stages Done = 3.
+    Status = STOPPED.
+
+### Final Answer JSON
+```json
+{"rollout_pct": 30, "stages_done": 3, "status": "STOPPED"}
+```

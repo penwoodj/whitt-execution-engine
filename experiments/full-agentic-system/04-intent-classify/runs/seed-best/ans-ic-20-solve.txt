@@ -1,0 +1,90 @@
+### Phase 1 RULE SCAN
+This phase lists every rule in the task that changes state during the event sequence (the "flaky upstream" scenario), identifying the specific trigger for each.
+
+1.  **Per-Attempt Cost Rule**: Triggers on every attempt (failed or successful). Adds `3` tokens to spend.
+2.  **Wait Time Rule**: Triggers after a failed attempt before the next retry. Adds wait seconds (`3`, then `6`, then `12`) to spend.
+3.  **Budget Accumulation Rule**: Triggers continuously as attempts and waits occur. Subtracts total spend from initial budget.
+4.  **Suppression Threshold Rule**: Triggers when accumulated spend exceeds the current budget limit. Sets state `suppressed = true` (pending re-check logic).
+5.  **Budget Doubling Rule**: Triggers exactly once if suppression occurs. Doubles the budget limit immediately for the re-evaluation of the same spend.
+6.  **Re-Check Suppression Rule**: Triggers after doubling. Re-evaluates `suppressed` based on whether spend < new_doubled_budget. Sets final `suppressed = false` if under, or `true` if still over (not applicable here as doubling covers the gap).
+7.  **Success Condition Rule**: Triggers on the 4th attempt. Marks job as successful and stops further processing.
+
+---
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at a time in strict arrival order, calculating the state after each step.
+
+**Initial State:**
+*   `Budget`: 30
+*   `Spend`: 0
+*   `Attempts`: 0
+*   `Wait_S`: 0
+*   `Suppressed`: false
+
+**Event 1: Attempt 1 (Failed)**
+*   Action: Run attempt.
+*   Cost: +3 tokens.
+*   State Update: Spend = 3, Attempts = 1.
+*   Check: 3 <= 30. OK.
+
+**Event 2: Wait after Attempt 1**
+*   Action: Retry wait (First wait).
+*   Duration: 3 seconds.
+*   Cost: +3 tokens.
+*   State Update: Spend = 6, Wait_S = 3.
+*   Check: 6 <= 30. OK.
+
+**Event 3: Attempt 2 (Failed)**
+*   Action: Run attempt.
+*   Cost: +3 tokens.
+*   State Update: Spend = 9, Attempts = 2.
+*   Check: 9 <= 30. OK.
+
+**Event 4: Wait after Attempt 2**
+*   Action: Retry wait (Second wait).
+*   Duration: Doubles previous (3 -> 6) seconds.
+*   Cost: +6 tokens.
+*   State Update: Spend = 15, Wait_S = 9.
+*   Check: 15 <= 30. OK.
+
+**Event 5: Attempt 3 (Failed)**
+*   Action: Run attempt.
+*   Cost: +3 tokens.
+*   State Update: Spend = 18, Attempts = 3.
+*   Check: 18 <= 30. OK.
+
+**Event 6: Wait after Attempt 3**
+*   Action: Retry wait (Third wait).
+*   Duration: Doubles previous (6 -> 12) seconds.
+*   Cost: +12 tokens.
+*   State Update: Spend = 30, Wait_S = 21.
+*   Check: 30 <= 30. OK.
+
+**Event 7: Attempt 4 (Successful)**
+*   Action: Run attempt.
+*   Cost: +3 tokens.
+*   State Update: Spend = 33, Attempts = 4.
+*   **Trigger**: Spend (33) > Budget (30).
+*   **Rule Application**: Suppression Threshold Rule fires -> `suppressed` becomes true.
+*   **Rule Application**: Budget Doubling Rule fires -> New Budget = 30 * 2 = 60.
+*   **Rule Application**: Re-Check Suppression Rule fires -> Is Spend (33) < New Budget (60)? Yes.
+*   Final State Update: `suppressed` becomes false.
+
+**Final Calculation:**
+*   Total Attempts: 4
+*   Total Wait Seconds: 3 + 6 + 12 = 21
+*   Total Spend: 33
+*   Budget After: 60 - 33 = 27 (Wait, the prompt definition says `budget_after` is computed against the doubled budget when doubling fired. The final state holds the remaining balance of that doubled budget).
+    *   Let's re-read carefully: "budget_after is always computed against the doubled budget when doubling fired".
+    *   Initial Budget = 30.
+    *   Final Spend = 33.
+    *   Doubled Budget = 60.
+    *   Remaining Balance (Budget After) = 60 - 33 = 27.
+
+---
+
+### Final Answer JSON
+
+```json
+{"attempts": 4, "wait_s": 21, "budget_after": 27, "suppressed": false}
+```

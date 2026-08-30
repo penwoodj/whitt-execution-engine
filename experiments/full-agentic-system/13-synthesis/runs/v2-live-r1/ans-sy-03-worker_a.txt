@@ -1,0 +1,113 @@
+### Phase 1 Rule Scan (First Half Only)
+
+Based on the text "night desk sy-03" and the specific rules governing the token pool for tonight's deploy window:
+
+1.  **Arrival/Grant Rule**: Requests land in strict arrival order; grants are partial when the pool cannot cover the full ask; a request arriving at an empty pool is denied and listed by id; a pool that still holds tokens never denies anyone (even if larger than remaining).
+2.  **Expiry Rule**: The grant for `r1` expires after request `r2` completes; an expired grant returns half its granted tokens rounded down to the pool; the expiry sentence names exactly one request id (`r1`) so only that one grant ever returns.
+
+### Phase 2 Ledger Walk (First Half Only)
+
+**Initial State**: Pool = 60 tokens.
+**Events**: r1(ask 6), r2(ask 10), r3(ask 12), r4(ask 15), r5(ask 19), r6(ask 21), r7(ask 24).
+
+*   **Event r1 (Ask 6)**:
+    *   Pool has 60. Ask is 6. Grant = min(6, 60) = 6.
+    *   New Pool = 60 - 6 = 54.
+    *   State: `granted_units`=6, `pool_left`=54.
+
+*   **Event r2 (Ask 10)**:
+    *   Pool has 54. Ask is 10. Grant = min(10, 54) = 10.
+    *   New Pool = 54 - 10 = 44.
+    *   State: `granted_units`=6+10=16, `pool_left`=44.
+
+*   **Event r3 (Ask 12)**:
+    *   Pool has 44. Ask is 12. Grant = min(12, 44) = 12.
+    *   New Pool = 44 - 12 = 32.
+    *   State: `granted_units`=16+12=28, `pool_left`=32.
+
+*   **Event r4 (Ask 15)**:
+    *   Pool has 32. Ask is 15. Grant = min(15, 32) = 15.
+    *   New Pool = 32 - 15 = 17.
+    *   State: `granted_units`=28+15=43, `pool_left`=17.
+
+*   **Event r5 (Ask 19)**:
+    *   Pool has 17. Ask is 19. Grant = min(19, 17) = 17 (Partial).
+    *   New Pool = 17 - 17 = 0.
+    *   State: `granted_units`=43+17=60, `pool_left`=0.
+
+*   **Event r6 (Ask 21)**:
+    *   Pool has 0. Ask is 21. Request arrives at empty pool.
+    *   Action: Denied. Listed by id.
+    *   State: `granted_units`=60, `denied`=["r6"], `pool_left`=0.
+
+*   **Event r7 (Ask 24)**:
+    *   Pool has 0. Ask is 24. Request arrives at empty pool.
+    *   Action: Denied. Listed by id.
+    *   State: `granted_units`=60, `denied`=["r6", "r7"], `pool_left`=0.
+
+*   **Expiry Trigger**: After r2 completes (which happened early in the walk), the grant for `r1` expires.
+    *   Rule: Returns half of granted tokens rounded down to pool.
+    *   Granted by r1 was 6. Half is 3. Rounded down is 3.
+    *   Pool becomes 0 + 3 = 3.
+    *   Note on Timing: The text says "The grant for r1 expires after request r2 completes". In the walk, this happens immediately following r2's processing. However, subsequent events (r3 through r7) occur *after* r2. Does the expiry happen before or after r3?
+    *   Re-reading strict order: "apply the events one at a time... arrival order: r1... r2...". The expiry is tied to an event completion ("after request r2 completes"). This implies it happens in the sequence between r2 and r3.
+    *   Let's re-calculate with Expiry happening before r3.
+
+**Revised Walk (Expiry applied after r2, before r3):**
+
+1.  **r1**: Grant 6. Pool 54. Total Granted: 6.
+2.  **r2**: Grant 10. Pool 44. Total Granted: 16.
+    *   **Expiry Trigger (r1)**: Returns floor(6/2) = 3 to pool.
+    *   New Pool = 44 + 3 = 47.
+3.  **r3**: Ask 12. Pool 47. Grant 12. Pool 35. Total Granted: 16+12=28.
+4.  **r4**: Ask 15. Pool 35. Grant 15. Pool 20. Total Granted: 28+15=43.
+5.  **r5**: Ask 19. Pool 20. Grant 19 (Partial). Pool 1. Total Granted: 43+19=62.
+6.  **r6**: Ask 21. Pool 1. Grant 1 (Partial). Pool 0. Total Granted: 62+1=63.
+7.  **r7**: Ask 24. Pool 0. Denied. List ["r7"]. Total Granted: 63.
+
+*Wait, let's re-read the denial rule carefully:* "a request arriving at an empty pool is denied and listed by id".
+In step 6 (r6), pool was 1. Grant = min(21, 1) = 1. Pool becomes 0. This is a partial grant, not a denial. The text says: "grants are partial when the pool cannot cover the full ask... denied means arriving to find the pool already at exactly zero".
+So r6 gets 1 token (partial). Pool hits 0.
+Then r7 arrives at 0. Denied.
+
+Let's re-verify the Expiry timing logic against the "orientation story" warning: "the return arrives right before the request the trigger names, not after it." This refers to the *expiry* event relative to the *named* request? No, the text says "The grant for r1 expires after request r2 completes". The orientation story warns about returns landing before the trigger. Here the trigger is `r2` completion. So the return happens immediately after `r2`.
+So the sequence is: Process r1 -> Process r2 -> **Expiry Event** -> Process r3...
+
+Let's re-run numbers with this specific sequence:
+Start: 60.
+1. **r1 (ask 6)**: Grant 6. Pool = 54. Total Granted = 6.
+2. **r2 (ask 10)**: Grant 10. Pool = 44. Total Granted = 16.
+   *   **Expiry Event**: Triggered by r2 completion. Returns floor(6/2) = 3 to pool.
+   *   Pool = 44 + 3 = 47.
+3. **r3 (ask 12)**: Grant 12. Pool = 35. Total Granted = 28.
+4. **r4 (ask 15)**: Grant 15. Pool = 20. Total Granted = 43.
+5. **r5 (ask 19)**: Grant 19. Pool = 1. Total Granted = 62.
+6. **r6 (ask 21)**: Grant min(21, 1) = 1. Pool = 0. Total Granted = 63.
+7. **r7 (ask 24)**: Arrives at 0. Denied. List ["r7"]. Total Granted = 63.
+
+Is there any other interpretation? "The grant for r1 expires after request r2 completes".
+Could it mean the expiry happens *after* all requests are processed? No, "after request r2 completes" is a specific event boundary.
+What if the pool was empty before r2? No, 60 start.
+What if the rounding works differently? "half its granted tokens rounded down". 6/2 = 3. Correct.
+
+Let's double check the denial condition for r6 and r7.
+r5 leaves pool at 1.
+r6 asks 21. Pool has 1. Grant is 1. Pool becomes 0. This is a partial grant. Not denied.
+r7 asks 24. Pool has 0. Denied.
+
+Final State for Part A:
+`granted_units`: 63
+`denied`: ["r7"]
+`pool_left`: 0
+
+```json
+{
+  "part_a": {
+    "granted_units": 63,
+    "denied": [
+      "r7"
+    ],
+    "pool_left": 0
+  }
+}
+```

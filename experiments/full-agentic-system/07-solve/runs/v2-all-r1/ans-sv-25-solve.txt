@@ -1,0 +1,95 @@
+The task requires simulating a memory management system based on specific rules provided in the text. The simulation must be performed event-by-event, tracking loads, evictions, deferrals, and deferred IDs for the specific request stream: `load A`, `load B`, `load C`, `load D`, `unload B`.
+
+**System Parameters:**
+*   **Capacity:** 8 GB.
+*   **Resident Sizes:** A (2 GB), B (2 GB), C (2 GB), D (7 GB).
+*   **Pinned Status:** Model B is pinned (`never evicted`). Others are unpinned.
+*   **Eviction Policy:** Least-Recently-Touched (LRU) unpinned model. If a load cannot fit, evict LRU unpinned models until room exists or only pinned remain.
+    *   Note: The text states "loads cost 30s, unloads 10s" and discusses timing for eviction counts ("every eviction actually performed counts... even when the load ends up deferred"). However, the core logic is about *space* fitting. The time costs usually imply overhead or latency in such problems, but without explicit instructions on how they modify capacity (e.g., "capacity reduces by 30s worth of space"), we assume standard space-based LRU eviction where time values are metadata unless specified otherwise to affect the fit calculation. Given the strict space constraints described ("P's 3GB did not fit in the 1GB left"), space is the primary factor.
+*   **Deferral Rule:** If a load cannot be accommodated even after evicting all unpinned residents and only pinned models remain, the load is deferred. The `deferred` list contains this load's ID.
+
+**Event Stream Analysis:**
+
+1.  **Event: `load A` (2 GB)**
+    *   Current Used: 0 GB.
+    *   Available: 8 GB.
+    *   Fits? Yes.
+    *   Action: Load A into memory.
+    *   State: Residents = {A(2)}. Evictions = 0, Deferrals = 0.
+
+2.  **Event: `load B` (2 GB)**
+    *   Current Used: 2 GB (Model A).
+    *   Available: 6 GB.
+    *   Fits? Yes.
+    *   Action: Load B into memory. Model B is pinned but fits easily.
+    *   State: Residents = {A(2), B(2)}. Evictions = 0, Deferrals = 0.
+
+3.  **Event: `load C` (2 GB)**
+    *   Current Used: 4 GB (Models A, B).
+    *   Available: 4 GB.
+    *   Fits? Yes.
+    *   Action: Load C into memory.
+    *   State: Residents = {A(2), B(2), C(2)}. Evictions = 0, Deferrals = 0.
+
+4.  **Event: `load D` (7 GB)**
+    *   Current Used: 6 GB (Models A, B, C). Note: Model sizes are 2+2+2=6. Wait, the text says "resident sizes: ... D7". Let's re-read carefully. "A through D, resident sizes: A2 B2 C2 D7".
+    *   Current Memory State: Contains A(2), B(2), C(2). Total Size = 6 GB.
+    *   Target Load: D (7 GB).
+    *   Space Required for D: 7 GB.
+    *   Available Space: 8 GB - 6 GB = 2 GB.
+    *   Fits? No (Needs 7, has 2).
+    *   Eviction Process:
+        *   Must make room for 7 GB.
+        *   Current residents: A(2), B(pinned), C(2). Unpinned: A, C.
+        *   Evict LRU unpinned (A or C? Order of arrival: A then C. So A is older/LRU).
+        *   Evict A (2 GB). New Free: 4 GB. Remaining Needed: 7 - 3 = 4 GB? No, simply check if target fits.
+        *   Target D is 7 GB. Current free after evicting A(2) is 8-6+2=4 GB. Still not enough (Need 7).
+        *   Evict next LRU unpinned: C (2 GB).
+        *   New Free: 4 + 2 = 6 GB.
+        *   Current Residents: B(pinned, 2), D(loading? No, hasn't loaded yet). Wait, standard logic: Evict until target fits or no unpinned left.
+        *   After evicting A and C: Free space = 8 - 0 (unpinned gone) - 2 (B pinned) = 6 GB available for new load? No. Total capacity is 8. B takes 2. Available for D is 6 GB.
+        *   Does D (7 GB) fit in 6 GB? **No.**
+    *   Condition: "if only pinned models remain and it still does not fit it defers."
+    *   Result: Load cannot fit even after evicting all unpinned residents. Only pinned B remains.
+    *   Action: Defer Load D. Increment Deferrals count. Add 'D' to deferred list.
+    *   State Update: No eviction counts added (evictions happen during the attempt, but since it fails completely, do we count them? Text: "every eviction actually performed counts... even when the load ends up deferred". We performed evictions of A and C).
+        *   Eviction Count: 2 (A then C).
+    *   State: Residents = {B(2)}. Loaded = {A, B, C}. Deferred = D.
+
+5.  **Event: `unload B` (2 GB)**
+    *   Current Used: 2 GB (Model B).
+    *   Action: Remove Model B from memory.
+    *   Note: Text says "an unload for a model no longer resident is a no-op." Here B is resident.
+    *   State Change: Memory becomes empty (0 GB used). Capacity available: 8 GB.
+    *   Impact on Counts: Unloads do not typically increment the global "evictions" counter defined in the output schema (`{"loads": N, "evictions": N, ...}`). The schema `loads` likely refers to successful load events or total load requests? Let's check the example logic provided in the text ("three loads..."). In the orientation story: Load M (ok), Load N (ok), Load P (evicted M), Load Q (deferred).
+        *   Orientation Story Counts: Loads=3 (M, N, P loaded successfully. Q deferred? Usually "loads" might count successful insertions or total requests. Let's look at the orientation result description: "three loads". This implies counting the successful load events that happened into the system (M, N, P). Q was deferred, so it didn't become a resident load in this context, or maybe "loads" counts requests?
+        *   Re-evaluating Orientation Story for definition of "loads":
+            *   Stream: Load M, Load N, Load P, Load Q.
+            *   Execution:
+                1. Load M (Success). Residents {M}.
+                2. Load N (Success). Residents {M, N} (N is pinned).
+                3. Load P (Fail -> Evict M -> Success). Residents {N, P}.
+                4. Load Q (Fail -> Evict None (Pinned remains) -> Defer). Deferred Q.
+            *   Result Text: "three loads". This matches the count of successful load completions (M, N, P). The deferred one (Q) is not counted as a "load" in the final tally if "loads" means "residents loaded successfully into memory". Or does it mean "load events processed"?
+            *   If "loads" = 3 for M, N, P, then Q (deferred) is excluded.
+            *   Therefore, for my stream:
+                *   Load A: Success.
+                *   Load B: Success.
+                *   Load C: Success.
+                *   Load D: Deferred (Not a successful load).
+                *   Unload B: Not a load event.
+            *   Total "loads" = 3.
+
+    *   Evictions Count Check:
+        *   In orientation story: P evicted M. That was 1 eviction. Q deferred. Total evictions in that stream? The text says "two evictions". Wait.
+        *   Let's re-read the Orientation Story carefully: "M and N loaded clean... P's 3GB did not fit... so it evicted ... M and loaded... Q's 4GB evicted P and still did not fit... so Q deferred".
+        *   In my trace of orientation story:
+            *   Start: Empty.
+            *   Load M (2): OK. Used 2/5. Unpinned {M}.
+            *   Load N (2, pinned): OK. Used 4/5. Pinned {N}, Unpinned {M}.
+            *   Load P (3): Needs 3. Available 1. Evict M (2). Space becomes 8-2(N)=6? No capacity is 5.
+                *   Cap 5. Residents N(2), M(2). Used 4. Free 1.
+                *   Need 3 for P.
+                *   Evict M (2). New Free: 4 - 0(M) + 2(M) = 4? No. Capacity is fixed at 5.
+                *   If N(2) stays, free for P is 5-2=3.
+                *   So after evicting M, space available is exactly 3 (Capacity 5 - Pinned N 2).

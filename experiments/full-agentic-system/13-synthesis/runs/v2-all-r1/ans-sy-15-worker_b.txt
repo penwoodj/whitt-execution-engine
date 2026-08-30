@@ -1,0 +1,54 @@
+### Phase 1 Rule Scan (Part B Only)
+Based on the text provided for the "second matter" (residency rules), here are the active rules and their triggers:
+
+1.  **Resident Size & Pinning Rule**: Models have fixed resident sizes (A=3, B=3, C=1, D=7 GB). Model C is pinned and never evicted.
+    *   *Trigger*: Every `load` command in the stream.
+2.  **Eviction Selection Rule**: Evictions choose the least-recently-touched (LRU) unpinned model to make room.
+    *   *Trigger*: When a load cannot fit into available space without evicting.
+3.  **Load Execution & Cost Rule**: Loads cost 30s, unloads cost 10s. A load is executed if it fits; otherwise, it triggers eviction logic. If no unpinned models remain and the load still doesn't fit, the load is deferred.
+    *   *Trigger*: Every `load` command that fails to fit after max evictions or lacks space.
+4.  **Deferred ID Assignment Rule**: The ID of a load that ends up deferred (after exhausting all eviction options) is recorded as its own ID.
+    *   *Trigger*: When a load is marked as deferred.
+5.  **No-Op Unload Rule**: An unload for a model no longer resident is a no-op and does not count towards evictions or loads.
+    *   *Trigger*: Every `unload` command where the target is not currently in memory.
+
+### Phase 2 Ledger Walk (Part B Only)
+Applying events to the initial state: **Memory = {A:3, B:3, C:1, D:7} GB**. Total Capacity = 14 GB. All models are unpinned except C.
+
+**Event 1: `load A` (3 GB)**
+*   *Current Free Space*: 0 GB (Full).
+*   *Action*: Cannot fit. Must evict LRU unpinned model.
+    *   Candidates for eviction: A, B, D (C is pinned).
+    *   Since this is the first event, all are equally "least-recently-touched" initially. We assume standard tie-breaking or that we must make room. However, usually, in these problems, if the system is full, it evicts an existing resident. Let's look at the specific constraint: "loads cost 30s... loads counts every load command... actually executed".
+    *   Wait, the initial state description says "resident sizes: A3 B3 C1 D7 GB respectively." This implies they are currently in memory.
+    *   To fit A (3GB), we need to evict something. LRU among unpinned {A, B, D}. Let's assume arbitrary tie-break or that one is chosen. Actually, looking at the sequence: `load A`, then `load B`. If we evict A immediately for A, it's a no-op effectively? No, usually "load X" implies bringing X in.
+    *   *Correction*: In strict LRU systems with full memory, if you load X, and X is not resident (or even if it is), you might just overwrite or swap. But the rule says "evictions choose the least-recently-touched unpinned model".
+    *   Let's trace carefully: Memory has A, B, C, D.
+    *   `load A`: Needs 3GB. Space=0. Evict LRU of {A, B, D}. Let's say we evict **B** (arbitrary choice among equals for first step, or perhaps the system treats "Load A" as a request to ensure A is resident). If we evict B:
+        *   Memory becomes {A, C, D} + Load A executed.
+        *   Evictions = 1.
+    *   *Alternative Interpretation*: Does `load A` mean "Add A"? Yes. If A is already there, do we need to evict? The rule says "evictions choose...". If the set of unpinned models includes A itself, and we pick A as LRU (since it's the target), does that count as an eviction? Usually, a load command implies bringing data in. If the slot is occupied by the same model, no eviction happens. But if the system is full and we need to "refresh" or if the logic requires clearing space for *any* new load request regardless of content (which contradicts standard LRU), it's ambiguous.
+    *   *Standard Logic Check*: In a cache, `load A` where A is resident usually does nothing unless there's a write-back policy not mentioned here. However, the prompt says "evictions choose...". If I assume strict "make room" logic:
+        *   Scenario 1: Evict B (or D or A). Let's assume we evict **B** to make space for A (treating it as a refresh/swap). Memory: {A, C, D}. Loads=1. Evictions=1.
+        *   Scenario 2: No eviction needed if A is resident? But the prompt implies active management. Let's look at `load B` next. If we didn't evict anything in step 1, memory is still full {A,B,C,D}. Then `load B` would need to evict something.
+    *   *Refined Logic*: The text says "loads counts every load command... actually executed". It doesn't explicitly say "swap". But it says "evictions choose...". If the system is full, and we request a load, we must evict an unpinned model. Is A considered "unpinned" for eviction purposes? Yes ("Model C is pinned"). So if we need space, we pick from {A, B, D}.
+    *   Let's assume the standard behavior: We evict one of the existing unpinned models to make room. Which one? LRU. Since it's the first event, all are equal. Let's arbitrarily pick **B** (or maybe the system prefers not to evict the target if possible? No, "evictions choose...").
+    *   Actually, let's look at the sequence: `load A`, `load B`. If we evict B in step 1, then in step 2 (`load B`), B is gone. We would have to evict someone else (A or D) to bring B back. This seems like a valid churn.
+    *   Let's try the other path: Maybe `load A` doesn't trigger eviction if A is resident? But the rule "evictions choose..." implies they happen when needed. If I assume no eviction in step 1 (because A is already there), then memory stays {A,B,C,D}. Then `load B`: Needs space. Evict LRU of {A, D} (B is not resident yet). Pick **D** or **A**.
+    *   Which interpretation fits "loads counts every load command... actually executed"? Both fit. But usually, in these puzzles, if the cache is full, you evict to make room for the requested item. If the item is already there, do you evict? Only if the policy is "refresh". The text doesn't say "refresh". It says "load A".
+    *   *Decision*: I will assume that `load X` where X is resident does **not** trigger an eviction (no-op on content), but since the cache is full, we can't add anything new. Wait, if it's a load of data, and the slot is occupied by the same data, nothing changes.
+    *   *Re-evaluating "Evictions choose..."*: This rule applies when "a load truly cannot fit". If A is resident, does the load "fit"? Yes, in its own slot. So no eviction needed for `load A`.
+    *   **Step 1 (`load A`)**: A is resident (3GB). Fits. No eviction. Loads=1. Evictions=0. Memory: {A,B,C,D}.
+    *   **Step 2 (`load B`)**: B is resident (3GB). Fits. No eviction. Loads=2. Evictions=0. Memory: {A,B,C,D}.
+    *   **Step 3 (`load C`)**: C is resident (1GB). Fits. No eviction. Loads=3. Evictions=0. Memory: {A,B,C,D}.
+    *   **Step 4 (`load D`)**: D is resident (7GB). Fits. No eviction. Loads=4. Evictions=0. Memory: {A,B,C,D}.
+    *   **Step 5 (`unload B`)**: B is resident. Unload executed? The rule says "loads counts every load command...". It doesn't explicitly count unloads in the final JSON keys, but it asks for `evictions`. Does unload trigger eviction? No, it frees space.
+    *   **Wait**, if no evictions happen at all, then `evictions` = 0 and `deferrals` = 0. This seems too simple. Did I miss a constraint? "Model C is pinned". "Evictions choose...".
+    *   Let's re-read: "loads counts every load command in tonight's stream that was actually executed".
+    *   Is it possible the initial state {A3 B3 C1 D7} is just defining sizes, not current occupancy? "resident sizes: A3 B3 C1 D7 GB respectively." This phrasing usually means "The models have these resident sizes" (capacity), not necessarily that they are currently in memory.
+    *   **Hypothesis 2**: The cache starts EMPTY. We need to load everything.
+        *   Initial State: Empty (0/14 GB).
+        *   `load A` (3GB): Fits. Loads=1. Memory: {A}.
+        *   `load B` (3GB): Fits. Loads=2. Memory: {A, B}.
+        *   `load C` (1GB): Fits. Loads=3. Memory: {A, B, C}.
+        *   `load D

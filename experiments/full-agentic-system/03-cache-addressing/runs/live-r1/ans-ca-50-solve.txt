@@ -1,0 +1,45 @@
+The user wants me to solve a scheduling problem based on specific rules provided in the text. The request includes a heavy emphasis on "state walking," avoiding narrative, reconciling with an example, and outputting a strict JSON format. However, the core of the prompt is a complex logic puzzle involving job preemption, checkpointing, and resource allocation.
+
+To provide the correct answer, I must first parse the rules from the text, simulate the events described in the "TASK" section (which differs from the example), and calculate the final metrics: `makespan_min`, `wasted_min`, and `order`. Then I will format this into the requested JSON.
+
+**1. Rule Parsing & State Definition:**
+*   **Resources:** One Core.
+*   **Jobs:** LOW1, LOW2 (and implicitly others if present, but the task lists specific ones).
+    *   *Note:* The text mentions "one core tonight, three jobs." However, the specific parameters given in the TASK section are: `LOW1 runs 5 minutes starting at minute 0`, `LOW2 runs 2 minutes starting at minute 1`. There is no third job defined with start times or durations in the TASK block. The example has three jobs (LOW1, LOW2, and likely a third implied or missing), but usually, these riddles define exactly what needs running. Let's look closer at the "three jobs" claim vs the specific definitions.
+    *   *Re-reading the TASK section carefully:* `LOW1 runs 5 minutes starting at minute 0`, `LOW2 runs 2 minutes starting at minute 1`. It does not list a third job. The phrase "one core tonight, three jobs" might be part of the narrative flavor or implies a hidden third job. However, standard interpretation of such logic puzzles is that only the explicitly defined jobs with start times need to run unless a rule forces otherwise. Wait, looking at the example: `LOW1 runs 7... LOW2 runs 3... HIGH arrives...`. The example also doesn't list a third job by name in the parameters but calls it "three jobs" in the intro? Or perhaps the third job is implicit?
+    *   *Correction:* Let's look at the "TASK" block again. It says `LOW1` and `LOW2`. Is there a `LOW3`? The text says "one core tonight, three jobs." If only two are defined, maybe one is idle or missing. But usually, in these specific riddles (often from datasets like BigBench or similar reasoning tasks), the "three jobs" refers to the set of LOW jobs present. Let's assume there are exactly two LOW jobs mentioned with parameters: `LOW1` and `LOW2`. If a third is not parameterized, it cannot start.
+    *   *Alternative:* Maybe the "HIGH" job counts as one of the three? No, HIGH is an interrupter. The example describes `LOW1`, `LOW2`, and implies a queue. Let's stick to the explicitly defined entities: LOW1 (5 min), LOW2 (2 min).
+    *   *Wait, let's check the Example again:* "LOW1 runs 7... LOW2 runs 3...". It doesn't list a third job either. Why does it say "three jobs"? Perhaps there is a `LOW3` with start time? The prompt says "arrivals in order". Maybe a `LOW3` arrives at minute X? Without parameters, I cannot assume its duration.
+    *   *Hypothesis:* The text "one core tonight, three jobs" might be a distractor or refers to the set of LOWs where one is missing from the definition, OR (more likely) I am supposed to treat the list as containing only `LOW1` and `LOW2`. Let's proceed with just these two. If the math fails later due to an unlisted job, I will reconsider.
+    *   *Actually*, looking at similar riddles, often there is a `LOW3` defined in the full problem set but omitted here? No, I must solve what is written. Written: LOW1 (5m), LOW2 (2m). HIGH arrives.
+    *   *Wait, re-reading the "TASK" block:* "one core tonight, three jobs." Then it lists `LOW1`... `LOW2`... Then later "completion order lists the LOW jobs". If there are only two defined, the list will have length 2.
+    *   *Let's assume the "three jobs" is a narrative error or refers to a standard set where the third is implicitly non-existent or zero-duration.* I will calculate based on `LOW1` and `LOW2`.
+
+*   **Timing & Execution:**
+    *   Jobs take the core in order of start minutes.
+    *   Tie-breaker: Resumed job outranks fresh job (if a tie exists).
+    *   Waiting logic: If a LOW's start minute arrives while busy, it waits.
+    *   Core never idles while a LOW is waiting? "the core never idles while a LOW job is waiting". This implies if the current job finishes at T=10 and no one else can run until their start time, does it idle? Or does it grab the next one? The rule says: "a LOW whose start minute arrives while the core is busy simply waits... the minute one LOW job finishes or is preempted, the next waiting LOW starts in that same minute".
+    *   This implies strict synchronization. If Job A runs 0-5. Job B started at 1. Job B waits until 1 (which was occupied). At 5, Job A finishes. Job B's start time (1) has passed. Does it start now? Or does it wait for its "start minute"? The rule says: "LOW jobs take the core in order of their start minutes". This usually means they are queued at their specific start times.
+    *   Let's refine: Jobs arrive/activate at $S$. They queue up. The core processes them based on priority (Start time, then Resumed status).
+    *   Checkpointing: Every 2 completed minutes of running time.
+        *   If running from T_start to T_end.
+        *   Banks checkpoints at absolute times: Start + 2, Start + 4, etc., relative to start? Or every 2 mins of *running* time? "LOW jobs checkpoint every 2 completed minutes of running time".
+        *   Example text: "LOW1 had 7 total minutes with 2 banked... resumed owing 5". If it ran 0-2 (bank), 2-4 (bank), then preempts at 3. It has 2 mins running. Next checkpoint would be at run-time 4. So at run-time 3, it hasn't hit a checkpoint. Work since last checkpoint is wasted? "on preemption the work past the last checkpoint is wasted".
+        *   If checkpoints are every 2 minutes of *running time*:
+            *   Run time 0-2: Checkpoint 1 (at run-time 2).
+            *   Run time 2-4: Checkpoint 2 (at run-time 4).
+            *   Preempt at run-time $R$. Wasted work = $\max(0, R - \text{last\_checkpoint\_run\_time})$.
+    *   Resume logic: "after resume a job redoes every minute past its last bank".
+        *   Example: 5 total mins. Banked 2 (meaning it completed 4 minutes worth of running time before? Or did it hit 2 checkpoints?). The example says: "LOW1 had 7 total minutes with 2 banked, so it resumed owing 5". This implies "banked" = number of checkpoints reached. To reach 2 checkpoints, you need to complete run-time 0-2 and 2-4 (total 4 mins). So remaining work = Total Duration - Run Time Completed *before* last checkpoint? No, "redoes every minute past its last bank".
+        *   If I have a job of 5 mins. I run for 3 mins. Checkpoints at 2 and 4. Last checkpoint was at 2. Current run time is 3. Work since last checkpoint = 1 min (from 2 to 3). This 1 min is wasted on resume. Resume work = Total (5) - Run Time Completed *at checkpoint*? No, the example says "resumed owing 5". That implies it thinks the whole thing is new?
+        *   Let's re-read the specific rule in the TASK: "LOW jobs checkpoint every 2 completed minutes of running time... a resumed LOW outranks a fresh one... on preemption the work past the last checkpoint is wasted and redone after resume."
+        *   Example calculation from text: "a job with 5 total minutes and 2 banked resumes with 3 minutes left".
+            *   Total = 5. Banked = 2 checkpoints reached.
+            *   Checkpoint times (absolute run time): 0-2, 2-4. So to reach 2 checkpoints, you must complete 4 minutes of running.
+            *   If the job is preemted at T=3 (run-time). It has completed 3 mins. Last checkpoint was at 2. Work past last checkpoint = 1 min (from 2 to 3). This 1 min is wasted.
+            *   Remaining work to do: Total Duration - Work Completed *before* last checkpoint? Or Total - Run Time + Wasted?
+            *   The example says "resumes with 3 minutes left". If total is 5, and it completed 3 mins (of which 1 was wasted), the valid progress is 2 mins (0-2). So remaining = 5 - 2 = 3 mins. This matches.
+            *   Logic: `Remaining Work` = `Total Duration` - `Run Time Completed Before Last Checkpoint`.
+            *   Wait, if it ran 0-4 (banked 2) then preempted at 4? Then remaining = 5-4=1.
+            *   If it ran 0-3 (preempted). Last checkpoint at 2. Valid progress 2. Remaining = 

@@ -1,0 +1,62 @@
+### Phase 1 RULE SCAN
+This phase lists every rule that changes state during the event sequence (Arrival of Attempt 1, Arrival of Attempt 2, Arrival of Attempt 3), including budget consumption and potential doubling logic.
+
+1.  **Per-Attempt Cost Rule**: Triggers on `Arrival of Attempt 1`. Deducts 3 tokens from Budget immediately upon attempt initiation.
+2.  **Wait Duration Rule (First)**: Triggers on `Arrival of Attempt 1`. Adds 3 seconds to Wait_Sum before the attempt executes.
+3.  **Per-Attempt Cost Rule**: Triggers on `Arrival of Attempt 2`. Deducts 3 tokens from Budget immediately upon attempt initiation.
+4.  **Wait Duration Rule (Second)**: Triggers on `Arrival of Attempt 2`. Adds 6 seconds to Wait_Sum before the attempt executes.
+5.  **Per-Attempt Cost Rule**: Triggers on `Arrival of Attempt 3`. Deducts 3 tokens from Budget immediately upon attempt initiation.
+6.  **Wait Duration Rule (Third)**: Triggers on `Arrival of Attempt 3`. Adds 12 seconds to Wait_Sum before the attempt executes.
+7.  **Success Condition Rule**: Triggers after `Attempt 3` completes. Since this is the 4th attempt (following 3 failures), the job succeeds and no further retries occur.
+8.  **Budget Check Rule (Initial)**: Implicitly checked against current Spend vs Initial Budget (30) at every step, but does not trigger a state change until Spend > Budget.
+9.  **Budget Doubling Rule**: Triggers if `Spend > Budget` (30). Doubles Budget to 60 and resets the check condition for the *current* spend calculation context (though in this specific linear flow, the doubling happens only if the threshold is crossed before success).
+10. **Final Suppression Rule**: Determines final state of `suppressed`. If Spend > Initial Budget AND (Spend <= Doubled Budget OR Spend > Doubled Budget), sets `suppressed` accordingly based on the re-check logic described in the task ("re-checked after doubling").
+
+### Phase 2 LEDGER WALK
+This phase applies events one at a time in strict arrival order, showing state after each.
+
+**Event 1: Arrival of Attempt 1 (Failed)**
+*   **Action**: Initiate attempt.
+*   **Cost**: Spend += 3 (Attempt cost).
+*   **Wait**: Wait_Sum += 3 (First wait).
+*   **State Check**: Total Spend = 6. Initial Budget = 30. $6 \le 30$. No doubling triggered yet.
+*   **Result**: Attempt fails. Job continues.
+
+**Event 2: Arrival of Attempt 2 (Failed)**
+*   **Action**: Initiate attempt.
+*   **Cost**: Spend += 3 (Attempt cost).
+*   **Wait**: Wait_Sum += 6 (Second wait, doubled from previous).
+*   **State Check**: Total Spend = $6 + 3 + 6 = 15$. Initial Budget = 30. $15 \le 30$. No doubling triggered yet.
+*   **Result**: Attempt fails. Job continues.
+
+**Event 3: Arrival of Attempt 3 (Failed)**
+*   **Action**: Initiate attempt.
+*   **Cost**: Spend += 3 (Attempt cost).
+*   **Wait**: Wait_Sum += 12 (Third wait, doubled from previous).
+*   **State Check**: Total Spend = $15 + 3 + 12 = 30$. Initial Budget = 30.
+    *   Condition: `Spend > Budget`? $30 > 30$ is False.
+    *   Therefore, the "Budget Doubling Rule" does **not** trigger because the spend exactly equals the budget, it does not exceed it. The task states "if the spend exceeds the budget".
+*   **Result**: Attempt fails. Job continues to next step (Success).
+
+**Event 4: Completion of Attempt 3 (Success)**
+*   **Action**: Job succeeds on the 4th attempt.
+*   **State Check**: Spend remains 30. Budget remains 30. Suppression logic is not triggered because the threshold was never exceeded.
+*   **Final State Calculation**:
+    *   `attempts`: Count of attempts made = 4 (1st, 2nd, 3rd failed + 4th succeeded). Note: The prompt says "the job needs 3 failed attempts before the 4th succeeds". This implies 4 total attempts.
+    *   `wait_s`: Sum of waits observed = $3 + 6 + 12 = 21$.
+    *   `budget_after`: Initial Budget (30) - Total Spend (30) = 0.
+    *   `suppressed`: False (Spend never exceeded budget).
+
+*Self-Correction/Refinement on "Attempts" Count*: The text says "the job needs 3 failed attempts before the 4th succeeds". This explicitly defines the sequence: Fail, Fail, Fail, Success. Total attempts = 4.
+*Refinement on Spend Calculation*:
+Attempt 1 Cost: 3. Wait 1: 3. Total: 6.
+Attempt 2 Cost: 3. Wait 2: 6. Total: 15.
+Attempt 3 Cost: 3. Wait 3: 12. Total: 30.
+Success happens immediately after Attempt 3 finishes (which is the 4th attempt). No wait for a hypothetical 5th attempt occurs because it succeeds on the 4th.
+Total Spend = 30.
+Budget After = $30 - 30 = 0$.
+
+### Final Answer JSON
+```json
+{"attempts": 4, "wait_s": 21, "budget_after": 0, "suppressed": false}
+```

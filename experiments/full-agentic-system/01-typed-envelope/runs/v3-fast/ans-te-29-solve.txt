@@ -1,0 +1,47 @@
+**Phase 1 RULE SCAN**
+Based on the task description and "orientation story" analysis, here are the rules that change state during the event or claim list:
+
+1.  **Load Rule**: A request to load a model loads it if there is sufficient free space; otherwise, it triggers eviction logic.
+2.  **Eviction Rule (LRU Unpinned)**: If a load cannot fit, evict the least-recently-touched (oldest) unpinned models one at a time until enough space exists or only pinned models remain.
+3.  **Deferral Rule**: If a load cannot fit and only pinned models remain in residency, defer the load (no eviction occurs).
+4.  **Touch/Recency Update Rule**: Every successful load of a model updates its recency to "most-recent".
+5.  **Unload Rule**: A request to unload a resident model frees its size immediately; if not resident, it is a no-op.
+
+**Phase 2 LEDGER WALK**
+Applying the events `load A (2 GB)`, `load C (4 GB)`, `load D (3 GB)`, `unload D (3 GB)` to the initial state:
+*   **Initial State**: Card = 8GB, Resident = {}, Free = 8GB.
+
+1.  **Event: load A (2 GB)**
+    *   Check Fit: 8GB >= 2GB? Yes.
+    *   Action: Load A. Update Recency {A}.
+    *   State: Resident {A}, Free 6GB.
+
+2.  **Event: load C (4 GB)**
+    *   Check Fit: 6GB >= 4GB? Yes.
+    *   Action: Load C. Update Recency {C, A} (C is newer).
+    *   State: Resident {A, C}, Free 2GB.
+
+3.  **Event: load D (3 GB)**
+    *   Check Fit: 2GB >= 3GB? No.
+    *   Eviction Logic: Need 1GB more space. Look for LRU Unpinned models.
+        *   Resident: {A, C}. Both are unpinned (Model B is pinned).
+        *   Recency Order (Oldest to Newest): A, then C.
+        *   Target: Evict A (2GB).
+    *   Action: Evict A. Free becomes 6GB. Load D. Update Recency {D, C} (D is newer than C? No, wait. After eviction of A, resident is {C}. Then load D. Order becomes C, then D).
+        *   Correction on Recency: Before eviction, order was [A, C]. Evict A. Resident {C}. Load D. New order [C, D].
+    *   State: Resident {C, D}, Free 4GB (8 - 2(C) - 3(D)).
+
+4.  **Event: unload D (3 GB)**
+    *   Check Resident: Is D in {C, D}? Yes.
+    *   Action: Unload D. Free becomes 7GB.
+    *   State: Resident {C}, Free 7GB.
+
+**Final Answer Calculation:**
+*   **loads**: Successful loads occurred for A and D. (Count = 2).
+*   **evictions**: Model A was evicted once to make room for D. (Count = 1).
+*   **deferrals**: No deferrals occurred. (Count = 0).
+*   **deferred**: Empty list.
+
+```json
+{"loads": 2, "evictions": 1, "deferrals": 0, "deferred": []}
+```

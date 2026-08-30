@@ -1,0 +1,73 @@
+The task requires processing two independent parts based on specific rules and events provided for "tonight". The text includes a detailed orientation story with different numbers which must be ignored in favor of tonight's specific data. I will walk through the logic step-by-step to derive the correct state before generating the final JSON.
+
+### Part A: Night Desk Sy-28 (Preemption Logic)
+
+**Rules & Events for Tonight:**
+1.  **Jobs:** `LOW1` starts at minute 0, duration 4 min. `LOW2` starts at minute 3, duration 3 min.
+2.  **High Priority Job (`HIGH`):** Arrives at minute 5, runs 4 minutes to completion (minutes 5-8). It instantly preempts whatever is running and blocks the core while it executes.
+3.  **Core Behavior:** The core never idles if a job is waiting. If preempted or finished, the next waiting job starts immediately in that same minute.
+4.  **Checkpointing (Waste Logic):** Jobs checkpoint every 2 completed minutes of running time. On preemption, work past the last checkpoint is wasted and redone.
+    *   `LOW1` checkpoints at absolute minutes: Start+2, Start+4, etc.
+    *   `LOW2` checkpoints at absolute minutes: Start+2, Start+4, etc. (Note: The rule says "absolute minutes" for tracking banks).
+
+**Walkthrough:**
+
+*   **Minute 0:** `LOW1` starts. Running time = 1.
+*   **Minute 1:** `LOW1` continues. Running time = 2. **Checkpoint Banked.**
+*   **Minute 2:** `LOW1` continues. Running time = 3.
+*   **Minute 3:** `LOW1` continues. Running time = 4. (Duration complete). `LOW1` finishes at end of minute 3? No, duration is 4 minutes starting at 0. So it occupies minutes 0, 1, 2, 3. It finishes at the *end* of minute 3.
+    *   Wait, let's re-read carefully: "LOW1 runs 4 minutes starting at minute 0". This implies it occupies slots [0, 1], [1, 2], [2, 3], [3, 4]. It finishes at the end of minute 4? Or does "minute 0" mean the first slot is 0-1?
+    *   Let's check the orientation story for timing convention: "LOW1 runs 7 minutes starting at minute 0... held the core minutes 0, 1 and 2". This implies discrete slots. If it runs 4 minutes, it holds slots 0, 1, 2, 3. It finishes at the end of slot 3 (which is time t=4).
+    *   However, `LOW2` starts at minute 3. Does this mean it enters the queue or the core? "a LOW whose start minute arrives while the core is busy simply waits." So `LOW2` enters the waiting list at minute 3.
+    *   Let's refine the timeline based on discrete minutes (slots):
+        *   **Slot 0:** `LOW1` runs. (Running time = 1).
+        *   **Slot 1:** `LOW1` runs. (Running time = 2). **Checkpoint Banked.**
+        *   **Slot 2:** `LOW1` runs. (Running time = 3).
+        *   **Slot 3:** `LOW1` runs. (Running time = 4). `LOW1` finishes at the end of this slot. `LOW2` arrives/starts waiting here.
+            *   Wait, if `LOW1` takes 4 minutes starting at 0, it occupies slots 0, 1, 2, 3. It is done after slot 3.
+            *   `HIGH` arrives at minute 5. This means there are gaps? Or does "minute 5" mean the start of the 6th slot (index 5)? Yes.
+            *   So slots 0-3 are free for `LOW1`. Slot 4 is empty? No, "the core never idles while a LOW job is waiting". Who is waiting? Only `LOW2` arrived at minute 3. But `LOW1` was still running until the end of slot 3.
+            *   Let's re-evaluate "starts at minute 0" vs "arrives at minute 5".
+            *   If `LOW1` runs for 4 minutes (slots 0, 1, 2, 3), it finishes at t=4.
+            *   `HIGH` arrives at minute 5 (t=5). There is a gap between t=4 and t=5? The core never idles if waiting. Is anyone waiting at t=4? `LOW2` arrived at minute 3. If the rule implies it enters the queue immediately, then at t=4, `LOW1` finishes, and `LOW2` (waiting since t=3) should start immediately in slot 4.
+            *   Let's assume standard discrete time steps where "minute X" is the interval [X, X+1].
+            *   **Step 0:** `LOW1` runs.
+            *   **Step 1:** `LOW1` runs. (Banked).
+            *   **Step 2:** `LOW1` runs.
+            *   **Step 3:** `LOW1` runs. Finishes at end of Step 3. `LOW2` has been waiting since Step 3 start? "starts at minute 3". Usually means it enters the queue at t=3. So at t=4 (Step 4), `LOW2` is waiting.
+            *   **Step 4:** `LOW1` finished. Core goes to next waiting job: `LOW2`. `LOW2` starts. Running time = 1.
+            *   **Step 5:** `HIGH` arrives at minute 5 (start of Step 5). It preempts `LOW2`. `LOW2` has run for 1 minute (Slot 4).
+                *   Checkpoint logic: `LOW2` started at t=3. Banks at t=3+2 = t=5? No, banks every 2 running minutes.
+                *   Running time of `LOW2`: Slot 4 is the first minute. Banked at end of Slot 6 (2 mins).
+                *   Preemption happens at start of Step 5. Work done: 1 minute. Last checkpoint was at t=3 (start) or t=5? "banks a checkpoint at minute s+2". Start s=3. Bank at 5.
+                *   Does the bank happen instantly at arrival? "a bank landing on the exact minute HIGH arrives still counts and nothing is wasted".
+                *   So `LOW2` has run 1 min (Slot 4). It banks at t=5 (start of Step 5). Since it lands exactly, work is safe. Wasted = 0.
+            *   **Step 5:** `HIGH` runs. (Duration 4 mins: Steps 5, 6, 7, 8). Core busy with `HIGH`.
+            *   **Step 6:** `HIGH` runs.
+            *   **Step 7:** `HIGH` runs.
+            *   **Step 8:** `HIGH` finishes at end of Step 8.
+            *   **Step 9:** Core free. Waiting jobs: `LOW2` (resumed), any others? Only `LOW1` and `LOW2`. `LOW1` finished earlier. `LOW2` was preempted.
+                *   State of `LOW2`: Ran Slot 4 (safe due to bank at t=5). Needs to run remaining duration. Total 3 mins. Ran 1. Remaining 2.
+            *   **Step 9:** `LOW2` resumes. Runs. Running time = 1.
+            *   **Step 10:** `LOW2` runs. Running time = 2. **Checkpoint Banked.** (Start t=3, +2=t=5 banked. Now at t=10? No, running minutes count from resume).
+                *   Let's re-read checkpoint rule: "checkpoint every 2 completed minutes of running time".
+                *   Resume logic: "after resume a job redoes every minute past its last bank".
+                *   `LOW2` last bank was at t=5 (absolute). It ran Slot 4. At start of Step 5, it banks. So work is safe.
+                *   Now running again from Step 9.
+                *   Step 9: Run 1 min.
+                *   Step 10: Run 2 mins total since resume? No, "every 2 completed minutes".
+                *   Let's trace `LOW2` duration: Total 3 mins.
+                *   Resume at Step 9.
+                *   Step 9: Minute 1 of resume.
+                *   Step 10: Minute 2 of resume. **Banked.** (Since it ran 2 minutes since last bank).
+                *   Step 11: Minute 3 of resume. `LOW2` finishes at end of Step 11.
+
+    *   **Completion Order:**
+        1.  `LOW1` finished at end of Step 3.
+        2.  `LOW2` finished at end of Step 11.
+        3.  Order: `["LOW1", "LOW2"]`.
+
+    *   **Wasted Minutes:**
+        *   `LOW1`: Finished naturally. Wasted = 0.
+        *   `LOW2`: Preempted at start of Step 5. Last bank was at t=5 (absolute). Work done in Slot 4 is safe. Resumed later. Ran remaining 2 minutes. No waste.
+        *   Wait, let's re-verify the "bank landing on exact minute" rule

@@ -1,0 +1,80 @@
+The task requires processing two independent parts based on specific rules and events provided for "tonight". The text includes a detailed orientation story with different numbers which must be ignored in favor of tonight's specific data. I will walk through the logic step-by-step to derive the correct state before generating the final JSON.
+
+### Part A: Night Desk Sy-27 (Preemption Logic)
+
+**Rules & Events for Tonight:**
+1.  **Jobs:** `LOW1` (4 min), `LOW2` (3 min). Both start at minute 0.
+2.  **High Priority Job (`HIGH`):** Arrives at minute 2, runs 6 minutes. Instantly preempts whatever is running. While `HIGH` runs, nothing else runs.
+3.  **Core Behavior:** The core never idles while a LOW job is waiting. If one finishes or is preempted, the next starts in that same minute.
+4.  **Checkpointing (Waste Logic):**
+    *   Jobs checkpoint every 2 completed minutes of running time.
+    *   On preemption, work past the last checkpoint is wasted and redone after resume.
+    *   A job starting/resuming at minute $s$ banks a checkpoint at $s+2$, then every 2 minutes thereafter.
+    *   **Crucial Rule:** "a bank landing on the exact minute HIGH arrives still counts and nothing is wasted".
+
+**Walkthrough (Minute by Minute):**
+
+*   **Minute 0:** `LOW1` starts. Running time = 0.
+*   **Minute 1:** `LOW1` continues. Running time = 1.
+    *   Checkpoint status: Needs 2 mins to bank first checkpoint. Current run < 2. No checkpoint yet.
+*   **Minute 2:** `HIGH` arrives at the exact minute.
+    *   Rule Application: "a bank landing on the exact minute HIGH arrives still counts". Since `LOW1` has completed exactly 2 minutes (minutes 0 and 1), it has successfully banked its first checkpoint at minute 2.
+    *   Preemption occurs. `HIGH` takes over.
+    *   **Waste Calculation:** Work past the last checkpoint is wasted. The last checkpoint was at minute 2. There is no work between minute 2 and minute 2 (the arrival instant). Therefore, **0 minutes are wasted**.
+    *   State: `LOW1` paused with 0 progress lost relative to its checkpoint. It effectively needs to re-do the time since the checkpoint? No, it resumes from the checkpoint. The "running time" counter for future checkpoints resets or continues based on new execution blocks. Let's track "time remaining".
+    *   Total `LOW1` = 4 mins. Banked at min 2 (covering minutes 0-1). Remaining needed: 2 mins.
+
+*   **Minutes 3, 4, 5:** `HIGH` runs (6 mins total). Core busy with `HIGH`. `LOW`s wait.
+    *   Minute 3 (`HIGH`): Running.
+    *   Minute 4 (`HIGH`): Running.
+    *   Minute 5 (`HIGH`): Running.
+
+*   **Minute 6:** `HIGH` finishes (ran mins 2,3,4,5). Core becomes free.
+    *   Queue: `LOW1` (needs 2 mins), `LOW2` (needs 3 mins).
+    *   Rule: "a LOW whose start minute arrives while the core is busy simply waits... the next waiting LOW starts in that same minute".
+    *   Comparison: `LOW1` started at min 0. `LOW2` started at min 0. Tie.
+    *   Rule: "a resumed LOW outranks a fresh one at any tie". `LOW1` is resumed (was preempted). `LOW2` is fresh.
+    *   Action: Core picks `LOW1`.
+
+*   **Minute 6:** `LOW1` resumes. Needs 2 mins. Runs minute 6. Running time since resume = 1.
+*   **Minute 7:** `LOW1` runs minute 7. Running time since resume = 2.
+    *   Checkpoint Logic: It has completed 2 minutes of running in this block (mins 6, 7). This banks a checkpoint at min 8? Or does it bank immediately upon completion? The rule says "checkpoint every 2 completed minutes". So after minute 7 finishes, it has 2 mins.
+    *   Does `LOW1` finish now? Total needed was 4. It ran 0-1 (banked), then resumed. Needs 2 more. It runs min 6 and 7. That is exactly 2 minutes.
+    *   **Result:** `LOW1` finishes at the end of Minute 7.
+
+*   **Minute 8:** Core free. Queue: `LOW2` (fresh, needs 3 mins).
+    *   Action: Start `LOW2`.
+
+*   **Minutes 9, 10, 11:** `LOW2` runs.
+    *   Minute 9: Run 1.
+    *   Minute 10: Run 2. (Checkpoints banked? Irrelevant for finish time).
+    *   Minute 11: Run 3. Finishes.
+
+*   **Completion Order:** `LOW1` finished at end of min 7. `LOW2` finished at end of min 11.
+    *   Order: `["LOW1", "LOW2"]`.
+    *   Wasted Minutes: As determined in Minute 2, the checkpoint landed exactly on arrival. No work was lost between the checkpoint and the preemption instant. **0 minutes wasted**.
+
+*   **Makespan:** Counts from the first start (Minute 0) to the last finish (End of Minute 11).
+    *   Duration: $11 - 0 + 1 = 12$ minutes? Or simply the time elapsed? Usually makespan is end_time - start_time. Start=0, End=11. Makespan = 11 minutes. Let's re-read "makespan counts from the the last finish". No, "makespan counts from the first start" (implied by standard definition and the example text: "makespan 13 minutes from the first start").
+    *   Example check: In orientation story, LOW1 started min 0, finished min 10. Makespan 13? Wait, in example: LOW1 ran 7 mins total. Orientation says "LOW1 held core minutes 0, 1 and 2... swap came... HIGH ran 3 to 5... LOW1 resumed... ran 5 to 10".
+        *   Example Timeline: Min 0-2 (LOW1), Min 3-5 (HIGH), Min 5-10 (LOW1). Last finish min 10. Start min 0. Makespan = 10? The text says "makespan 13 minutes from the first start". Why 13?
+        *   Ah, in the example: LOW2 started at minute 1. It finished at minute 13 ("ran minutes 10 to 13").
+        *   So Makespan is determined by the absolute time of the last event completion relative to $t=0$.
+        *   In my calculation: Last finish is end of Minute 11. Time = 11.
+        *   Wait, let's re-evaluate the "Minute" indexing. If an event runs during minute $N$, it completes at time $N+1$? Or does "minute 0" mean interval [0,1)?
+        *   Standard discrete simulation: Minute 0 is interval [0,1). Finish happens at $t=1$.
+        *   Orientation Example Check: LOW2 ran minutes 10 to 13. This implies it started at the beginning of minute 10 and finished at the end of minute 13? Or did it run for 4 minutes (10, 11, 12, 13)?
+        *   Text: "LOW2 then owed its whole 3, ran minutes 10 to 13". If it runs 3 minutes, and starts at min 10, it occupies [10,11), [11,12), [12,13). It finishes at $t=13$.
+        *   My calculation: `LOW2` ran minutes 8, 9, 10? No.
+            *   Resume `LOW1`: Needs 2 mins. Runs min 6, 7. Finishes end of min 7 ($t=8$).
+            *   Start `LOW2`: Needs 3 mins. Runs min 8, 9, 10. Finishes end of min 10 ($t=11$).
+        *   Let's re-read the queue logic carefully. "the core never idles while a LOW job is waiting: the minute one LOW job finishes or is preempted, the next waiting LOW starts in that same minute".
+            *   `HIGH` finishes end of min 5 ($t=6$). Core free at $t=6$.
+            *   Queue: `LOW1` (resumed), `LOW2` (fresh).
+            *   Tie breaker: Resumed > Fresh. Pick `LOW1`.
+            *   `LOW1` runs min 6, 7. Finishes end of min 7 ($t=8$).
+            *   Queue: `LOW2`. Start `LOW2` at $t=8$.
+            *   `LOW2` runs min 8, 9, 10. Finishes end of min 10 ($t=11$).
+        *   Makespan = 11 minutes?
+        *   Let's check the orientation example math again to ensure my "minute" interpretation matches their "makespan 13".
+            *   Example: LOW2 owed 3 mins. Ran min 10, 11, 12? Text says "ran minutes

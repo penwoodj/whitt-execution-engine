@@ -1,0 +1,101 @@
+### Phase 1 RULE SCAN
+
+The following rules govern the state changes during the event stream:
+
+1.  **Load Rule**: A load request attempts to occupy `size` GB of free space. If sufficient free space exists (including pinned models), the model is loaded, resident set updated with new recency, and `loads` count increments.
+2.  **Eviction Rule**: If a load cannot fit because total capacity < requested size + current usage, the system evicts the Least-Recently-Touched (LRT) *unpinned* models one by one until enough space is freed or only pinned models remain. Each eviction increments the `evictions` count and removes the model from the resident set.
+3.  **Deferral Rule**: If a load cannot fit even after evicting all unpinned models (i.e., only pinned models remain), the request is deferred. The model ID is added to the `deferred` list, `deferrals` count increments, and no eviction occurs for this specific event.
+4.  **Recency Rule**: Every time a model is loaded or touched (implicitly by being resident during an eviction check? No, only on load/unload/eviction), its position in the recency list updates to "most recent". The LRT model is at the start of the list.
+5.  **Unload Rule**: An unload request frees `size` GB immediately if the model is resident. If not resident (already evicted or never loaded), it is a no-op. Free space increases, and recency updates for remaining models.
+6.  **Pinned Constraint**: Pinned models are never candidates for eviction. They remain in the resident set regardless of pressure.
+
+**Trigger Mapping:**
+*   `load A (1 GB)` -> Triggers Load Rule (Fits).
+*   `load C (3 GB)` -> Triggers Load Rule (Fits, C is pinned).
+*   `load D (4 GB)` -> Triggers Eviction/Deferral Rule (Cannot fit: 8GB - 1 - 3 = 4GB free. Request 4GB. Fits exactly? Wait. Current usage: A(1)+C(3)=4. Free=4. Request=4. It fits exactly without eviction).
+    *   *Correction on Logic*: Let's re-verify the "fits" condition.
+    *   Start: 8GB free.
+    *   Event 1 (Load A, 1GB): Fits. Resident {A}. Free 7.
+    *   Event 2 (Load C, 3GB): Fits. Resident {A, C}. Free 4.
+    *   Event 3 (Load D, 4GB): Current Usage = 1+3=4. Capacity = 8. Free = 4. Request = 4. Since `Free >= Request`, it fits exactly. No eviction needed. Resident {A, C, D}. Free 0.
+    *   Event 4 (Unload D, 4GB): Fits. Resident {A, C}. Free 4.
+
+*Wait, let me double check the "fits" logic in the prompt's orientation example vs tonight.*
+Orientation: 5GB card. M(2), N(2 pinned), P(3). Load M (fits). Load N (fits). Load P (needs 3, has 1 left -> Evict M).
+Tonight: 8GB card. A(1), B(2), C(3 pinned), D(4).
+Stream: Load A(1) -> Fits.
+Load C(3) -> Fits.
+Load D(4) -> Current used = 1+3=4. Free = 4. Request = 4. Fits exactly. No eviction.
+Unload D(4) -> Frees space.
+
+Let's re-read the "Evictions choose..." rule carefully: "A load that cannot fit evicts...".
+Does Load D fit? Yes, 4GB free for a 4GB request is sufficient.
+So `evictions` = 0, `deferrals` = 0.
+
+**Final Rule Application List:**
+1.  **Event**: `load A (1 GB)` -> **Rule**: Load Rule. **Trigger**: Arrival of load A.
+2.  **Event**: `load C (3 GB)` -> **Rule**: Load Rule. **Trigger**: Arrival of load C.
+3.  **Event**: `load D (4 GB)` -> **Rule**: Load Rule. **Trigger**: Arrival of load D.
+4.  **Event**: `unload D (4 GB)` -> **Rule**: Unload Rule. **Trigger**: Arrival of unload D.
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   Capacity: 8GB
+*   Resident: []
+*   Free: 8GB
+*   Recency List: [] (Empty)
+*   Pinned Models: {C}
+
+**Event 1: `load A (1 GB)`**
+*   Check Fit: Request 1GB. Available 8GB. $8 \ge 1$. Fits.
+*   Action: Load A.
+*   State Update:
+    *   Resident: [A]
+    *   Free: 7GB
+    *   Recency: [A] (Most recent)
+*   Metrics: Loads=1, Evictions=0, Deferrals=0.
+
+**Event 2: `load C (3 GB)`**
+*   Check Fit: Request 3GB. Available 7GB. $7 \ge 3$. Fits.
+*   Action: Load C.
+*   State Update:
+    *   Resident: [A, C] (Order depends on arrival; A arrived first, then C. Recency updates to most recent).
+    *   Free: 4GB
+    *   Recency: [C, A] (C is newest touch)
+    *   Note: C is pinned.
+*   Metrics: Loads=2, Evictions=0, Deferrals=0.
+
+**Event 3: `load D (4 GB)`**
+*   Check Fit: Request 4GB. Available 4GB. $4 \ge 4$. Fits exactly.
+*   Action: Load D.
+*   State Update:
+    *   Resident: [C, A, D] (D is newest touch).
+    *   Free: 0GB
+    *   Recency: [D, C, A] (D most recent, then C, then A)
+*   Metrics: Loads=3, Evictions=0, Deferrals=0.
+
+**Event 4: `unload D (4 GB)`**
+*   Check Resident: D is in resident set.
+*   Action: Unload D.
+*   State Update:
+    *   Resident: [C, A] (D removed).
+    *   Free: 4GB
+    *   Recency: [A, C] (Recency order of remaining models; usually LRU logic implies the one touched last stays most recent relative to others. D was most recent, now gone. Next is C? Or does unload reset recency? Standard LRU: removing an item doesn't change the relative order of remaining items. Previous list was [D, C, A]. Remove D -> [C, A].)
+*   Metrics: Loads=3, Evictions=0, Deferrals=0.
+
+**Final Totals:**
+*   loads: 3 (A, C, D successfully loaded)
+*   evictions: 0 (No space pressure required eviction; Load D fit exactly)
+*   deferrals: 0 (No request failed to fit even after max eviction)
+*   deferred: []
+
+---
+
+### Final Answer JSON
+
+```json
+{"loads": 3, "evictions": 0, "deferrals": 0, "deferred": []}
+```

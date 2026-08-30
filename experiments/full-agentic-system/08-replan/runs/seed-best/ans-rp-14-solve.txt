@@ -1,0 +1,48 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the specific constraints regarding "tonight's" numbers (ignoring the orientation story), here are the rules that change state during the event sequence:
+
+1.  **Retry Wait Rule**: Sets the wait time for the next attempt to double the previous wait time after a failure. Triggered by: `Failed Attempt`.
+2.  **Attempt Cost Rule**: Deducts 3 tokens from the budget for every attempt made (failed or successful). Triggered by: `Attempt Execution` (both failed and success).
+3.  **Budget Spend Accumulation Rule**: Adds the cost of waits and attempts to a running total (`spend`). Triggered by: `Wait Completion` and `Attempt Execution`.
+4.  **Suppression Check Rule**: Compares current `spend` against `budget`. If `spend > budget`, triggers suppression logic. Triggered by: `Budget Re-evaluation` (after every spend event).
+5.  **Budget Doubling Rule**: If suppression is triggered, doubles the `budget` exactly once and resets the check state for a re-evaluation. Triggered by: `Suppression Trigger`.
+6.  **Final Suppression Verdict Rule**: Determines if the job is suppressed (`true`) or not (`false`) based on whether the spend exceeds the *doubled* budget during the re-check. Triggered by: `Budget Re-evaluation` (post-doubling).
+
+---
+
+### Phase 2 LEDGER WALK
+
+Applying events in strict arrival order with "tonight's" numbers:
+-   **Initial State**: Budget = 30, Spend = 0, Attempts = 0, Wait_Seconds = 0.
+-   **Event 1**: Attempt 1 (Failed). Cost = 3. Wait = 3s.
+    -   Spend += 3 + 3 = 6.
+    -   State: Budget=30, Spend=6, Attempts=1, Wait_Sum=3.
+-   **Event 2**: Attempt 2 (Failed). Cost = 3. Wait = 6s (doubled from 3).
+    -   Spend += 3 + 6 = 9. Total Spend = 15.
+    -   State: Budget=30, Spend=15, Attempts=2, Wait_Sum=9.
+-   **Event 3**: Attempt 3 (Failed). Cost = 3. Wait = 12s (doubled from 6).
+    -   Spend += 3 + 12 = 15. Total Spend = 30.
+    -   State: Budget=30, Spend=30, Attempts=3, Wait_Sum=21.
+-   **Event 4**: Attempt 4 (Success). Cost = 3. No wait cost incurred for the successful final attempt's *next* cycle, but the cost of this attempt is paid.
+    -   Spend += 3. Total Spend = 33.
+    -   State: Budget=30, Spend=33, Attempts=4, Wait_Sum=21.
+-   **Event 5**: Suppression Check (Initial).
+    -   Condition: `Spend` (33) > `Budget` (30)? Yes.
+    -   Action: Trigger Budget Doubling Rule.
+    -   New Budget = 30 * 2 = 60.
+-   **Event 6**: Suppression Check (Re-evaluation).
+    -   Condition: `Spend` (33) > `New_Budget` (60)? No.
+    -   Action: Job runs. `suppressed` = false.
+    -   Final Budget After (`budget_after`) = New_Budget (60) - Spend (33) = 27.
+
+*Note on Wait_Sum*: The task defines `wait_s` as "the sum of every wait second spent". The waits observed were 3, 6, and 12. Sum = 21.
+*Note on Budget_After*: Defined as "budget minus all spend... budget_after is always computed against the doubled budget when doubling fired". Calculation: Doubled Budget (60) - Total Spend (33) = 27.
+
+---
+
+### Final Answer
+
+```json
+{"attempts": 4, "wait_s": 21, "budget_after": 27, "suppressed": false}
+```

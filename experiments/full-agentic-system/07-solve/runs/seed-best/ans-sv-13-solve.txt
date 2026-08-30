@@ -1,0 +1,72 @@
+### Phase 1 RULE SCAN
+This phase lists every rule in the task that changes state during the event sequence (Arrivals), including expiry, return, revocation, refill, promotion, fallback, or source-ranking rules, marked with their trigger events.
+
+1.  **Per-Attempt Cost Rule**: Triggers on `Arrival` of an attempt; deducts cost equal to the number of tokens per attempt from the budget.
+2.  **Wait Time Cost Rule**: Triggers on `Arrival` of a wait interval (between attempts); deducts cost equal to the duration in seconds from the budget.
+3.  **Budget Suppression Rule (Initial)**: Triggers if `Total Spend > Budget`; sets state to `suppressed = true`.
+4.  **Budget Doubling Rule**: Triggers if `suppressed = true` and a doubling mechanism is active; doubles the current budget limit exactly once.
+5.  **Budget Suppression Rule (Re-check)**: Triggers after Budget Doubling; re-evaluates `Total Spend > New Doubled Budget`; sets final state to `suppressed = false` if under, or `true` if still over.
+6.  **Expiry Return Rule**: Triggers on completion of the job sequence (implied by "trigger request completes" in context of a full run); returns half of the *granted* amount (partial) rounded down to the pool. *(Note: No explicit expiry event is listed in the input events, so this rule does not trigger within the provided event list).*
+7.  **Refill Rule**: Triggers if a denial occurs and the pool refills; revokes the denial state. *(Note: The task explicitly states "a denial is permanent the instant it happens", overriding any implicit refill logic for denials, but this rule exists in the text's general description of traps).*
+
+---
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at a time in strict arrival order.
+**Initial State:**
+*   `Budget`: 24 tokens
+*   `Spend`: 0 tokens
+*   `Attempts`: 0
+*   `Wait_S`: 0 seconds
+*   `Suppressed`: false
+
+**Event List Analysis:**
+The input describes a sequence of failures and waits: "Waits observed: 2, 4". The job needs 3 attempts (2 failed before the 3rd succeeds).
+Sequence reconstruction based on text:
+1.  **Attempt 1**: Starts. Cost = 2 tokens.
+    *   `Spend` += 2. Total Spend = 2.
+    *   Fails.
+2.  **Wait 1**: Duration = 2s. Cost = 1 token/s.
+    *   `Wait_S` += 2.
+    *   `Spend` += (2 * 1) = 2. Total Spend = 4.
+3.  **Attempt 2**: Starts. Cost = 2 tokens.
+    *   `Spend` += 2. Total Spend = 6.
+    *   Fails.
+4.  **Wait 2**: Duration = 4s. Cost = 1 token/s.
+    *   `Wait_S` += 4.
+    *   `Spend` += (4 * 1) = 4. Total Spend = 10.
+5.  **Attempt 3**: Starts. Cost = 2 tokens.
+    *   `Spend` += 2. Total Spend = 12.
+    *   Succeeds. Job completes.
+
+**State Calculation:**
+*   **Total Attempts**: 3 (One success, two failures).
+*   **Total Wait Seconds**: 2 + 4 = 6.
+*   **Total Spend**:
+    *   Attempt Costs: 2 (A1) + 2 (A2) + 2 (A3) = 6.
+    *   Wait Costs: 2 (W1) + 4 (W2) = 6.
+    *   Total Spend = 6 + 6 = 12.
+*   **Budget Check**:
+    *   Initial Budget = 24.
+    *   Spend (12) < Budget (24).
+    *   Condition `Spend > Budget` is False.
+    *   No suppression occurs.
+    *   No doubling occurs.
+    *   Final `budget_after` = 24 - 12 = 12.
+    *   Final `suppressed` = false.
+
+**Ledger Walk Lines:**
+1.  Event: Attempt 1 Arrival -> State: Attempts=1, Spend=2, Wait_S=0, Suppressed=false.
+2.  Event: Wait 1 (2s) Arrival -> State: Attempts=1, Spend=4, Wait_S=2, Suppressed=false.
+3.  Event: Attempt 2 Arrival -> State: Attempts=2, Spend=6, Wait_S=2, Suppressed=false.
+4.  Event: Wait 2 (4s) Arrival -> State: Attempts=2, Spend=10, Wait_S=6, Suppressed=false.
+5.  Event: Attempt 3 Arrival (Success) -> State: Attempts=3, Spend=12, Wait_S=6, Suppressed=false.
+
+---
+
+### Final Answer
+The final JSON contains only the contract keys derived from the walk above.
+
+```json
+{"attempts": 3, "wait_s": 6, "budget_after": 12, "suppressed": false}
+```

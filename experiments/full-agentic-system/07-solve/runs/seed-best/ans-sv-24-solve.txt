@@ -1,0 +1,71 @@
+The task requires walking a specific state machine based on 6 observations (events) against defined limits for two stages. The final output must be a JSON object with `rollout_pct`, `stages_done`, and `status`.
+
+**Rule Analysis:**
+1.  **Stage Limits:**
+    *   Steps 1-5: Limit = 2.0%
+    *   Steps 6-10: Limit = 1.0%
+    *   Post-Breach Tightening: If a breach occurs, the limit for remaining steps becomes 0.8%.
+2.  **Stage Progression:**
+    *   A "clean" observation at position $N$ completes Stage $N$.
+    *   Upon completing Stage $N$, the `rollout` jumps to $10 \times N$.
+    *   The limit for the next step is determined by the current stage's rules (or tightened if breached).
+3.  **Breach Handling:**
+    *   If an observation breaches its limit, it is "spent" (no stage completed).
+    *   The state (`rollout`, `stages`) holds at the last completed value.
+    *   The limit tightens to 0.8% for remaining steps in that sequence.
+4.  **Termination Conditions:**
+    *   If a breach occurs and it is the only one (or leads to end), status depends on count.
+    *   Specifically, if there is exactly one breach and the list ends, status is `PAUSED`.
+
+**Event Walkthrough:**
+
+*   **Step 1:** Rate = 0.4%. Limit = 2.0%. Clean.
+    *   Completes Stage 1.
+    *   Rollout becomes $10 \times 1 = 10$.
+    *   State: `rollout_pct`=10, `stages_done`=1.
+
+*   **Step 2:** Rate = 0.6%. Limit = 2.0% (Stage 2 limit). Clean.
+    *   Completes Stage 2.
+    *   Rollout becomes $10 \times 2 = 20$.
+    *   State: `rollout_pct`=20, `stages_done`=2.
+
+*   **Step 3:** Rate = 0.9%. Limit = 2.0% (Stage 3 limit). Clean.
+    *   Completes Stage 3.
+    *   Rollout becomes $10 \times 3 = 30$.
+    *   State: `rollout_pct`=30, `stages_done`=3.
+
+*   **Step 4:** Rate = 1.2%. Limit = 2.0% (Stage 4 limit). Clean.
+    *   Completes Stage 4.
+    *   Rollout becomes $10 \times 4 = 40$.
+    *   State: `rollout_pct`=40, `stages_done`=4.
+
+*   **Step 5:** Rate = 1.4%. Limit = 2.0% (Stage 5 limit). Clean.
+    *   Completes Stage 5.
+    *   Rollout becomes $10 \times 5 = 50$.
+    *   State: `rollout_pct`=50, `stages_done`=5.
+
+*   **Step 6:** Rate = 1.9%. Limit = 2.0% (Stage 6 limit). Clean?
+    *   Wait, the prompt says "steps 6 through 10 only 1.0 percent".
+    *   Let's re-read carefully: "limits: steps 1 through 5 may show up to 2.0 percent, steps 6 through 10 only 1.0 percent."
+    *   Step 6 is the first step of Stage 6? Or does it continue Stage 5?
+    *   The prompt says: "the 1st observation carries stage 1...". This implies sequential stages.
+    *   If Step 6 completes Stage 6, the rollout would be $10 \times 6 = 60$.
+    *   However, let's look at the limit for Step 6. Is it 2.0% or 1.0%?
+    *   "steps 6 through 10 only 1.0 percent". This usually defines the budget for that specific step index in the sequence of stages.
+    *   If Step 6 is a clean observation, does it complete Stage 6?
+    *   Let's check the breach condition again. The prompt text says "observed error rates by step... exactly 6 observations".
+    *   If Step 6 rate (1.9%) exceeds the limit for Step 6 (which is defined as 1.0% for steps 6-10), then it is a **Breach**.
+    *   Limit for Step 6 = 1.0%. Rate = 1.9%. Breach!
+    *   Action: Observation spent. State holds last completed values (Stage 5, Rollout 50).
+    *   Tightening: Limit becomes 0.8% for remaining steps (none left in this list of 6).
+    *   Termination: Exactly one breach occurred (at Step 6) and the list ends.
+    *   Status Rule: "exactly one breach and the list ends: status PAUSED".
+
+**Final State Calculation:**
+*   `rollout_pct`: 50 (from Stage 5 completion).
+*   `stages_done`: 5.
+*   `status`: "PAUSED".
+
+```json
+{"rollout_pct": 50, "stages_done": 5, "status": "PAUSED"}
+```

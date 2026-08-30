@@ -1,0 +1,79 @@
+### Phase 1 RULE SCAN (Second Half Only)
+*Rules governing the retry logic for the flaky upstream.*
+
+1.  **Wait Rule**: Initial wait is 2s; each subsequent wait doubles after a failed attempt.
+2.  **Cost Rule**: Every attempt costs 2 tokens; every wait second costs 1 token.
+3.  **Success Condition**: The job needs exactly 2 failed attempts before the 3rd succeeds (Total: 3 attempts).
+4.  **Budget Rule**: Attempt budget is 24 tokens. If spend exceeds budget, the budget doubles exactly once, and the check repeats against the doubled budget.
+5.  **Suppression Rule**: The job is suppressed only if it remains over budget after the re-check (doubling fired but still insufficient).
+6.  **Spend Calculation**: Total spend = (Sum of all wait seconds) + (Number of attempts × 2).
+
+### Phase 2 LEDGER WALK (Second Half Only)
+*Applying events in strict arrival order.*
+
+**Event 1: Attempt 1**
+-   **Action**: Run attempt.
+-   **Wait Cost**: Initial wait is 2s. Cost = $2 \times 1 = 2$.
+-   **Attempt Cost**: $2$.
+-   **Total Spend**: $2 + 2 = 4$.
+-   **Result**: Failed (Required: 2 failures before success).
+-   **State Update**: Spend = 4. Remaining Budget = $24 - 4 = 20$.
+
+**Event 2: Wait for Attempt 2**
+-   **Action**: Apply wait penalty after failure.
+-   **Wait Duration**: Doubles from previous (2s $\to$ 4s). Cost = $4 \times 1 = 4$.
+-   **State Update**: Spend increases by 4. Total Spend = $4 + 4 = 8$. Remaining Budget = $20 - 4 = 16$.
+
+**Event 3: Attempt 2**
+-   **Action**: Run attempt.
+-   **Attempt Cost**: $2$.
+-   **Total Spend**: Previous ($8$) + Current ($2$) = $10$.
+-   **Result**: Failed (Required: 2 failures before success).
+-   **State Update**: Spend = 10. Remaining Budget = $16 - 2 = 14$.
+
+**Event 4: Wait for Attempt 3**
+-   **Action**: Apply wait penalty after failure.
+-   **Wait Duration**: Doubles from previous (4s $\to$ 8s). Cost = $8 \times 1 = 8$.
+-   **State Update**: Spend increases by 8. Total Spend = $10 + 8 = 18$. Remaining Budget = $14 - 8 = 6$.
+
+**Event 5: Attempt 3**
+-   **Action**: Run attempt.
+-   **Attempt Cost**: $2$.
+-   **Total Spend**: Previous ($18$) + Current ($2$) = $20$.
+-   **Result**: Success (Job completes).
+-   **State Update**: Spend = 20. Remaining Budget = $6 - 2 = 4$.
+
+**Event 6: Final Reconciliation & Suppression Check**
+-   **Check**: Did spend exceed initial budget? Yes ($20 > 24$ is false, wait... $20 < 24$, so no doubling triggered).
+    *Correction on Logic*: Let's re-evaluate the "Budget Rule" trigger.
+    -   Initial Budget: 24.
+    -   Total Spend calculated above: 20.
+    -   Is $20 > 24$? No.
+    -   Therefore, the budget doubling condition was **never met**. The job completed successfully within the original budget.
+    -   Wait, let me re-read the "Suppression Rule" carefully: "if the spend exceeds the budget the job is suppressed...". Since $20 \le 24$, suppression does not occur.
+    -   Let's double check the math one more time to ensure no misinterpretation of "spend".
+        -   Wait 1 (2s): 2 tokens.
+        -   Attempt 1: 2 tokens.
+        -   Total after A1: 4.
+        -   Wait 2 (4s): 4 tokens.
+        -   Total after W2: 8.
+        -   Attempt 2: 2 tokens.
+        -   Total after A2: 10.
+        -   Wait 3 (8s): 8 tokens.
+        -   Total after W3: 18.
+        -   Attempt 3: 2 tokens.
+        -   Total after A3: 20.
+    -   Budget is 24. $20 \le 24$. No doubling occurred. Suppression = false.
+
+**Final State Calculation:**
+-   **Attempts**: 3 (1 failed, 2 failed, 3 succeeded).
+-   **Wait Seconds Sum**: $2 + 4 + 8 = 14$ seconds.
+-   **Total Spend**: 20 tokens.
+-   **Budget After**: Initial (24) - Total Spend (20) = 4 tokens.
+    *(Note: The prompt defines `budget_after` as "the budget minus all spend". Since no doubling occurred, the base budget is 24).*
+
+### Final Answer JSON
+
+```json
+{"attempts": 3, "wait_s": 14, "budget_after": 4, "suppressed": false}
+```

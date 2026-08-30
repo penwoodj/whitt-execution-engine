@@ -1,0 +1,71 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the "orientation story" provided as a reference for rule logic (which applies to tonight's events), here are the rules that change state during an event or claim list:
+
+1.  **Arrival Rule**: Upon arrival of an attempt, `attempts` increments by 1, `wait_s` adds the current wait duration, and `spend` increases by (current wait + 2).
+    *   *Trigger*: Attempt Arrival Event.
+2.  **Budget Check Rule**: After updating spend, compare `spend` against `budget`. If `spend > budget`, trigger a "Double Budget" event where `budget` becomes `budget * 2`.
+    *   *Trigger*: Spend Exceeds Initial Budget (or current doubled budget).
+3.  **Re-Check Rule**: After doubling the budget, compare `spend` against the new `budget`. If `spend <= budget`, set `suppressed = false`; otherwise, set `suppressed = true`.
+    *   *Trigger*: Post-Doubling Budget Comparison.
+4.  **Success Rule**: Upon successful completion of the job (after required failures), finalize state with current `attempts`, `wait_s`, `budget_after` (`budget - spend`), and `suppressed`.
+    *   *Trigger*: Job Success Event.
+
+*(Note: The task explicitly states "no expiry" events for tonight's specific event list, so the Expiry Rule does not trigger in this walk.)*
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   `attempts`: 0
+*   `wait_s`: 0
+*   `budget`: 24
+*   `spend`: 0
+*   `suppressed`: false (default)
+*   `failures_needed`: 3 (Job needs 3 failed attempts before the 4th succeeds).
+
+**Event 1: Attempt Arrival #1**
+*   Wait observed: 2s.
+*   Cost calculation: Wait (2) + Attempt (2) = 4.
+*   New `spend`: 0 + 4 = 4.
+*   Budget Check: 4 <= 24. No doubling.
+*   State Update: `attempts`=1, `wait_s`=2, `budget_after` (internal calc)=20.
+
+**Event 2: Attempt Arrival #2 (Failure)**
+*   Wait observed: 4s (doubles from previous).
+*   Cost calculation: Wait (4) + Attempt (2) = 6.
+*   New `spend`: 4 + 6 = 10.
+*   Budget Check: 10 <= 24. No doubling.
+*   State Update: `attempts`=2, `wait_s`=2+4=6, `budget_after` (internal calc)=14.
+
+**Event 3: Attempt Arrival #3 (Failure)**
+*   Wait observed: 8s (doubles from previous).
+*   Cost calculation: Wait (8) + Attempt (2) = 10.
+*   New `spend`: 10 + 10 = 20.
+*   Budget Check: 20 <= 24. No doubling.
+*   State Update: `attempts`=3, `wait_s`=6+8=14, `budget_after` (internal calc)=4.
+
+**Event 4: Attempt Arrival #4 (Success)**
+*   Wait observed: The task lists "Waits observed: 2, 4, 8". It does not list a wait for the successful attempt in the specific event log provided ("first wait is 2s... after each failed attempt the retry waits"). However, standard logic implies the success happens immediately or with negligible cost unless specified. The prompt says "the job needs 3 failed attempts before the 4th succeeds".
+*   Cost calculation: If no wait is listed for the success event in the specific log, we assume 0 wait cost for this step, or that the "Waits observed" list covers all waiting periods incurred *before* a decision. Let's re-read carefully: "after each failed attempt the retry waits". The successful attempt does not require a retry wait before execution.
+*   Cost calculation: Attempt (2) + Wait (0) = 2.
+*   New `spend`: 20 + 2 = 22.
+*   Budget Check: 22 <= 24. No doubling.
+*   State Update: `attempts`=4, `wait_s`=14+0=14, `budget_after` (internal calc)=2.
+
+**Final Calculation Verification:**
+*   Total `attempts`: 4 (3 failed + 1 success).
+*   Total `wait_s`: 2 + 4 + 8 = 14.
+*   Total Spend: (Wait+Cost) for #1(4) + #2(6) + #3(10) + #4(2) = 22.
+    *   Alternatively: Sum of Waits (14) + Sum of Attempt Costs (4 attempts * 2 = 8) = 22.
+*   Budget After: `budget` (24) - `spend` (22) = 2.
+*   Suppressed: false (Spend never exceeded budget).
+
+---
+
+### Final Answer
+
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 2, "suppressed": false}
+```

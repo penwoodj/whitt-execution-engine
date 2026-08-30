@@ -1,0 +1,853 @@
+workflow_id: harness_v7_hb-07
+name: "Harness v7 - hb-07"
+description: "TABLE->GATE->AGGREGATE->JUDGE-V2->LEAK-AUDIT. Case: hb-07 hops=4 route=light"
+version: "7.0.0"
+author: "Experiment"
+tags: [harness, agentic, v7, routing, snapshot, meter, audit]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  m_light:
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  m_heavy:
+    name: "Qwen3-5-9B-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  m_judge:
+    name: "Hermes-2-Pro-Mistral-7B.Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  timing:
+    cooldown_after_unload_secs: 0
+    min_tmp_space_mb: 50
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+  steps:
+    s00_screen:
+      generative_entity: "${models.m_light}"
+      prompt: "pre-flight"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/screen-validate.py /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-07.yml"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - skip_step: true
+
+    s01_solve:
+      generative_entity: "${models.m_light}"
+      prompt: |
+        ROLE: on-call operator. Precise. Zero fluff.
+
+                You run the morning data-platform check for the analytics warehouse, a
+        ritual performed with coffee before the first dashboard refreshes land on
+        executives' screens. The check has three parts — freshness, cleanliness,
+        and rebuilds — and the rules come from the data-governance doc that was
+        rewritten after the quarter when a stale table quietly fed the board deck
+        for eleven days before anyone noticed the numbers had stopped moving.
+        
+        The freshness rule first. The nightly orchestration aims to finish all
+        source refreshes before ten at night, but the governance doc does not
+        trust intentions, only timestamps: a source counts as fresh this morning
+        if and only if its last refresh completed after 22:00 yesterday evening.
+        Completed after 22:00 yesterday — not started, completed, and not 22:00
+        today, which would be a nonsensical criterion for a morning check. A
+        refresh that completed at 21:59 yesterday, however healthy it looks, is
+        classified stale, and stale sources get flagged for the on-call data
+        engineer to investigate. Note also that a refresh completing after
+        midnight, in the small hours of this morning, trivially completed after
+        22:00 yesterday, and is fresh.
+        
+        The cleanliness rule second. The warehouse accumulates duplicate
+        partitions when orchestration retries overlap, and the morning check
+        counts how many duplicate partitions the janitor process detected and
+        removed overnight. These removals are maintenance on partitions inside
+        tables; they are not tables themselves, they are not sources, and they
+        have no interaction with the freshness classification of any source. They
+        get one number in the report and nothing more.
+        
+        The rebuild rule third, and it is where lazy mornings go wrong.
+        Downstream reporting views are rebuilt for fresh sources only. Every
+        fresh source triggers exactly one view rebuild — its reporting view,
+        rebuilt from the new data. Stale sources trigger nothing: their views
+        intentionally hold yesterday's state, because rebuilding a view from
+        stale data would just republish old numbers with a new timestamp, which
+        is worse than obviously-old numbers. The number of view rebuilds
+        performed this morning therefore equals the number of fresh sources, and
+        if you catch yourself computing it from the total source count, start
+        over.
+        
+        Now this morning's four sources, from the orchestration log.
+        
+        The orders source, the biggest and slowest, completed its refresh at
+        23:10 last night — the ingestion queue had backed up behind a late
+        upstream file, pushing completion past the ten o'clock target but keeping
+        it after the 22:00 line. Fresh.
+        
+        The users source completed at 21:40 last night. Twenty minutes. That is
+        all it missed by, and it hurt to type, but the rule is the rule and the
+        rule says 22:00: stale, flagged, and its view stays on yesterday's state.
+        
+        The events source, streaming-derived, completed at 23:55 last night after
+        a schema-evolution hiccup cost it an hour of reprocessing. Fresh.
+        
+        The metrics source, computed downstream of the others, finished its
+        refresh at 00:15 this morning — quarter past midnight, comfortably after
+        22:00 yesterday by any honest reading. Fresh.
+        
+        The janitor's overnight report, appended to the same log, records twelve
+        duplicate partitions detected and removed across the events source's
+        staging area, a residue of the schema-evolution retries. Twelve
+        partitions, gone before the morning check ran.
+        
+        Two neighbors in the log that are not yours to count. The ML feature
+        store runs its own refresh cycle from the same orchestration system but
+        under the platform-science team's namespace, which you do not manage; its
+        23:30 completion is their morning problem. And the metadata catalog's
+        heartbeat query, which runs every fifteen minutes and logs a completion
+        time each run, is a monitor, not a source refresh; it has never fed a
+        view and never will.
+        
+        The morning report needs: how many of your four sources are fresh, how
+        many are stale, how many reporting views were rebuilt, and how many
+        duplicate partitions were removed.
+        
+        The freshness policy earned its current shape the hard way, which every
+        member of the platform group can recite with tired eyes. The original
+        specification set a single global threshold for every view — one number,
+        one rule, elegant on the whiteboard — and it survived exactly one
+        quarter of production traffic before the quarterly business review
+        caught a revenue-critical view reading stale while a debugging view
+        that nobody consulted was fresh by hours. The lesson landed hard enough
+        to fund a redesign week — thresholds would be per view, derived from the
+        actual cost of staleness — and the numbers in force tonight are the
+        third revision since, each one tuned by the same argument about which
+        views the business actually reads.
+        
+        Partitioning maintenance, the nightly chore underneath the freshness
+        surface, follows its own quiet discipline. The lake rolls forward on a
+        rolling window — data arrives into fresh partitions, queries read the
+        window, and the maintenance job builds the next partition ahead of each
+        midnight so the window never slides into a hole. You watched tonight's
+        build complete on schedule, checked the retention sweep only archived
+        partitions outside the window, and noted the disk headroom the sweep
+        recovered, a number the capacity team tracks but which never appears in
+        any freshness verdict.
+        
+        Around the lake hums the usual machinery of a mature data platform,
+        most of it irrelevant to tonight's counts. The catalog crawler you do
+        not manage reindexes table metadata nightly and occasionally flags
+        schema drift in a channel nobody reads over breakfast. A query-cost
+        analyzer ranks the platform's most expensive queries for a tuning
+        board that meets monthly. And the replication pipeline shadows the
+        lake to a disaster-recovery region, its lag metrics watched by a
+        different on-call entirely — real infrastructure, real numbers, and
+        not one of them a partition that freshness counts would ever see.
+        
+        A note on the one stale view before the report is filed, because
+        single anomalies deserve their stories told. The stale reading came
+        from the view whose upstream job slipped its slot — a scheduling
+        conflict with a longer-running export, resolved by the orchestrator
+        requeuing the work rather than by any failure in the data itself. The
+        freshness policy does not care about excuses, which is the point of
+        having a policy; the view reads older than its threshold and is stale,
+        and the morning's data-on-call will chase the root cause through the
+        scheduler logs with the verdict as their starting lantern. What the
+        policy asks of you tonight is only the honest count.
+        
+        One final cross-check completes the ritual. The lake's own metadata
+        service tracks partition counts per table independently of the
+        maintenance job, and you reconcile your partition total against it
+        before filing — a disagreement would mean the window slid somewhere it
+        should not have, which is the kind of quiet structural drift that
+        freshness counts would surface only weeks later. The counts agree,
+        the views are tallied, and the platform's morning brief will carry
+        exactly what the thresholds saw.
+        
+        The data-on-call rotation's stake in tonight's numbers is worth a
+        closing thought, because freshness counts are the first lanterns of
+        their morning. A stale verdict is never just a number to that
+        rotation — it is a starting coordinate for a hunt through scheduler
+        logs, upstream jobs, and the occasional genuinely broken pipeline,
+        and a count that was sloppy would send the hunt in the wrong
+        direction for hours. The discipline of per-view thresholds paired
+        with honest counting is what makes the lantern trustworthy, and the
+        trust is mutual — the platform group counts carefully because the
+        on-call group chases faithfully, and each keeps the other's
+        standards high by example.
+        
+        The final numbers that matter are the ones the brief bolds, and they
+        deserve one last guard tonight — the distinction between a stale view
+        and a slow one. A view whose data arrived minutes after its threshold
+        passed is stale, full stop, however trivial the miss; a view that is
+        simply large and takes seconds to query is fresh if its last refresh
+        sits inside the window, however impatient its readers grow. The two
+        get conflated in hallway grumbling every few weeks, and the brief's
+        job — tonight's job — is to hold the line between them so the
+        on-call chases staleness, which is a disease, and not slowness,
+        which is a temperament. The thresholds define the line, the counts
+        report it, and the morning inherits it clean.
+        
+        One closing paragraph on the view nobody asked about, because it is
+        the view the platform group watches most closely of all — the meta-
+        view that reports freshness compliance itself, a view about views,
+        refreshed as reliably as any it measures. Its green this time of
+        night is the platform's small nightly reassurance that the machinery
+        of honest counting is itself being counted honestly. The morning
+        brief will not mention it, the thresholds do not govern it, and the
+        on-call rotation will not chase it, but its quiet steadiness under
+        everything else is the floor the whole policy stands on. It reads
+        green tonight, as it should, and the report files with the platform
+        resting on its own foundations.
+
+        METHOD: for EACH entity below, derive its answer from the rules.
+        Track state step by step in plain text. Entities you do not manage
+        NEVER count. Check deadline/budget rules BEFORE finalizing.
+
+        Entities (one line each, id then question):
+        - orders_fresh: A view is fresh if its last refresh completed after 22:00 yesterday — orders refreshed at 23:10; fresh? (1 if yes, 0 if no) [answer format: true or false]
+        - users_fresh: A view is fresh if its last refresh completed after 22:00 yesterday — users refreshed at 21:40, before the cutoff; fresh? (1 if yes, 0 if no) [answer format: true or false]
+        - events_fresh: A view is fresh if its last refresh completed after 22:00 yesterday — events refreshed at 23:55; fresh? (1 if yes, 0 if no) [answer format: true or false]
+        - metrics_fresh: is metrics fresh (completed 00.15 today, after 22.00 yesterday) [answer format: true or false]
+        - partitions_removed: The overnight janitor removes duplicate partitions it finds — 12 duplicates were found and removed; how many partitions were removed? [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 5 lines,
+        one per entity above, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines. No JSON. No explanations.
+      model_overrides: { temperature: 0.1, max_tokens: 1280 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-07.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s02_fix_1
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json check ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-07"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.solve.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage solve --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-07"
+              working_dir: "."
+              fail_on_error: false
+
+    s02_fix_1:
+      generative_entity: "${models.m_light}"
+      prompt: |
+        ROLE: correction specialist. Entity table failed checks. Fix rows.
+
+        Original task:
+                You run the morning data-platform check for the analytics warehouse, a
+        ritual performed with coffee before the first dashboard refreshes land on
+        executives' screens. The check has three parts — freshness, cleanliness,
+        and rebuilds — and the rules come from the data-governance doc that was
+        rewritten after the quarter when a stale table quietly fed the board deck
+        for eleven days before anyone noticed the numbers had stopped moving.
+        
+        The freshness rule first. The nightly orchestration aims to finish all
+        source refreshes before ten at night, but the governance doc does not
+        trust intentions, only timestamps: a source counts as fresh this morning
+        if and only if its last refresh completed after 22:00 yesterday evening.
+        Completed after 22:00 yesterday — not started, completed, and not 22:00
+        today, which would be a nonsensical criterion for a morning check. A
+        refresh that completed at 21:59 yesterday, however healthy it looks, is
+        classified stale, and stale sources get flagged for the on-call data
+        engineer to investigate. Note also that a refresh completing after
+        midnight, in the small hours of this morning, trivially completed after
+        22:00 yesterday, and is fresh.
+        
+        The cleanliness rule second. The warehouse accumulates duplicate
+        partitions when orchestration retries overlap, and the morning check
+        counts how many duplicate partitions the janitor process detected and
+        removed overnight. These removals are maintenance on partitions inside
+        tables; they are not tables themselves, they are not sources, and they
+        have no interaction with the freshness classification of any source. They
+        get one number in the report and nothing more.
+        
+        The rebuild rule third, and it is where lazy mornings go wrong.
+        Downstream reporting views are rebuilt for fresh sources only. Every
+        fresh source triggers exactly one view rebuild — its reporting view,
+        rebuilt from the new data. Stale sources trigger nothing: their views
+        intentionally hold yesterday's state, because rebuilding a view from
+        stale data would just republish old numbers with a new timestamp, which
+        is worse than obviously-old numbers. The number of view rebuilds
+        performed this morning therefore equals the number of fresh sources, and
+        if you catch yourself computing it from the total source count, start
+        over.
+        
+        Now this morning's four sources, from the orchestration log.
+        
+        The orders source, the biggest and slowest, completed its refresh at
+        23:10 last night — the ingestion queue had backed up behind a late
+        upstream file, pushing completion past the ten o'clock target but keeping
+        it after the 22:00 line. Fresh.
+        
+        The users source completed at 21:40 last night. Twenty minutes. That is
+        all it missed by, and it hurt to type, but the rule is the rule and the
+        rule says 22:00: stale, flagged, and its view stays on yesterday's state.
+        
+        The events source, streaming-derived, completed at 23:55 last night after
+        a schema-evolution hiccup cost it an hour of reprocessing. Fresh.
+        
+        The metrics source, computed downstream of the others, finished its
+        refresh at 00:15 this morning — quarter past midnight, comfortably after
+        22:00 yesterday by any honest reading. Fresh.
+        
+        The janitor's overnight report, appended to the same log, records twelve
+        duplicate partitions detected and removed across the events source's
+        staging area, a residue of the schema-evolution retries. Twelve
+        partitions, gone before the morning check ran.
+        
+        Two neighbors in the log that are not yours to count. The ML feature
+        store runs its own refresh cycle from the same orchestration system but
+        under the platform-science team's namespace, which you do not manage; its
+        23:30 completion is their morning problem. And the metadata catalog's
+        heartbeat query, which runs every fifteen minutes and logs a completion
+        time each run, is a monitor, not a source refresh; it has never fed a
+        view and never will.
+        
+        The morning report needs: how many of your four sources are fresh, how
+        many are stale, how many reporting views were rebuilt, and how many
+        duplicate partitions were removed.
+        
+        The freshness policy earned its current shape the hard way, which every
+        member of the platform group can recite with tired eyes. The original
+        specification set a single global threshold for every view — one number,
+        one rule, elegant on the whiteboard — and it survived exactly one
+        quarter of production traffic before the quarterly business review
+        caught a revenue-critical view reading stale while a debugging view
+        that nobody consulted was fresh by hours. The lesson landed hard enough
+        to fund a redesign week — thresholds would be per view, derived from the
+        actual cost of staleness — and the numbers in force tonight are the
+        third revision since, each one tuned by the same argument about which
+        views the business actually reads.
+        
+        Partitioning maintenance, the nightly chore underneath the freshness
+        surface, follows its own quiet discipline. The lake rolls forward on a
+        rolling window — data arrives into fresh partitions, queries read the
+        window, and the maintenance job builds the next partition ahead of each
+        midnight so the window never slides into a hole. You watched tonight's
+        build complete on schedule, checked the retention sweep only archived
+        partitions outside the window, and noted the disk headroom the sweep
+        recovered, a number the capacity team tracks but which never appears in
+        any freshness verdict.
+        
+        Around the lake hums the usual machinery of a mature data platform,
+        most of it irrelevant to tonight's counts. The catalog crawler you do
+        not manage reindexes table metadata nightly and occasionally flags
+        schema drift in a channel nobody reads over breakfast. A query-cost
+        analyzer ranks the platform's most expensive queries for a tuning
+        board that meets monthly. And the replication pipeline shadows the
+        lake to a disaster-recovery region, its lag metrics watched by a
+        different on-call entirely — real infrastructure, real numbers, and
+        not one of them a partition that freshness counts would ever see.
+        
+        A note on the one stale view before the report is filed, because
+        single anomalies deserve their stories told. The stale reading came
+        from the view whose upstream job slipped its slot — a scheduling
+        conflict with a longer-running export, resolved by the orchestrator
+        requeuing the work rather than by any failure in the data itself. The
+        freshness policy does not care about excuses, which is the point of
+        having a policy; the view reads older than its threshold and is stale,
+        and the morning's data-on-call will chase the root cause through the
+        scheduler logs with the verdict as their starting lantern. What the
+        policy asks of you tonight is only the honest count.
+        
+        One final cross-check completes the ritual. The lake's own metadata
+        service tracks partition counts per table independently of the
+        maintenance job, and you reconcile your partition total against it
+        before filing — a disagreement would mean the window slid somewhere it
+        should not have, which is the kind of quiet structural drift that
+        freshness counts would surface only weeks later. The counts agree,
+        the views are tallied, and the platform's morning brief will carry
+        exactly what the thresholds saw.
+        
+        The data-on-call rotation's stake in tonight's numbers is worth a
+        closing thought, because freshness counts are the first lanterns of
+        their morning. A stale verdict is never just a number to that
+        rotation — it is a starting coordinate for a hunt through scheduler
+        logs, upstream jobs, and the occasional genuinely broken pipeline,
+        and a count that was sloppy would send the hunt in the wrong
+        direction for hours. The discipline of per-view thresholds paired
+        with honest counting is what makes the lantern trustworthy, and the
+        trust is mutual — the platform group counts carefully because the
+        on-call group chases faithfully, and each keeps the other's
+        standards high by example.
+        
+        The final numbers that matter are the ones the brief bolds, and they
+        deserve one last guard tonight — the distinction between a stale view
+        and a slow one. A view whose data arrived minutes after its threshold
+        passed is stale, full stop, however trivial the miss; a view that is
+        simply large and takes seconds to query is fresh if its last refresh
+        sits inside the window, however impatient its readers grow. The two
+        get conflated in hallway grumbling every few weeks, and the brief's
+        job — tonight's job — is to hold the line between them so the
+        on-call chases staleness, which is a disease, and not slowness,
+        which is a temperament. The thresholds define the line, the counts
+        report it, and the morning inherits it clean.
+        
+        One closing paragraph on the view nobody asked about, because it is
+        the view the platform group watches most closely of all — the meta-
+        view that reports freshness compliance itself, a view about views,
+        refreshed as reliably as any it measures. Its green this time of
+        night is the platform's small nightly reassurance that the machinery
+        of honest counting is itself being counted honestly. The morning
+        brief will not mention it, the thresholds do not govern it, and the
+        on-call rotation will not chase it, but its quiet steadiness under
+        everything else is the floor the whole policy stands on. It reads
+        green tonight, as it should, and the report files with the platform
+        resting on its own foundations.
+
+        Failed cells (id + your observed value, correct values withheld):
+        {{bookmarks.cell_feedback}}
+
+        Prior table:
+        {{bookmarks.table}}
+
+        METHOD: re-read the task rules above, then re-derive each failed
+        entity. Use these exact entity ids:
+
+        - orders_fresh: A view is fresh if its last refresh completed after 22:00 yesterday — orders refreshed at 23:10; fresh? (1 if yes, 0 if no) [answer format: true or false]
+        - users_fresh: A view is fresh if its last refresh completed after 22:00 yesterday — users refreshed at 21:40, before the cutoff; fresh? (1 if yes, 0 if no) [answer format: true or false]
+        - events_fresh: A view is fresh if its last refresh completed after 22:00 yesterday — events refreshed at 23:55; fresh? (1 if yes, 0 if no) [answer format: true or false]
+        - metrics_fresh: is metrics fresh (completed 00.15 today, after 22.00 yesterday) [answer format: true or false]
+        - partitions_removed: The overnight janitor removes duplicate partitions it finds — 12 duplicates were found and removed; how many partitions were removed? [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 5 lines,
+        one per entity, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines.
+      model_overrides: { temperature: 0.0, max_tokens: 1600 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/table-feedback.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-07.yml"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$cell_feedback"
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-07.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s03_fix_2
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json fix_1 ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-07"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.fix_1.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage fix_1 --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-07"
+              working_dir: "."
+              fail_on_error: false
+
+    s03_fix_2:
+      generative_entity: "${models.m_heavy}"
+      prompt: |
+        ROLE: escalation solver. Two attempts wrong. Rebuild table from scratch.
+
+        Original task:
+                You run the morning data-platform check for the analytics warehouse, a
+        ritual performed with coffee before the first dashboard refreshes land on
+        executives' screens. The check has three parts — freshness, cleanliness,
+        and rebuilds — and the rules come from the data-governance doc that was
+        rewritten after the quarter when a stale table quietly fed the board deck
+        for eleven days before anyone noticed the numbers had stopped moving.
+        
+        The freshness rule first. The nightly orchestration aims to finish all
+        source refreshes before ten at night, but the governance doc does not
+        trust intentions, only timestamps: a source counts as fresh this morning
+        if and only if its last refresh completed after 22:00 yesterday evening.
+        Completed after 22:00 yesterday — not started, completed, and not 22:00
+        today, which would be a nonsensical criterion for a morning check. A
+        refresh that completed at 21:59 yesterday, however healthy it looks, is
+        classified stale, and stale sources get flagged for the on-call data
+        engineer to investigate. Note also that a refresh completing after
+        midnight, in the small hours of this morning, trivially completed after
+        22:00 yesterday, and is fresh.
+        
+        The cleanliness rule second. The warehouse accumulates duplicate
+        partitions when orchestration retries overlap, and the morning check
+        counts how many duplicate partitions the janitor process detected and
+        removed overnight. These removals are maintenance on partitions inside
+        tables; they are not tables themselves, they are not sources, and they
+        have no interaction with the freshness classification of any source. They
+        get one number in the report and nothing more.
+        
+        The rebuild rule third, and it is where lazy mornings go wrong.
+        Downstream reporting views are rebuilt for fresh sources only. Every
+        fresh source triggers exactly one view rebuild — its reporting view,
+        rebuilt from the new data. Stale sources trigger nothing: their views
+        intentionally hold yesterday's state, because rebuilding a view from
+        stale data would just republish old numbers with a new timestamp, which
+        is worse than obviously-old numbers. The number of view rebuilds
+        performed this morning therefore equals the number of fresh sources, and
+        if you catch yourself computing it from the total source count, start
+        over.
+        
+        Now this morning's four sources, from the orchestration log.
+        
+        The orders source, the biggest and slowest, completed its refresh at
+        23:10 last night — the ingestion queue had backed up behind a late
+        upstream file, pushing completion past the ten o'clock target but keeping
+        it after the 22:00 line. Fresh.
+        
+        The users source completed at 21:40 last night. Twenty minutes. That is
+        all it missed by, and it hurt to type, but the rule is the rule and the
+        rule says 22:00: stale, flagged, and its view stays on yesterday's state.
+        
+        The events source, streaming-derived, completed at 23:55 last night after
+        a schema-evolution hiccup cost it an hour of reprocessing. Fresh.
+        
+        The metrics source, computed downstream of the others, finished its
+        refresh at 00:15 this morning — quarter past midnight, comfortably after
+        22:00 yesterday by any honest reading. Fresh.
+        
+        The janitor's overnight report, appended to the same log, records twelve
+        duplicate partitions detected and removed across the events source's
+        staging area, a residue of the schema-evolution retries. Twelve
+        partitions, gone before the morning check ran.
+        
+        Two neighbors in the log that are not yours to count. The ML feature
+        store runs its own refresh cycle from the same orchestration system but
+        under the platform-science team's namespace, which you do not manage; its
+        23:30 completion is their morning problem. And the metadata catalog's
+        heartbeat query, which runs every fifteen minutes and logs a completion
+        time each run, is a monitor, not a source refresh; it has never fed a
+        view and never will.
+        
+        The morning report needs: how many of your four sources are fresh, how
+        many are stale, how many reporting views were rebuilt, and how many
+        duplicate partitions were removed.
+        
+        The freshness policy earned its current shape the hard way, which every
+        member of the platform group can recite with tired eyes. The original
+        specification set a single global threshold for every view — one number,
+        one rule, elegant on the whiteboard — and it survived exactly one
+        quarter of production traffic before the quarterly business review
+        caught a revenue-critical view reading stale while a debugging view
+        that nobody consulted was fresh by hours. The lesson landed hard enough
+        to fund a redesign week — thresholds would be per view, derived from the
+        actual cost of staleness — and the numbers in force tonight are the
+        third revision since, each one tuned by the same argument about which
+        views the business actually reads.
+        
+        Partitioning maintenance, the nightly chore underneath the freshness
+        surface, follows its own quiet discipline. The lake rolls forward on a
+        rolling window — data arrives into fresh partitions, queries read the
+        window, and the maintenance job builds the next partition ahead of each
+        midnight so the window never slides into a hole. You watched tonight's
+        build complete on schedule, checked the retention sweep only archived
+        partitions outside the window, and noted the disk headroom the sweep
+        recovered, a number the capacity team tracks but which never appears in
+        any freshness verdict.
+        
+        Around the lake hums the usual machinery of a mature data platform,
+        most of it irrelevant to tonight's counts. The catalog crawler you do
+        not manage reindexes table metadata nightly and occasionally flags
+        schema drift in a channel nobody reads over breakfast. A query-cost
+        analyzer ranks the platform's most expensive queries for a tuning
+        board that meets monthly. And the replication pipeline shadows the
+        lake to a disaster-recovery region, its lag metrics watched by a
+        different on-call entirely — real infrastructure, real numbers, and
+        not one of them a partition that freshness counts would ever see.
+        
+        A note on the one stale view before the report is filed, because
+        single anomalies deserve their stories told. The stale reading came
+        from the view whose upstream job slipped its slot — a scheduling
+        conflict with a longer-running export, resolved by the orchestrator
+        requeuing the work rather than by any failure in the data itself. The
+        freshness policy does not care about excuses, which is the point of
+        having a policy; the view reads older than its threshold and is stale,
+        and the morning's data-on-call will chase the root cause through the
+        scheduler logs with the verdict as their starting lantern. What the
+        policy asks of you tonight is only the honest count.
+        
+        One final cross-check completes the ritual. The lake's own metadata
+        service tracks partition counts per table independently of the
+        maintenance job, and you reconcile your partition total against it
+        before filing — a disagreement would mean the window slid somewhere it
+        should not have, which is the kind of quiet structural drift that
+        freshness counts would surface only weeks later. The counts agree,
+        the views are tallied, and the platform's morning brief will carry
+        exactly what the thresholds saw.
+        
+        The data-on-call rotation's stake in tonight's numbers is worth a
+        closing thought, because freshness counts are the first lanterns of
+        their morning. A stale verdict is never just a number to that
+        rotation — it is a starting coordinate for a hunt through scheduler
+        logs, upstream jobs, and the occasional genuinely broken pipeline,
+        and a count that was sloppy would send the hunt in the wrong
+        direction for hours. The discipline of per-view thresholds paired
+        with honest counting is what makes the lantern trustworthy, and the
+        trust is mutual — the platform group counts carefully because the
+        on-call group chases faithfully, and each keeps the other's
+        standards high by example.
+        
+        The final numbers that matter are the ones the brief bolds, and they
+        deserve one last guard tonight — the distinction between a stale view
+        and a slow one. A view whose data arrived minutes after its threshold
+        passed is stale, full stop, however trivial the miss; a view that is
+        simply large and takes seconds to query is fresh if its last refresh
+        sits inside the window, however impatient its readers grow. The two
+        get conflated in hallway grumbling every few weeks, and the brief's
+        job — tonight's job — is to hold the line between them so the
+        on-call chases staleness, which is a disease, and not slowness,
+        which is a temperament. The thresholds define the line, the counts
+        report it, and the morning inherits it clean.
+        
+        One closing paragraph on the view nobody asked about, because it is
+        the view the platform group watches most closely of all — the meta-
+        view that reports freshness compliance itself, a view about views,
+        refreshed as reliably as any it measures. Its green this time of
+        night is the platform's small nightly reassurance that the machinery
+        of honest counting is itself being counted honestly. The morning
+        brief will not mention it, the thresholds do not govern it, and the
+        on-call rotation will not chase it, but its quiet steadiness under
+        everything else is the floor the whole policy stands on. It reads
+        green tonight, as it should, and the report files with the platform
+        resting on its own foundations.
+
+        Failed cells (id + observed, withheld correct):
+        {{bookmarks.cell_feedback}}
+
+        METHOD: discard prior attempts. Re-derive EVERY entity answer from
+        the rules. Use these exact entity ids:
+
+        - orders_fresh: A view is fresh if its last refresh completed after 22:00 yesterday — orders refreshed at 23:10; fresh? (1 if yes, 0 if no) [answer format: true or false]
+        - users_fresh: A view is fresh if its last refresh completed after 22:00 yesterday — users refreshed at 21:40, before the cutoff; fresh? (1 if yes, 0 if no) [answer format: true or false]
+        - events_fresh: A view is fresh if its last refresh completed after 22:00 yesterday — events refreshed at 23:55; fresh? (1 if yes, 0 if no) [answer format: true or false]
+        - metrics_fresh: is metrics fresh (completed 00.15 today, after 22.00 yesterday) [answer format: true or false]
+        - partitions_removed: The overnight janitor removes duplicate partitions it finds — 12 duplicates were found and removed; how many partitions were removed? [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 5 lines,
+        one per entity, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines. No prose summaries.
+      model_overrides: { temperature: 0.0, max_tokens: 1600 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/table-feedback.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-07.yml"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$cell_feedback"
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-07.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json fix_2 ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-07"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.fix_2.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage fix_2 --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-07"
+              working_dir: "."
+              fail_on_error: false
+
+    s04_aggregate:
+      generative_entity: "${models.m_light}"
+      prompt: "deterministic-aggregate-noop"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/aggregate.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-07.yml --table-result ./docs/benchmarks/outputs/output/ha-table-result.json --out ./docs/benchmarks/outputs/output/ha-final.json"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-deterministic.py --artifact ./docs/benchmarks/outputs/output/ha-final.json --criteria /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-07.yml --out ./docs/benchmarks/outputs/output/ha-final-check.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s05_judge
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-final-check.json final ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-07"
+              working_dir: "."
+              fail_on_error: false
+          - skip_step: true
+
+    s05_judge:
+      generative_entity: "${models.m_judge}"
+      prompt: |
+        ROLE: blind auditor. See only task + result. No author knowledge.
+
+        Task objective: Classify pipeline sources by refresh-timestamp freshness and derive rebuild counts.
+        Result: {{bookmarks.final_json}}
+
+        Answer EXACTLY 6 lines, nothing else:
+        KEYS: yes or no
+        VALUES: yes or no
+        FORMAT: yes or no
+        VERDICT: PASS or FAIL
+        REASON: one sentence
+        SCORE: 1-10
+
+        VERDICT must be PASS only if all three of KEYS, VALUES, FORMAT are yes.
+      model_overrides: { temperature: 0.0, max_tokens: 160 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/output/ha-final.json"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$final_json"
+        after_step_succeeds:
+          - save_to:
+              - "$verdict"
+              - "./docs/benchmarks/outputs/output/ha-verdict.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-judge.py ./docs/benchmarks/outputs/output/ha-verdict.txt ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-07"
+              working_dir: "."
+              fail_on_error: false
+
+    s06_end_fail:
+      generative_entity: "${models.m_light}"
+      prompt: "FAIL"
+      model_overrides: { temperature: 0.0, max_tokens: 8 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/failflag.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --final-check ./docs/benchmarks/outputs/output/ha-final-check.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s07_fail_trace
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s08_audit
+          - skip_step: true
+
+    s07_fail_trace:
+      generative_entity: "${models.m_light}"
+      prompt: "trace-only"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl end_fail fail case=hb-07"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s08_audit
+
+    s08_audit:
+      generative_entity: "${models.m_light}"
+      prompt: "leak-audit-noop"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/leak-audit.py --run-dir ./docs/benchmarks/outputs/output --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-07.yml"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s09_audit_pass
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s10_audit_leak
+          - skip_step: true
+
+    s09_audit_pass:
+      generative_entity: "${models.m_light}"
+      prompt: "audit-pass-trace"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl audit pass case=hb-07"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s_end
+
+    s10_audit_leak:
+      generative_entity: "${models.m_light}"
+      prompt: "audit-leak-trace"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl audit fail leak=true case=hb-07"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s_end
+
+    s_end:
+      generative_entity: "${models.m_light}"
+      prompt: "term"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - skip_step: true

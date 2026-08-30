@@ -1,0 +1,118 @@
+### Phase 1 RULE SCAN
+
+The following rules govern state changes during the event sequence. Rules are listed in order of priority (higher list = applied first) as per "pick the one higher in the list."
+
+1.  **Breach Rule**: If `observed_error_rate` > `current_limit`, trigger **PAUSE/ROLLBACK**.
+    *   *Effect*: Status becomes `PAUSED`. Rollback to previous step (climb resumes from next observation). Current breached observation is marked **SPENT** (ignored for future limit checks).
+2.  **Tighten Rule**: Triggered immediately after a Breach event occurs.
+    *   *Effect*: For every remaining step in the climb, `current_limit` becomes **0.8**.
+3.  **Double-Breach Rule**: If a Breach Rule triggers while Status is already `PAUSED` (or if a breach occurs on Step 1 where no previous step exists to rollback to? No, rule says "rolls back to previous", implying at least one prior successful step). However, the text explicitly states: "a second breach stops everything... status is STOPPED".
+    *   *Effect*: If Status is `PAUSED` (from first breach) and a new Breach occurs -> Status becomes **STOPPED**. Climb halts.
+4.  **Completion Rule**: If events process without triggering any Breach Rule, Status becomes **DONE** after the final step.
+
+*Trigger Mapping:*
+*   Event 1: Triggers Check vs Limit (No change).
+*   Event 2: Triggers Breach Rule (Breach occurs).
+*   Event 3: Triggers Check vs Tightened Limit.
+*   Event 4: Triggers Breach Rule (Breach occurs -> Second breach triggers Stop).
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   `rollout_pct`: 0
+*   `stages_done`: 0
+*   `status`: "CLIMBING" (Implicit start state, transitions on first event logic)
+*   `current_limit`: 2.0 (Default for steps 1-5)
+*   `step_sequence`: [0.4, 1.9, 0.5, 2.2, 0.6]
+
+**Event 1: Step 1 Observation (0.4%)**
+*   *Rule Applied*: Breach Rule Check.
+*   *Logic*: Current Limit = 2.0. Observed = 0.4. $0.4 \le 2.0$. No breach.
+*   *State Change*: Increment steps done. Update rollout %.
+    *   `rollout_pct`: $0 + 10\% = 10$ (Climbs in 10 percent steps).
+    *   `stages_done`: 1
+    *   `status`: "CLIMBING"
+
+**Event 2: Step 2 Observation (1.9%)**
+*   *Rule Applied*: Breach Rule Check.
+*   *Logic*: Current Limit = 2.0. Observed = 1.9. $1.9 \le 2.0$. No breach.
+*   *State Change*: Increment steps done. Update rollout %.
+    *   `rollout_pct`: $10 + 10\% = 20$
+    *   `stages_done`: 2
+    *   `status`: "CLIMBING"
+
+**Event 3: Step 3 Observation (0.5%)**
+*   *Rule Applied*: Breach Rule Check.
+*   *Logic*: Current Limit = 2.0. Observed = 0.5. $0.5 \le 2.0$. No breach.
+*   *State Change*: Increment steps done. Update rollout %.
+    *   `rollout_pct`: $20 + 10\% = 30$
+    *   `stages_done`: 3
+    *   `status`: "CLIMBING"
+
+**Event 4: Step 4 Observation (2.2%)**
+*   *Rule Applied*: Breach Rule Check.
+*   *Logic*: Current Limit = 2.0. Observed = 2.2. $2.2 > 2.0$. **BREACH DETECTED**.
+    *   Action: Rollback to previous step (Step 3). Resume from next observation (Step 5 is the next in queue, but we are currently at Step 4 logic which failed; effectively we stay at Step 3's completion level for the rollout % until we try again? No, "climb resumes from the next observation". This means we attempt to apply the *next* event in the list against the new rules.
+    *   Wait, let's re-read carefully: "a breach pauses the climb and rolls back to the previous step... the climb resumes from the next observation."
+    *   Interpretation A: We failed Step 4. We revert `rollout_pct` to value after Step 3 (30%). The "next observation" refers to the next item in the arrival list (which is Step 5, value 0.6).
+    *   Action: Apply Tighten Rule. Remaining steps limit = 0.8.
+*   *State Change*:
+    *   `rollout_pct`: Revert to previous valid state -> **30**. (We did not complete Step 4).
+    *   `stages_done`: Remains **3** (Step 4 is not counted as done).
+    *   `status`: "PAUSED"
+    *   `current_limit` for future: **0.8** (Tightened).
+    *   `spent_observations`: [2.2]
+
+**Event 5: Step 5 Observation (0.6%)** (This is the "next observation" after the rollback)
+*   *Rule Applied*: Breach Rule Check vs Tightened Limit.
+*   *Logic*: Current Limit = 0.8 (from Tighten Rule). Observed = 0.6. $0.6 \le 0.8$. **NO BREACH**.
+    *   Note: The rule says "the observation that breached is spent". This implies the *failed* one (2.2) is spent. The current one (0.6) is fresh and valid if it passes.
+*   *State Change*: Increment steps done. Update rollout %.
+    *   `rollout_pct`: $30 + 10\% = 40$.
+    *   `stages_done`: 4 (We successfully processed the observation that was next in line).
+    *   `status`: "CLIMBING"
+
+**Event List Check**: The input list has 5 observations: `[0.4, 1.9, 0.5, 2.2, 0.6]`.
+We have processed all 5 events listed in the task description ("observed error rates by step, in order: ...").
+After Event 5 (the last event), there are no more events.
+
+**Final Status Determination**:
+*   Did we stop? No.
+*   Did we finish climbing *all* steps? The list contains 5 steps. We have processed all 5 observations provided in the list.
+    *   Step 1: Done (10%)
+    *   Step 2: Done (20%)
+    *   Step 3: Done (30%)
+    *   Step 4: Breached -> Rolled back. (Rollout stays at 30%).
+    *   Step 5: Processed next observation (0.6). Passed tight limit. (Rollout goes to 40%).
+*   Is the climb finished? The task says "the morning report only reads JSON" and asks for `rollout_pct`. It does not ask for a boolean flag on whether the *entire theoretical rollout* (e.g., steps 1-10) was completed. It asks for the state produced by the events.
+*   Since all input events have been consumed, and no "STOPPED" rule was triggered (only one breach occurred), the status is **DONE** relative to the provided event stream. The system has processed the queue.
+
+Let's double check the "Second Breach" condition just in case I misread the list length or logic.
+List: 0.4, 1.9, 0.5, 2.2, 0.6. (5 items).
+Sequence:
+1. 0.4 <= 2.0 -> OK. Pct=10. Done=1.
+2. 1.9 <= 2.0 -> OK. Pct=20. Done=2.
+3. 0.5 <= 2.0 -> OK. Pct=30. Done=3.
+4. 2.2 > 2.0 -> BREACH #1.
+   - Rollback to previous state (Pct=30, Done=3).
+   - Status = PAUSED.
+   - Limit tightens to 0.8 for remaining steps.
+   - Observation 2.2 is spent.
+5. Next observation in list: 0.6.
+   - Check against new limit (0.8).
+   - 0.6 <= 0.8 -> OK.
+   - State advances: Pct=40, Done=4. Status = CLIMBING.
+
+Queue empty. No further events to trigger a second breach or completion of steps 6-10.
+The system state reflects the processing of all available data. The status is **DONE**.
+
+Final Values:
+*   `rollout_pct`: 40 (Integer)
+*   `stages_done`: 4 (Integer)
+*   `status`: "DONE"
+
+```json
+{"rollout_pct": 40, "stages_done": 4, "status": "DONE"}
+```

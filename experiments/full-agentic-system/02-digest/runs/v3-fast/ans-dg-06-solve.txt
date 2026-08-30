@@ -1,0 +1,129 @@
+### Phase 1 RULE SCAN
+
+Based on the task description, here are the rules that change state during the event or claim list:
+
+1.  **Arrival Rule**: Requests land in strict arrival order; each asks for a fixed number of tokens.
+2.  **Grant Rule (Full)**: If the pool covers the full ask, grant the full amount and subtract from the pool.
+3.  **Grant Rule (Partial)**: If the pool cannot cover the full ask, grant what is there (the remaining pool) and set the pool to zero.
+4.  **Denial Rule**: A request arriving at an empty pool is denied and listed by id; no tokens are granted or returned for this specific event's grant logic.
+5.  **Expiry Trigger Rule**: The grant for `r2` expires after request `r3` completes (triggered by the completion of `r3`).
+6.  **Return Calculation Rule**: An expired grant returns half its granted tokens, rounded down (`floor(granted / 2)`).
+7.  **Timing Rule**: The return lands right before the request the trigger names (`r4`), not after it.
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   Pool: 60
+*   Events: r1(ask 6), r2(ask 10), r3(ask 12), r4(ask 15), r5(ask 19), r6(ask 21), r7(ask 24).
+
+**Event 1: r1 arrives (Ask: 6)**
+*   Rule Applied: Grant Rule (Full)
+*   Action: Pool has 60. Ask is 6. $60 \ge 6$.
+*   Grant: 6.
+*   New Pool: $60 - 6 = 54$.
+
+**Event 2: r2 arrives (Ask: 10)**
+*   Rule Applied: Grant Rule (Full)
+*   Action: Pool has 54. Ask is 10. $54 \ge 10$.
+*   Grant: 10.
+*   New Pool: $54 - 10 = 44$.
+
+**Event 3: r3 arrives (Ask: 12)**
+*   Rule Applied: Grant Rule (Full)
+*   Action: Pool has 44. Ask is 12. $44 \ge 12$.
+*   Grant: 12.
+*   New Pool: $44 - 12 = 32$.
+*   *Side Effect*: The grant for `r2` expires after this request completes.
+    *   Expiry Trigger: Completion of r3.
+    *   Target Grant: r2 (Granted amount was 10).
+    *   Return Calculation: $floor(10 / 2) = 5$.
+    *   Timing Rule: Return lands before the next request (`r4`).
+*   Action: Add return to pool.
+*   New Pool: $32 + 5 = 37$.
+
+**Event 4: r4 arrives (Ask: 15)**
+*   Current Pool State entering event: 37.
+*   Rule Applied: Grant Rule (Partial)
+*   Action: Pool has 37. Ask is 15. $37 \ge 15$. Wait, check math again.
+    *   Start: 60
+    *   r1 (-6): 54
+    *   r2 (-10): 44
+    *   r3 (-12): 32
+    *   Expiry (+5 from r2): 37
+    *   r4 Ask: 15. Pool (37) >= Ask (15). Full Grant applies?
+    *   Let's re-read the "Partial" condition carefully: "grants are partial when the pool cannot cover the full ask".
+    *   Here $37 \ge 15$. So it is a **Full Grant**.
+*   Correction on Logic: The prompt says "grants are partial when the pool cannot cover the full ask". Since 37 covers 15, this is a full grant.
+*   Action: Grant 15.
+*   New Pool: $37 - 15 = 22$.
+
+**Event 5: r5 arrives (Ask: 19)**
+*   Current Pool State entering event: 22.
+*   Rule Applied: Grant Rule (Partial)
+*   Action: Pool has 22. Ask is 19. $22 \ge 19$. Full Grant applies? Yes.
+*   Wait, let me re-evaluate the sequence. Did I miss an expiry or a denial earlier?
+    *   r1: -6 (54)
+    *   r2: -10 (44)
+    *   r3: -12 (32). Trigger expires r2 (+5). Pool -> 37.
+    *   r4: Ask 15. Pool 37. $37 \ge 15$. Grant 15. Pool -> 22.
+    *   r5: Ask 19. Pool 22. $22 \ge 19$. Grant 19. Pool -> 3.
+*   Let's check the "Partial" logic again. Is there any other rule? No.
+*   Okay, proceeding with Full Grant for r4 and r5.
+
+**Event 6: r6 arrives (Ask: 21)**
+*   Current Pool State entering event: 3.
+*   Rule Applied: Denial Rule / Partial Logic check.
+    *   Ask is 21. Pool is 3.
+    *   $3 < 21$. Cannot cover full ask.
+    *   Action: Grant what is there (Partial).
+    *   Grant Amount: 3.
+*   New Pool: $3 - 3 = 0$.
+
+**Event 7: r7 arrives (Ask: 24)**
+*   Current Pool State entering event: 0.
+*   Rule Applied: Denial Rule.
+*   Action: Request arriving at an empty pool is denied.
+*   Grant Amount: 0.
+*   New Pool: 0.
+
+**Final Totals Calculation:**
+*   **Granted Units**: Sum of all grants (full and partial).
+    *   r1: 6
+    *   r2: 10
+    *   r3: 12
+    *   Expiry Return: 5 (This is a return, not a grant from the ask, but adds to pool. The question asks for "granted_units". Usually this means tokens given out of requests + returns? Or just request grants? Let's look at the contract keys: `{"granted_units": N, "denied": [ids], "pool_left": N}`.
+    *   Standard interpretation in these ledger problems: `granted_units` is the sum of all positive flows into the pool from requests (including partials) and returns? Or just the sum of request grants?
+    *   Let's check the orientation story for definition: "that night closed with 31 granted".
+        *   Orientation Story Check: Start 35. Ask 11 -> Grant 11 (Pool 24). Ask 7 -> Grant 7 (Pool 17). Expiry r1 returns 5 (floor(11/2)). Pool becomes 22. Ask 13 -> Partial Grant 13? No, pool is 22, ask 13. Full grant 13. Pool 9.
+        *   Total granted from requests: $11 + 7 + 13 = 31$.
+        *   The orientation story says "closed with 31 granted". This implies `granted_units` counts only the tokens given to fulfill requests, NOT the returned tokens. Returned tokens are just pool mechanics.
+    *   Let's re-verify my walk for tonight based on this definition (Request Grants Only).
+        *   r1: 6
+        *   r2: 10
+        *   r3: 12
+        *   r4: 15
+        *   r5: 19
+        *   r6: Partial Grant of 3 (since pool was 3).
+        *   r7: Denied.
+        *   Sum: $6 + 10 + 12 + 15 + 19 + 3 = 65$.
+
+*   **Denied**: List of IDs where the request received 0 tokens from the ask.
+    *   r7 arrived at empty pool (0). Denied.
+    *   List: `["r7"]`.
+
+*   **Pool Left**: Final state of the pool.
+    *   Start: 60
+    *   Minus Grants: $-6 -10 -12 -15 -19 -3 = -65$.
+    *   Plus Returns: $+5$ (from r2 expiry).
+    *   Calculation: $60 - 65 + 5 = 0$.
+
+Let's double check the "Partial" logic for r4 and r5.
+*   After r3 completion: Pool is 32. Expiry adds 5. Pool is 37.
+*   r4 asks 15. $37 \ge 15$. Full grant. Pool becomes 22.
+*   r5 asks 19. $22 \ge 19$. Full grant. Pool becomes 3.
+*   r6 asks 21. $3 < 21$. Partial grant of 3. Pool becomes 0.
+*   r7 asks 24. $0 < 24$. Denied.
+
+Wait, did I miss an expiry for r3? The text says: "the grant for r2 expires after

@@ -1,0 +1,53 @@
+### Phase 1 RULE SCAN
+*List of rules that change state during the event sequence, with triggers:*
+
+1.  **Load Rule**: `load A` -> State change: Model A (2GB) enters pool; Pool size: 6/8GB used.
+2.  **Load Rule**: `load C` -> State change: Model C (4GB) enters pool; Pool size: 10/8GB used (Overage); Triggers Eviction Logic for Model B? No, Model B is pinned. Must evict LRU unpinned to fit.
+3.  **Eviction Rule**: `load C` -> State change: Models A and D must be evicted to make room for C (since A was loaded first, it is LRU among unpinned). Pool now contains {C, B}. Size: 4+1=5GB.
+    *Correction on Logic*: Let's re-evaluate strictly by capacity.
+    *   Start: Empty.
+    *   Event `load A` (2GB): Fits. Pool={A(2)}. Used=2/8.
+    *   Event `load C` (4GB): Current used 2+4=6 < 8? No, wait. The prompt says "residents sizes: A2 B1 C4 D3".
+        *   Wait, is Model B already loaded? "Model B is pinned and never evicted." Usually implies it exists or will exist. In cache problems, "pinned" often means it occupies space but cannot be touched. If the card starts empty, does B count against capacity immediately?
+        *   Re-reading: "one 8GB card... models A through D... model B is pinned". It doesn't explicitly say B is loaded at $t=0$. However, standard cache logic implies if it's pinned, it consumes space unless stated otherwise. Let's assume the pool starts empty and we process events. If B is never an event "load", does it exist?
+        *   Interpretation A: B exists pre-loaded (1GB). Total capacity 8GB. Available = 7GB.
+            *   `load A` (2GB): Fits in 7GB. Pool={A, B}. Used=3/8.
+            *   `load C` (4GB): Needs 4GB. Available = 5GB. Fits? Yes. But wait, "a load that cannot fit evicts". Does it imply we must evict if it causes overflow, or only if it exceeds total capacity? Standard LRU: If new item + current items > Capacity, evict.
+            *   Let's check the "orientation story" hint: "4GB card... two 1.5GB loads walked in, the second forced one eviction". This implies strict capacity checks.
+            *   Hypothesis: Model B is loaded at start (pinned).
+                *   State 0: {B(1)}. Used=1/8. Free=7.
+                *   Event `load A` (2GB): Fits. Pool={A, B}. Used=3/8. LRU=A.
+                *   Event `load C` (4GB): Needs 4GB. Current used 3. Total would be 7. Fits in 8? Yes. No eviction needed?
+                *   Event `load D` (3GB): Needs 3GB. Current used 1+2+4=7. Total would be 10 > 8. Eviction needed. Unpinned models: A(2), C(4). LRU is A (loaded before C). Evict A. Load D. Pool={B, C, D}. Used=1+4+3=8.
+                *   Event `unload D`.
+            *   Let's re-read carefully: "models A through D... resident sizes... model B is pinned". It does not say "Model B is loaded at start". But if it's not loaded, and we load A then C then D, where is B? If B is never loaded via an event, but exists as a resident, the state description must account for it.
+            *   Alternative Interpretation: The system starts empty. B becomes pinned only when loaded? No, "pinned" is usually a property of the resident. If no load event for B occurs in the list `load A, load C, load D`, then B never enters the pool? That seems unlikely for a "rotation" task involving models A-D if one is special.
+            *   Let's look at the "Orientation Story": "4GB card... one pinned 1GB model". In that story, the pinned model was likely loaded initially to demonstrate eviction mechanics ("second forced one eviction").
+            *   Decision: **Model B is pre-loaded** (or loaded implicitly before the stream starts) because otherwise, mentioning it as "pinned" in a context where we manage memory suggests it occupies space. If it weren't there, the capacity constraint would be trivial until D arrives? Let's trace both paths mentally.
+                *   Path 1 (B pre-loaded): Pool={B(1)}. Load A-> {A,B}. Load C-> {A,B,C} (Total 7GB). Load D-> Need 3GB. Current 7+3=10 > 8. Evict LRU unpinned (A). Result: {C, B, D}. Unload D -> {C, B}.
+                *   Path 2 (B not pre-loaded): Pool={}. Load A->{A}. Load C-> Need 4GB. Current 2+4=6 <= 8. Fits? Wait. Is there a limit on number of models? No. "load that cannot fit evicts". If B is never loaded, it's not in the pool.
+                    *   Sequence: `load A` (2). Pool={A}.
+                    *   `load C` (4). Pool={A,C}. Used=6. Fits. LRU=A.
+                    *   `load D` (3). Need 3. Current 6+3=9 > 8. Evict LRU unpinned (A). Pool={C,D}. Used=7.
+                    *   `unload D`. Pool={C}.
+                *   Which is correct? "Model B is pinned". If it's not in the list of events, and we are walking a ledger, usually initial state is defined. The text says "models A through D... resident sizes...". It lists them as properties. In cache problems, "pinned" residents often start resident to force specific eviction behaviors (like evicting an older unpinned one).
+                *   However, the instruction says: "requested stream: load A, load C, load D, unload D." This is the *entire* requested stream. If B was pre-loaded, it's not in the stream.
+                *   Let's look at the orientation story again: "two 1.5GB loads walked in, the second forced one eviction". In a 4GB card with a pinned 1GB model. Start: {Pinned(1)}. Load 1.5 -> {P, L1}. Used 2.5. Load 1.5 -> Need 1.5. Total 4.0. Fits exactly? Or does "forced one eviction" imply it didn't fit?
+                *   If Start={P(1)}. Load 1.5 (Total 2.5). Load 1.5 (Total 4.0). No eviction.
+                *   Maybe the orientation story implies: Start Empty? Load 1.5 -> {L1}. Load 1.5 -> {L1, L2}. Then where is pinned? "one pinned 1GB model". If it's pinned but not loaded yet, maybe it loads automatically? No.
+                *   Let's reconsider the "Orientation Story" arithmetic: "4GB card... one pinned 1GB model, two 1.5GB loads walked in, the second forced one eviction".
+                    *   Total capacity 4GB. Pinned = 1GB. Available = 3GB.
+                    *   Load 1: 1.5GB. Fits. Pool={P(1), L1(1.5)}. Used=2.5.
+                    *   Load 2: 1.5GB. Need 1.5. Current used 2.5. Total 4.0. Fits exactly in 4GB card? Yes.
+                    *   Why "forced one eviction"? Maybe the pinned model doesn't count towards eviction logic, but does it count towards capacity? Yes.
+                    *   Is it possible the first load evicted something? No, pool was small.
+                    *   Maybe the "pinned" model wasn't loaded initially in the story either? But then where did it come from? "one pinned 1GB model". Usually implies existence.
+                    *   Perhaps the capacity is strictly `sum of sizes <= card`. If Start={P(1)}. Load 1.5 -> 2.5. Load 1.5 -> 4.0. No eviction needed mathematically.
+                    *   Unless... "two 1.5GB loads walked in" implies the sequence was: Load X, Load Y. And result is eviction.
+                    *   If Start Empty. Load 1.5 ({L1}). Load 1.5 ({L1, L2}). No eviction.
+                    *   Maybe the pinned model loads *after*? No, "one pinned".
+                    *   There must be a misunderstanding of the orientation story's math or my assumption of start state.
+                    *   Let's try: Start Empty. Load 1.5 (L1). Load Pinned(1)? No, events are specific.
+                    *   Okay, let's ignore the exact arithmetic of the orientation story for a moment and focus on the explicit rules for "tonight". The story is for "orientation only" and "numbers... not tonight's numbers". The rule to follow is: "a load that cannot fit evicts".
+                    *   Crucial Question: **Is Model B in the pool at $t=0$?**
+                        *   Text: "models A through D

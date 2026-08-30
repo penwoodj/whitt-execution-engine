@@ -1,0 +1,77 @@
+### Phase 1: RULE SCAN
+Based on the task description and the "whole law for tonight", here are the rules that change state during the event stream:
+
+1.  **Load Rule**: A request to load a model triggers an attempt to place it in resident memory. If space exists, the model is loaded (state changes: `loads` increments).
+2.  **Eviction Rule**: If a load cannot fit, the system evicts least-recently-touched (LRU) *unpinned* models one at a time until space fits. Each eviction increments the `evictions` counter and removes the model from resident memory.
+3.  **Deferral Rule**: If a load cannot fit even after all unpinned models are evicted (because only pinned models remain), the request is deferred. The model ID is added to the `deferred` list, and no eviction occurs (`evictions` does not increment).
+4.  **Touch/Recency Rule**: Every time a model is loaded or touched during an eviction check, it moves to the most-recent position in the recency list.
+5.  **Unload Rule**: A request to unload a resident model frees its size from memory and removes it from the resident set (state changes: `free` space increases).
+
+**Trigger Mapping:**
+*   Event "load A": Triggers Load Rule.
+*   Event "load B": Triggers Load Rule.
+*   Event "load C": Triggers Load Rule.
+*   Event "load D": Triggers Load Rule.
+*   Event "unload B": Triggers Unload Rule.
+
+---
+
+### Phase 2: LEDGER WALK
+Applying events in strict arrival order to the initial state (8GB card, empty).
+
+**Initial State:** Resident: {}, Free: 8GB, Recency: {}
+
+1.  **Event**: `load A` (1 GB)
+    *   Fits? Yes (8 >= 1).
+    *   Action: Load A.
+    *   State: Resident {A}, Free 7GB, Recency [A].
+    *   Result: Successful load.
+
+2.  **Event**: `load B` (4 GB)
+    *   Fits? Yes (7 >= 4). Note: Model B is pinned, but it fits without eviction.
+    *   Action: Load B.
+    *   State: Resident {A, B}, Free 3GB, Recency [B, A] (B touched last).
+
+3.  **Event**: `load C` (2 GB)
+    *   Fits? Yes (3 >= 2).
+    *   Action: Load C.
+    *   State: Resident {A, B, C}, Free 1GB, Recency [C, B, A].
+
+4.  **Event**: `load D` (6 GB)
+    *   Fits? No (1 < 6). Need 5GB more.
+    *   Eviction Check: Look for LRU unpinned models.
+        *   Resident set: {A, B, C}.
+        *   Pinned status: Only B is pinned. A and C are unpinned.
+        *   Recency order (Oldest to Newest): [A, B, C].
+        *   Target for eviction: A (LRU unpinned). Size 1GB.
+    *   Evict A? Yes. Free becomes 2GB. Resident {B, C}.
+    *   Fits now? No (2 < 6). Need 4GB more.
+    *   Eviction Check again: Look for LRU unpinned models.
+        *   Resident set: {B, C}.
+        *   Pinned status: B is pinned. C is unpinned.
+        *   Recency order (Oldest to Newest): [C, B].
+        *   Target for eviction: C (LRU unpinned). Size 2GB.
+    *   Evict C? Yes. Free becomes 4GB. Resident {B}.
+    *   Fits now? No (4 < 6). Need 2GB more.
+    *   Eviction Check again: Look for LRU unpinned models.
+        *   Resident set: {B}.
+        *   Pinned status: B is pinned. No unpinned models remain.
+    *   Action: Cannot fit, only pinned models remain. Deferral.
+    *   State: Resident {B}, Free 4GB, Recency [B]. D added to deferred list.
+
+5.  **Event**: `unload B` (4 GB)
+    *   Is B resident? Yes.
+    *   Action: Unload B.
+    *   State: Resident {}, Free 8GB, Recency {}.
+
+---
+
+### Final Answer Calculation
+*   **loads**: Count of successful loads = 3 (A, B, C). D was deferred.
+*   **evictions**: Count of models evicted = 2 (A and C).
+*   **deferrals**: Count of deferred requests = 1 (D).
+*   **deferred**: List of IDs for deferred requests = ["D"].
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

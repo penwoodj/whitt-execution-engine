@@ -1,0 +1,88 @@
+### Phase 1: Rule Scan (Part B - Residency)
+
+**Rules Identified for Part B:**
+1.  **Capacity & Eviction Policy**: Total capacity is 8GB. Models A(2), B(2), C(2), D(7). Model B is pinned and never evicted. Evictions target the Least-Recently-Touched (LRU) unpinned model.
+2.  **Timing Costs**: Load cost = 30s, Unload cost = 10s. (Note: These are costs, not counts for the final JSON).
+3.  **Load Execution Logic**: A load command is executed if there is room. If a load cannot fit, it evicts LRU unpinned models until it fits or only pinned models remain. If even after evicting all unpinned models it still doesn't fit, the load is deferred.
+4.  **Counting Definitions**:
+    *   `loads`: Counts every load command actually executed (including those that later evicted something).
+    *   `evictions`: Counts every eviction actually performed during a load attempt.
+    *   `deferrals`: Counts loads that end up deferred after exhausting unpinned space.
+    *   `deferred`: List of IDs for deferred loads.
+
+**Event Stream:**
+1.  Load A (2 GB)
+2.  Load B (2 GB)
+3.  Load C (2 GB)
+4.  Load D (7 GB)
+5.  Unload B (2 GB)
+
+---
+
+### Phase 2: Ledger Walk (Part B - Residency)
+
+**Initial State:**
+*   Capacity: 8GB
+*   Residents: [] (Empty)
+*   Pinned Models: {B}
+*   Unpinned Models: {}
+
+**Event 1: Load A (2 GB)**
+*   Current Used: 0GB. Available: 8GB.
+*   Fit Check: 2GB <= 8GB. Fits easily.
+*   Action: Execute Load. Add Model A to residents.
+*   Evictions: 0.
+*   State Residents: [A] (Size 2). Used: 2GB.
+
+**Event 2: Load B (2 GB)**
+*   Current Used: 2GB. Available: 6GB.
+*   Fit Check: 2GB <= 6GB. Fits easily.
+*   Action: Execute Load. Add Model B to residents.
+*   Evictions: 0.
+*   State Residents: [A, B] (Sizes 2, 2). Used: 4GB.
+
+**Event 3: Load C (2 GB)**
+*   Current Used: 4GB. Available: 4GB.
+*   Fit Check: 2GB <= 4GB. Fits easily.
+*   Action: Execute Load. Add Model C to residents.
+*   Evictions: 0.
+*   State Residents: [A, B, C] (Sizes 2, 2, 2). Used: 6GB.
+
+**Event 4: Load D (7 GB)**
+*   Current Used: 6GB. Available: 2GB.
+*   Fit Check: 7GB > 2GB. Does not fit.
+*   Eviction Phase: Target unpinned models to free space.
+    *   Unpinned Residents: {A, C} (Model B is pinned).
+    *   Need to free: 7GB - 2GB = 5GB.
+    *   Evict A (2GB): Free +2GB. Total Freed: 2GB. Remaining Needed: 3GB.
+    *   Evict C (2GB): Free +2GB. Total Freed: 4GB. Remaining Needed: 1GB.
+    *   Unpinned Residents now empty. Only Pinned (B) remains.
+    *   Can we fit D? No, because only B is resident and it cannot be evicted. Even if we could, the rule says "if only pinned models remain... it defers".
+*   Action: Load D is Deferred.
+*   Evictions Count: 2 (A and C were evicted).
+*   Deferral Status: True. ID: "Load D" (or simply "D" based on context, usually the model name or command identifier; given the prompt uses "load A", "deferred": ["D"] is appropriate).
+*   State Residents: [A, B, C] -> Evicted A, C -> [B]. Used: 2GB.
+
+**Event 5: Unload B (2 GB)**
+*   Current Residents: [B].
+*   Action: Execute Unload. Remove Model B.
+*   Note: This is an unload command, not a load. It does not trigger the eviction/deferral logic defined for loads.
+*   Evictions: 0.
+*   State Residents: []. Used: 0GB.
+
+**Final Totals Calculation:**
+*   `loads`: Executed commands were Load A, Load B, Load C. (Load D was deferred). Total = 3.
+*   `evictions`: Performed during Event 4 (Evicted A and C). Total = 2.
+*   `deferrals`: Occurred in Event 4. Total = 1.
+*   `deferred`: List containing the ID of the deferred load. Based on stream "load D", ID is "D".
+
+### Final Output JSON
+
+```json
+{
+  "loads": 3,
+  "evictions": 2,
+  "deferrals": 1,
+  "deferred": ["D"]
+}
+```

@@ -1,0 +1,56 @@
+**Phase 1 RULE SCAN**
+- Rule: Pool starts at 40 tokens (Trigger: Initial State).
+- Rule: Request r1 asks for 5 tokens (Trigger: Arrival of r1).
+- Rule: Grant r1 partial/full based on pool availability; if full, grant 5, pool becomes 35 (Trigger: Completion of r1).
+- Rule: Expiry trigger occurs after request r2 completes (Trigger: Completion of r2).
+- Rule: Expired grant for r1 returns half its granted amount (rounded down) to the pool immediately before processing the next event (r3) (Trigger: Expiry Event).
+- Rule: Request r2 asks for 8 tokens (Trigger: Arrival of r2).
+- Rule: Grant r2 partial/full based on pool availability; if full, grant 8, pool becomes 27 (Trigger: Completion of r2).
+- Rule: Request r3 asks for 12 tokens (Trigger: Arrival of r3).
+- Rule: Grant r3 partial/full based on pool availability; if full, grant 12, pool becomes 15 (Trigger: Completion of r3).
+- Rule: Request r4 asks for 14 tokens (Trigger: Arrival of r4).
+- Rule: Grant r4 partial/full based on pool availability; if full, grant 14, pool becomes 1 (Trigger: Completion of r4).
+- Rule: Request r5 asks for 17 tokens (Trigger: Arrival of r5).
+- Rule: Grant r5 partial/full based on pool availability; since pool is 1 and ask is 17, grant 1, pool becomes 0 (Trigger: Completion of r5).
+- Rule: Request r6 arrives at empty pool (pool=0), so it is denied and listed by id (Trigger: Arrival of r6).
+
+**Phase 2 LEDGER WALK**
+- Event: Initial State -> Pool = 40.
+- Event: r1 Arrives (Ask 5) -> Grant 5 -> Pool = 35.
+- Event: Expiry Trigger for r1 completes after r2? No, expiry happens *after* r2 completes. Wait, let's re-read the sequence carefully.
+    - Sequence: r1 arrives/grants -> r2 arrives/grants -> **Expiry of r1** occurs (because it expires after r2 completes) -> r3 arrives...
+    - Let's trace the "Completion" events vs "Arrival" events.
+    - 1. r1 Arrives/Grants: Pool 40 - 5 = 35.
+    - 2. r2 Arrives/Grants: Pool 35 - 8 = 27. (r2 completes).
+    - 3. Expiry Event for r1 triggers immediately after r2 completes. Return amount = floor(5 / 2) = 2. Pool becomes 27 + 2 = 29.
+    - 4. r3 Arrives/Grants: Ask 12. Pool 29 >= 12. Grant 12. Pool = 29 - 12 = 17.
+    - 5. r4 Arrives/Grants: Ask 14. Pool 17 >= 14. Grant 14. Pool = 17 - 14 = 3. (Wait, previous calculation said 1? Let's re-calculate).
+        - Start: 40
+        - r1: -5 -> 35
+        - r2: -8 -> 27
+        - Expiry r1: +floor(5/2)=+2 -> 29
+        - r3: -12 -> 17
+        - r4: -14 -> 3
+        - r5: Ask 17. Pool 3 < 17. Grant 3. Pool = 0.
+        - r6: Arrives at 0. Denied.
+
+    Let's re-verify the "Expiry" timing description: "grant for r1 expires after request r2 completes". This implies the event happens between r2 completion and r3 arrival.
+    
+    Recalculating Step-by-Step with strict order:
+    1. **r1 Arrival**: Ask 5. Pool 40. Grant 5. Pool -> 35.
+    2. **r2 Arrival**: Ask 8. Pool 35. Grant 8. Pool -> 27. (r2 completes).
+    3. **Expiry Event**: Triggered by r2 completion. Returns floor(5/2) = 2 to pool. Pool -> 29.
+    4. **r3 Arrival**: Ask 12. Pool 29. Grant 12. Pool -> 17.
+    5. **r4 Arrival**: Ask 14. Pool 17. Grant 14. Pool -> 3.
+    6. **r5 Arrival**: Ask 17. Pool 3. Grant 3 (partial). Pool -> 0.
+    7. **r6 Arrival**: Ask 21. Pool 0. Denied.
+
+    Final State:
+    - Granted Units: Sum of all grants = 5 + 8 + 12 + 14 + 3 = 42.
+    - Denied IDs: ["r6"].
+    - Pool Left: 0.
+
+**Final Answer JSON**
+```json
+{"granted_units": 42, "denied": ["r6"], "pool_left": 0}
+```

@@ -1,0 +1,109 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event or claim list.*
+
+1.  **Grant Rule**: A request arriving at a non-zero pool is granted `min(ask, current_pool)`. State change: Pool decreases by grant amount; Request status becomes "Granted".
+2.  **Denial Rule**: A request arriving at an exactly zero pool is denied (listed by ID). State change: Request status becomes "Denied"; Pool remains zero.
+3.  **Expiry Trigger Rule**: Upon completion of a specific request named in the expiry sentence, the associated expired grant returns `floor(granted_amount / 2)` to the pool. State change: Pool increases by return amount; The specific grant is removed/returned.
+4.  **Return Timing Rule**: The expiry return lands immediately before the next request is processed (or after the trigger completes), never after a subsequent unrelated event.
+
+### Phase 2 LEDGER WALK
+*Applying events one at a in strict arrival order.*
+
+**Initial State:** Pool = 40, Granted List = [], Denied List = []
+
+1.  **Event r1 arrives (Ask: 5)**
+    *   Rule Applied: Grant Rule.
+    *   Calculation: `min(5, 40) = 5`.
+    *   Action: Grant 5 to r1. Pool becomes $40 - 5 = 35$.
+    *   State: Pool=35, Granted=[r1:5].
+
+2.  **Event r2 arrives (Ask: 8)**
+    *   Rule Applied: Grant Rule.
+    *   Calculation: `min(8, 35) = 8`.
+    *   Action: Grant 8 to r2. Pool becomes $35 - 8 = 27$.
+    *   State: Pool=27, Granted=[r1:5, r2:8].
+
+3.  **Event r3 arrives (Ask: 12)**
+    *   Rule Applied: Grant Rule.
+    *   Calculation: `min(12, 27) = 12`.
+    *   Action: Grant 12 to r3. Pool becomes $27 - 12 = 15$.
+    *   State: Pool=15, Granted=[r1:5, r2:8, r3:12].
+
+4.  **Event r4 arrives (Ask: 14)**
+    *   Rule Applied: Grant Rule.
+    *   Calculation: `min(14, 15) = 14`.
+    *   Action: Grant 14 to r4. Pool becomes $15 - 14 = 1$.
+    *   State: Pool=1, Granted=[r1:5, r2:8, r3:12, r4:14].
+
+5.  **Event r5 arrives (Ask: 17)**
+    *   Rule Applied: Grant Rule.
+    *   Calculation: `min(17, 1) = 1`.
+    *   Action: Partially grant 1 to r5. Pool becomes $1 - 1 = 0$.
+    *   State: Pool=0, Granted=[r1:5, r2:8, r3:12, r4:14, r5:1].
+
+6.  **Event r6 arrives (Ask: 21)**
+    *   Rule Applied: Denial Rule (Pool is exactly zero).
+    *   Calculation: `min(21, 0) = 0`.
+    *   Action: Deny r6. Pool remains 0.
+    *   State: Pool=0, Granted=[r1:5, r2:8, r3:12, r4:14, r5:1], Denied=[r6].
+
+7.  **Expiry Trigger: "grant for r2 expires after request r3 completes"**
+    *   Rule Applied: Expiry Trigger Rule.
+    *   Target Grant: r2 (Granted amount was 8).
+    *   Calculation: `floor(8 / 2) = 4`.
+    *   Action: Return 4 to pool immediately before next request processing.
+    *   State: Pool becomes $0 + 4 = 4$. Granted=[r1:5, r3:12, r4:14, r5:1] (r2 removed).
+
+8.  **Event r6 re-evaluation?**
+    *   *Correction on Logic*: The prompt states "a request arriving at an empty pool is denied... a pool that still holds tokens never denies anyone".
+    *   In Step 6, r6 arrived when Pool was 0. It was Denied.
+    *   Does the expiry return happen *before* or *after* the denial?
+    *   Text: "the grant for r2 expires after request r3 completes... an expired grant returns half its granted tokens rounded down to the pool".
+    *   Sequence of events in strict arrival order:
+        1. r1 arrives (Grant)
+        2. r2 arrives (Grant)
+        3. r3 arrives (Grant) -> **r3 completes**. This triggers the expiry of r2.
+        4. Expiry returns happen immediately upon trigger completion. Pool goes from 0 to 4? Wait, let's re-trace Step 5/6 carefully.
+
+    *Re-Tracing Steps 5 & 6 with strict timing:*
+    *   Start: 40
+    *   r1 (5) -> Grant 5. Pool: 35.
+    *   r2 (8) -> Grant 8. Pool: 27.
+    *   r3 (12) -> Grant 12. Pool: 15.
+    *   r4 (14) -> Grant 14. Pool: 1.
+    *   r5 (17) -> Grant 1. Pool: 0.
+    *   **Trigger Event**: "grant for r2 expires after request r3 completes".
+        *   Request r3 completed at Step 3.
+        *   At that moment, Pool was 15.
+        *   Expiry returns `floor(8/2) = 4`.
+        *   Pool becomes $15 + 4 = 19$.
+    *   **Resume Processing**:
+        *   r4 (14) arrives. Pool is 19. Grant 14. Pool: 5.
+        *   r5 (17) arrives. Pool is 5. Grant 5. Pool: 0.
+        *   r6 (21) arrives. Pool is 0. **Denied**.
+
+    *Let's verify the "after request r3 completes" timing again.*
+    The text says: "the grant for r2 expires after request r3 completes".
+    Request r3 completes at index 3.
+    At that exact moment, the pool state is updated by the return.
+    
+    *Corrected Walk:*
+    1. **r1 (5)**: Grant 5. Pool $40 \to 35$.
+    2. **r2 (8)**: Grant 8. Pool $35 \to 27$.
+    3. **r3 (12)**: Grant 12. Pool $27 \to 15$.
+       *   **Expiry Trigger**: r3 completes. r2 expires. Return `floor(8/2)=4`.
+       *   Pool $15 \to 19$.
+    4. **r4 (14)**: Grant 14. Pool $19 \to 5$.
+    5. **r5 (17)**: Grant 5 (partial). Pool $5 \to 0$.
+    6. **r6 (21)**: Arrives at 0. Denied.
+
+    *Final Totals:*
+    Granted Units: $5 + 8 + 12 + 14 + 5 = 44$.
+    Denied IDs: ["r6"].
+    Pool Left: 0.
+
+### Final Answer JSON
+
+```json
+{"granted_units": 44, "denied": ["r6"], "pool_left": 0}
+```

@@ -1,0 +1,80 @@
+### Phase 1 RULE SCAN
+This phase lists every rule in the task that changes state during an event or claim, including expiry, return, revocation, refill, promotion, fallback, source-ranking rules, and marks which event triggers it.
+
+1.  **Arrival Rule**: Triggers on `r1` through `r6`. Adds a request to the queue for processing.
+2.  **Grant/Partial/Deny Rule (State Change)**: Triggers immediately after arrival. If `pool >= ask`, state changes to `granted = ask`, `pool -= ask`. If `0 < pool < ask`, state changes to `granted = pool` (partial), `pool = 0`. If `pool == 0`, state changes to `denied = true`, request listed by ID.
+3.  **Expiry Rule**: Triggers when the *trigger* request (`r2`) completes. State change: The grant associated with `r1` returns half of its *granted* amount (rounded down) to the pool.
+4.  **Return Rule**: Effect of Expiry Rule. Adds returned tokens to `pool`.
+
+### Phase 2 LEDGER WALK
+This phase applies events one at a time in strict arrival order, showing the state after each event.
+
+**Initial State:**
+*   Pool: 40
+*   Granted Units: 0
+*   Denied List: []
+
+**Event 1: `r1` arrives (Ask: 5)**
+*   Rule Applied: Grant/Partial/Deny.
+*   Logic: Pool (40) >= Ask (5). Full grant.
+*   Action: `granted += 5`, `pool -= 5`.
+*   State After: Pool = 35, Granted Units = 5, Denied = [].
+
+**Event 2: `r2` arrives (Ask: 8)**
+*   Rule Applied: Grant/Partial/Deny.
+*   Logic: Pool (35) >= Ask (8). Full grant.
+*   Action: `granted += 8`, `pool -= 8`.
+*   State After: Pool = 27, Granted Units = 13, Denied = [].
+
+**Event 3: Expiry Trigger (`r2` completes)**
+*   Rule Applied: Expiry/Return.
+*   Logic: The grant for `r1` expires. Return amount = floor(granted_r1 / 2) = floor(5 / 2) = 2.
+*   Action: `pool += 2`.
+*   State After: Pool = 29, Granted Units = 13 (Note: "Granted Units" usually refers to the sum of all successful grants before expiry returns are deducted from the running total in some contexts, but strictly speaking, the *units currently held/granted* logic implies we track the cumulative flow. However, standard ledger walks for this specific problem type often treat `granted_units` as the sum of all partial/full grants issued minus any returned amounts if they reduce the "active" count, OR simply the sum of successful transactions. Let's look at the sanity formula: `pool_left = start - sum(granted) + sum(expiry returns)`.
+    *   Start: 40
+    *   Sum(Granted so far): 5 (r1) + 8 (r2) = 13.
+    *   Sum(Returns): 2.
+    *   Pool Left Check: 40 - 13 + 2 = 29. Matches.
+    *   The `granted_units` field in the final JSON typically represents the total units successfully granted that are still "active" or the net flow? No, looking at the previous failed attempt context and standard interpretations of this specific "quota duty" puzzle: `granted_units` is usually the sum of all successful grants *minus* any returns if the metric is "net granted", OR it is just the sum of all successful grants.
+    *   Let's re-read the contract keys: `{"granted_units": N, ...}`. In similar puzzles (e.g., Advent of Code or specific logic grids), `granted_units` often tracks the cumulative sum of successful grants. However, if we return tokens, do they count against the "granted" total?
+    *   Let's check the sanity formula again: `pool_left = start - sum(granted) + sum(expiry returns)`. This implies `sum(granted)` is a static accumulator of all positive grant events. If `granted_units` in the output JSON corresponds to this `sum(granted)`, then it includes r1 and r2.
+    *   Wait, let's look at the "sister pool" example for clarification: "that night closed with 31 granted". Sister pool start=30. Ask1=11 (Grant 11). Ask2=7 (Grant 7). Total Granted = 18. Expiry returns 5. Pool left before Ask3 = 30-11-7+5 = 17. Ask3=13. Grant 13. Total Granted sum = 11+7+13 = 31.
+    *   Conclusion: `granted_units` is the **sum of all successful grant events** (r1, r2, etc.), regardless of subsequent returns. Returns affect `pool_left`, not the historical `granted_units` count used for that specific metric in this schema.
+
+*   State After Expiry: Pool = 29, Granted Units (Accumulator) = 13.
+
+**Event 4: `r3` arrives (Ask: 12)**
+*   Rule Applied: Grant/Partial/Deny.
+*   Logic: Pool (29) >= Ask (12). Full grant.
+*   Action: `granted += 12`, `pool -= 12`.
+*   State After: Pool = 17, Granted Units = 25 (13 + 12), Denied = [].
+
+**Event 5: `r4` arrives (Ask: 14)**
+*   Rule Applied: Grant/Partial/Deny.
+*   Logic: Pool (17) >= Ask (14). Full grant.
+*   Action: `granted += 14`, `pool -= 14`.
+*   State After: Pool = 3, Granted Units = 39 (25 + 14), Denied = [].
+
+**Event 6: `r5` arrives (Ask: 17)**
+*   Rule Applied: Grant/Partial/Deny.
+*   Logic: Pool (3) < Ask (17). Partial grant.
+*   Action: `granted += 3`, `pool -= 3`.
+*   State After: Pool = 0, Granted Units = 42 (39 + 3), Denied = [].
+
+**Event 7: `r6` arrives (Ask: 21)**
+*   Rule Applied: Grant/Partial/Deny.
+*   Logic: Pool (0) == Ask? No, Pool is exactly 0. Request arriving at empty pool is denied.
+*   Action: Deny request. List ID `r6`.
+*   State After: Pool = 0, Granted Units = 42, Denied = ["r6"].
+
+**Final Reconciliation:**
+*   Start: 40
+*   Grants: r1(5) + r2(8) + r3(12) + r4(14) + r5(3 partial) = 42.
+*   Returns: r1_expiry(2).
+*   Pool Calculation: 40 - 42 (total granted out) + 2 (returned in) = 0.
+*   Denied List: ["r6"].
+
+### Final Answer JSON
+```json
+{"granted_units": 42, "denied": ["r6"], "pool_left": 0}
+```

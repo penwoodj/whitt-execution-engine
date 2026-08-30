@@ -1,0 +1,69 @@
+### Phase 1 RULE SCAN
+The following rules govern the state changes during the event list (5 observations):
+
+1.  **Limit Rule**: Steps 1-5 have a limit of 2.0%; Steps 6-10 have a limit of 1.0%.
+2.  **Breach Definition**: An observation is a breach if `observed > limit`.
+3.  **Clean Observation Rule**: If clean, the stage completed equals the position in the list; rollout becomes $10 \times$ that stage number.
+4.  **First Breach Rollback Rule**: On first breach, rollback exactly one step (the current observation is SPENT), and tighten limit to 0.8% for all remaining steps.
+5.  **Second Breach Stop Rule**: On second breach, stop immediately with status STOPPED; rollout/stages hold the last completed stage's values.
+6.  **Single Breach End Rule**: If exactly one breach occurs and the list ends, status is PAUSED with last completed stage's values.
+7.  **No Breach End Rule**: If no breaches occur, status is DONE with final climb values.
+
+**Trigger Mapping:**
+*   Observation 1 (Step 1): Triggers Limit Rule & Clean/Breach check.
+*   Observation 2 (Step 2): Triggers Limit Rule & Clean/Breach check.
+*   Observation 3 (Step 3): Triggers Limit Rule & Clean/Breach check.
+*   Observation 4 (Step 4): Triggers Limit Rule & Clean/Breach check.
+*   Observation 5 (Step 5): Triggers Limit Rule & Clean/Breach check.
+
+---
+
+### Phase 2 LEDGER WALK
+Applying events in strict arrival order:
+
+1.  **Observation 1**: Position 1, Rate 0.4 vs Limit 2.0 -> OK. Stage completed 1, Rollout becomes 10.
+2.  **Observation 2**: Position 2, Rate 1.9 vs Limit 2.0 -> OK. Stage completed 2, Rollout becomes 20.
+3.  **Observation 3**: Position 3, Rate 0.5 vs Limit 2.0 -> OK. Stage completed 3, Rollout becomes 30.
+4.  **Observation 4**: Position 4, Rate 2.2 vs Limit 2.0 -> BREACH (2.2 > 2.0). Trigger First Breach Rollback Rule: Observation 4 is SPENT. Tighten limit to 0.8 for remaining steps. State holds last completed stage values (Stage 3, Rollout 30).
+5.  **Observation 5**: Position 5, Rate 0.6 vs Limit 0.8 -> OK (0.6 <= 0.8). Stage completed 4 (since it is the next valid step after rollback), Rollout becomes $10 \times 4 = 40$.
+
+*End of List Check*: Exactly one breach occurred (at Observation 4) and the list ended.
+*Status Determination*: Apply Single Breach End Rule -> Status PAUSED.
+*Final State Values*: Last completed stage was Stage 3? No, wait. Let's re-evaluate the "Stage" logic carefully based on the text: "a clean observation completes the stage equal to its own position in the list... after any rollback the limit tightens... a second breach stops everything with status STOPPED, holding the rollout and stages of the last completed stage's values."
+
+Re-evaluating Step 5 Logic:
+After Observation 4 (Breach), we are at "last completed stage" which is Stage 3 (from Obs 3). Rollout is 30.
+Observation 5 arrives. It is Position 5.
+Is it a clean observation? Rate 0.6 vs Limit 0.8. Yes, Clean.
+Rule: "a clean observation completes the stage equal to its own position in the list".
+So Observation 5 completes Stage 5.
+Rollout becomes $10 \times 5 = 50$.
+
+Let's re-read the specific constraint about rollback skipping: "the rollout jumps to 40 and stages to 4, skipping the spent position 3" (from orientation example). This implies that after a breach at Pos N, the next clean observation at Pos M completes Stage M.
+So:
+Obs 1 -> Stage 1.
+Obs 2 -> Stage 2.
+Obs 3 -> Stage 3.
+Obs 4 -> Breach. Spent. State holds Stage 3, Rollout 30.
+Obs 5 -> Clean (vs 0.8). Completes Stage 5. Rollout becomes $10 \times 5 = 50$.
+
+Wait, the orientation example says: "position 4 rolled 0.5... clean: it carries stage 4 by position, so the rollout jumps to 40 and stages to 4".
+In my trace: Obs 5 is Position 5. So it should carry Stage 5. Rollout 50.
+
+Let's double check the "Single Breach End Rule": "exactly one breach and the list ends: status PAUSED with the last completed stage's values."
+Last completed stage is Stage 5 (from Obs 5).
+Values: Rollout 50, Stages Done 5.
+
+Final Check of the numbers:
+Obs 1: 0.4 <= 2.0 (OK) -> S1, R10.
+Obs 2: 1.9 <= 2.0 (OK) -> S2, R20.
+Obs 3: 0.5 <= 2.0 (OK) -> S3, R30.
+Obs 4: 2.2 > 2.0 (BREACH). Spent. Limit becomes 0.8. State holds S3, R30.
+Obs 5: 0.6 <= 0.8 (OK). Completes Stage 5. Rollout = 10 * 5 = 50.
+
+List ends. One breach total. Status PAUSED.
+Final State: Rollout 50, Stages 5.
+
+```json
+{"rollout_pct": 50, "stages_done": 5, "status": "PAUSED"}
+```

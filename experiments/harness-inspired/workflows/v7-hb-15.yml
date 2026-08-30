@@ -1,0 +1,844 @@
+workflow_id: harness_v7_hb-15
+name: "Harness v7 - hb-15"
+description: "TABLE->GATE->AGGREGATE->JUDGE-V2->LEAK-AUDIT. Case: hb-15 hops=4 route=light"
+version: "7.0.0"
+author: "Experiment"
+tags: [harness, agentic, v7, routing, snapshot, meter, audit]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  m_light:
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  m_heavy:
+    name: "Qwen3-5-9B-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  m_judge:
+    name: "Hermes-2-Pro-Mistral-7B.Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  timing:
+    cooldown_after_unload_secs: 0
+    min_tmp_space_mb: 50
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+  steps:
+    s00_screen:
+      generative_entity: "${models.m_light}"
+      prompt: "pre-flight"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/screen-validate.py /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-15.yml"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - skip_step: true
+
+    s01_solve:
+      generative_entity: "${models.m_light}"
+      prompt: |
+        ROLE: on-call operator. Precise. Zero fluff.
+
+                You are the ladder administrator for a competitive online game closing out
+        its season tonight. Four players on the roster need their matchmaking
+        ratings resolved before the new season opens at midnight, and the season
+        handbook spells out exactly how each situation must be handled. The book
+        says: a player who completed at least thirty ranked matches during the
+        season keeps their rating, adjusted by folding it toward the seasonal floor
+        of twelve hundred — a kept rating already at or above the floor simply
+        carries over unchanged, while a kept rating below the floor is raised up to
+        the floor itself. A player who failed to reach thirty ranked matches but
+        completed the full five-match calibration series at season's end instead
+        receives whatever placement the calibration produced, with no fold applied
+        at all. A player who neither reached thirty ranked matches nor completed
+        calibration takes a full reset to the standing floor of twelve hundred,
+        and that reset is final for the new season. The four players stand as
+        follows. Volkan grinded the ladder hard all season, finished forty ranked
+        matches, and closed at a rating of eighteen hundred — comfortably above
+        the floor, so his number carries over as it stands. Mira hit only nine
+        ranked matches but ran her five calibration games last weekend and earned
+        a placement of fourteen hundred twenty from the series. Joona also fell
+        short on the ladder with just twenty-two ranked matches, chose not to
+        calibrate, and ended the season at sixteen hundred twenty. Petra played
+        twelve ranked matches, skipped the calibration series entirely because of
+        exams, and sat at thirteen hundred fifty when the season closed. A
+        spectator overlay you do not manage also displays a "provisional" badge
+        next to two of the players, which is cosmetic and has no bearing on
+        rating outcomes. For the record the regional ladder rebalance team you
+        also do not manage has proposed shifting the floor next season, but that
+        proposal is not in effect tonight. Report how many players take a full
+        reset, how many receive a calibration placement, how many keep a
+        carried-over rating, and how many kept ratings were low enough to need
+        raising to the floor.
+        
+        The seasonal reset ritual exists because of the soft-reset winter,
+        a story every ladder administrator retires having told at least
+        twice. Three seasons ago the fold rule was new, the floor had just
+        been lowered, and a wave of returning casual players — all with
+        kept ratings suddenly beneath the new floor — met a population of
+        hardened veterans at numbers the casuals had never seen. The
+        matchmaking queue became a slaughterhouse for two weeks, the forums
+        burned, and the postmortem pinned it on arithmetic nobody had run
+        — the fold-to-floor rule was correct but its first application
+        coincided with a population shift, and the ladder had no machinery
+        for counting who landed where. Tonight's four buckets are that
+        machinery in its current, battle-tested form — resets counted
+        separately from placements, kept ratings separated from raised
+        ones — and the season-open brief reads them in the order the
+        postmortem demanded.
+        
+        Your evening as administrator runs the closing checklist the
+        operations binder prescribes. You pulled the season's final match
+        counts per player straight from the match ledger rather than the
+        client-visible profiles, because the two disagree on edge cases —
+        forfeits and remakes count toward the total in the ledger's view,
+        which is the view the handbook's thresholds have always meant. You
+        cross-checked each calibration series against its completion flag,
+        since an abandoned series at four of five games is not a completion
+        no matter how well it was going. And you walked each of tonight's
+        four players through the handbook's decision ladder one rule at a
+        time, in the binder's order — threshold first, calibration second,
+        reset last — the sequence that keeps an administrator from granting
+        a placement to a player who had already earned a keep.
+        
+        Around the ladder hums the machinery of a live service, nearly all
+        of it irrelevant to tonight's buckets. The spectator overlay you
+        do not manage renders provisional badges from its own heuristics,
+        and its cosmetic judgments have never matched the handbook's
+        definitions — the overlay badges two players tonight, the handbook
+        calls one of them kept and the other placed, and both renderings
+        are correct in their own universes. The regional rebalance team's
+        floor proposal circulates in a design document with comments
+        threaded three deep, none of them law until next season's patch
+        notes say so. And the anti-smurf detection system runs its own
+        inquiries into account histories in the background — suspicions,
+        shadow scores, and a review queue for a team you have never met —
+        none of which alters what the match ledger says a player earned,
+        which is the only thing your four buckets were ever built to
+        count.
+        
+        A note on the calibration series and its edge, because edges are
+        where eligibility arithmetic proves itself. The handbook counts a
+        calibration as completed only when the ledger shows five games
+        finished with the series flag set — a series abandoned at four
+        games, however brilliant, is not a placement and not a keep; it
+        is simply unfinished, and unfinished series have no bucket at
+        all. Mira's series shows five finished with the flag set, which
+        is why tonight's arithmetic never once wobbles on her line. The
+        distinction matters more every season as returning casuals test
+        the boundary — players who begin calibration, abandon it at four
+        games, and expect the handbook to round up in their favor. The
+        handbook does not round. The ledger's flag column is the whole
+        conversation, and tonight it says what it says.
+        
+        The administrator's final act each season-close is the bucket
+        reconciliation the operations binder mandates. The four buckets
+        must sum to the number of players processed — every player lands
+        in exactly one disposition, no player in two, none in none — and
+        you walk the four lines against the roster count before the
+        season-open brief locks. Tonight's arithmetic closes on the
+        first pass, as it has every season since the soft-reset winter
+        taught the binder's authors to insist on the check; the brief
+        files with the ladder's population described exactly, and the
+        new season opens on numbers the forums will argue about for a
+        week and the matchmaker will simply obey.
+        
+        The forums will read tonight's buckets by morning, and the
+        administrator's craft is making sure they find nothing to
+        willfully misread. Every season-close brings a thread that
+        recounts a friend's rating fate with outrage and imprecision —
+        the kept player described as reset, the placement described as
+        punishment — and the operations binder's quiet defense is that
+        the report's four numbers carry the handbook's own vocabulary,
+        defined in its own terms, defensible line by line. Outrage
+        thrives on ambiguity; the buckets are the opposite of
+        ambiguity; and the thread that starts angry usually ends with
+        a player quoting the handbook back at the original poster,
+        which the administrators consider the system's finest
+        feature.
+        
+        A closing thought on the floor itself, the number the rebalance
+        team wants to move. Twelve hundred has been the ladder's floor
+        for as long as most players have played, and the proposal to
+        raise it circulates with projections attached — population
+        curves, retention models, a spreadsheet the analysts defend
+        in meetings. The floor tonight is what the floor has been, and
+        tonight's soft-reset bucket is zero partly because of where
+        the floor stands; move it, and next season's closing walk
+        tells a different story in that column. The administrator
+        files tonight's numbers knowing they are true for this floor,
+        this handbook, this season — the only jurisdiction a count
+        was ever meant to cover.
+        
+        And so the season closes the way seasons now close — ledger
+        pulled, ladder walked, four players and four buckets and a
+        floor that held its meaning through every line of the
+        arithmetic. Volkan keeps what he ground for, Mira carries what
+        the series earned her, Joona and Petra answer for the matches
+        they did not play under the same rule they would have claimed
+        under had the counting gone the other way. The brief files,
+        the forums wake, the rebalance team's proposal waits in its
+        threaded comments for a season that is no longer this one.
+        Tomorrow the ladder resets its clock and not its book — the
+        book is permanent, the book is the point — and the new
+        season's first match will find the ladder exactly as
+        tonight's four numbers left it.
+        
+        The last column worth a sentence is soft_reset, because its zero
+        tonight is the floor's arithmetic speaking. A kept rating below
+        twelve hundred rises to twelve hundred — that is the fold the
+        soft-reset winter installed — and the column counts the risers.
+        Volkan's kept eighteen hundred stands above the floor by six
+        hundred, so the column records nothing; had the season closed
+        differently, the same player, the same threshold, the same rule
+        would fill it. The zero is not an absence of rule but a presence
+        of margin, and the brief's readers know which one they are
+        looking at.
+
+        METHOD: for EACH entity below, derive its answer from the rules.
+        Track state step by step in plain text. Entities you do not manage
+        NEVER count. Check deadline/budget rules BEFORE finalizing.
+
+        Entities (one line each, id then question):
+        - volkan_reset: Volkan played 40 ranked matches (>= 30 threshold) so he keeps his rating — players at or above the threshold never take a full reset; does Volkan take a full reset? (1 if yes, 0 if no) [answer format: a whole number]
+        - mira_reset: Mira played only 9 ranked but completed the 5-match calibration series earning a placement — calibration completers receive placements, never full resets; does Mira take a full reset? (1 if yes, 0 if no) [answer format: a whole number]
+        - joona_reset: Joona played 22 ranked matches (below the 30 threshold) and chose not to calibrate — players under 30 matches without calibration take the full reset; does Joona take a full reset? (1 if yes, 0 if no) [answer format: a whole number]
+        - petra_reset: Petra played 12 ranked matches (below the 30 threshold) and skipped calibration — players under 30 matches without calibration take the full reset; does Petra take a full reset? (1 if yes, 0 if no) [answer format: a whole number]
+        - placements_count: Count players receiving calibration placements this season (under 30 ranked matches but completed the 5-game series) — only Mira qualifies; how many placements? [answer format: a whole number]
+        - kept_count: Count players keeping a carried-over rating (completed 30 or more ranked matches) — only Volkan's 40 qualifies; how many kept? [answer format: a whole number]
+        - soft_reset_count: Kept ratings below the 1200 floor are raised to it — Volkan keeps 1800 which is above 1200; how many kept ratings needed raising? [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 7 lines,
+        one per entity above, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines. No JSON. No explanations.
+      model_overrides: { temperature: 0.1, max_tokens: 1280 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-15.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s02_fix_1
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json check ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-15"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.solve.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage solve --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-15"
+              working_dir: "."
+              fail_on_error: false
+
+    s02_fix_1:
+      generative_entity: "${models.m_light}"
+      prompt: |
+        ROLE: correction specialist. Entity table failed checks. Fix rows.
+
+        Original task:
+                You are the ladder administrator for a competitive online game closing out
+        its season tonight. Four players on the roster need their matchmaking
+        ratings resolved before the new season opens at midnight, and the season
+        handbook spells out exactly how each situation must be handled. The book
+        says: a player who completed at least thirty ranked matches during the
+        season keeps their rating, adjusted by folding it toward the seasonal floor
+        of twelve hundred — a kept rating already at or above the floor simply
+        carries over unchanged, while a kept rating below the floor is raised up to
+        the floor itself. A player who failed to reach thirty ranked matches but
+        completed the full five-match calibration series at season's end instead
+        receives whatever placement the calibration produced, with no fold applied
+        at all. A player who neither reached thirty ranked matches nor completed
+        calibration takes a full reset to the standing floor of twelve hundred,
+        and that reset is final for the new season. The four players stand as
+        follows. Volkan grinded the ladder hard all season, finished forty ranked
+        matches, and closed at a rating of eighteen hundred — comfortably above
+        the floor, so his number carries over as it stands. Mira hit only nine
+        ranked matches but ran her five calibration games last weekend and earned
+        a placement of fourteen hundred twenty from the series. Joona also fell
+        short on the ladder with just twenty-two ranked matches, chose not to
+        calibrate, and ended the season at sixteen hundred twenty. Petra played
+        twelve ranked matches, skipped the calibration series entirely because of
+        exams, and sat at thirteen hundred fifty when the season closed. A
+        spectator overlay you do not manage also displays a "provisional" badge
+        next to two of the players, which is cosmetic and has no bearing on
+        rating outcomes. For the record the regional ladder rebalance team you
+        also do not manage has proposed shifting the floor next season, but that
+        proposal is not in effect tonight. Report how many players take a full
+        reset, how many receive a calibration placement, how many keep a
+        carried-over rating, and how many kept ratings were low enough to need
+        raising to the floor.
+        
+        The seasonal reset ritual exists because of the soft-reset winter,
+        a story every ladder administrator retires having told at least
+        twice. Three seasons ago the fold rule was new, the floor had just
+        been lowered, and a wave of returning casual players — all with
+        kept ratings suddenly beneath the new floor — met a population of
+        hardened veterans at numbers the casuals had never seen. The
+        matchmaking queue became a slaughterhouse for two weeks, the forums
+        burned, and the postmortem pinned it on arithmetic nobody had run
+        — the fold-to-floor rule was correct but its first application
+        coincided with a population shift, and the ladder had no machinery
+        for counting who landed where. Tonight's four buckets are that
+        machinery in its current, battle-tested form — resets counted
+        separately from placements, kept ratings separated from raised
+        ones — and the season-open brief reads them in the order the
+        postmortem demanded.
+        
+        Your evening as administrator runs the closing checklist the
+        operations binder prescribes. You pulled the season's final match
+        counts per player straight from the match ledger rather than the
+        client-visible profiles, because the two disagree on edge cases —
+        forfeits and remakes count toward the total in the ledger's view,
+        which is the view the handbook's thresholds have always meant. You
+        cross-checked each calibration series against its completion flag,
+        since an abandoned series at four of five games is not a completion
+        no matter how well it was going. And you walked each of tonight's
+        four players through the handbook's decision ladder one rule at a
+        time, in the binder's order — threshold first, calibration second,
+        reset last — the sequence that keeps an administrator from granting
+        a placement to a player who had already earned a keep.
+        
+        Around the ladder hums the machinery of a live service, nearly all
+        of it irrelevant to tonight's buckets. The spectator overlay you
+        do not manage renders provisional badges from its own heuristics,
+        and its cosmetic judgments have never matched the handbook's
+        definitions — the overlay badges two players tonight, the handbook
+        calls one of them kept and the other placed, and both renderings
+        are correct in their own universes. The regional rebalance team's
+        floor proposal circulates in a design document with comments
+        threaded three deep, none of them law until next season's patch
+        notes say so. And the anti-smurf detection system runs its own
+        inquiries into account histories in the background — suspicions,
+        shadow scores, and a review queue for a team you have never met —
+        none of which alters what the match ledger says a player earned,
+        which is the only thing your four buckets were ever built to
+        count.
+        
+        A note on the calibration series and its edge, because edges are
+        where eligibility arithmetic proves itself. The handbook counts a
+        calibration as completed only when the ledger shows five games
+        finished with the series flag set — a series abandoned at four
+        games, however brilliant, is not a placement and not a keep; it
+        is simply unfinished, and unfinished series have no bucket at
+        all. Mira's series shows five finished with the flag set, which
+        is why tonight's arithmetic never once wobbles on her line. The
+        distinction matters more every season as returning casuals test
+        the boundary — players who begin calibration, abandon it at four
+        games, and expect the handbook to round up in their favor. The
+        handbook does not round. The ledger's flag column is the whole
+        conversation, and tonight it says what it says.
+        
+        The administrator's final act each season-close is the bucket
+        reconciliation the operations binder mandates. The four buckets
+        must sum to the number of players processed — every player lands
+        in exactly one disposition, no player in two, none in none — and
+        you walk the four lines against the roster count before the
+        season-open brief locks. Tonight's arithmetic closes on the
+        first pass, as it has every season since the soft-reset winter
+        taught the binder's authors to insist on the check; the brief
+        files with the ladder's population described exactly, and the
+        new season opens on numbers the forums will argue about for a
+        week and the matchmaker will simply obey.
+        
+        The forums will read tonight's buckets by morning, and the
+        administrator's craft is making sure they find nothing to
+        willfully misread. Every season-close brings a thread that
+        recounts a friend's rating fate with outrage and imprecision —
+        the kept player described as reset, the placement described as
+        punishment — and the operations binder's quiet defense is that
+        the report's four numbers carry the handbook's own vocabulary,
+        defined in its own terms, defensible line by line. Outrage
+        thrives on ambiguity; the buckets are the opposite of
+        ambiguity; and the thread that starts angry usually ends with
+        a player quoting the handbook back at the original poster,
+        which the administrators consider the system's finest
+        feature.
+        
+        A closing thought on the floor itself, the number the rebalance
+        team wants to move. Twelve hundred has been the ladder's floor
+        for as long as most players have played, and the proposal to
+        raise it circulates with projections attached — population
+        curves, retention models, a spreadsheet the analysts defend
+        in meetings. The floor tonight is what the floor has been, and
+        tonight's soft-reset bucket is zero partly because of where
+        the floor stands; move it, and next season's closing walk
+        tells a different story in that column. The administrator
+        files tonight's numbers knowing they are true for this floor,
+        this handbook, this season — the only jurisdiction a count
+        was ever meant to cover.
+        
+        And so the season closes the way seasons now close — ledger
+        pulled, ladder walked, four players and four buckets and a
+        floor that held its meaning through every line of the
+        arithmetic. Volkan keeps what he ground for, Mira carries what
+        the series earned her, Joona and Petra answer for the matches
+        they did not play under the same rule they would have claimed
+        under had the counting gone the other way. The brief files,
+        the forums wake, the rebalance team's proposal waits in its
+        threaded comments for a season that is no longer this one.
+        Tomorrow the ladder resets its clock and not its book — the
+        book is permanent, the book is the point — and the new
+        season's first match will find the ladder exactly as
+        tonight's four numbers left it.
+        
+        The last column worth a sentence is soft_reset, because its zero
+        tonight is the floor's arithmetic speaking. A kept rating below
+        twelve hundred rises to twelve hundred — that is the fold the
+        soft-reset winter installed — and the column counts the risers.
+        Volkan's kept eighteen hundred stands above the floor by six
+        hundred, so the column records nothing; had the season closed
+        differently, the same player, the same threshold, the same rule
+        would fill it. The zero is not an absence of rule but a presence
+        of margin, and the brief's readers know which one they are
+        looking at.
+
+        Failed cells (id + your observed value, correct values withheld):
+        {{bookmarks.cell_feedback}}
+
+        Prior table:
+        {{bookmarks.table}}
+
+        METHOD: re-read the task rules above, then re-derive each failed
+        entity. Use these exact entity ids:
+
+        - volkan_reset: Volkan played 40 ranked matches (>= 30 threshold) so he keeps his rating — players at or above the threshold never take a full reset; does Volkan take a full reset? (1 if yes, 0 if no) [answer format: a whole number]
+        - mira_reset: Mira played only 9 ranked but completed the 5-match calibration series earning a placement — calibration completers receive placements, never full resets; does Mira take a full reset? (1 if yes, 0 if no) [answer format: a whole number]
+        - joona_reset: Joona played 22 ranked matches (below the 30 threshold) and chose not to calibrate — players under 30 matches without calibration take the full reset; does Joona take a full reset? (1 if yes, 0 if no) [answer format: a whole number]
+        - petra_reset: Petra played 12 ranked matches (below the 30 threshold) and skipped calibration — players under 30 matches without calibration take the full reset; does Petra take a full reset? (1 if yes, 0 if no) [answer format: a whole number]
+        - placements_count: Count players receiving calibration placements this season (under 30 ranked matches but completed the 5-game series) — only Mira qualifies; how many placements? [answer format: a whole number]
+        - kept_count: Count players keeping a carried-over rating (completed 30 or more ranked matches) — only Volkan's 40 qualifies; how many kept? [answer format: a whole number]
+        - soft_reset_count: Kept ratings below the 1200 floor are raised to it — Volkan keeps 1800 which is above 1200; how many kept ratings needed raising? [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 7 lines,
+        one per entity, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines.
+      model_overrides: { temperature: 0.0, max_tokens: 1600 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/table-feedback.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-15.yml"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$cell_feedback"
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-15.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s03_fix_2
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json fix_1 ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-15"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.fix_1.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage fix_1 --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-15"
+              working_dir: "."
+              fail_on_error: false
+
+    s03_fix_2:
+      generative_entity: "${models.m_heavy}"
+      prompt: |
+        ROLE: escalation solver. Two attempts wrong. Rebuild table from scratch.
+
+        Original task:
+                You are the ladder administrator for a competitive online game closing out
+        its season tonight. Four players on the roster need their matchmaking
+        ratings resolved before the new season opens at midnight, and the season
+        handbook spells out exactly how each situation must be handled. The book
+        says: a player who completed at least thirty ranked matches during the
+        season keeps their rating, adjusted by folding it toward the seasonal floor
+        of twelve hundred — a kept rating already at or above the floor simply
+        carries over unchanged, while a kept rating below the floor is raised up to
+        the floor itself. A player who failed to reach thirty ranked matches but
+        completed the full five-match calibration series at season's end instead
+        receives whatever placement the calibration produced, with no fold applied
+        at all. A player who neither reached thirty ranked matches nor completed
+        calibration takes a full reset to the standing floor of twelve hundred,
+        and that reset is final for the new season. The four players stand as
+        follows. Volkan grinded the ladder hard all season, finished forty ranked
+        matches, and closed at a rating of eighteen hundred — comfortably above
+        the floor, so his number carries over as it stands. Mira hit only nine
+        ranked matches but ran her five calibration games last weekend and earned
+        a placement of fourteen hundred twenty from the series. Joona also fell
+        short on the ladder with just twenty-two ranked matches, chose not to
+        calibrate, and ended the season at sixteen hundred twenty. Petra played
+        twelve ranked matches, skipped the calibration series entirely because of
+        exams, and sat at thirteen hundred fifty when the season closed. A
+        spectator overlay you do not manage also displays a "provisional" badge
+        next to two of the players, which is cosmetic and has no bearing on
+        rating outcomes. For the record the regional ladder rebalance team you
+        also do not manage has proposed shifting the floor next season, but that
+        proposal is not in effect tonight. Report how many players take a full
+        reset, how many receive a calibration placement, how many keep a
+        carried-over rating, and how many kept ratings were low enough to need
+        raising to the floor.
+        
+        The seasonal reset ritual exists because of the soft-reset winter,
+        a story every ladder administrator retires having told at least
+        twice. Three seasons ago the fold rule was new, the floor had just
+        been lowered, and a wave of returning casual players — all with
+        kept ratings suddenly beneath the new floor — met a population of
+        hardened veterans at numbers the casuals had never seen. The
+        matchmaking queue became a slaughterhouse for two weeks, the forums
+        burned, and the postmortem pinned it on arithmetic nobody had run
+        — the fold-to-floor rule was correct but its first application
+        coincided with a population shift, and the ladder had no machinery
+        for counting who landed where. Tonight's four buckets are that
+        machinery in its current, battle-tested form — resets counted
+        separately from placements, kept ratings separated from raised
+        ones — and the season-open brief reads them in the order the
+        postmortem demanded.
+        
+        Your evening as administrator runs the closing checklist the
+        operations binder prescribes. You pulled the season's final match
+        counts per player straight from the match ledger rather than the
+        client-visible profiles, because the two disagree on edge cases —
+        forfeits and remakes count toward the total in the ledger's view,
+        which is the view the handbook's thresholds have always meant. You
+        cross-checked each calibration series against its completion flag,
+        since an abandoned series at four of five games is not a completion
+        no matter how well it was going. And you walked each of tonight's
+        four players through the handbook's decision ladder one rule at a
+        time, in the binder's order — threshold first, calibration second,
+        reset last — the sequence that keeps an administrator from granting
+        a placement to a player who had already earned a keep.
+        
+        Around the ladder hums the machinery of a live service, nearly all
+        of it irrelevant to tonight's buckets. The spectator overlay you
+        do not manage renders provisional badges from its own heuristics,
+        and its cosmetic judgments have never matched the handbook's
+        definitions — the overlay badges two players tonight, the handbook
+        calls one of them kept and the other placed, and both renderings
+        are correct in their own universes. The regional rebalance team's
+        floor proposal circulates in a design document with comments
+        threaded three deep, none of them law until next season's patch
+        notes say so. And the anti-smurf detection system runs its own
+        inquiries into account histories in the background — suspicions,
+        shadow scores, and a review queue for a team you have never met —
+        none of which alters what the match ledger says a player earned,
+        which is the only thing your four buckets were ever built to
+        count.
+        
+        A note on the calibration series and its edge, because edges are
+        where eligibility arithmetic proves itself. The handbook counts a
+        calibration as completed only when the ledger shows five games
+        finished with the series flag set — a series abandoned at four
+        games, however brilliant, is not a placement and not a keep; it
+        is simply unfinished, and unfinished series have no bucket at
+        all. Mira's series shows five finished with the flag set, which
+        is why tonight's arithmetic never once wobbles on her line. The
+        distinction matters more every season as returning casuals test
+        the boundary — players who begin calibration, abandon it at four
+        games, and expect the handbook to round up in their favor. The
+        handbook does not round. The ledger's flag column is the whole
+        conversation, and tonight it says what it says.
+        
+        The administrator's final act each season-close is the bucket
+        reconciliation the operations binder mandates. The four buckets
+        must sum to the number of players processed — every player lands
+        in exactly one disposition, no player in two, none in none — and
+        you walk the four lines against the roster count before the
+        season-open brief locks. Tonight's arithmetic closes on the
+        first pass, as it has every season since the soft-reset winter
+        taught the binder's authors to insist on the check; the brief
+        files with the ladder's population described exactly, and the
+        new season opens on numbers the forums will argue about for a
+        week and the matchmaker will simply obey.
+        
+        The forums will read tonight's buckets by morning, and the
+        administrator's craft is making sure they find nothing to
+        willfully misread. Every season-close brings a thread that
+        recounts a friend's rating fate with outrage and imprecision —
+        the kept player described as reset, the placement described as
+        punishment — and the operations binder's quiet defense is that
+        the report's four numbers carry the handbook's own vocabulary,
+        defined in its own terms, defensible line by line. Outrage
+        thrives on ambiguity; the buckets are the opposite of
+        ambiguity; and the thread that starts angry usually ends with
+        a player quoting the handbook back at the original poster,
+        which the administrators consider the system's finest
+        feature.
+        
+        A closing thought on the floor itself, the number the rebalance
+        team wants to move. Twelve hundred has been the ladder's floor
+        for as long as most players have played, and the proposal to
+        raise it circulates with projections attached — population
+        curves, retention models, a spreadsheet the analysts defend
+        in meetings. The floor tonight is what the floor has been, and
+        tonight's soft-reset bucket is zero partly because of where
+        the floor stands; move it, and next season's closing walk
+        tells a different story in that column. The administrator
+        files tonight's numbers knowing they are true for this floor,
+        this handbook, this season — the only jurisdiction a count
+        was ever meant to cover.
+        
+        And so the season closes the way seasons now close — ledger
+        pulled, ladder walked, four players and four buckets and a
+        floor that held its meaning through every line of the
+        arithmetic. Volkan keeps what he ground for, Mira carries what
+        the series earned her, Joona and Petra answer for the matches
+        they did not play under the same rule they would have claimed
+        under had the counting gone the other way. The brief files,
+        the forums wake, the rebalance team's proposal waits in its
+        threaded comments for a season that is no longer this one.
+        Tomorrow the ladder resets its clock and not its book — the
+        book is permanent, the book is the point — and the new
+        season's first match will find the ladder exactly as
+        tonight's four numbers left it.
+        
+        The last column worth a sentence is soft_reset, because its zero
+        tonight is the floor's arithmetic speaking. A kept rating below
+        twelve hundred rises to twelve hundred — that is the fold the
+        soft-reset winter installed — and the column counts the risers.
+        Volkan's kept eighteen hundred stands above the floor by six
+        hundred, so the column records nothing; had the season closed
+        differently, the same player, the same threshold, the same rule
+        would fill it. The zero is not an absence of rule but a presence
+        of margin, and the brief's readers know which one they are
+        looking at.
+
+        Failed cells (id + observed, withheld correct):
+        {{bookmarks.cell_feedback}}
+
+        METHOD: discard prior attempts. Re-derive EVERY entity answer from
+        the rules. Use these exact entity ids:
+
+        - volkan_reset: Volkan played 40 ranked matches (>= 30 threshold) so he keeps his rating — players at or above the threshold never take a full reset; does Volkan take a full reset? (1 if yes, 0 if no) [answer format: a whole number]
+        - mira_reset: Mira played only 9 ranked but completed the 5-match calibration series earning a placement — calibration completers receive placements, never full resets; does Mira take a full reset? (1 if yes, 0 if no) [answer format: a whole number]
+        - joona_reset: Joona played 22 ranked matches (below the 30 threshold) and chose not to calibrate — players under 30 matches without calibration take the full reset; does Joona take a full reset? (1 if yes, 0 if no) [answer format: a whole number]
+        - petra_reset: Petra played 12 ranked matches (below the 30 threshold) and skipped calibration — players under 30 matches without calibration take the full reset; does Petra take a full reset? (1 if yes, 0 if no) [answer format: a whole number]
+        - placements_count: Count players receiving calibration placements this season (under 30 ranked matches but completed the 5-game series) — only Mira qualifies; how many placements? [answer format: a whole number]
+        - kept_count: Count players keeping a carried-over rating (completed 30 or more ranked matches) — only Volkan's 40 qualifies; how many kept? [answer format: a whole number]
+        - soft_reset_count: Kept ratings below the 1200 floor are raised to it — Volkan keeps 1800 which is above 1200; how many kept ratings needed raising? [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 7 lines,
+        one per entity, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines. No prose summaries.
+      model_overrides: { temperature: 0.0, max_tokens: 1600 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/table-feedback.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-15.yml"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$cell_feedback"
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-15.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json fix_2 ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-15"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.fix_2.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage fix_2 --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-15"
+              working_dir: "."
+              fail_on_error: false
+
+    s04_aggregate:
+      generative_entity: "${models.m_light}"
+      prompt: "deterministic-aggregate-noop"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/aggregate.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-15.yml --table-result ./docs/benchmarks/outputs/output/ha-table-result.json --out ./docs/benchmarks/outputs/output/ha-final.json"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-deterministic.py --artifact ./docs/benchmarks/outputs/output/ha-final.json --criteria /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-15.yml --out ./docs/benchmarks/outputs/output/ha-final-check.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s05_judge
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-final-check.json final ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-15"
+              working_dir: "."
+              fail_on_error: false
+          - skip_step: true
+
+    s05_judge:
+      generative_entity: "${models.m_judge}"
+      prompt: |
+        ROLE: blind auditor. See only task + result. No author knowledge.
+
+        Task objective: Apply season-reset eligibility rules across four players.
+        Result: {{bookmarks.final_json}}
+
+        Answer EXACTLY 6 lines, nothing else:
+        KEYS: yes or no
+        VALUES: yes or no
+        FORMAT: yes or no
+        VERDICT: PASS or FAIL
+        REASON: one sentence
+        SCORE: 1-10
+
+        VERDICT must be PASS only if all three of KEYS, VALUES, FORMAT are yes.
+      model_overrides: { temperature: 0.0, max_tokens: 160 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/output/ha-final.json"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$final_json"
+        after_step_succeeds:
+          - save_to:
+              - "$verdict"
+              - "./docs/benchmarks/outputs/output/ha-verdict.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-judge.py ./docs/benchmarks/outputs/output/ha-verdict.txt ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-15"
+              working_dir: "."
+              fail_on_error: false
+
+    s06_end_fail:
+      generative_entity: "${models.m_light}"
+      prompt: "FAIL"
+      model_overrides: { temperature: 0.0, max_tokens: 8 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/failflag.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --final-check ./docs/benchmarks/outputs/output/ha-final-check.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s07_fail_trace
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s08_audit
+          - skip_step: true
+
+    s07_fail_trace:
+      generative_entity: "${models.m_light}"
+      prompt: "trace-only"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl end_fail fail case=hb-15"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s08_audit
+
+    s08_audit:
+      generative_entity: "${models.m_light}"
+      prompt: "leak-audit-noop"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/leak-audit.py --run-dir ./docs/benchmarks/outputs/output --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-15.yml"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s09_audit_pass
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s10_audit_leak
+          - skip_step: true
+
+    s09_audit_pass:
+      generative_entity: "${models.m_light}"
+      prompt: "audit-pass-trace"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl audit pass case=hb-15"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s_end
+
+    s10_audit_leak:
+      generative_entity: "${models.m_light}"
+      prompt: "audit-leak-trace"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl audit fail leak=true case=hb-15"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s_end
+
+    s_end:
+      generative_entity: "${models.m_light}"
+      prompt: "term"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - skip_step: true

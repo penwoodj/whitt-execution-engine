@@ -1,0 +1,70 @@
+Based on the provided text and task requirements, here is the analysis of the "Canary Rollout" event sequence.
+
+### **Phase 1: Rule List**
+The rules governing this station (tonight's rotation) are fixed by position in the list and never renumber. Breaches do not shift count. The limits for error rates are strictly enforced based on step position.
+
+*   **Rule:** Steps 1 through 5 may show up to 2.0 percent error rate.
+*   **Rule:** Steps 6 through 10 only allow 1.0 percent error rate.
+*   **Rule:** Clean observation completes stage equal to its own position in list; Rollout shows 10% times that stage number.
+*   **Rule:** Breaching observation completes nothing and is spent (Rollback leaves values at last completed stage).
+*   **Rule:** Second breach stops everything with status STOPPED.
+*   **Rule:** Exactly one breach and list ends: status PAUSED.
+*   **Rule:** No breach at all and climb finishes with status DONE.
+
+### **Phase 2: Ledger Walk**
+We apply the events (observations) in strict arrival order, checking limits and calculating stage completion/rollout.
+
+| Position | Rate | Limit | Verdict | Stage Completed | Rollout After |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 1 | 0.5% | 2.0% | Clean | 1 | 10% |
+| 2 | 0.8% | 2.0% | Clean | 2 | 20% |
+| 3 | 2.1% | 2.0% | Breach | - | 20% (Rollback) |
+| 4 | 0.6% | 2.0% | Clean | 3 | 30% |
+| 5 | 0.7% | 2.0% | Clean | 4 | 40% |
+| 6 | 0.9% | 1.0% | Breach | - | 40% (Rollback) |
+
+*Note on Step 3:* The rate is 2.1%, exceeding the limit of 2.0%. This is a breach. Per rules, it completes nothing and triggers rollback to the last completed stage (Stage 2). However, the "Clean" observations at positions 4 and 5 proceed normally because they are valid cleans within their limits. The final observation (Step 6) is also a breach (0.9% > 1.0%).
+*Correction on Logic:* Let's re-evaluate the sequence strictly based on "Breaching observation completes nothing".
+- Step 1: Clean -> Stage 1, Rollout 10%.
+- Step 2: Clean -> Stage 2, Rollout 20%.
+- Step 3: Breach (2.1% > 2.0%). Completes nothing. Status remains based on last completed stage? No, the rule says "Breaching observation completes nothing and is spent; rollback leaves rollout and stages at last completed stage's values." So after Step 3, we are effectively back to Stage 2 state for calculation purposes of subsequent steps?
+- Let's look at the specific wording: "breaches do not shift count". This implies the step number remains the index.
+- If Step 3 is a breach, it contributes no stage. The next clean observation (Step 4) would be the *next* valid stage completion. Does Stage numbering reset? "Stage numbering is fixed by position in list and never renumbers: 1st observation carries stage 1...". This suggests if an observation fails to complete a stage, the *next successful one* might still carry the next number or it skips?
+- Re-reading: "Clean observation completes stage equal to its own position in list". If Step 3 is a breach, it does not complete Stage 3. Does Step 4 complete Stage 4? Yes, if it's clean. The rule says "Stage numbering is fixed by position... never renumbers". This implies the *target* stage for step $N$ is always $N$. A breach at $N$ means Stage $N$ is not completed.
+- So:
+    - Step 1 (Clean): Completes Stage 1. Rollout = 10% * 1 = 10%.
+    - Step 2 (Clean): Completes Stage 2. Rollout = 10% * 2 = 20%.
+    - Step 3 (Breach): Does not complete Stage 3. Rollback to last completed stage values? "Rollback leaves rollout and stages at last completed stage's values." Last completed was Stage 2. So current state is effectively Stage 2, Rollout 20%.
+    - Step 4 (Clean): Completes Stage 4? Or does it complete the next available? The rule says "completes stage equal to its own position". If Step 3 failed, did we miss Stage 3? Yes. But Step 4 is clean. Does it complete Stage 4? Yes.
+    - Step 5 (Clean): Completes Stage 5. Rollout = 10% * 5 = 50%.
+    - Step 6 (Breach): Rate 0.9%, Limit 1.0%. Wait, 0.9 < 1.0. Is it a breach?
+        - Rule: "Steps 6 through 10 only 1.0 percent". This means the limit is 1.0%. The observed rate is 0.9%. Since 0.9 <= 1.0, this is **Clean**.
+    - Let's re-read Step 3 carefully. Rate 2.1%, Limit 2.0%. Breach confirmed.
+    - Let's re-read Step 6 carefully. Rate 0.9%, Limit 1.0%. Clean confirmed.
+
+**Revised Walk:**
+1.  **Step 1**: Rate 0.5% (Limit 2.0%). **Clean**. Completes Stage 1. Rollout = 10 * 1 = 10%.
+2.  **Step 2**: Rate 0.8% (Limit 2.0%). **Clean**. Completes Stage 2. Rollout = 10 * 2 = 20%.
+3.  **Step 3**: Rate 2.1% (Limit 2.0%). **Breach**. Does not complete Stage 3. State rolls back to last completed stage values (Stage 2, Rollout 20%).
+4.  **Step 4**: Rate 0.6% (Limit 2.0%). **Clean**. Completes Stage 4? Or does it complete the next valid stage number? The rule says "completes stage equal to its own position". If Step 3 was a breach, we missed Stage 3. But Step 4 is clean. Does it complete Stage 4? Yes.
+    - *Wait*, if Step 3 was a breach, does the system consider Step 4 as completing Stage 4 or Stage 3 (retry)? "Stage numbering is fixed by position... never renumbers". This implies the target for Step $N$ is always $N$. So Step 4 completes Stage 4.
+    - Rollout = 10 * 4 = 40%.
+5.  **Step 5**: Rate 0.7% (Limit 2.0%). **Clean**. Completes Stage 5. Rollout = 10 * 5 = 50%.
+6.  **Step 6**: Rate 0.9% (Limit 1.0%). **Clean**. Completes Stage 6. Rollout = 10 * 6 = 60%.
+
+**Final Status:** No breaches remaining after Step 3? Wait, Step 3 was a breach. "Exactly one breach and list ends: status PAUSED". But the list has more steps (4, 5, 6). So it's not "list ends" immediately.
+The rule says: "Second breach stops everything with status STOPPED... Exactly one breach and list ends: status PAUSED".
+Here we have **one breach** at Step 3. The list continues to Step 6. At the end of the list, if there was exactly one breach (and no second breach), the status is **PAUSED**.
+
+Let's double check Step 6 limit. "Steps 6 through 10 only 1.0 percent". Observed: 0.9%. This is within limits. So Step 6 is Clean.
+So we have exactly one breach (Step 3). The list finishes. Status = PAUSED.
+
+**Values:**
+- `rollout_pct`: Last completed stage was Stage 6? Or does the breach at Step 3 invalidate everything after it? "Rollback leaves rollout and stages at last completed stage's values." This applies *during* the breach processing. But subsequent cleans (4, 5, 6) are valid. Do they increment the stage counter?
+- If Step 3 is a breach, we missed Stage 3. Step 4 completes Stage 4. Step 5 completes Stage 5. Step 6 completes Stage 6.
+- The "Rollout" metric is defined as "10 percent times that stage number". So if Stage 6 is completed, Rollout = 60%.
+- Is there a penalty for the breach? "Breaching observation completes nothing and is spent; rollback leaves rollout and stages at last completed stage's values." This describes the state *immediately after* the breach. But subsequent cleans should advance the state again.
+- However, if the rule implies that a breach stops the climb from progressing linearly (e.g., you can't complete Stage 3, so Step 4 completes Stage 4? Or does it skip?), the text says "Stage numbering is fixed by position... never renumbers". This strongly supports that Step $N$ targets Stage $N$.
+- So:
+    - End of Step 2: Stage 2, Rollout 20%.
+   

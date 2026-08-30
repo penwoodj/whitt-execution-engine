@@ -1,0 +1,63 @@
+### Phase 1: RULE SCAN
+Based on the task description and the "Residency Discipline" constraints (ignoring the expired partial return logic mentioned in the failed attempt's specific error context as it contradicts the core residency rules provided for this night), here are the active state-changing rules:
+
+1.  **Load Rule**: A load request attempts to add a model of size $S$. If current free space $\ge S$, the model is loaded immediately (no eviction).
+2.  **Eviction Selection Rule**: If current free space $< S$, evictions occur only on **unpinned** models. The system selects the **Least-Recently-Touched (LRT)** unpinned model(s) one by one until enough space exists or no unpinned models remain.
+3.  **Recency Update Rule**: Every time a model is loaded, unloaded, or evicted, its recency is updated to "Most-Recent". Evicted models are removed from the resident set.
+4.  **Pinning Constraint**: Model C is pinned and can never be evicted. Unload operations on non-resident models are no-ops.
+5.  **Deferral Rule**: If space cannot be created by evicting all available unpinned models (i.e., only pinned models remain), the load request is deferred. The model is not loaded, and no eviction count is added for this specific step beyond those already performed to try to fit it.
+6.  **Counter Rules**: `loads` increments on successful loads. `evictions` increments by the total number of models evicted across all steps. `deferrals` increments on deferred requests. `deferred` list appends the ID of deferred requests in order of arrival.
+
+**Trigger Mapping:**
+*   Event 1 (`load A`) triggers Rule 1 (Load).
+*   Event 2 (`load C`) triggers Rule 1 (Load) or Rule 5 (Deferral if space insufficient, but here it fits).
+*   Event 3 (`load D`) triggers Rule 1 (Load), Rule 2 (Eviction), and potentially Rule 5.
+*   Event 4 (`unload D`) triggers Unload logic (Rule: Free space increases by size of model).
+
+---
+
+### Phase 2: LEDGER WALK
+Applying events in strict arrival order to the initial state (8GB card, Models A1, B2, C3, D4. Model C is pinned. Initial residents empty).
+
+**Initial State:**
+*   Residents: []
+*   Free Space: 8 GB
+*   Recency Map: {}
+
+**Event 1: `load A` (Size 1 GB)**
+*   Check Fit: $8 \ge 1$. Fits.
+*   Action: Load Model A.
+*   Update State: Residents [A]. Free Space $8 - 1 = 7$ GB. Recency {A}.
+*   Counters: Loads=1, Evictions=0.
+
+**Event 2: `load C` (Size 3 GB)**
+*   Check Fit: $7 \ge 3$. Fits.
+*   Action: Load Model C.
+*   Update State: Residents [A, C]. Free Space $7 - 3 = 4$ GB. Recency {C, A} (Order depends on implementation, but both are recent). Let's assume insertion order for recency tie-breaking if needed, or strictly LRT logic. Since both were just touched, neither is "older" than the other in a way that matters yet, except C was just loaded.
+*   Counters: Loads=2, Evictions=0.
+
+**Event 3: `load D` (Size 4 GB)**
+*   Check Fit: $4 \ge 4$. Fits exactly.
+*   Action: Load Model D.
+*   Update State: Residents [A, C, D]. Free Space $4 - 4 = 0$ GB. Recency {D, C, A}.
+*   Counters: Loads=3, Evictions=0.
+
+**Event 4: `unload D` (Size 4 GB)**
+*   Check Resident: Model D is in Residents [A, C, D].
+*   Action: Unload Model D. Free space increases by 4.
+*   Update State: Residents [A, C]. Free Space $0 + 4 = 4$ GB. Recency {C, A} (D removed).
+*   Counters: Loads=3, Evictions=0, Deferrals=0.
+
+**Final Totals:**
+*   `loads`: 3
+*   `evictions`: 0
+*   `deferrals`: 0
+*   `deferred`: []
+
+---
+
+### Final Answer JSON
+
+```json
+{"loads": 3, "evictions": 0, "deferrals": 0, "deferred": []}
+```

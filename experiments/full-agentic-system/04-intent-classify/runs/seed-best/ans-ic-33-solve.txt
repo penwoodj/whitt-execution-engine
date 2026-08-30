@@ -1,0 +1,62 @@
+### Phase 1: Rule List
+Based on the task description, here are the rules that govern state changes during the event list (arrivals, grants/preemptions, expiries/checkpoints):
+
+1.  **Arrival Order Rule**: Jobs arrive in strict order of their start minutes ($t_{start}$). A resumed job outranks a fresh job at any tie.
+2.  **Preemption Rule**: When `HIGH` arrives (at minute 2), it instantly preempts whatever `LOW` job is running. While `HIGH` runs, nothing else runs.
+3.  **Checkpoint Banking Rule**: Checkpoints bank at $t_{start} + 2$ and every subsequent even number of *running* minutes relative to the start/resume time (absolute minutes). A bank landing exactly on the preemption minute counts; no work is wasted.
+4.  **Waste Calculation Rule**: On preemption, only minutes past the last valid checkpoint are wasted. The job must redo this work upon resume ($owed = total - banked$).
+5.  **Core Utilization Rule**: The core never idles while a `LOW` job is waiting. As soon as one finishes or is preempted, the next waiting `LOW` starts in that same minute.
+
+### Phase 2: Ledger Walk (Minute-by-Minute Table)
+
+| Minute | Core Activity | Event / State Change Details |
+| :--- | :--- | :--- |
+| **0** | LOW1 | Start LOW1 ($t=0$). Bank checkpoint at $0+2=2$. Running time: 1 min. |
+| **1** | LOW1 | Continue LOW1. Running time: 2 mins (Banked). |
+| **2** | HIGH | `HIGH` arrives. Preempts LOW1. <br>LOW1 Status: Ran 0-2 (3 mins total planned? No, task says "runs 5 minutes starting at minute 0"). <br>Wait, let's re-read the specific duration rule for tonight vs orientation.<br><br>**Tonight's Rules:**<br>- LOW1 runs **5** minutes starting at minute 0.<br>- LOW2 runs **7** minutes starting at minute 2.<br>- HIGH arrives at minute 2, runs **9** minutes to completion. |
+| **2 (cont)** | HIGH | Preemption occurs. <br>LOW1 Bank Checkpoint: Absolute min 2. <br>LOW1 Total Planned: 5 mins. <br>LOW1 Banked: 2 mins. <br>**Wasted**: $5 - 2 = 3$ minutes. <br>`HIGH` starts running (Duration 9). |
+| **3** | HIGH | `HIGH` runs. |
+| **4** | HIGH | `HIGH` runs. |
+| **5** | HIGH | `HIGH` runs. |
+| **6** | HIGH | `HIGH` runs. |
+| **7** | HIGH | `HIGH` runs. |
+| **8** | HIGH | `HIGH` runs. |
+| **9** | HIGH | `HIGH` finishes (ran 2-10? No, "runs 9 minutes to completion" starting at 2 means it occupies 2,3,4,5,6,7,8,9,10). <br>Wait, duration logic: Start 2. Run 9 mins. Occupies minutes [2, 3, 4, 5, 6, 7, 8, 9, 10]. Finishes at end of minute 10. |
+| **10** | LOW1 | `HIGH` finishes. Core becomes free. <br>Waiting Jobs: LOW1 (Resumed), LOW2 (Fresh). <br>Tie-breaker: Resumed outranks Fresh. <br>**Start LOW1**. <br>LOW1 Owed: 3 minutes. <br>Bank Checkpoint at $0+2=2$ (already hit). Next bank would be at running time +2 = 4 mins absolute? No, "every 2 completed minutes of running time". <br>Running time starts counting from resume. Resume at 10. Bank at $10+2=12$. |
+| **11** | LOW1 | Continue LOW1 (Owed: 2). Running time since resume: 1 min. |
+| **12** | LOW1 | Continue LOW1 (Owed: 1). <br>Bank Checkpoint at $10+4=14$? No, "every 2 completed minutes". <br>Running time 0-1 (min 10-11), 2 (min 12). Bank at absolute min 12. |
+| **13** | LOW1 | Continue LOW1 (Owed: 0). Running time since resume: 3 mins. <br>Bank Checkpoint at $10+6=16$? No, bank every 2 running mins. <br>Running times: 1 (min 11), 2 (min 12 - Banked), 3 (min 13). |
+| **14** | LOW1 | Finish LOW1. Total time for this run: 3 mins. <br>**LOW1 Finished**. |
+| **15** | LOW2 | Waiting Jobs: LOW2 (Fresh, start=2). <br>Start LOW2. <br>Bank Checkpoint at $2+2=4$? No, "banks a checkpoint at minute s+2". Start time $s=2$. Bank at 4. But we are at min 15. <br>Wait, the rule says: "a job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after". <br>Start LOW2 at 15. $s=15$. Bank at $15+2=17$. |
+| **16** | LOW2 | Continue LOW2 (Owed: 6). Running time since start: 1 min. |
+| **17** | LOW2 | Continue LOW2 (Owed: 5). <br>Bank Checkpoint at $15+4=19$? No, bank every 2 running mins. <br>Running times: 1 (min 16), 2 (min 17 - Banked). |
+| **18** | LOW2 | Continue LOW2 (Owed: 4). Running time since start: 3 mins. |
+| **19** | LOW2 | Continue LOW2 (Owed: 3). Running time since start: 4 mins. <br>Bank Checkpoint at $15+6=21$? No, bank every 2 running mins. <br>Running times: 1, 2(Bank), 3, 4(Bank). |
+| **20** | LOW2 | Continue LOW2 (Owed: 2). Running time since start: 5 mins. |
+| **21** | LOW2 | Continue LOW2 (Owed: 1). Running time since start: 6 mins. <br>Bank Checkpoint at $15+8=23$? No, bank every 2 running mins. <br>Running times: 1, 2(B), 3, 4(B), 5, 6(B). |
+| **22** | LOW2 | Continue LOW2 (Owed: 0). Running time since start: 7 mins. <br>**LOW2 Finished**. |
+
+**Correction on Bank Logic for LOW1 Resume:**
+Rule: "a job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after".
+Resume at $s=10$.
+Bank 1: Absolute min $10+2 = 12$. (Occurs during minute 12).
+Running time logic: "every 2 completed minutes of running time".
+Minute 10-11: Run 1.
+Minute 11-12: Run 2. (Bank at abs 12).
+Minute 12-13: Run 3.
+Minute 13-14: Run 4. (Bank at abs 14? No, "again every 2 running minutes after". So runs 3 and 4 are the next block? Or is it absolute time based?)
+Text says: "bank a checkpoint at minute s+2 and again every 2 running minutes after". This implies relative to start/resume.
+Start/Resume $s$. Bank at $s+2$. Then bank at $(s+2) + \text{duration of 2 running mins}$. Since 1 running min = 1 calendar min, duration is 2 mins.
+So banks at absolute minutes: $s+2$, $s+4$, $s+6$...
+For LOW1 Resume ($s=10$): Banks at 12, 14, 16...
+LOW1 needs to run 3 minutes (minutes 10-11, 11-12, 12-13).
+It hits bank at 12. It finishes at end of minute 13 (after running 3 mins).
+So it is safe.
+
+**Correction on Bank Logic for LOW2 Start:**
+Start at $s=15$ (since core free at 14, starts next min? No, "the minute one LOW job finishes... the next waiting LOW starts in that same minute").
+LOW1 finished at end of minute 13. So start LOW2 at minute 14?
+Let's re-evaluate the transition from HIGH finish.
+HIGH runs 9 minutes starting at 2. Occupies [2, 3, 4, 5, 6, 7, 8, 9, 10]. Finishes end of minute 10.
+Wait, my previous table said HIGH finishes at 10?
+"runs 9 minutes to completion". Start 2. Duration 9.

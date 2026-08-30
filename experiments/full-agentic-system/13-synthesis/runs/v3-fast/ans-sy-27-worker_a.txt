@@ -1,0 +1,119 @@
+### Phase 1 Rule Scan (First Half Only)
+*Rules governing the core scheduling, preemption, checkpointing, and state transitions for LOW jobs.*
+
+1.  **Arrival Order:** LOW jobs are queued in order of their start minutes; a resumed job outranks a fresh one at any tie.
+2.  **Preemption Rule:** HIGH arrival instantly preempts whatever LOW is running; while HIGH runs, nothing else runs.
+3.  **Checkpoint Banking:** A job banks a checkpoint every 2 completed minutes of running time (absolute minutes $s+2$, then every 2 mins after).
+4.  **Waste on Preemption:** Work past the last banked checkpoint is wasted and must be redone upon resume.
+5.  **Resume State:** Upon resume, a job owes all unbanked minutes since its last bank; it resumes with zero progress in those unbanked minutes.
+6.  **Core Utilization:** The core never idles while a LOW job is waiting; the next waiting LOW starts immediately upon preemption or finish of the current one.
+
+### Phase 2 Ledger Walk (First Half Only)
+*Applying events to the state minute-by-minute.*
+
+**Initial State:**
+-   **Queue:** `LOW1` (Start: 0, Duration: 4), `LOW2` (Start: 0, Duration: 3).
+-   **Core Status:** Idle.
+-   **Current Minute:** 0.
+
+**Minute 0:**
+-   Event: `LOW1` starts (Start minute 0 arrives). `LOW2` also has start minute 0 but waits behind `LOW1`.
+-   Action: Core runs `LOW1`.
+-   State: `LOW1` running (Time elapsed: 1/4). Banked Checkpoints: None.
+
+**Minute 1:**
+-   Event: Time passes.
+-   Action: Core continues `LOW1`.
+-   State: `LOW1` running (Time elapsed: 2/4). **Banked Checkpoint at Minute 2.** (Note: The checkpoint is *banked* at the end of minute 2, so no waste yet).
+
+**Minute 2:**
+-   Event: Time passes. End of minute 2 arrives. `LOW1` has completed 2 minutes.
+-   Action: Core continues `LOW1`. **Checkpoint Banked.** (Progress saved: 2 mins).
+-   State: `LOW1` running (Time elapsed: 3/4).
+
+**Minute 3:**
+-   Event: `HIGH` arrives at minute 2 (instantly preempting current run) and runs for 6 minutes.
+-   Action: Core switches to `HIGH`. `LOW1` is preempted.
+-   State Checkpoint Analysis: `LOW1` had completed 2 mins before preemption. The checkpoint was banked at the exact minute of arrival (Minute 2). Per rule "a bank landing on the exact minute HIGH arrives still counts and nothing is wasted".
+-   Result: `LOW1` resumes with **0 minutes wasted**. It owes its remaining time ($4 - 2 = 2$ mins).
+
+**Minute 4:**
+-   Event: Time passes. `HIGH` continues running (Time elapsed for HIGH: 3/6).
+-   Action: Core runs `HIGH`. `LOW1` waits in queue.
+-   State: `HIGH` running. Queue: `LOW1` (Owes 2), `LOW2` (Start minute 0, owes 3).
+
+**Minute 5:**
+-   Event: Time passes. `HIGH` continues running (Time elapsed for HIGH: 4/6).
+-   Action: Core runs `HIGH`.
+-   State: `HIGH` running. Queue: `LOW1`, `LOW2`.
+
+**Minute 6:**
+-   Event: Time passes. `HIGH` finishes its 6 minutes at the end of minute 5? Wait, let's re-calculate duration vs absolute time carefully.
+    -   HIGH arrives at Minute 2 (Start). Runs for 6 minutes.
+    -   Minutes occupied by HIGH: [2, 3], [3, 4], [4, 5], [5, 6], [6, 7], [7, 8].
+    -   So `HIGH` finishes at the end of Minute 7.
+-   Correction on previous steps:
+    -   Min 0: LOW1 starts.
+    -   Min 1: LOW1 runs (2 mins done). Checkpoint banks at end of Min 2.
+    -   Min 2: LOW1 runs (3 mins done). HIGH arrives. Preemption happens. `LOW1` has 2 mins banked. Waste = 0.
+    -   Min 3-7: HIGH runs.
+        -   End of Min 3: HIGH done 1 min.
+        -   End of Min 4: HIGH done 2 mins.
+        -   End of Min 5: HIGH done 3 mins.
+        -   End of Min 6: HIGH done 4 mins.
+        -   End of Min 7: HIGH done 5 mins.
+    -   Wait, "runs 6 minutes to completion". If it starts at minute 2 (time $t=2$), it occupies intervals $(2,3), (3,4), (4,5), (5,6), (6,7), (7,8)$. It finishes at $t=8$.
+    -   Let's re-verify the "Minute X" notation. Usually, "Minute 0" is interval $[0,1]$.
+    -   LOW1 runs $[0,2]$ (2 mins). Checkpoint banks at end of Min 2 ($t=2$).
+    -   HIGH arrives at Minute 2 ($t=2$). Preempts.
+    -   HIGH runs for 6 minutes: Intervals $(2,3), (3,4), (4,5), (5,6), (6,7), (7,8)$. Finishes at $t=8$.
+    -   Queue status during HIGH run ($t \in [2, 8]$): `LOW1` (owes 2), `LOW2` (owes 3).
+    -   At $t=8$, HIGH finishes. Core becomes free.
+
+**Minute 8:**
+-   Event: `HIGH` completes. Core frees up.
+-   Queue Resolution: Two jobs waiting. `LOW1` (Start minute 0) vs `LOW2` (Start minute 0). Tie in start minutes. Rule: "a resumed LOW outranks a fresh one". `LOW1` was preempted (resumed), `LOW2` is fresh.
+-   Action: Core starts `LOW1`.
+-   State: `LOW1` resumes with 0 wasted. Owes 2 mins.
+
+**Minute 9:**
+-   Event: Time passes. `LOW1` runs its first minute of resume.
+-   State: `LOW1` running (Time elapsed since resume: 1/2).
+
+**Minute 10:**
+-   Event: Time passes. `LOW1` completes its second minute of resume. Total duration reached ($4$ mins).
+-   Action: `LOW1` finishes.
+-   State: `LOW1` Done. Queue: `LOW2`.
+
+**Minute 11:**
+-   Event: Core free. `LOW2` starts (Start minute 0 arrived earlier, waited entire time).
+-   Action: Core runs `LOW2`.
+-   State: `LOW2` running (Time elapsed: 1/3).
+
+**Minute 12:**
+-   Event: Time passes. `LOW2` completes its second minute? No, duration is 3 minutes.
+    -   Interval $[0,1]$ done at Min 1.
+    -   Interval $[1,2]$ done at Min 2 (relative).
+    -   Wait, let's track absolute time for `LOW2`.
+    -   Starts at Min 8? No, starts when core frees. Core freed at end of Min 8? Or during?
+    -   HIGH finishes at $t=8$. Core runs LOW1 from $t=8$ to $t=10$ (2 mins). LOW1 done at $t=10$.
+    -   Core runs LOW2 from $t=10$ to $t=13$ (3 mins). LOW2 done at $t=13$.
+
+**Re-evaluating the "Minute" labels vs Absolute Time:**
+The prompt asks for a walk. Let's stick to absolute time intervals.
+-   **Start:** $t=0$. `LOW1` starts.
+-   **$t=2$:** `LOW1` has 2 mins done. Checkpoint banks at $t=2$.
+-   **$t=2$:** `HIGH` arrives. Preempts `LOW1`. `LOW1` owes 2 mins. Waste = 0 (banked exactly).
+-   **$t=8$:** `HIGH` finishes ($6$ mins duration from $t=2$).
+-   **$t=8 \to t=10$:** Core runs `LOW1` (Resumed, owes 2 mins). Finishes at $t=10$.
+-   **$t=10 \to t=13$:** Core runs `LOW2` (Fresh, owes 3 mins). Finishes at $t=13$.
+
+**Final Metrics:**
+-   **Makespan:** Last finish time = 13 minutes.
+-   **Wasted Minutes:** 0 minutes (Checkpoint banked exactly on arrival).
+-   **Completion Order:** `LOW1` finished at $t=10$, `LOW2` finished at $t=13$. Order: `["LOW1", "LOW2"]`.
+
+### Final Answer JSON (First Half Only)
+
+```json
+{"makespan_min": 13

@@ -1,0 +1,102 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event or claim list.*
+
+1.  **Arrival Rule**: A request arrives in strict arrival order; if the pool has tokens ($>0$), it is processed (granted fully or partially); if the pool is empty ($=0$), it is denied and listed by ID.
+2.  **Grant/Partial Rule**: If a request asks for $X$ and the pool holds $Y$, where $Y > 0$:
+    *   If $Y \ge X$: Grant $X$, Pool becomes $Y - X$.
+    *   If $Y < X$: Grant $Y$ (partial), Pool becomes $0$. The request is still considered "granted" and never denied.
+3.  **Denial Rule**: A request arriving when the pool is exactly $0$ is denied, listed by ID, and remains denied permanently.
+4.  **Expiry Trigger Rule**: Upon completion of a specific request (the one named in the expiry sentence), any associated expired grant returns immediately.
+5.  **Return Amount Rule**: The return amount is calculated as $\lfloor \text{GrantedAmount} / 2 \rfloor$ (half rounded down).
+6.  **Timing Rule**: The return lands *before* the next request is processed, but strictly *after* the trigger request completes.
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order.*
+
+**Initial State:** Pool = 50. Grants = []. Denied = [].
+
+**Event 1: Request r1 asks for 4.**
+*   **Rule Applied**: Arrival/Grant Rule ($50 \ge 4$).
+*   **Action**: Grant full amount (4).
+*   **State Change**: Pool becomes $50 - 4 = 46$.
+*   **Ledger Line**: `r1: grant 4, pool -> 46`
+
+**Event 2: Request r2 asks for 6.**
+*   **Rule Applied**: Arrival/Grant Rule ($46 \ge 6$).
+*   **Action**: Grant full amount (6).
+*   **State Change**: Pool becomes $46 - 6 = 40$.
+*   **Ledger Line**: `r2: grant 6, pool -> 40`
+
+**Event 3: Request r3 asks for 9.**
+*   **Rule Applied**: Arrival/Grant Rule ($40 \ge 9$).
+*   **Action**: Grant full amount (9).
+*   **State Change**: Pool becomes $40 - 9 = 31$.
+*   **Ledger Line**: `r3: grant 9, pool -> 31`
+
+**Event 4: Request r4 asks for 13.**
+*   **Rule Applied**: Arrival/Grant Rule ($31 \ge 13$).
+*   **Action**: Grant full amount (13).
+*   **State Change**: Pool becomes $31 - 13 = 18$.
+*   **Ledger Line**: `r4: grant 13, pool -> 18`
+
+**Event 5: Request r5 asks for 15.**
+*   **Rule Applied**: Arrival/Grant Rule ($18 \ge 15$).
+*   **Action**: Grant full amount (15).
+*   **State Change**: Pool becomes $18 - 15 = 3$.
+*   **Ledger Line**: `r5: grant 15, pool -> 3`
+
+**Post-Event Processing Check:**
+*   The task mentions "the grant for r2 expires after request r3 completes".
+*   **Trigger Event**: Completion of r3.
+*   **Expired Grant**: The grant associated with r2 (which was fully granted as 6).
+*   **Return Calculation**: $\lfloor 6 / 2 \rfloor = 3$.
+*   **Timing Rule Application**: Return lands *before* the next request (r4) is processed.
+    *   Current Pool before return: 31.
+    *   Add Return: $31 + 3 = 34$.
+    *   Process r4 (Ask 13): Grant 13 from 34 -> Pool becomes 21.
+*   **Re-evaluating the Walk with Expiry Insertion**:
+    The prompt says "Walk one ledger line per event... arrival, grant/partial/deny, expiry return". This implies the return is an intermediate state change within the flow of events or strictly between them. Let's re-walk carefully inserting the return at the exact moment defined: "after request r3 completes" and "before the next request".
+
+    **Corrected Walk:**
+    
+    1.  **r1 arrives (ask 4)**: Pool $50 \to 46$. State: `pool=46`.
+    2.  **r2 arrives (ask 6)**: Pool $46 \to 40$. State: `pool=40`.
+    3.  **r3 arrives (ask 9)**: Pool $40 \to 31$. State: `pool=31`.
+        *   *Trigger*: r3 completes.
+        *   *Expiry Rule*: Grant for r2 expires. Granted amount was 6. Return = $\lfloor 6/2 \rfloor = 3$.
+        *   *Timing*: Return happens now, before next request.
+        *   Pool $31 + 3 = 34$. State: `pool=34`.
+    4.  **r4 arrives (ask 13)**: Pool $34 \to 21$ ($34 - 13$). State: `pool=21`.
+    5.  **r5 arrives (ask 15)**: Pool $21 \to 6$ ($21 - 15$). State: `pool=6`.
+
+    *Wait, let me double check the "Orientation" story logic vs tonight's rules.*
+    Orientation story: "first grant expired and returned 5... third ask of 13 landed against only 12". This confirms returns happen before subsequent requests.
+    
+    Let's re-verify the "Grant for r2 expires after request r3 completes".
+    Does any other grant expire? The text says "the expiry sentence names exactly one request id so only that one grant ever returns". So only r2's grant returns.
+    
+    **Final State Calculation:**
+    *   Start: 50
+    *   r1 (+4): Pool = 46
+    *   r2 (+6): Pool = 40
+    *   r3 (+9): Pool = 31
+        *   Expiry Trigger (r3 done): Return from r2 ($\lfloor 6/2 \rfloor = 3$).
+        *   Pool becomes $31 + 3 = 34$.
+    *   r4 (+13): Pool = $34 - 13 = 21$.
+    *   r5 (+15): Pool = $21 - 15 = 6$.
+    
+    Total Granted: $4 + 6 + 9 + 13 + 15 = 47$.
+    Net Change to Pool: Start (50) - End (6) = 44.
+    Difference accounted for by Return (+3). Correct.
+    
+    Denied List: Empty (Pool never hit zero before a request arrived).
+
+---
+
+### Final Answer JSON
+
+```json
+{"granted_units": 47, "denied": [], "pool_left": 6}
+```

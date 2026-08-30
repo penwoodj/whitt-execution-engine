@@ -1,0 +1,820 @@
+workflow_id: harness_v7_hb-04
+name: "Harness v7 - hb-04"
+description: "TABLE->GATE->AGGREGATE->JUDGE-V2->LEAK-AUDIT. Case: hb-04 hops=5 route=heavy"
+version: "7.0.0"
+author: "Experiment"
+tags: [harness, agentic, v7, routing, snapshot, meter, audit]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  m_light:
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  m_heavy:
+    name: "Qwen3-5-9B-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  m_judge:
+    name: "Hermes-2-Pro-Mistral-7B.Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  timing:
+    cooldown_after_unload_secs: 0
+    min_tmp_space_mb: 50
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+  steps:
+    s00_screen:
+      generative_entity: "${models.m_heavy}"
+      prompt: "pre-flight"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/screen-validate.py /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-04.yml"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - skip_step: true
+
+    s01_solve:
+      generative_entity: "${models.m_heavy}"
+      prompt: |
+        ROLE: on-call operator. Precise. Zero fluff.
+
+                You are the engineering manager who owns the cloud bill for a mid-sized
+        SaaS company, and tomorrow morning is the monthly finance review where you
+        have to explain, line by line, why the infrastructure account looks the way
+        it looks. You have spent the evening reconciling the provider's invoice
+        draft against the internal usage export, and you now hold the complete
+        picture for last month. The finance partner is new, sharp, and allergic to
+        hand-waving, so you want the summary numbers computed exactly before the
+        meeting, with each rule applied the way the account is actually configured.
+        
+        The account runs under a spending cap of fifty thousand dollars per month,
+        a hard ceiling agreed with finance after the incident two quarters ago
+        when a runaway job quietly burned a week of budget in a weekend. If a
+        month's projected total would exceed the cap, workloads are throttled
+        before that happens — but as you will see, that clause never triggered
+        last month, and part of your preparation is confirming exactly that.
+        
+        Compute usage splits across two product lines, and the cpu line is the
+        complicated one because of the reservation. A year and a half ago the
+        company bought a reserved-instance block for compute: it is a flat
+        commitment of twenty thousand dollars per month, and in exchange the first
+        six thousand cpu-hours each month are covered by that flat fee — those
+        hours cost nothing beyond the reservation itself, no matter how fully
+        they are used. Any cpu-hours beyond six thousand in a month are billed at
+        the on-demand rate of three dollars per hour, on top of the flat
+        reservation. Last month the compute lines consumed seven thousand
+        cpu-hours in total. So the cpu cost is the flat twenty thousand, plus one
+        thousand hours of overage at three dollars an hour. One thousand hours at
+        three dollars is three thousand dollars, which makes the cpu line come to
+        twenty-three thousand dollars for the month. Write that down as the cpu
+        total, because the finance partner will absolutely walk the arithmetic
+        with you.
+        
+        The gpu line is steadier and duller, which is a mercy. The account runs a
+        pair of gpu instances for model inference at a flat four hundred dollars
+        per instance per month, and both were provisioned for the entire month —
+        no partial months, no spot interruptions, no mid-month additions. Two
+        instances at four hundred dollars each is eight hundred dollars per month,
+        and the reservation covering them has been in place for twelve months now,
+        which means the gpu line on last month's invoice reads eight hundred
+        dollars. There was a proposal in last month's architecture review to add a
+        third gpu instance starting this month; it was approved, but provisioning
+        has not happened yet, so it contributes nothing to last month and belongs
+        only in the talking-points section of the meeting, not the ledger.
+        
+        Storage is a flat line item of twelve thousand dollars per month under the
+        enterprise agreement — an all-you-can-eat tier negotiated when the data
+        retention policy ballooned. The tier has no usage-based component and last
+        month's stored volume, while larger than the month before, changes nothing
+        about the charge.
+        
+        Now the reconciliation noise, all of which you have already ruled out, and
+        each of which deserves one sentence in the meeting so nobody chases it
+        later. The provider's console shows a line for their managed kubernetes
+        control planes at ten dollars per cluster per month; those clusters run in
+        the platform team's account, which you do not manage, and their cost never
+        touches this ledger. The internal export lists a cache-service egress
+        spike; egress is bundled into the storage enterprise tier here and adds
+        zero. And finance's draft includes a credit from a previous billing error
+        on the gpu line; credits apply against the account balance at close, not
+        against workload cost, and the review tracks workload cost only.
+        
+        What you need for the morning, precisely: the cpu cost, the gpu cost, the
+        storage cost, the grand total, whether the month went over the fifty
+        thousand cap, and the headroom — the difference between the cap and the
+        actual total.
+        
+        This review lands in a sensitive month because the account is midway
+        through a cost program that finance has been watching with unusual
+        attention. Six months ago the bill ran comfortably under the cap with no
+        reservation at all, pure on-demand everything; then a pricing analysis
+        showed the compute workload had steadied into a pattern that reserved
+        capacity would reward, and the company locked in the flat commitment.
+        The quarters since have been a slow education in how reservations change
+        the shape of a bill — the compute line went from spiky to flat-plus-
+        overage, and the overage tails taught engineering that the six-thousand-
+        hour cushion is real but not bottomless. Tonight's numbers are the
+        cleanest expression yet of that new shape, which is exactly why you want
+        every line to survive scrutiny.
+        
+        Preparing for the review followed the monthly ritual. You pulled the
+        invoice the moment it closed, exported the CSV, and reconciled it line by
+        line against the tagging ledger — every resource stamped with a team
+        label, every label rolled up into the service lines you will present.
+        Discrepancies this month ran thin — one orphaned disk attributable to a
+        deleted cluster, since reassigned, and a rounding wobble of a few dollars
+        in taxes that finance told you to stop chasing. The deck itself is five
+        slides, one per line item plus the total, and the slide people will
+        actually discuss is the last one, where the total meets the cap and the
+        headroom either earns a nod or starts a conversation about trimming.
+        
+        The account carries furniture that never reaches the invoice's decision
+        lines. There is a savings-plan recommendation service you do not manage
+        that emails monthly suggestions, some of them genuinely useful, none of
+        them binding. A shadow-environment policy spins down unused staging
+        servers nightly, and its savings show up as absence rather than as a
+        line anyone reads. And the department's budget-versus-actual tracker
+        projects year-end positions from these monthly totals for the ops review
+        — downstream analysis, valuable, but not part of what the invoice itself
+        says.
+        
+        In the final hour before the review, the discipline that matters most is
+        re-verification of the arithmetic itself. You recompute the overage from
+        the raw hour counters rather than trusting the invoice's pre-baked
+        subtotal, because a subtotal that silently bundled the reservation would
+        double-count the flat fee and nobody downstream would catch it. You
+        re-read the reservation contract's clause on the six-thousand-hour
+        cushion to confirm the boundary is inclusive the way the platform's
+        billing guide claims, since a fencepost error at that boundary would move
+        the overage by exactly one hour's worth. You confirm the cap figure
+        against the finance memo rather than memory, because caps have changed
+        twice this year and the number in your head is the number from two memos
+        ago. Only when each line survives recomputation do you close the deck —
+        the same deck whose totals you are about to report, and the last thing
+        standing between your month and the record.
+        
+        The cap itself deserves a word, because its history explains the care
+        around tonight's headroom. The figure was set in a budget meeting eight
+        months ago as a hard guardrail, not a target — the difference matters
+        in every conversation that follows a review. Land under it comfortably
+        and the program continues as designed; brush against it and the
+        following week becomes a line-byline audit of what the money is buying;
+        exceed it and the deploy freeze engages automatically, a mechanism the
+        platform team wired in after a quarter in which goodwill alone failed
+        to stop the overage. Everyone involved understands the arithmetic of
+        tonight's total, which is why you recomputed it twice before opening
+        the deck and why the number you report will be the number the freeze
+        mechanism itself sees.
+        
+        A note on the enterprise tier before you close the deck, because tiers
+        are where invoice arithmetic goes to get complicated. The storage line
+        sits on the enterprise plan, which bundles the smaller charges that
+        would otherwise clutter the bill — the egress spike the export flagged
+        is absorbed, the support overhead is absorbed, and the bundling is
+        exactly why the storage figure reads as a clean flat number while its
+        raw components would tell a messier story. There was a quarter when
+        finance tried to unbundle the tier to see inside it, and the exercise
+        produced eleven spreadsheet tabs and no change to any decision, which
+        is why the tier now stands as a single honest line. The total you
+        report inherits that cleanliness, and the review will be better for
+        it.
+        
+        One final check completes the ritual. The invoice's own total line sits
+        at the bottom of page three, and you verify that the sum of your
+        presented lines meets it exactly — a presenter whose lines do not sum
+        to the invoice's own number has a tagging error somewhere, and it is
+        far better to find it at your desk tonight than to have the finance
+        analyst find it by calculator in the meeting. The check passes, as it
+        has every month since the tagging ledger matured, and the small
+        satisfaction of that consistency is the quiet reward of the whole
+        monthly exercise. The deck closes, the laptop sleeps, and tomorrow the
+        numbers speak for themselves with you merely narrating.
+
+        METHOD: for EACH entity below, derive its answer from the rules.
+        Track state step by step in plain text. Entities you do not manage
+        NEVER count. Check deadline/budget rules BEFORE finalizing.
+
+        Entities (one line each, id then question):
+        - cpu_cost: cpu line total (flat 20000 reservation covering first 6000 hrs + 1000 overage hrs at 3/hr) [answer format: a whole number]
+        - gpu_cost: GPU line on the monthly invoice — 2 instances at a flat 400 each for the full month, and the invoice reports the monthly line (the 12-month reservation history is context only); what is the gpu line total? [answer format: a whole number]
+        - storage_cost: Storage rides the enterprise tier — a flat 12000 regardless of usage, with egress and support bundled in; what is the storage line total? [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 3 lines,
+        one per entity above, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines. No JSON. No explanations.
+      model_overrides: { temperature: 0.1, max_tokens: 1280 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-04.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s02_fix_1
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json check ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-04"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.solve.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage solve --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-04"
+              working_dir: "."
+              fail_on_error: false
+
+    s02_fix_1:
+      generative_entity: "${models.m_heavy}"
+      prompt: |
+        ROLE: correction specialist. Entity table failed checks. Fix rows.
+
+        Original task:
+                You are the engineering manager who owns the cloud bill for a mid-sized
+        SaaS company, and tomorrow morning is the monthly finance review where you
+        have to explain, line by line, why the infrastructure account looks the way
+        it looks. You have spent the evening reconciling the provider's invoice
+        draft against the internal usage export, and you now hold the complete
+        picture for last month. The finance partner is new, sharp, and allergic to
+        hand-waving, so you want the summary numbers computed exactly before the
+        meeting, with each rule applied the way the account is actually configured.
+        
+        The account runs under a spending cap of fifty thousand dollars per month,
+        a hard ceiling agreed with finance after the incident two quarters ago
+        when a runaway job quietly burned a week of budget in a weekend. If a
+        month's projected total would exceed the cap, workloads are throttled
+        before that happens — but as you will see, that clause never triggered
+        last month, and part of your preparation is confirming exactly that.
+        
+        Compute usage splits across two product lines, and the cpu line is the
+        complicated one because of the reservation. A year and a half ago the
+        company bought a reserved-instance block for compute: it is a flat
+        commitment of twenty thousand dollars per month, and in exchange the first
+        six thousand cpu-hours each month are covered by that flat fee — those
+        hours cost nothing beyond the reservation itself, no matter how fully
+        they are used. Any cpu-hours beyond six thousand in a month are billed at
+        the on-demand rate of three dollars per hour, on top of the flat
+        reservation. Last month the compute lines consumed seven thousand
+        cpu-hours in total. So the cpu cost is the flat twenty thousand, plus one
+        thousand hours of overage at three dollars an hour. One thousand hours at
+        three dollars is three thousand dollars, which makes the cpu line come to
+        twenty-three thousand dollars for the month. Write that down as the cpu
+        total, because the finance partner will absolutely walk the arithmetic
+        with you.
+        
+        The gpu line is steadier and duller, which is a mercy. The account runs a
+        pair of gpu instances for model inference at a flat four hundred dollars
+        per instance per month, and both were provisioned for the entire month —
+        no partial months, no spot interruptions, no mid-month additions. Two
+        instances at four hundred dollars each is eight hundred dollars per month,
+        and the reservation covering them has been in place for twelve months now,
+        which means the gpu line on last month's invoice reads eight hundred
+        dollars. There was a proposal in last month's architecture review to add a
+        third gpu instance starting this month; it was approved, but provisioning
+        has not happened yet, so it contributes nothing to last month and belongs
+        only in the talking-points section of the meeting, not the ledger.
+        
+        Storage is a flat line item of twelve thousand dollars per month under the
+        enterprise agreement — an all-you-can-eat tier negotiated when the data
+        retention policy ballooned. The tier has no usage-based component and last
+        month's stored volume, while larger than the month before, changes nothing
+        about the charge.
+        
+        Now the reconciliation noise, all of which you have already ruled out, and
+        each of which deserves one sentence in the meeting so nobody chases it
+        later. The provider's console shows a line for their managed kubernetes
+        control planes at ten dollars per cluster per month; those clusters run in
+        the platform team's account, which you do not manage, and their cost never
+        touches this ledger. The internal export lists a cache-service egress
+        spike; egress is bundled into the storage enterprise tier here and adds
+        zero. And finance's draft includes a credit from a previous billing error
+        on the gpu line; credits apply against the account balance at close, not
+        against workload cost, and the review tracks workload cost only.
+        
+        What you need for the morning, precisely: the cpu cost, the gpu cost, the
+        storage cost, the grand total, whether the month went over the fifty
+        thousand cap, and the headroom — the difference between the cap and the
+        actual total.
+        
+        This review lands in a sensitive month because the account is midway
+        through a cost program that finance has been watching with unusual
+        attention. Six months ago the bill ran comfortably under the cap with no
+        reservation at all, pure on-demand everything; then a pricing analysis
+        showed the compute workload had steadied into a pattern that reserved
+        capacity would reward, and the company locked in the flat commitment.
+        The quarters since have been a slow education in how reservations change
+        the shape of a bill — the compute line went from spiky to flat-plus-
+        overage, and the overage tails taught engineering that the six-thousand-
+        hour cushion is real but not bottomless. Tonight's numbers are the
+        cleanest expression yet of that new shape, which is exactly why you want
+        every line to survive scrutiny.
+        
+        Preparing for the review followed the monthly ritual. You pulled the
+        invoice the moment it closed, exported the CSV, and reconciled it line by
+        line against the tagging ledger — every resource stamped with a team
+        label, every label rolled up into the service lines you will present.
+        Discrepancies this month ran thin — one orphaned disk attributable to a
+        deleted cluster, since reassigned, and a rounding wobble of a few dollars
+        in taxes that finance told you to stop chasing. The deck itself is five
+        slides, one per line item plus the total, and the slide people will
+        actually discuss is the last one, where the total meets the cap and the
+        headroom either earns a nod or starts a conversation about trimming.
+        
+        The account carries furniture that never reaches the invoice's decision
+        lines. There is a savings-plan recommendation service you do not manage
+        that emails monthly suggestions, some of them genuinely useful, none of
+        them binding. A shadow-environment policy spins down unused staging
+        servers nightly, and its savings show up as absence rather than as a
+        line anyone reads. And the department's budget-versus-actual tracker
+        projects year-end positions from these monthly totals for the ops review
+        — downstream analysis, valuable, but not part of what the invoice itself
+        says.
+        
+        In the final hour before the review, the discipline that matters most is
+        re-verification of the arithmetic itself. You recompute the overage from
+        the raw hour counters rather than trusting the invoice's pre-baked
+        subtotal, because a subtotal that silently bundled the reservation would
+        double-count the flat fee and nobody downstream would catch it. You
+        re-read the reservation contract's clause on the six-thousand-hour
+        cushion to confirm the boundary is inclusive the way the platform's
+        billing guide claims, since a fencepost error at that boundary would move
+        the overage by exactly one hour's worth. You confirm the cap figure
+        against the finance memo rather than memory, because caps have changed
+        twice this year and the number in your head is the number from two memos
+        ago. Only when each line survives recomputation do you close the deck —
+        the same deck whose totals you are about to report, and the last thing
+        standing between your month and the record.
+        
+        The cap itself deserves a word, because its history explains the care
+        around tonight's headroom. The figure was set in a budget meeting eight
+        months ago as a hard guardrail, not a target — the difference matters
+        in every conversation that follows a review. Land under it comfortably
+        and the program continues as designed; brush against it and the
+        following week becomes a line-byline audit of what the money is buying;
+        exceed it and the deploy freeze engages automatically, a mechanism the
+        platform team wired in after a quarter in which goodwill alone failed
+        to stop the overage. Everyone involved understands the arithmetic of
+        tonight's total, which is why you recomputed it twice before opening
+        the deck and why the number you report will be the number the freeze
+        mechanism itself sees.
+        
+        A note on the enterprise tier before you close the deck, because tiers
+        are where invoice arithmetic goes to get complicated. The storage line
+        sits on the enterprise plan, which bundles the smaller charges that
+        would otherwise clutter the bill — the egress spike the export flagged
+        is absorbed, the support overhead is absorbed, and the bundling is
+        exactly why the storage figure reads as a clean flat number while its
+        raw components would tell a messier story. There was a quarter when
+        finance tried to unbundle the tier to see inside it, and the exercise
+        produced eleven spreadsheet tabs and no change to any decision, which
+        is why the tier now stands as a single honest line. The total you
+        report inherits that cleanliness, and the review will be better for
+        it.
+        
+        One final check completes the ritual. The invoice's own total line sits
+        at the bottom of page three, and you verify that the sum of your
+        presented lines meets it exactly — a presenter whose lines do not sum
+        to the invoice's own number has a tagging error somewhere, and it is
+        far better to find it at your desk tonight than to have the finance
+        analyst find it by calculator in the meeting. The check passes, as it
+        has every month since the tagging ledger matured, and the small
+        satisfaction of that consistency is the quiet reward of the whole
+        monthly exercise. The deck closes, the laptop sleeps, and tomorrow the
+        numbers speak for themselves with you merely narrating.
+
+        Failed cells (id + your observed value, correct values withheld):
+        {{bookmarks.cell_feedback}}
+
+        Prior table:
+        {{bookmarks.table}}
+
+        METHOD: re-read the task rules above, then re-derive each failed
+        entity. Use these exact entity ids:
+
+        - cpu_cost: cpu line total (flat 20000 reservation covering first 6000 hrs + 1000 overage hrs at 3/hr) [answer format: a whole number]
+        - gpu_cost: GPU line on the monthly invoice — 2 instances at a flat 400 each for the full month, and the invoice reports the monthly line (the 12-month reservation history is context only); what is the gpu line total? [answer format: a whole number]
+        - storage_cost: Storage rides the enterprise tier — a flat 12000 regardless of usage, with egress and support bundled in; what is the storage line total? [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 3 lines,
+        one per entity, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines.
+      model_overrides: { temperature: 0.0, max_tokens: 1600 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/table-feedback.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-04.yml"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$cell_feedback"
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-04.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s03_fix_2
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json fix_1 ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-04"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.fix_1.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage fix_1 --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-04"
+              working_dir: "."
+              fail_on_error: false
+
+    s03_fix_2:
+      generative_entity: "${models.m_heavy}"
+      prompt: |
+        ROLE: escalation solver. Two attempts wrong. Rebuild table from scratch.
+
+        Original task:
+                You are the engineering manager who owns the cloud bill for a mid-sized
+        SaaS company, and tomorrow morning is the monthly finance review where you
+        have to explain, line by line, why the infrastructure account looks the way
+        it looks. You have spent the evening reconciling the provider's invoice
+        draft against the internal usage export, and you now hold the complete
+        picture for last month. The finance partner is new, sharp, and allergic to
+        hand-waving, so you want the summary numbers computed exactly before the
+        meeting, with each rule applied the way the account is actually configured.
+        
+        The account runs under a spending cap of fifty thousand dollars per month,
+        a hard ceiling agreed with finance after the incident two quarters ago
+        when a runaway job quietly burned a week of budget in a weekend. If a
+        month's projected total would exceed the cap, workloads are throttled
+        before that happens — but as you will see, that clause never triggered
+        last month, and part of your preparation is confirming exactly that.
+        
+        Compute usage splits across two product lines, and the cpu line is the
+        complicated one because of the reservation. A year and a half ago the
+        company bought a reserved-instance block for compute: it is a flat
+        commitment of twenty thousand dollars per month, and in exchange the first
+        six thousand cpu-hours each month are covered by that flat fee — those
+        hours cost nothing beyond the reservation itself, no matter how fully
+        they are used. Any cpu-hours beyond six thousand in a month are billed at
+        the on-demand rate of three dollars per hour, on top of the flat
+        reservation. Last month the compute lines consumed seven thousand
+        cpu-hours in total. So the cpu cost is the flat twenty thousand, plus one
+        thousand hours of overage at three dollars an hour. One thousand hours at
+        three dollars is three thousand dollars, which makes the cpu line come to
+        twenty-three thousand dollars for the month. Write that down as the cpu
+        total, because the finance partner will absolutely walk the arithmetic
+        with you.
+        
+        The gpu line is steadier and duller, which is a mercy. The account runs a
+        pair of gpu instances for model inference at a flat four hundred dollars
+        per instance per month, and both were provisioned for the entire month —
+        no partial months, no spot interruptions, no mid-month additions. Two
+        instances at four hundred dollars each is eight hundred dollars per month,
+        and the reservation covering them has been in place for twelve months now,
+        which means the gpu line on last month's invoice reads eight hundred
+        dollars. There was a proposal in last month's architecture review to add a
+        third gpu instance starting this month; it was approved, but provisioning
+        has not happened yet, so it contributes nothing to last month and belongs
+        only in the talking-points section of the meeting, not the ledger.
+        
+        Storage is a flat line item of twelve thousand dollars per month under the
+        enterprise agreement — an all-you-can-eat tier negotiated when the data
+        retention policy ballooned. The tier has no usage-based component and last
+        month's stored volume, while larger than the month before, changes nothing
+        about the charge.
+        
+        Now the reconciliation noise, all of which you have already ruled out, and
+        each of which deserves one sentence in the meeting so nobody chases it
+        later. The provider's console shows a line for their managed kubernetes
+        control planes at ten dollars per cluster per month; those clusters run in
+        the platform team's account, which you do not manage, and their cost never
+        touches this ledger. The internal export lists a cache-service egress
+        spike; egress is bundled into the storage enterprise tier here and adds
+        zero. And finance's draft includes a credit from a previous billing error
+        on the gpu line; credits apply against the account balance at close, not
+        against workload cost, and the review tracks workload cost only.
+        
+        What you need for the morning, precisely: the cpu cost, the gpu cost, the
+        storage cost, the grand total, whether the month went over the fifty
+        thousand cap, and the headroom — the difference between the cap and the
+        actual total.
+        
+        This review lands in a sensitive month because the account is midway
+        through a cost program that finance has been watching with unusual
+        attention. Six months ago the bill ran comfortably under the cap with no
+        reservation at all, pure on-demand everything; then a pricing analysis
+        showed the compute workload had steadied into a pattern that reserved
+        capacity would reward, and the company locked in the flat commitment.
+        The quarters since have been a slow education in how reservations change
+        the shape of a bill — the compute line went from spiky to flat-plus-
+        overage, and the overage tails taught engineering that the six-thousand-
+        hour cushion is real but not bottomless. Tonight's numbers are the
+        cleanest expression yet of that new shape, which is exactly why you want
+        every line to survive scrutiny.
+        
+        Preparing for the review followed the monthly ritual. You pulled the
+        invoice the moment it closed, exported the CSV, and reconciled it line by
+        line against the tagging ledger — every resource stamped with a team
+        label, every label rolled up into the service lines you will present.
+        Discrepancies this month ran thin — one orphaned disk attributable to a
+        deleted cluster, since reassigned, and a rounding wobble of a few dollars
+        in taxes that finance told you to stop chasing. The deck itself is five
+        slides, one per line item plus the total, and the slide people will
+        actually discuss is the last one, where the total meets the cap and the
+        headroom either earns a nod or starts a conversation about trimming.
+        
+        The account carries furniture that never reaches the invoice's decision
+        lines. There is a savings-plan recommendation service you do not manage
+        that emails monthly suggestions, some of them genuinely useful, none of
+        them binding. A shadow-environment policy spins down unused staging
+        servers nightly, and its savings show up as absence rather than as a
+        line anyone reads. And the department's budget-versus-actual tracker
+        projects year-end positions from these monthly totals for the ops review
+        — downstream analysis, valuable, but not part of what the invoice itself
+        says.
+        
+        In the final hour before the review, the discipline that matters most is
+        re-verification of the arithmetic itself. You recompute the overage from
+        the raw hour counters rather than trusting the invoice's pre-baked
+        subtotal, because a subtotal that silently bundled the reservation would
+        double-count the flat fee and nobody downstream would catch it. You
+        re-read the reservation contract's clause on the six-thousand-hour
+        cushion to confirm the boundary is inclusive the way the platform's
+        billing guide claims, since a fencepost error at that boundary would move
+        the overage by exactly one hour's worth. You confirm the cap figure
+        against the finance memo rather than memory, because caps have changed
+        twice this year and the number in your head is the number from two memos
+        ago. Only when each line survives recomputation do you close the deck —
+        the same deck whose totals you are about to report, and the last thing
+        standing between your month and the record.
+        
+        The cap itself deserves a word, because its history explains the care
+        around tonight's headroom. The figure was set in a budget meeting eight
+        months ago as a hard guardrail, not a target — the difference matters
+        in every conversation that follows a review. Land under it comfortably
+        and the program continues as designed; brush against it and the
+        following week becomes a line-byline audit of what the money is buying;
+        exceed it and the deploy freeze engages automatically, a mechanism the
+        platform team wired in after a quarter in which goodwill alone failed
+        to stop the overage. Everyone involved understands the arithmetic of
+        tonight's total, which is why you recomputed it twice before opening
+        the deck and why the number you report will be the number the freeze
+        mechanism itself sees.
+        
+        A note on the enterprise tier before you close the deck, because tiers
+        are where invoice arithmetic goes to get complicated. The storage line
+        sits on the enterprise plan, which bundles the smaller charges that
+        would otherwise clutter the bill — the egress spike the export flagged
+        is absorbed, the support overhead is absorbed, and the bundling is
+        exactly why the storage figure reads as a clean flat number while its
+        raw components would tell a messier story. There was a quarter when
+        finance tried to unbundle the tier to see inside it, and the exercise
+        produced eleven spreadsheet tabs and no change to any decision, which
+        is why the tier now stands as a single honest line. The total you
+        report inherits that cleanliness, and the review will be better for
+        it.
+        
+        One final check completes the ritual. The invoice's own total line sits
+        at the bottom of page three, and you verify that the sum of your
+        presented lines meets it exactly — a presenter whose lines do not sum
+        to the invoice's own number has a tagging error somewhere, and it is
+        far better to find it at your desk tonight than to have the finance
+        analyst find it by calculator in the meeting. The check passes, as it
+        has every month since the tagging ledger matured, and the small
+        satisfaction of that consistency is the quiet reward of the whole
+        monthly exercise. The deck closes, the laptop sleeps, and tomorrow the
+        numbers speak for themselves with you merely narrating.
+
+        Failed cells (id + observed, withheld correct):
+        {{bookmarks.cell_feedback}}
+
+        METHOD: discard prior attempts. Re-derive EVERY entity answer from
+        the rules. Use these exact entity ids:
+
+        - cpu_cost: cpu line total (flat 20000 reservation covering first 6000 hrs + 1000 overage hrs at 3/hr) [answer format: a whole number]
+        - gpu_cost: GPU line on the monthly invoice — 2 instances at a flat 400 each for the full month, and the invoice reports the monthly line (the 12-month reservation history is context only); what is the gpu line total? [answer format: a whole number]
+        - storage_cost: Storage rides the enterprise tier — a flat 12000 regardless of usage, with egress and support bundled in; what is the storage line total? [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 3 lines,
+        one per entity, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines. No prose summaries.
+      model_overrides: { temperature: 0.0, max_tokens: 1600 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/table-feedback.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-04.yml"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$cell_feedback"
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-04.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json fix_2 ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-04"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.fix_2.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage fix_2 --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-04"
+              working_dir: "."
+              fail_on_error: false
+
+    s04_aggregate:
+      generative_entity: "${models.m_heavy}"
+      prompt: "deterministic-aggregate-noop"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/aggregate.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-04.yml --table-result ./docs/benchmarks/outputs/output/ha-table-result.json --out ./docs/benchmarks/outputs/output/ha-final.json"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-deterministic.py --artifact ./docs/benchmarks/outputs/output/ha-final.json --criteria /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-04.yml --out ./docs/benchmarks/outputs/output/ha-final-check.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s05_judge
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-final-check.json final ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-04"
+              working_dir: "."
+              fail_on_error: false
+          - skip_step: true
+
+    s05_judge:
+      generative_entity: "${models.m_judge}"
+      prompt: |
+        ROLE: blind auditor. See only task + result. No author knowledge.
+
+        Task objective: Compute monthly cloud cost with reserved block, overage rate, and flat lines under a cap.
+        Result: {{bookmarks.final_json}}
+
+        Answer EXACTLY 6 lines, nothing else:
+        KEYS: yes or no
+        VALUES: yes or no
+        FORMAT: yes or no
+        VERDICT: PASS or FAIL
+        REASON: one sentence
+        SCORE: 1-10
+
+        VERDICT must be PASS only if all three of KEYS, VALUES, FORMAT are yes.
+      model_overrides: { temperature: 0.0, max_tokens: 160 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/output/ha-final.json"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$final_json"
+        after_step_succeeds:
+          - save_to:
+              - "$verdict"
+              - "./docs/benchmarks/outputs/output/ha-verdict.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-judge.py ./docs/benchmarks/outputs/output/ha-verdict.txt ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-04"
+              working_dir: "."
+              fail_on_error: false
+
+    s06_end_fail:
+      generative_entity: "${models.m_heavy}"
+      prompt: "FAIL"
+      model_overrides: { temperature: 0.0, max_tokens: 8 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/failflag.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --final-check ./docs/benchmarks/outputs/output/ha-final-check.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s07_fail_trace
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s08_audit
+          - skip_step: true
+
+    s07_fail_trace:
+      generative_entity: "${models.m_heavy}"
+      prompt: "trace-only"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl end_fail fail case=hb-04"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s08_audit
+
+    s08_audit:
+      generative_entity: "${models.m_heavy}"
+      prompt: "leak-audit-noop"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/leak-audit.py --run-dir ./docs/benchmarks/outputs/output --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-04.yml"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s09_audit_pass
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s10_audit_leak
+          - skip_step: true
+
+    s09_audit_pass:
+      generative_entity: "${models.m_heavy}"
+      prompt: "audit-pass-trace"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl audit pass case=hb-04"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s_end
+
+    s10_audit_leak:
+      generative_entity: "${models.m_heavy}"
+      prompt: "audit-leak-trace"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl audit fail leak=true case=hb-04"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s_end
+
+    s_end:
+      generative_entity: "${models.m_heavy}"
+      prompt: "term"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - skip_step: true

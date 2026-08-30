@@ -1,0 +1,84 @@
+Phase 1 RULE SCAN:
+- Arrivals in order (FIFO) rule: Jobs are queued based on arrival time; if core is free, immediate start; if busy, wait.
+- Start-minute priority rule (Tie-breaker): Among waiting jobs, the one with the earliest original `start_minute` starts first; resumes outrank fresh jobs only upon a tie in `start_minute`.
+- Core occupancy rule: While HIGH runs, no LOW job runs (preemption/stop).
+- Checkpoint rule: LOW jobs checkpoint every 2 completed minutes of running time.
+- Checkpoint timing exception: A checkpoint lands instantly at the end of the 2nd minute; if an event (like HIGH arrival) happens exactly then, the checkpoint is considered landed and safe before preemption logic applies.
+- Preemption/Waste rule: If preempted after a checkpoint, only work past the last checkpoint is wasted. If preempted without completing a checkpoint cycle, all current running time is wasted.
+- Resume rule: Upon resumption (after HIGH), the job restarts from immediately after its last saved checkpoint.
+
+Phase 2 LEDGER WALK:
+
+**Event 0: Start LOW1**
+- State: Time=0. Core free. LOW1 arrives at min 0. Starts immediately.
+- Action: LOW1 runs minute 0 to 1.
+- Checkpoint status: 0/2 minutes completed. No checkpoint yet.
+- Status after Event 0: LOW1 running (1m elapsed). Queue empty.
+
+**Event 3: Start LOW2**
+- State: Time=3. Core idle? Yes, LOW1 finished at t=4. Wait, let's re-evaluate timeline carefully.
+- Correction on Timeline Logic:
+    - T=0: LOW1 starts (duration 4). Runs [0, 1).
+    - T=1: LOW1 completes minute 1. Total elapsed = 1. No checkpoint yet (needs 2 mins). Core busy until T=4.
+    - T=3: LOW2 arrives. Core is busy with LOW1. LOW2 enters queue.
+    - T=4: LOW1 completes minute 2 (Total elapsed = 2). Checkpoint lands instantly at T=4.
+        - Action: Checkpoint saved for LOW1.
+        - Status after Event 3/Transition to T=4+: LOW1 has checkpointed. Core busy until T=4. At exactly T=4, LOW1 finishes minute 2 and hits checkpoint. It is still "running" or just finished? The rule says: "a checkpoint lands the instant a LOW job finishes its 2nd running minute".
+        - Let's trace strictly by minutes as discrete blocks.
+        - Block 0-1: LOW1 runs. Elapsed=1.
+        - Block 1-2: LOW1 runs. Elapsed=2. At end of this block (T=4), Checkpoint occurs.
+        - So at T=4, LOW1 is safe with a checkpoint. It has completed 2 minutes. Remaining needed = 2 more.
+    - Wait, the prompt says "LOW1 runs 4 minutes".
+    - Let's re-read the "orientation" logic to ensure interpretation of "instant".
+    - Orientation: LOW1 ran 5 mins. Checked at min 2. HIGH arrived min 3 (after min 2 finished). Swap happened. Wasted 1 min (the unbanked one). This implies if checkpoint happens at T=4, and nothing interrupts between T=4 and T=6, it's safe.
+    - Back to Main Task:
+        - LOW1 runs [0, 1), [1, 2). At T=4, Checkpoint occurs. Low1 needs [2, 3) and [3, 4).
+        - LOW2 arrived at T=3. Waiting since T=3.
+    - State after Event "LOW2 Arrival": Time is effectively continuing. But let's list events strictly as they occur.
+    
+**Re-calculating Strictly Minute by Minute:**
+
+*   **T=0**: `LOW1` arrives/start minute 0. Core free. Starts LOW1.
+    *   State: `LOW1` running (elapsed 0). Queue: [].
+*   **T=3**: `LOW2` arrives/start minute 3. Core busy (`LOW1`). Adds to queue.
+    *   State: `LOW1` running (elapsed ~1, nearing end of min 1? No, starts at 0, runs 4 mins -> finishes at T=4).
+    *   Queue: [`LOW2`] (start_min=3).
+*   **T=4**: End of LOW1's 2nd minute. Checkpoint logic triggers.
+    *   Rule: "checkpoint lands the instant a LOW job finishes its 2nd running minute, even if that instant is exactly when HIGH arrives".
+    *   Here no HIGH at T=4 yet. High arrives at T=5.
+    *   Action: `LOW1` saves checkpoint. Time advances to next second/block.
+    *   State: `LOW1` has completed 2 mins. Checkpointed. Needs 2 more. Queue: [`LOW2`].
+*   **T=5**: HIGH arrives (duration 4, starts T=5).
+    *   Rule: "HIGH... instantly preempting whatever LOW job is running".
+    *   At T=5, `LOW1` is in its 3rd minute (running [4,5)). It has NOT reached a checkpoint yet (next one at T=6).
+    *   Action: Preempt `LOW1`. `HIGH` starts.
+    *   Waste calculation for `LOW1`: Work done since last checkpoint. Last checkpoint was at T=4. Current time T=5. Work in progress = 1 minute. This 1 minute is wasted.
+    *   State: Core running `HIGH`. Queue remains [`LOW2`] (waiting). Note: Does `LOW1` re-enter queue? No, it's preempted and "paused" or discarded until resume? Rule: "on preemption the work past the last checkpoint is wasted". It implies state is reset to after checkpoint. So at T=5+, `LOW1` effectively restarts from 0 (relative to its own clock) but keeps priority based on start minute 0.
+    *   Queue check: Is there anyone waiting? Yes, `LOW2`. But rule: "while HIGH runs nothing else runs". So queue sits idle.
+
+*   **T=9**: `HIGH` finishes (started T=5, duration 4). Core becomes free.
+    *   State: `HIGH` done. Queue has [`LOW2`] and suspended/resumable `LOW1`.
+    *   Rule: "arrivals in order... resumed LOW outranks a fresh one at any tie".
+    *   Comparing `LOW1` (resumed) vs `LOW2` (fresh/waiting).
+    *   Tie-breaker: Start minutes. `LOW1`: 0. `LOW2`: 3.
+    *   Even though `LOW1` is resumed, the rule says "a LOW whose start minute arrives while the core is busy simply waits... a resumed LOW outranks a fresh one at any tie". It does not say "resumed outranks non-resumed regardless of start time". The primary sort key is Start Minute.
+    *   Comparison: `LOW1` (Start 0) vs `LOW2` (Start 3). `LOW1` wins on the primary key (Start Minute).
+    *   Action: Core starts Resuming `LOW1`.
+    *   State: `LOW1` resumes. It needs to complete its remaining minutes.
+        - Original total: 4 mins. Checkpointed at T=4 (end of min 2). Wasted the minute from T=4 to T=5.
+        - So it has done 0 productive minutes towards the *new* run since resume? Or does it resume at "minute 2" status needing 2 more?
+        - Text: "after resume a job only redoes work past its last bank... so a job with 4 of 5 minutes banked resumes with just 1 minute left." -> Meaning if checkpoint was at time T_checkpoint, and job needed T_total - T_checkpoint.
+        - `LOW1` needs [2,3) and [3,4). Total 2 mins to go.
+    *   Queue: [`LOW2`] (waiting since T=3).
+
+*   **T=T+2** (which is T=6): `LOW1` completes its 1st minute of resumed run. (Total elapsed since resume = 1).
+*   **T=T+4** (which is T=8): `LOW1` completes 2nd minute of resumed run. Checkpoint lands at end of this minute (T=8).
+    *   State: `LOW1` has checkpointed again. Needs 0 more? Wait, total duration was 4 mins.
+    - Run 1: [0, 2) -> Checkpoint.
+    - Interrupted [2, 5) (HIGH ran). Waste = 3 minutes? Or just the active minute?
+    - Let's re-read waste rule carefully: "on preemption the work past the last checkpoint is wasted and redone".
+    - Checkpoint at T=4. Preemption at T=5. Work done between T=4 and T=5 is 1 minute. That 1 minute is wasted.
+    - So `LOW1` effectively resets its progress clock to 0 (relative to the checkpoint). It has "completed" the first 2 minutes logically, but physically needs to run them again? No, "redone".
+    - If I check a box at 50%, and lose power, I have to do that 50% again.
+    - So `LOW1` runs: Minute A (redo of min 3), Minute B (redo of min 4). Checkpoint lands after Minute B (at T=8+2 = T=10? No).
+    - Let's track absolute time

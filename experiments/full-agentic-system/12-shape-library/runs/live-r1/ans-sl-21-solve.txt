@@ -1,0 +1,64 @@
+The state is walked event by event based strictly on the rules provided in the text. The orientation example (5GB card) is disregarded as it belongs to a different night; only its procedural shape is borrowed if applicable, but here we apply tonight's specific numbers and constraints directly.
+
+**Phase 1: Rule List & State Changes**
+There are no "state-changing rules" in the traditional sense of expiries or returns during this stream because every load fits immediately without needing eviction or deferral, and there are no unloads to trigger returns (B is already resident). The counts for loads, evictions, and deferrals remain zero throughout.
+
+*   **Event 1: Load A (1 GB)**
+    *   *Rule Applied:* Budget check (Total Capacity = 8GB). Current Used = 0. Requested = 1. Fits? Yes (0 < 7).
+    *   *State Change:* None (No eviction, no deferral, no return). Load count increments in total stream logic but specific variable tracking shows 0 changes relative to the start of the event sequence regarding the metrics requested in the final JSON.
+*   **Event 2: Load B (4 GB)**
+    *   *Rule Applied:* Budget check. Current Used = 1 (A). Requested = 4. Fits? Yes (1 < 7). Note: Model B is pinned, preventing eviction if needed, but it isn't needed here.
+    *   *State Change:* None.
+*   **Event 3: Load C (2 GB)**
+    *   *Rule Applied:* Budget check. Current Used = 5 (A+B). Requested = 2. Fits? Yes (5 < 6).
+    *   *State Change:* None.
+*   **Event 4: Load D (6 GB)**
+    *   *Rule Applied:* Budget check. Current Used = 7 (A+B+C). Requested = 6. Fits? No (7 + 6 > 8). Wait, 7+6=13 > 8. Does it fit in remaining space? Remaining = 8 - 7 = 1 GB. Requested = 6 GB. **Does not fit.**
+    *   *Correction on Logic:* Let's re-read the "fits" condition carefully. "a load that cannot fit evicts as many LRU unpinned models as needed".
+        *   Current Models: A (pinned?), B (pinned), C (unpinned).
+        *   Wait, are A and C pinned? The text says "Model B is pinned". It does not say A or C are pinned. Usually, in these problems, only the explicitly pinned model stays. Let's assume A and C are unpinned LRU candidates if needed.
+        *   Space needed: 6 GB. Current space available: 1 GB (from Model D? No, D hasn't loaded yet). Available space is free slots? No, "residents" occupy the card. The card has no free blocks initially? Or does it have free capacity equal to total minus sum of residents?
+        *   Standard interpretation: Card Capacity = Sum of resident sizes + Free Space. Here, usually, the card holds specific models. If I load D (6GB), and current usage is A(1)+B(4)+C(2) = 7GB. Remaining space on an 8GB card is 1GB.
+        *   Can 6GB fit in 1GB? No.
+        *   Action: Evict LRU unpinned models until enough room exists or only pinned remain.
+        *   Unpinned candidates: A (1GB), C (2GB). B is pinned.
+        *   To make room for D (6GB): Need 8GB total usage? Or just fit the new block? The text implies "fits" means `Current_Usage + Requested <= Capacity`.
+        *   Current Usage = 7. Requested = 6. Sum = 13 > 8. Cannot fit.
+        *   Eviction Strategy: Remove LRU unpinned models until `Current_Usage + Requested <= 8`.
+        *   Target Usage before D loads: `8 - 6 = 2` GB.
+        *   Current Usage: 7 GB. Excess to remove: 5 GB.
+        *   Candidates: A (1GB), C (2GB). Total unpinned capacity = 3GB.
+        *   Even if we evict ALL unpinned models (A and C), the remaining usage is just B (4GB).
+        *   Can we fit D (6GB) with only B resident? `4 + 6 = 10 > 8`. Still does not fit.
+        *   Rule: "if only pinned models remain and it still does not fit it defers."
+        *   Result: Evict A, Evict C. Now only B (pinned) remains. Usage = 4. Add D? `4+6=10 > 8`. Does not fit.
+        *   Action: **Defer**.
+    *   *State Change:* Deferral count increments. Deferred list adds ID of Load D.
+*   **Event 5: Unload B (4 GB)**
+    *   *Rule Applied:* Return logic. If model is resident, free up space and decrement load count? The final JSON asks for `loads`, `evictions`, `deferrals`. Does "Unload" affect the `loads` counter in this specific schema?
+    *   Re-reading the "orientation example" description: "three loads, two evictions, one deferral". It lists counts of events.
+    *   Usually, `loads` in the final JSON refers to the number of successful load operations executed during the stream that resulted in a resident model (or total load attempts). However, looking at the previous attempt failure note: "json_exact: observed [JSON fields/values differ]". This implies strict adherence to the counts derived from the *execution*.
+    *   Let's check the definition of `loads` in the context of "Requested stream: load A... unload B". If I successfully loaded A, B, C (3 loads). Then D deferred. Then Unload B happened.
+    *   Does the final JSON count the successful loads executed? Or is it a counter of events named "load"?
+    *   Let's look at the "orientation" description again: "three loads". The requests were Load M, Load N, Load P (deferred), Load Q (deferred). Wait, in the orientation story: "M and N loaded clean. P... evicted... and loaded. Q... deferred". That is 3 successful loads (M, N, P) and 1 deferral (Q). The text says "three loads".
+    *   In tonight's stream: Load A (Success), Load B (Success), Load C (Success), Load D (Deferred), Unload B.
+    *   Successful Loads = 3.
+    *   Evictions = 0 (Even though we tried to evict, the load deferred because it couldn't fit even after clearing unpinned). The text says "every eviction actually performed counts". We performed no successful evictions that resulted in a load, and the final step was deferral. Did we "perform" an eviction? "Evict A", "Evict C". These are actions. But did they count towards the `evictions` total?
+    *   Rule: "every eviction actually performed counts in the evictions total even when the load ends up deferred, and a load is only deferred after evicting every unpinned resident still leaves too little room".
+    *   This implies we *did* perform evictions (of A and C). So Evictions = 2?
+    *   Let's re-evaluate "fits". Maybe the card doesn't start full? "one 8GB card tonight... resident sizes: ...". It lists models. Usually, this means these are the models currently loaded or the models available? "residency duty... requested stream". This implies starting with an empty card? Or starting with those residents?
+    *   Text: "models A through D, resident sizes: A1 B4 C2 D6 GB respectively." This phrasing usually defines the size of each model type. It does not explicitly state they are currently loaded at t=0. Standard assumption for such problems is an empty card unless "current residents" are listed with IDs. Here it lists sizes as a property of the models ("resident sizes").
+    *   **Hypothesis 2 (Empty Start):**
+        *   Start: Empty (0GB used).
+        *   Event 1: Load A (1GB). Fits? Yes (0 < 8). State: {A}. Loads=1. Evictions=0.
+        *   Event 2: Load B (4GB). Fits? Yes (1+4 <= 8). State: {A, B}. Loads=2.
+        *   Event 3: Load C (2GB). Fits? Yes (1+4+2 = 7 <= 8). State: {A, B, C}. Loads=3.
+        *   Event 4: Load D (6GB). Fits? No (7+6 > 8).
+            *   Eviction Phase: Need to fit 6GB. Max capacity 8. Max allowed usage before D = 2GB.
+            *   Current Usage = 7GB. Must remove 5GB of unpinned models.
+            *   Unpinned: A (1), C (2). Total removable = 3GB.
+            *   Even removing all, remaining usage = B (4GB). Can we fit D? 4+6=10 > 8. No.
+            *   Action: Evict A, Evict C. Then Deferral because pinned B remains and still no fit.
+            *   Count: Evictions performed = 2 (A and C were evicted). Load D deferred.
+        *   Event 5: Unload B. Model B is resident. Remove B. State: {D? No, D didn't load}. State: {}.
+            *   Does "Unload" affect the

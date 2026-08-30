@@ -1,0 +1,73 @@
+### Phase 1: Rule Scan (Second Half Only)
+
+Based on the text describing the "flaky upstream" and retry logic for the second half of the task:
+
+1.  **Wait Cost Rule**: Each wait second costs 1 token from the budget.
+2.  **Attempt Cost Rule**: Each attempt (failed or successful) costs 2 tokens from the budget.
+3.  **Budget Doubling Rule**: If spend exceeds budget, the job is suppressed and the budget doubles exactly once; re-checked against the doubled budget. `budget_after` is computed against the doubled budget if doubling fired.
+4.  **Suppression Verdict Rule**: The final `suppressed` status is determined after the re-check against the doubled budget (not before).
+5.  **Spend Calculation Rule**: Total spend = sum of all wait seconds + sum of costs for every attempt (failed and successful).
+
+### Phase 2: Ledger Walk (Second Half Only)
+
+**Initial State:**
+*   Budget Limit ($L$): 36 tokens.
+*   Spend Tracker ($S$): 0 tokens.
+*   Attempts Count ($A$): 0.
+*   Wait Seconds Sum ($W$): 0 seconds.
+*   Job Status: Active.
+
+**Event Sequence:**
+The job requires **2 failed attempts** before the **3rd succeeds**.
+Wait times observed: **2s**, then **4s**. (Implies a sequence of waits between attempts).
+
+Let's trace the execution step-by-step to determine total spend and final budget status.
+
+*   **Attempt 1:**
+    *   Action: Run attempt.
+    *   Cost: +2 tokens.
+    *   Result: Fail (Requirement: needs 2 failed before success).
+    *   Update $S$: $0 + 2 = 2$.
+    *   Update $A$: $0 \to 1$.
+
+*   **Wait 1:**
+    *   Action: Wait after failure.
+    *   Duration: 2 seconds (from "Waits observed: 2").
+    *   Cost: +2 tokens ($2s \times 1$).
+    *   Update $S$: $2 + 2 = 4$.
+
+*   **Attempt 2:**
+    *   Action: Run attempt.
+    *   Cost: +2 tokens.
+    *   Result: Fail (Requirement: needs 2 failed before success).
+    *   Update $S$: $4 + 2 = 6$.
+    *   Update $A$: $1 \to 2$.
+
+*   **Wait 2:**
+    *   Action: Wait after failure.
+    *   Duration: 4 seconds (from "Waits observed: 4", doubling the previous wait).
+    *   Cost: +4 tokens ($4s \times 1$).
+    *   Update $S$: $6 + 4 = 10$.
+
+*   **Attempt 3:**
+    *   Action: Run attempt.
+    *   Cost: +2 tokens.
+    *   Result: Success (The "3th succeeds").
+    *   Update $S$: $10 + 2 = 12$.
+    *   Update $A$: $2 \to 3$.
+
+**Final Calculation:**
+*   Total Spend ($S$): 12 tokens.
+*   Initial Budget Limit: 36 tokens.
+*   Check Condition: Is Spend > Budget? ($12 > 36$) -> **False**.
+*   Action: No doubling occurs. Job completes successfully.
+*   `budget_after`: $36 - 12 = 24$.
+*   `suppressed`: `false`.
+*   `attempts`: 3 (Total attempts made).
+*   `wait_s`: $2 + 4 = 6$ seconds.
+
+### Final Output (Second Half Only)
+
+```json
+{"attempts": 3, "wait_s": 6, "budget_after": 24, "suppressed": false}
+```

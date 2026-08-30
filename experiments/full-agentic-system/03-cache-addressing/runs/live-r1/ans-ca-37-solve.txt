@@ -1,0 +1,62 @@
+The task requires a strict adherence to the provided rules for the specific events listed ("tonight's numbers"), ignoring the narrative examples ("orientation story") which belong to a different context with different parameters (5GB card vs 8GB card).
+
+**Phase 1: Rule Analysis (Tonight's Context)**
+Based on the text "arrivals in order, budgets and limits exactly as stated... read every rule twice", here are the active rules for the 8GB card scenario:
+1.  **Capacity Check:** A load request is accepted only if `Current_Used + Request_Size <= Card_Total (8GB)`.
+2.  **Eviction Trigger:** If a load cannot fit, unpinned models are evicted starting from the Least Recently Used (LRU).
+3.  **Pinned Protection:** Pinned models (`model B`) can never be evicted.
+4.  **Multi-Model Eviction:** A single load request that does not fit will trigger evictions of *all* necessary unpinned LRU models until space is available or only pinned models remain.
+5.  **Deferral Condition:** If after exhausting all unpinned models, the remaining capacity (occupied by pinned models) is still insufficient for the requested size, the load is deferred.
+6.  **No-Op Unload:** An unload request for a model not currently resident has no effect on state.
+7.  **State Persistence:** State changes are cumulative; previous loads remain unless explicitly evicted or unloaded.
+
+**Phase 2: Ledger Walk (Tonight's Events)**
+*Initial State:* Card = 8GB Used, Free = 0GB. Models = []. Pinned = {B}.
+
+1.  **Event: Load A (2 GB)**
+    *   Check: `0 + 2 <= 8`. Fits.
+    *   Action: Add A to resident set.
+    *   State: Used=2, Free=6. Resident={A}. Pinned={B}.
+
+2.  **Event: Load B (2 GB)**
+    *   Check: `2 + 2 <= 8`. Fits.
+    *   Action: Add B to resident set. Note: B is pinned.
+    *   State: Used=4, Free=4. Resident={A, B}. Pinned={B}.
+
+3.  **Event: Load C (2 GB)**
+    *   Check: `4 + 2 <= 8`. Fits.
+    *   Action: Add C to resident set.
+    *   State: Used=6, Free=2. Resident={A, B, C}. Pinned={B}.
+
+4.  **Event: Load D (7 GB)**
+    *   Check: `6 + 7 = 13 > 8`. Does not fit.
+    *   Eviction Logic: Need space for 7GB. Current free is 2GB. Shortfall = 5GB.
+    *   Available to evict: Unpinned models {A, C}. (B is pinned).
+    *   LRU Order of unpinned: A was loaded first, then C. So A is LRU, then C.
+    *   Evict A (2GB): New Free = 2 + 2 = 4GB. Used = 6 - 2 = 4GB. Resident={B, C}.
+    *   Check again: `4 + 7 = 11 > 8`. Still doesn't fit. Shortfall = 4GB.
+    *   Evict C (2GB): New Free = 4 + 2 = 6GB. Used = 4 - 2 = 2GB. Resident={B}.
+    *   Check again: `2 + 7 = 9 > 8`. Still doesn't fit. Shortfall = 1GB.
+    *   Available to evict: None (Only B remains, and it is pinned).
+    *   Result: Cannot fit even after emptying all unpinned models.
+    *   Action: **Deferral**. D goes to deferred list.
+    *   State: Used=2, Free=6. Resident={B}. Pinned={B}.
+
+5.  **Event: Unload B (2 GB)**
+    *   Check: Is B resident? Yes.
+    *   Action: Remove B from resident set. Update counters.
+    *   State: Used = 2 - 2 = 0GB. Free = 6 + 2 = 8GB. Resident={}. Pinned={B} (conceptually, but empty).
+
+**Final Calculation:**
+*   Loads attempted: A, B, C, D. All successfully entered the system (A, B, C loaded; D deferred).
+    *   Count of successful loads (`loads`): 3 (A, B, C).
+*   Evictions performed during Load D: A and C were evicted.
+    *   Count of evictions (`evictions`): 2.
+*   Deferrals: D was deferred.
+    *   Count of deferrals (`deferrals`): 1.
+*   Deferred List IDs: ["D"].
+
+**JSON Output:**
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

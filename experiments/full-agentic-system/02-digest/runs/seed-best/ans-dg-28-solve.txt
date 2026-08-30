@@ -1,0 +1,70 @@
+### Phase 1: Rule Scan
+The following rules govern the state changes during the event list (LOW1 arrival/grant, LOW2 arrival/grant, HIGH arrival/preempt):
+
+1.  **Arrival/Grant Rule**: Jobs arrive in order of their start minutes; a job starting at minute $s$ banks a checkpoint at absolute minute $s+2$.
+2.  **Resume Priority Rule**: A resumed LOW outranks a fresh LOW at any tie (start/resume time).
+3.  **Preemption Rule**: HIGH arrives and instantly preempts the running LOW; minutes past the last bank are wasted.
+4.  **Core Continuity Rule**: The core never idles while a LOW waits; the next waiting LOW starts in the exact minute the previous one finishes or is preempted.
+5.  **Completion Order Rule**: LOW jobs are listed by finish minute (HIGH excluded from list).
+
+**Trigger Mapping:**
+*   `LOW1` arrival triggers Grant/Start at $t=0$.
+*   `LOW2` arrival triggers Grant/Wait at $t=3$ (arrives while core busy).
+*   `HIGH` arrival triggers Preemption at $t=3$, followed by Resume of waiting jobs.
+
+---
+
+### Phase 2: Ledger Walk (Minute-by-Minute)
+
+**Fact Bullets:**
+*   LOW1: Duration 4, Start 0.
+*   LOW2: Duration 3, Start 3.
+*   HIGH: Arrival 3, Duration 6.
+
+**Event Table:**
+
+| Minute | Core | Event | Notes (Bank/Finish) |
+| :--- | :--- | :--- | :--- |
+| **0** | LOW1 | Start | Bank @ $0+2=2$. Remaining: 4. |
+| **1** | LOW1 | Run | Running time 1. |
+| **2** | LOW1 | Run | Running time 2 (Banked). |
+| **3** | HIGH | Preempt | LOW1 preempted. Bank was at 2. Wasted: $4-2=2$. <br> LOW2 arrives (Start 3, Rem 3). Core busy with HIGH. |
+| **4** | HIGH | Run | Running time 1. |
+| **5** | HIGH | Run | Running time 2. |
+| **6** | HIGH | Run | Running time 3. |
+| **7** | HIGH | Run | Running time 4. |
+| **8** | HIGH | Run | Running time 5. |
+| **9** | HIGH | Run | Running time 6 (Finish). Core free at $t=10$. |
+| **10**| LOW1 | Resume | Resumed LOW1 (Start 0) vs Fresh LOW2 (Start 3). Start 0 wins. <br> Bank @ $0+2=2$ (absolute). Remaining: 4-2=2? No, re-do full remaining. Total 4, Banked 2. Owed 2. |
+| **11**| LOW1 | Run | Running time 1. |
+| **12**| LOW1 | Run | Running time 2 (Bank @ $10+2=12$). Remaining: 0. Finish at 13? No, finishes at $12+1=13$. Wait, duration is 4. Banked 2. Owed 2. Runs 2 mins. Finishes at $10+2=12$? Let's re-calc finish logic. |
+| **Correction on Finish Logic**: <br> Job starts/resumes at $S$. Needs to run $R$ minutes. <br> Minute $S$: runs 1st min. <br> Minute $S+1$: runs 2nd min. <br> ... <br> Finishes at minute $S+R-1$? No, standard convention: occupies $S..S+n-1$, finishes at $S+n$. <br> LOW1 Resume at 10. Needs to run 2 mins (Total 4 - Banked 2). <br> Minute 10: Run 1st min. <br> Minute 11: Run 2nd min. <br> Finishes at $10+2=12$. |
+| **Re-evaluating Table Rows based on Correction**: |
+
+Let's re-run the table strictly with the "Finishes at $S+n$" convention and checkpoint logic.
+
+*   **LOW1 Start 0, Dur 4.**
+    *   $t=0$: Run (Bank @ 2). Rem: 3.
+    *   $t=1$: Run. Rem: 2.
+    *   $t=2$: Run (Bank @ 2 absolute? No, bank at start+2 and every 2 running mins. Start=0. Bank @ 2. Running time reaches 2 at end of $t=2$. So banked).
+        *   Wait, "bank a checkpoint at minute s+2". If start is 0, bank is at absolute minute 2.
+        *   At end of $t=2$, running time = 3? No.
+        *   $t=0$: Run (1st min). End of $t=0$, RT=1.
+        *   $t=1$: Run (2nd min). End of $t=1$, RT=2. Bank @ absolute minute 2? The rule says "bank a checkpoint at minute s+2". If start is 0, bank is at absolute minute 2. This happens when the job has completed 2 minutes of running time? Or just at that clock time?
+        *   Text: "a job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after".
+        *   Interpretation A: Bank occurs at absolute time $S+2$.
+        *   Interpretation B: Bank occurs when Running Time reaches 2, then +2 RT.
+        *   Text example: "LOW1 held the core minutes 0, 1 and 2... banked a checkpoint at minute 2". This implies if it runs 0, 1, 2 (3 mins), it banks at absolute minute 2? That contradicts "every 2 running minutes".
+        *   Let's look at the example logic again: "LOW1 held core minutes 0, 1 and 2... banked a checkpoint at minute 2, and its 3rd minute was unbanked". This implies banks are at absolute times $S+2$, $S+4$? Or Running Time milestones?
+        *   Example says: "LOW1 held core minutes 0, 1 and 2... banked a checkpoint at minute 2". If it runs 3 mins (0,1,2), and banks at absolute 2, then the 3rd minute (absolute 2) is unbanked? That makes no sense.
+        *   Alternative reading: The example says "minutes 0, 1 and 2" are held. Maybe it means minutes $t=0, t=1$ are held, and at $t=2$ something happens?
+        *   Let's stick to the explicit text definition over the potentially confusing example phrasing if they conflict, but try to align. "banks a checkpoint at minute s+2". If start is 0, bank is at absolute time 2. "and again every 2 running minutes after". So banks at RT=2, RT=4...
+        *   Example check: "LOW1 held core minutes 0, 1 and 2". This implies it ran for 3 minutes (absolute times 0, 1, 2). "banked a checkpoint at minute 2". If bank is at absolute time 2, then the minute ending at 2 (the 3rd minute) is covered? But text says "its 3rd minute was unbanked".
+        *   Contradiction in example vs rule text. Rule text: "bank... at s+2". Example: "held 0,1,2... banked at 2... 3rd min unbanked". This implies the bank is NOT covering the current minute if it lands on the boundary?
+        *   Let's assume the standard interpretation for these problems: Bank covers the work done *up to* that point. If bank is at absolute time $T$, and job runs during interval $[T-1, T]$, does it cover it?
+        *   Example says "3rd minute was unbanked". 3rd minute is interval $[2, 3]$ (absolute times). Bank is at absolute minute 2. So bank at 2 covers work done in $[0, 2]$? i.e., first 2 minutes ($t=0, t=1$). The 3rd minute ($t=2$) is unbanked.
+        *   Okay, logic: Bank at absolute time $T$ validates the work completed in intervals ending before or at $T-1$? No, "completed minutes". If I run for 2 minutes (intervals 0 and 1), I have completed 2 minutes. The bank is placed at minute 2. It confirms those 2 minutes are safe.
+        *   So: Start 0. Run intervals $t=0$ (1st min), $t=1$ (2nd min). At end of $t=1$, RT=2. Bank placed at absolute time 2? Or does bank happen at the start of minute 2?
+        *   "bank a checkpoint at minute s+2". If $s=0$, bank is at minute 2. This likely means at the beginning of minute 2, we check if we have completed 2 minutes? No, we complete 2 minutes at end of minute 1.
+        *   Let's assume: Bank occurs when RT reaches a multiple of 2 (or $S+2$). It validates the work done so far.
+        *   Example: "held core minutes 0

@@ -1,0 +1,71 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the "orientation story" provided as a reference for rule shape (which must be applied to tonight's numbers), here are the rules that change state during an event or claim:
+
+1.  **Arrival Rule**: Upon arrival of an attempt, `attempts` increments by 1; if it is a wait-based retry, `wait_s` increases by the duration specified in the event (3s, then doubling).
+2.  **Cost Accumulation Rule**: Every attempt adds its specific cost to `spend`; every second of waiting adds 1 to `spend`. Total `spend` = sum(attempt costs) + sum(wait seconds).
+3.  **Budget Check Rule**: After updating `spend`, compare against the current active budget limit. If `spend > budget`, trigger a "Double Budget" event (budget doubles exactly once), then re-evaluate suppression status immediately using the new doubled budget.
+4.  **Suppression Rule**: If, after any necessary doubling and re-check, `spend` still exceeds the budget, set `suppressed` to true; otherwise, set `suppressed` to false. The job is suppressed only if it fails this final check.
+5.  **Final State Calculation Rule**: Calculate `budget_after` as (Current Budget) - (Total Spend). This value represents the remaining capacity after all events are processed.
+
+**Triggers:**
+*   Event: "Arrival of Attempt" -> Triggers Rules 1, 2, 3, 4, 5.
+*   Event: "Budget Exceeded" -> Triggers Rule 3 (Doubling) and Rule 4 (Re-evaluation).
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   `attempts`: 0
+*   `wait_s`: 0
+*   `budget_limit`: 30
+*   `spend`: 0
+*   `suppressed`: false (default)
+
+**Event 1: First Attempt Arrives**
+*   **Action**: Increment attempts. Add wait cost and attempt cost to spend.
+*   **Wait**: 3s. Cost = 3 tokens.
+*   **Attempt Cost**: 3 tokens.
+*   **New Spend**: $0 + 3 (\text{wait}) + 3 (\text{attempt}) = 6$.
+*   **Budget Check**: Is $6 > 30$? No.
+*   **State Update**: `attempts`=1, `wait_s`=3, `spend`=6.
+
+**Event 2: Second Attempt Arrives (Failed)**
+*   **Action**: Increment attempts. Add wait cost and attempt cost to spend.
+*   **Wait**: Doubles from previous (3s -> 6s). Cost = 6 tokens.
+*   **Attempt Cost**: 3 tokens.
+*   **New Spend**: $6 (\text{prev}) + 6 (\text{wait}) + 3 (\text{attempt}) = 15$.
+*   **Budget Check**: Is $15 > 30$? No.
+*   **State Update**: `attempts`=2, `wait_s`=$3+6=9$, `spend`=15.
+
+**Event 3: Third Attempt Arrives (Failed)**
+*   **Action**: Increment attempts. Add wait cost and attempt cost to spend.
+*   **Wait**: Doubles from previous (6s -> 12s). Cost = 12 tokens.
+*   **Attempt Cost**: 3 tokens.
+*   **New Spend**: $15 (\text{prev}) + 12 (\text{wait}) + 3 (\text{attempt}) = 30$.
+*   **Budget Check**: Is $30 > 30$? No (Spend equals budget, does not exceed).
+*   **State Update**: `attempts`=3, `wait_s`=$9+12=21$, `spend`=30.
+
+**Event 4: Fourth Attempt Arrives (Success)**
+*   **Action**: Increment attempts. Add wait cost and attempt cost to spend.
+*   **Wait**: Doubles from previous (12s -> 24s). Cost = 24 tokens.
+*   **Attempt Cost**: 3 tokens.
+*   **New Spend**: $30 (\text{prev}) + 24 (\text{wait}) + 3 (\text{attempt}) = 57$.
+*   **Budget Check**: Is $57 > 30$? Yes. Trigger Budget Doubling.
+    *   New Budget Limit: $30 \times 2 = 60$.
+    *   Re-check Spend against New Budget: Is $57 > 60$? No.
+*   **Suppression**: Since spend (57) is not greater than the doubled budget (60), `suppressed` remains false.
+*   **Final Calculation**:
+    *   `attempts`: 4
+    *   `wait_s`: $3 + 6 + 12 + 24 = 45$
+    *   `budget_after`: $60 (\text{doubled budget}) - 57 (\text{total spend}) = 3$.
+    *   `suppressed`: false
+
+---
+
+### Final Answer
+
+```json
+{"attempts": 4, "wait_s": 45, "budget_after": 3, "suppressed": false}
+```

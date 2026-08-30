@@ -1,0 +1,51 @@
+LOW1 (4 min, start 0), LOW2 (3 min, start 3), HIGH (arrives 5, dur 4)
+minute | core | event
+0 | LOW1 | LOW1 starts; banks at 2
+1 | LOW1 | LOW1 runs; banked @2 pending
+2 | LOW1 | LOW1 completes minute 2 (banked); finishes @3. LOW2 waits (start 3).
+3 | LOW2 | LOW2 starts (resumes/waiting logic: start aligns with finish of prev or arrival? Task says "starts at 3". Core goes to waiting LOW2). LOW2 banks at 5.
+4 | LOW2 | LOW2 runs; banked @5 pending.
+5 | HIGH | HIGH arrives. Preempts LOW2 (which had run minutes 3,4=2 mins). Bank was at 5. Minutes past last bank = 0? Wait: "starts or resumes at minute s banks a checkpoint at minute s+2". LOW2 starts at 3. Banks at 5. HIGH arrives at 5. Bank lands exactly on arrival -> nothing wasted per rule ("a bank landing exactly on HIGH's arrival minute still counts").
+   *Correction*: Re-eval preemption cost.
+   Rule: "On preemption the work past the last checkpoint is wasted". Checkpoint banks at s+2 and every 2 running mins after.
+   LOW2 starts @3. Runs minute 3 (1st), runs minute 4 (2nd). Bank triggers at 5 (start+2).
+   HIGH arrives @5.
+   Does the bank happen *before* preemption? "a bank landing exactly on HIGH's arrival minute still counts". Yes, it counts.
+   So wasted = 0 for LOW2.
+   Wait, previous example logic: "LOW1 held core minutes 0,1,2, banked at 2... swap came, so 1 minute wasted". In that example, start=0. Bank at 2. HIGH arrives at 3? No, in example HIGH arrived at 3, ran to 5.
+   Let's re-read the specific rule text carefully: "A job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after".
+   Example trace provided in prompt for orientation: LOW1 (7 min) start 0. Runs 0,1,2. Bank @2. HIGH arrives 3. Preemption happens. Work past last bank (minute 3 of run? No, job runs absolute time).
+   Let's map the example logic to tonight's numbers.
+   Example: LOW1 runs min 0..6 (7 mins). Starts 0. Banks at 2. Runs minutes 0,1,2 (completed). At end of minute 2, bank occurs? Or during? "banks a checkpoint at s+2". If start=0, bank at 2.
+   Preemption happens when HIGH arrives. In example HIGH arrived 3. So LOW1 ran min 0,1,2. Bank @2 occurred. Then min 3 started (unbanked). Swap at 3? "its 3rd minute was unbanked". This implies the bank happened *before* the swap effectively covered it? No, "wasted" is past last bank.
+   If bank happens at absolute time T. And HIGH arrives at T_high. If T <= T_high, nothing wasted? Or does the bank happen *after* the minute completes?
+   Usually: Run min 0 (ends t=1). Run min 1 (ends t=2). Bank @2 triggered by completion of min 1? Or start+2 is absolute time 2.
+   If HIGH arrives at 3, and bank was at 2. The job ran minute 2 (absolute 2..3) which is unbanked. Swap happens. Is the work done in minute 2 wasted? "work past the last checkpoint". Yes. So if bank @2, then any run after t=2 until swap is wasted.
+   In Example: LOW1 ran min 0,1,2 (absolute time coverage). Bank at 2. HIGH arrived 3. Run min 2 happened? If swap happens *at* arrival, does it interrupt immediately? "instantly preempting whatever LOW job is running".
+   If bank @2 means checkpoint saved up to absolute minute 2. Then run starting at minute 2 (absolute) is new work. If HIGH arrives at 3, and preemption hits during min 2, then part of min 2 is wasted? Or if swap happens instantly at arrival, does it count the whole minute as done or not?
+   Prompt says: "LOW1 held core minutes 0, 1 and 2... banked a checkpoint at minute 2... its 3rd minute was unbanked when the swap came". This implies minute 2 (the 3rd minute) was NOT banked. So the bank happened *after* minute 2?
+   Hypothesis: Bank happens at absolute time s+2 + epsilon? Or bank marks completion of work up to s+2, but the "checkpoint" is valid only if swap doesn't happen before the next checkpoint window closes?
+   Actually, look at Example text: "LOW1 held core minutes 0, 1 and 2... banked a checkpoint at minute 2". If it held min 0,1,2 (absolute time coverage), that's 3 units. Start=0. s+2 = 2.
+   If the bank is recorded at absolute time 2. And the job runs minute 2 (absolute 2..3). The text says "its 3rd minute was unbanked". This means the work in minute 2 (the interval 2-3) is considered unbanked.
+   Therefore: Checkpoint banks *at* absolute time s+2, but does not cover the run starting at s+2 until another checkpoint? Or simply, the bank covers up to t=s+2. Any run after that is wasted if swapped.
+   In Example: LOW1 ran min 0 (ends 1), min 1 (ends 2). Bank @2 recorded? But it says "3rd minute was unbanked". So maybe bank happens at s+2 + duration of a minute? No, "every 2 RUNNING minutes after".
+   Let's assume: Bank occurs at absolute time T. It covers work done *up to* T. Run starting at T is new. If swapped during run starting at T, that work is wasted (or fully if instant).
+   In Example: LOW1 ran min 0..2 (absolute coverage). Bank @2? If bank covers up to 2, then minute 2 (starts at 2) is unbanked. Correct.
+   So rule: Bank covers [start, start+2). Run starting at start+2 is unbanked until next bank.
+   
+   Apply to Tonight:
+   LOW2 starts @3. Banks at 5 (3+2). Covers interval [3, 5). Minutes 3 and 4 are covered. Minute 5? No, minute 5 starts at 5.
+   HIGH arrives @5. Instantly preempts.
+   Does it preempt during minute 5 or at the start of minute 5? "instantly preempting whatever LOW job is running". At t=5, LOW2 has completed minutes 3 and 4 (absolute). It is about to run minute 5. If swapped instantly, does it waste minute 5?
+   Example logic: "its 3rd minute was unbanked when the swap came". The swap happened at arrival. The 3rd minute (minute index 2) started at t=2. Swap at t=3. Work in [2,3] was wasted? Or whole minute? "1 minute wasted". Yes, whole minute.
+   So if LOW2 starts @3, runs min 3 ([3,4]), min 4 ([4,5]). Bank @5 covers up to 5. Swap at 5. Minute starting at 5 is unbanked. If swap happens instantly at 5, does it waste the whole minute?
+   In Example: Arrival at 3. Job ran min 0,1 (ends 2). Min 2 started at 2. Bank @2 covers up to 2? But text says "3rd minute was unbanked". This implies bank happens *after* minute completes? Or bank triggers at t=2 but doesn't cover the run starting at t=2 until next trigger?
+   Let's assume: Bank at T covers [Start, T). Run starting at T is unbanked. If swapped instantly at T, entire run at T is wasted (as seen in example where 1 minute was wasted).
+   
+   Back to Tonight:
+   LOW2 starts @3. Runs min 3 ([3,4]), min 4 ([4,5]). Bank triggers at 5 (covers [3,5)).
+   HIGH arrives @5. Instantly preempts.
+   Run starting at 5 is unbanked. Wasted = full minute? Or does it not start? "instantly preempting". Usually means the job is kicked out. If it hadn't started running that minute yet (only completed previous), maybe wasted=0? But Example says "3rd minute was unbanked" and 1 min wasted. The 3rd minute corresponds to interval [2,3].
+   So in Tonight: Interval starting at 5 is the 3rd minute of LOW2. It is unbanked. Preemption happens at start of this interval (instantly). Work done = 0? But "wasted" counts minutes run past last bank. If no work was run, is it wasted=0 or wasted=1?
+   Example: "LOW1 held core minutes 0, 1 and 2... 3rd minute was unbanked". It *held* the core during that minute (ran it). Then swap came. So work was done, then discarded? Or work not yet done but considered "past bank" in terms of scheduling logic?
+   Re-read: "work past the last checkpoint

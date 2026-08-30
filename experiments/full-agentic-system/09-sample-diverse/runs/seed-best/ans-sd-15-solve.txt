@@ -1,0 +1,108 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the "orientation story" provided as a reference for rule shape (which must be applied to tonight's numbers), here are the rules that change state during an event or claim:
+
+1.  **Arrival Rule**: Upon arrival of a request, `attempts` increments by 1; if it is not the first attempt, `wait_s` increases by the current wait duration (calculated as $2^{\text{attempt\_index}-1} \times \text{base\_wait}$).
+2.  **Cost Rule**: Every arrival (whether success or failure) consumes tokens from the budget equal to `per_attempt_cost`.
+3.  **Success Rule**: If the attempt succeeds, the job completes; no further retries occur for this unit of work.
+4.  **Suppression Check Rule**: After every failed attempt (and its associated wait), check if `current_spend` > `budget`.
+    *   If true: Trigger a budget doubling event (`budget` becomes $2 \times \text{budget}$).
+    *   Re-check suppression condition against the new doubled budget.
+    *   Set `suppressed` to `true` only if spend still exceeds the (potentially doubled) budget; otherwise, set `suppressed` to `false`.
+5.  **Expiry Rule**: When a grant expires (triggered by a subsequent request or completion), return half of the amount actually granted (`granted_amount / 2`, rounded down). This reduces the effective pool/spend balance before the next event processes that specific unit's final state.
+
+**Trigger Mapping:**
+*   **Arrival Rule**: Triggered by every new request arrival (Event: "Request Arrival").
+*   **Cost Rule**: Triggered by every new request arrival (Event: "Request Arrival").
+*   **Success Rule**: Triggered when a specific attempt succeeds (Event: "Attempt Success").
+*   **Suppression Check Rule**: Triggered immediately after a failed attempt completes its wait and cost deduction (Event: "Failed Attempt Completion").
+*   **Expiry Rule**: Triggered by the completion of the job or a new request that invalidates previous grants (Event: "Grant Expiry/Invalidation").
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   `attempts`: 0
+*   `wait_s`: 0
+*   `budget`: 36
+*   `spend`: 0
+*   `suppressed`: false
+*   `base_wait`: 2s (from "first wait is 2s")
+
+**Event List:**
+The task states: "the job needs 3 failed attempts before the 4th succeeds."
+Waits observed: 2, 4, 8.
+Cost per attempt: 2 tokens.
+Budget: 36 tokens.
+
+**Walk Step-by-Step:**
+
+1.  **Event 1: Request Arrival (Attempt 1)**
+    *   Action: Increment attempts to 1.
+    *   Cost: Spend += 2. Total Spend = 2.
+    *   Wait: This is the first attempt, so no wait yet.
+    *   Result: Attempt fails (implied by "needs 3 failed").
+    *   State Check: Spend (2) <= Budget (36). No suppression.
+
+2.  **Event 2: Failed Attempt Completion & Wait (After Attempt 1)**
+    *   Action: Apply wait for next retry. Base wait = 2s.
+    *   Cost: `wait_s` += 2. Total Spend = 2 + 2 = 4.
+    *   Result: Attempt fails.
+
+3.  **Event 3: Request Arrival (Attempt 2)**
+    *   Action: Increment attempts to 2.
+    *   Cost: Spend += 2. Total Spend = 4 + 2 = 6.
+    *   State Check: Spend (6) <= Budget (36). No suppression.
+
+4.  **Event 4: Failed Attempt Completion & Wait (After Attempt 2)**
+    *   Action: Apply wait for next retry. Previous wait was 2s, doubles to 4s.
+    *   Cost: `wait_s` += 4. Total Spend = 6 + 4 = 10.
+    *   Result: Attempt fails.
+
+5.  **Event 5: Request Arrival (Attempt 3)**
+    *   Action: Increment attempts to 3.
+    *   Cost: Spend += 2. Total Spend = 10 + 2 = 12.
+    *   State Check: Spend (12) <= Budget (36). No suppression.
+
+6.  **Event 6: Failed Attempt Completion & Wait (After Attempt 3)**
+    *   Action: Apply wait for next retry. Previous wait was 4s, doubles to 8s.
+    *   Cost: `wait_s` += 8. Total Spend = 12 + 8 = 20.
+    *   Result: Attempt fails.
+
+7.  **Event 7: Request Arrival (Attempt 4 - Success)**
+    *   Action: Increment attempts to 4.
+    *   Cost: Spend += 2. Total Spend = 20 + 2 = 22.
+    *   Result: Attempt succeeds. Job completes.
+
+**Final State Calculation:**
+*   `attempts`: 4 (1st, 2nd, 3rd failed, 4th succeeded).
+*   `wait_s`: Sum of waits observed in the text ("Waits observed: 2, 4, 8"). Total = 2 + 4 + 8 = 14.
+    *   *Verification*: Wait after Attemp 1 (2) + Wait after Attempt 2 (4) + Wait after Attempt 3 (8). The successful attempt does not incur a wait because the job ends. Sum = 14.
+*   `budget`: Initial 36. No doubling occurred because spend never exceeded budget.
+    *   Spend breakdown:
+        *   Attempt 1 Cost: 2
+        *   Wait 1: 2
+        *   Attempt 2 Cost: 2
+        *   Wait 2: 4
+        *   Attempt 3 Cost: 2
+        *   Wait 3: 8
+        *   Attempt 4 Cost: 2
+    *   Total Spend = 2+2+2+4+2+8+2 = 22.
+*   `budget_after`: Budget (36) - Spend (22) = 14.
+*   `suppressed`: false (Spend 22 < Budget 36).
+
+**Reconciliation against Orientation Story Shape:**
+The orientation story had a successful run with spend 30 and budget 39, resulting in `budget_after` 9.
+My walk: Spend 22, Budget 36 -> `budget_after` 14.
+The logic holds: `budget_after` = `budget` - (`wait_s` + `attempts` * `cost_per_attempt`).
+Wait sum = 14. Attempts cost = 4 * 2 = 8. Total Spend = 22.
+36 - 22 = 14.
+
+---
+
+### Final Answer
+
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 14, "suppressed": false}
+```

@@ -1,0 +1,120 @@
+The task requires simulating a scheduling scenario with specific rules for preemption, checkpointing, and job ordering based on start times. The input describes two LOW jobs (LOW1: 4 mins, LOW2: 3 mins) starting at minute 0, and one HIGH job arriving at minute 2 (6 mins duration).
+
+**Phase 1: Rule Analysis & State Initialization**
+*   **Events:**
+    1.  `T=0`: Start LOW1 (4m), Start LOW2 (3m). Queue: [LOW1, LOW2]. Core busy with LOW1.
+    2.  `T=2`: HIGH arrives. Preempts current core job.
+*   **Rules Applied:**
+    *   **Start Rule:** Jobs enter the queue in order of start minutes. Tie-breaker: Resumed > Fresh.
+    *   **Preemption Rule:** HIGH preempts whatever LOW is running instantly. No other jobs run while HIGH runs.
+    *   **Checkpoint Rule:** LOW checkpoints every 2 completed minutes. Work past last checkpoint is wasted on resume.
+    *   **Resume Logic:** Upon resumption, job redoes work past the last bank (checkpoint).
+
+**Phase 2: Ledger Walk (Simulation)**
+
+*   **Time 0 to 1:**
+    *   LOW1 runs (Minute 1 of 4). Total run time = 1.
+    *   State: LOW1 running. Queue: [LOW2].
+
+*   **Time 1 to 2:**
+    *   LOW1 runs (Minute 2 of 4). Total run time = 2.
+    *   **Checkpoint Event:** LOW1 completes its 2nd minute exactly at T=2. A checkpoint is saved. Work done so far: 2 minutes.
+    *   State: LOW1 running, Checkpointed at 2m. Queue: [LOW2].
+
+*   **Time 2 (Arrival of HIGH):**
+    *   HIGH arrives at T=2.
+    *   **Preemption Event:** HIGH preempts the currently running job (LOW1).
+    *   **Checkpoint Validation:** The checkpoint landed exactly at the arrival minute. Per rules: "a bank that lands on the arrival minute is safe and nothing is wasted".
+    *   LOW1 resumes later with 2 minutes saved. Remaining work for LOW1 = 4 - 2 = 2 minutes.
+    *   HIGH starts running immediately.
+    *   State: HIGH running (0m of 6). Queue: [LOW2, LOW1(resumed)]. Note: LOW1 is in queue as resumed; LOW2 is fresh.
+
+*   **Time 2 to 4:**
+    *   HIGH runs (Minute 1 and 2). Total run time = 2.
+    *   State: HIGH running. Queue: [LOW2, LOW1].
+
+*   **Time 4 to 6:**
+    *   HIGH runs (Minute 3 and 4). Total run time = 4.
+    *   State: HIGH running. Queue: [LOW2, LOW1].
+
+*   **Time 6 to 8:**
+    *   HIGH runs (Minute 5 and 6). Total run time = 6. HIGH finishes at T=8.
+    *   Core becomes free.
+    *   **Queue Resolution:**
+        *   Waiting jobs: LOW2 (Fresh, Start Min 0), LOW1 (Resumed, Start Min 0).
+        *   Rule: "a resumed LOW outranks a fresh one at any tie".
+        *   Order of execution: LOW1 first, then LOW2.
+    *   **LOW1 Execution:**
+        *   Needs to run remaining 2 minutes.
+        *   Runs Minute 7 (Total 3m) and Minute 8 (Total 4m).
+        *   Checkpoint? No (needs 5 mins for next checkpoint, finishes at 4).
+        *   LOW1 finishes at T=9? Wait, let's re-calculate duration.
+        *   LOW1 started at 0. Needs 4 mins total. Saved 2. Needs 2 more.
+        *   Runs from T=8 to T=10 (2 minutes). Finishes at T=10.
+    *   **LOW2 Execution:**
+        *   Starts after LOW1 finishes? Or does it start immediately if queue allows?
+        *   Queue order: LOW1, then LOW2.
+        *   LOW1 runs 8->9 (min 3), 9->10 (min 4). Finishes at T=10.
+        *   LOW2 starts at T=10. Needs 3 minutes.
+        *   Runs 10->11, 11->12, 12->13. Finishes at T=13.
+
+    *Wait, let me re-read the "Resume Logic" and "Makespan" definition carefully.*
+    "makespan counts from the first start of any job to the last finish." -> First start was T=0. Last finish will be max(LOW1_finish, LOW2_finish).
+
+    Let's re-verify the "Safe Checkpoint" logic vs "Wasted".
+    Scenario: LOW1 runs 0->2 (Checkpoint at 2). HIGH arrives at 2. Preempts.
+    Rule: "a bank that lands on the arrival minute is safe and nothing is wasted".
+    So LOW1 has 2 mins saved. Needs 2 more.
+
+    Timeline Re-eval:
+    T=0-2: LOW1 runs (2m). Checkpoint at T=2.
+    T=2-8: HIGH runs (6m).
+    T=8: Core free. Queue: [LOW2, LOW1].
+    Tie-breaker: Resumed (LOW1) > Fresh (LOW2).
+    Execute LOW1 first.
+    LOW1 needs 2 mins. Runs T=8-9 (min 3), T=9-10 (min 4). Finishes at T=10.
+    Execute LOW2 next.
+    LOW2 needs 3 mins. Runs T=10-11, T=11-12, T=12-13. Finishes at T=13.
+
+    **Wasted Calculation:**
+    "minutes wasted past checkpoints".
+    LOW1: Checkpointed at 2m. Resumed with 2m left. No work lost because checkpoint was safe. Wasted = 0.
+    LOW2: Never ran, never checked. Wasted = 0.
+    Total Wasted = 0.
+
+    **Order Calculation:**
+    Completion times: LOW1 (T=10), LOW2 (T=13).
+    Order: ["LOW1", "LOW2"].
+
+    **Makespan:**
+    Start T=0. End T=13. Makespan = 13.
+
+    *Self-Correction Check on Example Logic:*
+    The example provided in the prompt says: "LOW1 held the core from minute 0, banked a checkpoint at minute 2... swap came, so 1 minute wasted."
+    Why did the example have waste?
+    Example details: LOW1 (5m), LOW2 (2m). HIGH arrives T=3.
+    Example Walk:
+    T=0-2: LOW1 runs 2m. Checkpoint at T=2.
+    T=2-3: LOW1 runs 1m (Total 3m). No checkpoint yet (needs 4m for next, or maybe the rule is every 2 mins regardless of total? "checkpoint every 2 completed minutes").
+    If checkpoint is every 2 mins:
+    Run 0-2 (Checkpoint 1).
+    Run 2-4 (Checkpoint 2).
+    In Example: HIGH arrives T=3. LOW1 has run 3 mins. It passed the first checkpoint (at 2) but hasn't reached the second (at 4).
+    Preemption at T=3. Work done since last checkpoint (T=2 to T=3 = 1 min) is wasted.
+    
+    Applying this strict logic to **Tonight's Task**:
+    LOW1 runs 0-2. Checkpoint lands exactly at T=2.
+    HIGH arrives T=2.
+    Does the work *during* the arrival instant count as "past checkpoint"?
+    Rule: "a bank that lands on the arrival minute is safe and nothing is wasted".
+    This explicitly overrides the general waste rule for this specific boundary condition. The prompt states: "after resume a job only redoes work past its last bank... so a job with 4 of 5 minutes banked resumes with just 1 minute left."
+    In tonight's case, LOW1 has exactly 2 minutes banked (0-2). HIGH arrives at 2. The checkpoint is safe. Work wasted = 0.
+
+    **Final Verification:**
+    Makespan: 13 mins.
+    Wasted: 0 mins.
+    Order: ["LOW1", "LOW2"].
+
+```json
+{"makespan_min": 13, "wasted_min": 0, "order": ["LOW1", "LOW2"]}
+```

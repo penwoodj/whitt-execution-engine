@@ -1,0 +1,45 @@
+### Phase 1: RULE SCAN
+The following rules govern the state changes during the event sequence (LOW1 arrival/grant, LOW2 arrival/grant, HIGH arrival/preempt, LOW1 resume/finish, LOW2 finish):
+
+1.  **Arrival Rule**: Jobs arrive in strict order of their start minutes; a job arriving while the core is busy enters the waiting queue.
+2.  **Queue Ordering Rule**: The core dispatches from the waiting queue based on Start Minute (ascending); ties are broken by Resume Status (Resumed > Fresh).
+3.  **Checkpoint Banking Rule**: A job banks a checkpoint at `Start + 2` and every subsequent even number of running minutes relative to its start/resume time, tracked in absolute minutes.
+4.  **Preemption Rule**: When HIGH arrives, it instantly preempts the currently running LOW job (if any).
+5.  **Waste Calculation Rule**: Minutes run past the last valid bank on a preempted job are wasted and must be redone upon resume (`Owed = Total - Banked`).
+6.  **Dispatch Continuity Rule**: The core never idles; if a job finishes or is preempted, the next waiting job starts in that same minute.
+
+### Phase 2: LEDGER WALK (Minute-by-Minute Table)
+
+**Fact Bullets:**
+*   LOW1: Duration 5 min, Start Minute 0.
+*   LOW2: Duration 2 min, Start Minute 1.
+*   HIGH: Arrival Minute 4, Duration 4 min.
+
+| minute | core | event |
+| :--- | :--- | :--- |
+| 0 | LOW1 (running) | LOW1 starts (Bank @ 2). Runs min 0. |
+| 1 | LOW1 (running) | LOW2 arrives (waits). LOW1 runs min 1. |
+| 2 | LOW1 (running) | LOW1 banks checkpoint (@ 2). Runs min 2. |
+| 3 | LOW1 (running) | LOW1 runs min 3. |
+| 4 | HIGH (running) | HIGH arrives, preempts LOW1. LOW1 has 0 wasted (banked at 2, current run is 3rd minute which is odd). Core switches to HIGH. |
+| 5 | HIGH (running) | HIGH runs min 5. |
+| 6 | HIGH (running) | HIGH runs min 6. |
+| 7 | HIGH (running) | HIGH runs min 7. |
+| 8 | LOW1 (running) | HIGH finishes. Core dispatches to waiting queue: LOW2 (Start 1) vs LOW1 (Resumed). Resumed outranks Fresh. Core picks LOW1. LOW1 resumes, owes 3 mins (Total 5 - Banked 2). Runs min 8. |
+| 9 | LOW1 (running) | LOW1 runs min 9. |
+| 10 | LOW1 (running) | LOW1 banks checkpoint (@ 4 relative to resume? No, absolute time logic: Resume at 8. Run 1 (min 8), Run 2 (min 9). Bank @ 8+2=10). Runs min 10. |
+| 11 | LOW1 (running) | LOW1 runs min 11. |
+| 12 | LOW1 (running) | LOW1 finishes. |
+| 13 | LOW2 (running) | Core dispatches to waiting queue: Only LOW2 remains. Starts fresh. Runs min 13. |
+| 14 | LOW2 (running) | LOW2 runs min 14. |
+
+**Derived Values:**
+*   **Makespan**: The last finish minute is 14 (LOW2 finishes at end of minute 14).
+*   **Wasted Minutes**: 0. (At preemption minute 4, LOW1 had banked at absolute minute 2. It was running its 3rd minute (odd), so no waste occurred).
+*   **Order**: LOW1 finished at minute 12. LOW2 finished at minute 14. Order: ["LOW1", "LOW2"].
+
+### Final Answer JSON
+
+```json
+{"makespan_min": 14, "wasted_min": 0, "order": ["LOW1", "LOW2"]}
+```

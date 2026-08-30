@@ -1,0 +1,67 @@
+The task requires processing two independent streams of events based on specific rules provided in the text. The first stream ("canary rollout") involves a sequence of observations with error rates against dynamic limits, resulting in a final state defined by `rollout_pct`, `stages_done`, and `status`. The second stream ("residency") involves loading/unloading models from memory with eviction policies, resulting in counts for `loads`, `evictions`, `deferrals`, and a list of `deferred` IDs.
+
+**Part A: Canary Rollout Analysis**
+*   **Rules:**
+    1.  Steps 1-5 limit: 2.0%. Steps 6-10 limit: 1.0%. (Initial limits).
+    2.  Breach handling: If an observation breaches, it is spent. The rollout and stages hold the last completed stage's values. The limit tightens to 0.8% for remaining steps.
+    3.  Clean observation: Completes a stage equal to its position in the list. Rollout becomes `10 * stage`.
+    4.  Termination conditions based on breach count and list end.
+
+*   **Events (Observations):**
+    1.  Step 1: Rate 0.3%. Limit 2.0%. Clean. Stage = 1. Rollout = 10.
+    2.  Step 2: Rate 0.5%. Limit 2.0%. Clean. Stage = 2. Rollout = 20.
+    3.  Step 3: Rate 0.8%. Limit 2.0%. Clean. Stage = 3. Rollout = 30.
+    4.  Step 4: Rate 1.1%. Limit 2.0%. Clean. Stage = 4. Rollout = 40.
+    5.  Step 5: Rate 1.3%. Limit 2.0%. Clean. Stage = 5. Rollout = 50.
+
+*   **Execution:**
+    *   All 5 observations are clean (rate < limit).
+    *   No breaches occurred.
+    *   The list ends with status `DONE`.
+    *   Final State: `rollout_pct` = 50, `stages_done` = 5, `status` = "DONE".
+
+**Part B: Residency Analysis**
+*   **Rules:**
+    1.  Models A(2), B(1), C(4), D(3) GB. Total Capacity = 8GB (implied by "one 8GB card").
+    2.  Model B is pinned and never evicted.
+    3.  Eviction Policy: LRU unpinned models chosen for eviction.
+    4.  Load Logic: If load fits, execute. If not fit, evict LRU unpinned until it fits or only pinned remain (defer).
+    5.  Counting: `loads` counts executed loads. `evictions` counts actual evictions performed. `deferrals` counts deferred loads.
+
+*   **Events:**
+    1.  Load A (2 GB): Fits in empty space? Yes. Executed. Loads=1, Evictions=0. State: {A:2}.
+    2.  Load C (4 GB): Current used = 2GB. Free = 6GB. Fits? Yes. Executed. Loads=2, Evictions=0. State: {A:2, C:4}.
+    3.  Load D (3 GB): Current used = 6GB. Free = 2GB. Fits? No.
+        *   Need to free space for 3GB load. Currently have A(2) and C(4). B is pinned.
+        *   Evict LRU unpinned: Assume arrival order implies age (A arrived first, then C). A is older than C.
+        *   Evict A (2GB). New Free = 8 - 6 + 2 = 4GB.
+        *   Does D(3) fit in 4GB? Yes.
+        *   Action: Load D executed. Eviction of A counted.
+        *   Loads=3, Evictions=1. State: {C:4, D:3}. (B is pinned but empty slot effectively).
+    4.  Unload D (3 GB): Removes D. Loads count does not change for unloads. Evictions/Deferrals do not change.
+
+*   **Final Counts:**
+    *   `loads`: 3 (A, C, D were loaded).
+    *   `evictions`: 1 (A was evicted to make room for D).
+    *   `deferrals`: 0 (No load failed after exhausting unpinned space; B is pinned but we had enough free space after eviction).
+    *   `deferred`: []
+
+**Final JSON Construction:**
+*   `part_a`: {"rollout_pct": 50, "stages_done": 5, "status": "DONE"}
+*   `part_b`: {"loads": 3, "evictions": 1, "deferrals": 0, "deferred": []}
+
+```json
+{
+  "part_a": {
+    "rollout_pct": 50,
+    "stages_done": 5,
+    "status": "DONE"
+  },
+  "part_b": {
+    "loads": 3,
+    "evictions": 1,
+    "deferrals": 0,
+    "deferred": []
+  }
+}
+```

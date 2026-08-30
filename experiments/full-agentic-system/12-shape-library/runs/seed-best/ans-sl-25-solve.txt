@@ -1,0 +1,79 @@
+### Phase 1: RULE SCAN
+The following rules govern state changes during the night's events (arrivals, grants, preemptions, expiries):
+
+1.  **Arrival Rule**: `HIGH` arrives at minute 3; triggers immediate preemption of any running `LOW` job and halts all other execution until `HIGH` completes.
+2.  **Grant/Start Rule**: `LOW` jobs start or resume in order of their absolute start minutes (`s`). A resumed `LOW` outranks a fresh one at ties. If the core is busy, waiting `LOW`s queue up.
+3.  **Checkpoint Bank Rule**: Checkpoints bank at `start_or_resume + 2` and every subsequent even running minute (absolute time). Banks landing exactly on `HIGH`'s arrival count; no work is wasted if a bank aligns with the preemption trigger.
+4.  **Preemption Waste Rule**: On preemption, minutes run past the last valid bank are wasted (`owed = total_duration - banked_minutes`). Work must be redone after resume.
+5.  **Core Continuity Rule**: The core never idles while a `LOW` job is waiting; the next waiting `LOW` starts in the exact minute the previous one finishes or is preempted.
+
+---
+
+### Phase 2: LEDGER WALK (Minute-by-Minute Table)
+
+**Fact Bullets (Tonight's Numbers):**
+*   **LOW1**: Duration 5 min, Start Minute 0.
+*   **LOW2**: Duration 7 min, Start Minute 2.
+*   **HIGH**: Arrival Minute 3, Duration 8 min.
+
+| minute | core | event |
+| :--- | :--- | :--- |
+| 0 | LOW1 (fresh) | Grant/Start LOW1 @ 0. Bank@2. |
+| 1 | LOW1 (running) | Running. |
+| 2 | LOW1 (running) | Running. Bank@4. **Grant/Start LOW2** @ 2 (queued). |
+| 3 | HIGH (fresh) | Preempt LOW1. LOW1 ran 0-2 (3 mins). Last bank at 4? No, banks are absolute time. Checkpoint logic: Start=0. Banks at 0+2=2, then +2 running mins -> abs 4. Current time is 3. Has it reached abs 4? No. Wait, rule says "bank landing on exact minute HIGH arrives still counts". HIGH arrives at 3. Did LOW1 bank at 3? No, banks are at 2, 4... So no bank at 3. **Waste**: Time past last bank (which was at abs 2). Run time so far: 3 mins (0,1,2). Banked: 2 mins (at abs 2). Wasted = 3 - 2 = 1 min. |
+| 4 | HIGH (running) | Running. LOW1 resumes later. |
+| 5 | HIGH (running) | Running. |
+| 6 | HIGH (running) | Running. |
+| 7 | HIGH (running) | Running. |
+| 8 | HIGH (finishes) | Finish HIGH @ 8. Core free. |
+| 9 | LOW1 (fresh resume) | Resume LOW1. It owed 1 min (from waste). Runs minute 9. Bank@11 (start/resume+2). |
+| 10 | LOW1 (running) | Running. |
+| 11 | LOW1 (running) | Running. Bank@13. **Grant/Start LOW2** @ 2 is now eligible? Tie-breaker: Resumed LOW1 vs Fresh LOW2. Resumed outranks fresh. Core stays on LOW1. |
+| 12 | LOW1 (running) | Running. |
+| 13 | LOW1 (finishes) | Finish LOW1 @ 13. Total duration 5. Banked at resume: 0? No, resumed jobs don't bank immediately unless they hit the +2 rule. Resume at 9. Banks at 11. Did it reach 11? Yes. So 1 min wasted was redone. It finished exactly after running minute 12 (total 5 mins run). |
+| 14 | LOW2 (fresh) | Start LOW2 @ 14. Bank@16. |
+| 15 | LOW2 (running) | Running. |
+| 16 | LOW2 (running) | Running. Bank@18. |
+| 17 | LOW2 (running) | Running. |
+| 18 | LOW2 (finishes) | Finish LOW2 @ 18. Total duration 7. Run minutes: 14,15,16,17,18? Wait. Start 14. Runs 14..19? No. Duration 7 means occupies 14,15,16,17,18,19,20? Let's re-calc duration logic. |
+| **Re-eval LOW2**: Starts at 14. Needs 7 mins. Occupies minutes: 14, 15, 16, 17, 18, 19, 20. Finishes at minute 21? No, "FINISHES AT minute s+n". Start 14 + 7 = 21. |
+| **Re-eval LOW1**: Resumed at 9. Needs to run 5 mins (since 1 was wasted). Occupies minutes: 9, 10, 11, 12, 13. Finishes at minute 14? Start 9 + 5 = 14. |
+| **Correction on Timeline**: |
+| Minute 8: HIGH finishes. Core free. |
+| Minute 9: LOW1 resumes (fresh start effectively for scheduling, but it's the same job). It has 5 mins to run. Runs 9..13. Finishes at 14. |
+| Minute 10-13: LOW1 running. Checkpoint banks? Resume at 9. Banks at 9+2=11. Then +2 running -> abs 13. |
+| Minute 14: LOW1 finishes. Core free. **Start LOW2** (fresh). |
+| Minute 15-20: LOW2 runs (7 mins). Occupies 15,16,17,18,19,20. Finishes at 21? Start 14 + 7 = 21. Wait, if it starts at 14, does it run minute 14? Yes. So runs 14..20. Finishes at 21. |
+| **Wait, check LOW1 finish**: Starts 9. Runs 5 mins. Minutes: 9, 10, 11, 12, 13. Finish time = Start + Duration = 9 + 5 = 14. Correct. |
+| **Check LOW2 start**: Starts at 14 (when core frees). Runs 7 mins. Minutes: 14, 15, 16, 17, 18, 19, 20. Finish time = 14 + 7 = 21. |
+| **Wasted Calculation**: LOW1 wasted 1 min (at minute 3). Redone at minute 9. Total wasted = 1. |
+| **Makespan**: Max finish time = 21. |
+| **Order**: LOW1 finishes at 14. LOW2 finishes at 21. Order: ["LOW1", "LOW2"]. |
+
+Let's double check the "Bank landing on exact minute HIGH arrives" rule for LOW1.
+HIGH arrives at minute 3.
+LOW1 started at 0.
+Banks at absolute time: $T_{bank} = T_{start} + 2k$.
+$T=0+2=2$. Next bank? "every 2 completed minutes of running time".
+Running time at $T=2$ is 2 mins. Bank valid.
+Next bank when running time reaches 4 mins (Absolute $T=4$).
+At $T=3$, running time is 3 mins. No bank at 3.
+So the rule "bank landing on exact minute HIGH arrives" does not apply here because no bank lands on 3.
+Waste = Total run time before preemption - Banked time.
+Run time: Minutes 0, 1, 2 (3 minutes).
+Banked time: Minute at $T=2$ counts as a checkpoint? "banks a checkpoint at minute s+2". Yes. So 2 mins banked.
+Waste = 3 - 2 = 1 min. Correct.
+
+Timeline Re-verification:
+0: LOW1 starts (5m). Bank@2.
+1: LOW1 runs.
+2: LOW1 runs. Bank@4? No, running time is 2. Next bank at running time 4 (Abs 4). But rule says "bank landing on exact minute HIGH arrives". HIGH arrives at 3. Is there a bank at 3? No. Banks are at 2, 4...
+Wait, does the checkpoint happen *at* the moment of completion of the interval? Yes.
+So at T=2, checkpoint valid. At T=3, no checkpoint.
+Preemption at T=3. Waste = (Current Time - Last Bank) ? No, "minutes past the last bank".
+Minutes run: 0, 1, 2. Total 3 mins.
+Last bank was at T=2.
+Minutes past last bank: Minute 3? But preemption happens *at* minute 3 arrival. Does it consume minute 3?
+"HIGH arrives at minute 3 and runs... instantly preempting".
+Usually, if HIGH arrives at 3, the core switches from LOW1 to HIGH at the boundary of 2->3 or during 3

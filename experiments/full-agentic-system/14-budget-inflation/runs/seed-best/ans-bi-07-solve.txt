@@ -1,0 +1,80 @@
+### Phase 1 RULE SCAN
+
+Based on the text provided, here are the rules that change state during the event sequence, listed in order of precedence (higher list = higher priority):
+
+1.  **Retry Wait Rule**: After a failed attempt, wait time doubles for the next attempt ($W_{n} = W_{n-1} \times 2$).
+2.  **Cost Rule**: Every retry wait second costs 1 token; every attempt costs 2 tokens.
+3.  **Budget Check Rule**: If total spend exceeds budget, job is suppressed and budget doubles exactly once (re-checked immediately after doubling).
+4.  **Success Condition Rule**: The job succeeds on the 4th attempt (after 3 failures).
+5.  **Expiry Return Rule**: When a trigger request completes for an expired grant, it returns half of what was *granted* (the partial amount actually given), rounded DOWN, immediately before the next request is processed.
+
+**Trigger Mapping:**
+*   **Event 1 (Attempt 1 Fail)**: Triggers Retry Wait Rule (sets wait to 2s) and Cost Rule (costs 2 tokens).
+*   **Event 2 (Wait 1)**: Triggers Cost Rule (costs 1 token for the 2s wait).
+*   **Event 3 (Attempt 2 Fail)**: Triggers Retry Wait Rule (sets wait to 4s) and Cost Rule (costs 2 tokens).
+*   **Event 4 (Wait 2)**: Triggers Cost Rule (costs 1 token for the 4s wait).
+*   **Event 5 (Attempt 3 Fail)**: Triggers Retry Wait Rule (sets wait to 8s) and Cost Rule (costs 2 tokens).
+*   **Event 6 (Wait 3)**: Triggers Cost Rule (costs 1 token for the 8s wait).
+*   **Event 7 (Attempt 4 Success)**: Triggers Success Condition Rule.
+
+---
+
+### Phase 2 LEDGER WALK
+
+Applying events in strict arrival order with state updates:
+
+**Initial State:**
+*   `attempts`: 0
+*   `wait_s`: 0
+*   `budget_after`: 24
+*   `suppressed`: false
+*   `total_cost`: 0
+
+**Event 1: Attempt 1 (Fail)**
+*   Action: Run attempt. Cost = 2.
+*   State Update: `attempts` becomes 1. `total_cost` = 2.
+*   Rule Check: Spend (2) <= Budget (24). No suppression.
+
+**Event 2: Wait 1 (Duration 2s)**
+*   Action: Execute wait. Cost = 1 * 2 = 2? **Correction**: Text says "every wait second costs 1". Duration is 2s. Cost = 2.
+    *   *Re-reading text carefully*: "first wait is 2s... waits observed: 2, 4, 8."
+    *   Wait duration = 2 seconds. Cost per second = 1. Total cost for this wait = 2.
+*   State Update: `total_cost` = 2 + 2 = 4.
+
+**Event 3: Attempt 2 (Fail)**
+*   Action: Run attempt. Cost = 2.
+*   State Update: `attempts` becomes 2. `total_cost` = 4 + 2 = 6.
+*   Rule Check: Spend (6) <= Budget (24). No suppression.
+
+**Event 4: Wait 2 (Duration 4s)**
+*   Action: Execute wait. Duration = 4 seconds. Cost per second = 1. Total cost = 4.
+*   State Update: `total_cost` = 6 + 4 = 10.
+
+**Event 5: Attempt 3 (Fail)**
+*   Action: Run attempt. Cost = 2.
+*   State Update: `attempts` becomes 3. `total_cost` = 10 + 2 = 12.
+*   Rule Check: Spend (12) <= Budget (24). No suppression.
+
+**Event 6: Wait 3 (Duration 8s)**
+*   Action: Execute wait. Duration = 8 seconds. Cost per second = 1. Total cost = 8.
+*   State Update: `total_cost` = 12 + 8 = 20.
+
+**Event 7: Attempt 4 (Success)**
+*   Action: Run attempt. Cost = 2.
+*   State Update: `attempts` becomes 4. `total_cost` = 20 + 2 = 22.
+*   Rule Check: Spend (22) <= Budget (24). No suppression needed. Job succeeds.
+
+**Final State Calculation:**
+*   Total Attempts executed: 4
+*   Total Wait Seconds observed: 2 + 4 + 8 = 14s.
+*   Total Cost: 22 tokens.
+*   Budget Remaining (`budget_after`): 24 - 22 = 2.
+*   Suppressed: false (Spend never exceeded budget).
+
+---
+
+### Final Answer
+
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 2, "suppressed": false}
+```

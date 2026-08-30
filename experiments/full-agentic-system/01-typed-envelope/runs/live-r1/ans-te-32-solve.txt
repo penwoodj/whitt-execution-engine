@@ -1,0 +1,60 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event or claim list, including any expiry, return, revocation, refill, promotion, fallback, or source-ranking rule.*
+
+1. **Arrival Rule**: `LOW1` arrives at minute 0 (fresh job).
+2. **Arrival Rule**: `HIGH` arrives at minute 0 (preemptible high-priority job).
+3. **Promotion/Preemption Rule**: `HIGH` instantly preempts all running LOW jobs; if a LOW job is preempted, the time elapsed since its last checkpoint becomes wasted.
+4. **Checkpoint Rule**: Active LOW jobs save checkpoints every 2 completed minutes.
+5. **Completion Rule (HIGH)**: `HIGH` finishes at minute 8.
+6. **Refill/Resumption Rule**: Upon `HIGH` completion, all preempted LOW jobs resume execution from their last valid checkpoint immediately.
+7. **Arrival Rule**: `LOW2` arrives at minute 2 (fresh job). *Note: At this moment, `HIGH` is running, so `LOW2` enters the queue or waits behind `HIGH` depending on implicit scheduling; however, the prompt implies `LOW` jobs run concurrently until preemption. Given "three jobs" and `HIGH` preempts instantly, we must determine if `LOW2` starts at minute 2 while `HIGH` runs. Standard preemptive scheduling usually allows lower priority jobs to run when no high-priority job is running or in parallel if resources allow. The text says "HIGH runs... LOW1 runs...". This implies concurrency. Thus `LOW2` likely starts at minute 2 alongside the remaining time of `LOW1`.*
+   *Correction based on strict reading*: If `HIGH` preempts instantly, it grabs the resource. Does it stop `LOW1`? Yes ("preempts instantly"). Does it stop `LOW2` if `LOW2` arrives at minute 2 while `HIGH` is running? Yes. So `LOW2` starts its lifecycle but cannot run until `HIGH` finishes or a gap opens.
+8. **Completion Rule (LOW1)**: `LOW1` resumes after `HIGH`, runs to completion.
+9. **Arrival/Overlap Logic**: `LOW2` arrives at minute 2. While `HIGH` is running (0-8), `LOW2` cannot run. It effectively waits or accumulates state as a fresh job. Once `HIGH` finishes, the system checks for runnable jobs.
+10. **Completion Rule (LOW2)**: `LOW2` runs to completion after `HIGH`.
+
+*Events List for Phase 2:*
+- Event A: Time 0, Job `LOW1` arrives (Fresh). State: `{LOW1: fresh}`.
+- Event B: Time 0, Job `HIGH` arrives. Rule: Preempt. Action: `HIGH` starts immediately. `LOW1` is preempted instantly? The prompt says "HIGH preempts instantly and runs to completion." If it preempts *instantly* at T=0, does it even let `LOW1` run for a tick? Usually, in such puzzles, arrival order matters. But the rule "preempts instantly" suggests `HIGH` takes the resource immediately upon arrival. Since they arrive same time (T=0), `HIGH` gets priority. `LOW1` is effectively paused at T=0 or runs 0 minutes before being preempted?
+Let's re-read carefully: "LOW1 runs 5 minutes starting at minute 0... HIGH preempts instantly". If `HIGH` arrives at 0, it grabs the resource. `LOW1` starts but immediately gets preempted by the arriving `HIGH`. Wasted time = 0 for `LOW1`? Or does `LOW1` get a tiny slice? "Work past the last checkpoint is wasted". Checkpoints are every 2 minutes. If interrupted at < 2, no checkpoint exists yet. Work is wasted.
+*Refined Interpretation*: `HIGH` arrives T=0. `LOW1` arrives T=0. Rule: `HIGH` preempts instantly. Result: `HIGH` runs [0, 8]. `LOW1` does not run (or runs negligible time). Last checkpoint for `LOW1`: None (< 2 mins elapsed).
+- Event C: Time 2, Job `LOW2` arrives. Rule: Arrivals in order. State update: `LOW2` is now a fresh job. Current running: `HIGH`.
+- Event D: Time 8, Job `HIGH` completes. Rule: Preemption ends. Resource freed. Resume pending LOW jobs? Or start new ones? "A resumed LOW job outranks a fresh one". This implies both exist in the pool. We need to know who is waiting.
+   - At T=2, `LOW1` was preempted (wasted < 2 mins). It has no checkpoint yet. It is in state "Preempted/Waiting".
+   - At T=2, `LOW2` arrived. Is it "Running" or "Waiting"? Since `HIGH` is running, and resources are likely single-unit (implied by "preempts"), `LOW2` must be Waiting/Fresh.
+   - So at T=8, we have: `LOW1` (Preempted, No Checkpoint), `LOW2` (Fresh).
+   - Rule: "A resumed LOW job outranks a fresh one". Therefore, the system picks `LOW1` to resume first.
+- Event E: `LOW1` resumes and runs its remaining time (5 mins total - 0 run = 5 mins). Finishes at T=8+5=13.
+- Event F: `LOW2` starts after `LOW1` finishes? Or does it start when resource is free? Yes, after `LOW1`. Starts at 13. Runs 7 mins. Finishes at 20.
+
+*Wait, let's re-evaluate the "Instant Preemption" vs "Arrival Order".*
+If `HIGH` preempts instantly at T=0, `LOW1` never gets to run. Wasted = 0? Or is there a convention that arrival happens before preemption logic?
+"Low1 runs 5 minutes starting at minute 0... HIGH preempts instantly". This phrasing suggests `LOW1` *starts*, then `HIGH` cuts in. But if they arrive simultaneously, and `HIGH` has the preemptive rule, does it cut in at T=0 or T=epsilon?
+Standard interpretation for this specific "rotation" puzzle type: The preemption happens immediately upon the high-priority job's presence. If both exist at 0, High wins. Low1 runs 0 minutes. Checkpoint status: No checkpoint recorded (needs >2 mins).
+However, consider `LOW2` arriving at minute 2. At T=2, `HIGH` is still running (until 8). So `LOW2` cannot run. It sits as a Fresh job.
+At T=8 (`HIGH` done): Pool has `LOW1` (Preempted, 0 mins run, no checkpoint) and `LOW2` (Fresh, 0 mins run, no checkpoint).
+Priority: Resumed > Fresh. Both are "resumed" in the sense that they were interrupted? No, `LOW2` never started. Is a fresh job a "fresh one"? Yes ("outranks a fresh one"). So `LOW1` (which was running/preempted) is prioritized over `LOW2` (which just arrived/waiting).
+Sequence: Finish `LOW1`, then `LOW2`.
+
+Let's double check the "orientation" example to ensure my logic matches the *shape* requested, even if numbers differ.
+Orientation Example Logic Check:
+- 7 min HIGH, 5 min LOW starting immediately (T=0), checkpoints every 2 mins.
+- Swap happens (HIGH finishes).
+- Result: 1 wasted minute at swap? Wait. If LOW runs 0 to T=7? No, HIGH is 7 min.
+- Example text says: "1 wasted minute at the swap". This implies in the example, the LOW job ran for 1 minute before being preempted? Or maybe the checkpoint logic is different?
+"LOW jobs checkpoint every 2 completed minutes; work past the last checkpoint is wasted".
+If a job runs [0, 1] and gets preempted. Last checkpoint was at < 2 (none). Wasted = 1.
+If it runs [0, 2], checkpoint at 2. Runs to 7? No, HIGH finishes earlier.
+In the example: "a resumed LOW finishing before any fresh one started". This confirms Resumed > Fresh.
+"makespan 12". HIGH=7. LOW=5. Total = 7 + 5 = 12. This implies NO overlap and no wasted time added to makespan? Or does it include waste?
+If LOW runs 0-6 (wasted?), then resumes...
+Actually, the example says "a 7-minute HIGH, a 5-minute LOW starting immediately... means 1 wasted minute at the swap".
+This implies: In the example scenario, the LOW job ran for 1 minute before being preempted? Why would it run if HIGH is also there? Maybe in the example, HIGH arrives *after* some time? Or maybe the "instant" preemption allows a tiny bit of progress?
+BUT, look at the text: "HIGH runs... LOW runs". If they are concurrent jobs on one core, and High preempts, High takes the whole core.
+Perhaps in the example, HIGH arrives at T=2? No, "starting immediately" usually means T=0.
+Let's stick strictly to *Tonight's* numbers and rules provided in the first paragraph, ignoring the specific arithmetic of the orientation story except for the *logic flow* (Resumed > Fresh, Checkpoints every 2 mins, Waste = time after last checkpoint).
+
+**Recalculating Tonight's Scenario Strictly:**
+Jobs: `HIGH` (8m), `LOW1` (5m), `LOW2` (7m).
+Start Times: `LOW1`=0, `LOW2`=2.
+Rules:

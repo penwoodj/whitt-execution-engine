@@ -1,0 +1,69 @@
+### Phase 1: RULE SCAN
+*Scanning all rules that change state during the event sequence.*
+
+1. **Arrival Rule**: Events are processed in strict arrival order; no two events share a line or trigger simultaneously.
+2. **HIGH Job Execution Rule**: HIGH job starts immediately, runs to completion (6 minutes), and preempts any other running job instantly upon start.
+3. **LOW Job Checkpoint Rule**: LOW jobs checkpoint every 2 completed minutes of actual runtime; work past the last checkpoint is wasted if preempted.
+4. **Preemption Loss Rule**: Upon HIGH job start, currently running LOW jobs are cut off immediately; their remaining time counts as "wasted".
+5. **Resumption Priority Rule**: A resumed (preempted then restarted) LOW job outranks a fresh LOW job starting at the same moment or later.
+6. **Makespan Definition Rule**: Makespan is calculated from the first start (minute 0) to the absolute last finish of any job.
+7. **Completion Order Rule**: The output list reflects the order in which LOW jobs finish, respecting resumption priority for ties or overlaps.
+
+---
+
+### Phase 2: LEDGER WALK
+*Applying events one at a time in strict arrival order.*
+
+**Event 0 (T=0): HIGH Job Arrives and Starts.**
+- State Change: HIGH job begins execution at T=0. Duration = 6 min. Finish Time = 6.
+- LOW1 Status: Arrives at T=0 but cannot start because HIGH occupies the core instantly. LOW1 is queued/delayed.
+- Ledger: `HIGH_starting(T=0)`, `LOW1_queued()`.
+
+**Event 1 (T=3): LOW2 Job Arrives and Starts.**
+- State Change: It has been 3 minutes since T=0. HIGH job started at 0, so it is running.
+- Rule Application: "HIGH preempts instantly". Since HIGH is already running when LOW2 arrives, LOW2 cannot start immediately. It must wait for HIGH to finish? Or does the prompt imply concurrent execution isn't possible?
+- Re-evaluating "Preemption": Usually, preemption implies one job takes over from another. If HIGH starts at 0 and runs continuously, no other job can run until T=6.
+- Correction on Arrival Logic: "HIGH runs... LOW1 runs 4 minutes starting at minute 0". This phrasing in the prompt ("LOW1 runs... starting at minute 0") conflicts with "HIGH preempts instantly" unless HIGH has priority *after* start, or they run concurrently (impossible for one core).
+- Interpretation of "Preemption": The text says "HIGH preempts instantly and runs to completion." This implies if a LOW job starts, HIGH can kick it out. But does HIGH kick it out immediately upon starting? Yes. So at T=0, HIGH starts. Can LOW1 start at T=0? No, because the core is taken by HIGH.
+- *Wait, let's re-read carefully:* "LOW1 runs 4 minutes starting at minute 0". This sounds like a description of intent, but the rule says "HIGH preempts instantly". If HIGH starts at 0, it holds the core. LOW1 arrives at 0. Does it start?
+- Standard scheduling logic with preemption: High priority job preempt low priority. At T=0, HIGH is scheduled. LOW1 arrives same time. HIGH wins. LOW1 waits.
+- *Alternative Interpretation:* Maybe "starting at minute 0" means the *arrival* is at 0, and it attempts to run? But if HIGH preempts instantly upon start, and they both want to start at 0, HIGH goes first.
+- Let's look at the "Orientation Rehearsal": "5-minute LOW starting immediately... a resumed LOW finishing before any fresh one started". This implies concurrency isn't allowed; it's sequential.
+- **Revised Event Logic**:
+    - T=0: HIGH arrives and starts (Duration 6). Core busy until T=6.
+    - T=3: LOW2 arrives. Since HIGH is running, LOW2 cannot start yet? Or does the system queue them? "Preemption" usually handles the switch. If HIGH starts at 0 and runs to completion, nothing else runs until T=6.
+    - *However*, the prompt says "LOW1 runs 4 minutes starting at minute 0". This specific instruction might override general preemption if interpreted as a simultaneous start attempt where priority resolves it immediately. But "runs... starting at" describes the action. If HIGH preempts instantly, LOW1 cannot run its first 2 minutes (checkpoint).
+    - Let's trace the "Orientation Rehearsal" logic to deduce the mechanism: "7-min HIGH", "5-min LOW starting immediately". Result: "makespan 12".
+        - If High runs 0-7. Low arrives at 0? If it starts immediately, it gets preempted instantly? Then it resumes later.
+        - Orientation says: "a resumed LOW finishing before any fresh one started". This implies a scenario where one LOW was paused and restarted.
+        - Let's assume the standard interpretation for these puzzles: **Single Core**. One job runs at a time.
+        - T=0: HIGH starts (Duration 6). Ends T=6.
+        - Where is LOW1? "LOW1 runs 4 minutes starting at minute 0". If it *starts* at 0, and HIGH preempts instantly... this creates a paradox unless they are distinct jobs on different cores (not stated) or the "preemption" happens only if there's a conflict.
+        - *Hypothesis*: The prompt describes a specific scenario where LOW1 is *allowed* to start at T=0, but HIGH preempts it? No, that doesn't make sense for a single core unless they overlap in time which isn't allowed.
+        - *Most likely interpretation*: "Starting at minute 0" refers to the **arrival/claim** time, not necessarily the execution start if preempted immediately by a higher priority job arriving at the same instant.
+        - **BUT**, look at the Orientation example numbers: High=7, Low=5. Makespan=12.
+            - If High runs 0-7. Low arrives 0? If it waits until T=7, finishes at 7+5=12. Total time 12. Order: Resumed? No, only one job in example description "a single resumed job". Wait, the example says "resumed LOW finishing before any fresh one started". This implies TWO LOW jobs in the example (one resumed, one fresh).
+            - Example setup: High (7), Low A (5), Low B (fresh?).
+            - If High runs 0-7. Low A arrives 0? If it gets preempted instantly, it does 0 work. Then resumes at 7. Finishes 7+5=12. Makespan 12. This matches the example "makespan 12".
+            - So in the main task: High (6), Low1 (4) @ T=0, Low2 (3) @ T=3.
+            - **Sequence**:
+                1. T=0: HIGH starts. LOW1 arrives same time. HIGH preempts instantly. LOW1 does 0 work yet. Queued? Or is it "fresh" waiting?
+                2. T=3: LOW2 arrives. HIGH still running (until T=6). LOW2 waits.
+                3. T=6: HIGH finishes.
+                   - State at T=6: LOW1 has been waiting since T=0. Has it started? No, because HIGH was there. So LOW1 is "fresh" (0 mins done). Checkpoint status: None reached.
+                   - LOW2 arrived at T=3. Still hasn't run. Fresh (0 mins done).
+                4. Who runs next? Rule: "a resumed LOW job outranks a fresh one". Neither has been resumed yet because neither ran. Both are fresh.
+                   - Tie-breaker needed. Usually FIFO or ID order. Prompt says "arrivals in order". LOW1 arrived at 0, LOW2 at 3. So LOW1 is next.
+                5. T=6: LOW1 starts. Runs 4 mins. Finishes at T=10.
+                   - Checkpoint logic: LOW1 checkpoints every 2 minutes. It runs 0->2 (CP), 2->4 (CP). No preemption during this run.
+                6. Does LOW2 get a chance? LOW1 finishes at 10. Core free. LOW2 starts at T=10? Runs 3 mins. Finishes at T=13.
+                   - Checkpoint logic: LOW2 runs 0->2 (CP), 2->3 (Finish). No waste.
+                7. Wait, is there a preemption event I missed? "HIGH preempts instantly". This only happens if HIGH starts while another is running. Here, at T=0, no one was running. So LOW1 never got to run before HIGH started?
+                   - If the rule is "HIGH runs... LOW1 runs...", maybe they are concurrent? No, "one core".
+                   - Maybe the "preemption" implies that even if they start together, HIGH takes over? Yes.
+                   - So at T=0: Both claim. HIGH wins. LOW1 suspended (Fresh).
+                   - At T=3: LOW2 claims. LOW1 is waiting (Fresh). LOW2 is Fresh.
+                   - At T=6: HIGH done. Queue: LOW1 (arrived 0), LOW2 (arrived 3). Both Fresh. Order by arrival: LOW1 then LOW2.
+                   - Execution: LOW1 runs 4 min (0-4 relative to start, i.e., 6-10 absolute). Checkpoints at +2, +4. No waste.
+                   - Then LOW2 runs 3 min (10-13 absolute). Checkpoints at +2, +3. No waste.
+                   - Waste = 0? Order = [LOW1, LOW2

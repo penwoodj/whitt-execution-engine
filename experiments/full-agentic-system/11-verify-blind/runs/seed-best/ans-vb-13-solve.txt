@@ -1,0 +1,88 @@
+### Phase 1 RULE SCAN
+This phase lists every rule in the task that changes state during the event sequence (the "flaky upstream" scenario), identifying the specific trigger for each.
+
+1.  **Per-Attempt Cost Rule**: Triggers on every attempt (failed or successful). Adds `2` tokens to spend.
+2.  **Wait Time Rule**: Triggers after a failed attempt. Adds wait seconds (`2`, then `4`, then `8`) to spend.
+3.  **Total Spend Calculation Rule**: Aggregates costs from attempts and waits. Defines the threshold for suppression.
+4.  **Budget Doubling Rule**: Triggers if Total Spend > Initial Budget (39). Doubles the budget exactly once before re-evaluation.
+5.  **Suppression Verdict Rule**: Determines `suppressed` status based on whether spend exceeds the *current* effective budget after any doubling.
+6.  **Budget After Calculation Rule**: Computes `budget_after` as Effective Budget minus Total Spend.
+
+---
+
+### Phase 2 LEDGER WALK
+This phase applies the events in strict arrival order, updating the state line by line.
+
+**Initial State:**
+-   `attempts`: 0
+-   `wait_s`: 0
+-   `budget_limit`: 39 (Initial)
+-   `effective_budget`: 39
+-   `total_spend`: 0
+-   `suppressed`: false
+
+**Event 1: Attempt 1 (Failed)**
+-   Action: Run attempt. Cost = 2.
+-   State Update: `attempts` becomes 1. `total_spend` increases by 2.
+-   Current Spend: 2. Limit: 39. OK.
+
+**Event 2: Wait after Attempt 1**
+-   Action: Apply wait time (First wait is 2s). Cost = 2.
+-   State Update: `wait_s` increases by 2. `total_spend` increases by 2.
+-   Current Spend: 4. Limit: 39. OK.
+
+**Event 3: Attempt 2 (Failed)**
+-   Action: Run attempt. Cost = 2.
+-   State Update: `attempts` becomes 2. `total_spend` increases by 2.
+-   Current Spend: 6. Limit: 39. OK.
+
+**Event 4: Wait after Attempt 2**
+-   Action: Apply wait time (Next wait doubles from 2s to 4s). Cost = 4.
+-   State Update: `wait_s` increases by 4. `total_spend` increases by 4.
+-   Current Spend: 10. Limit: 39. OK.
+
+**Event 5: Attempt 3 (Failed)**
+-   Action: Run attempt. Cost = 2.
+-   State Update: `attempts` becomes 3. `total_spend` increases by 2.
+-   Current Spend: 12. Limit: 39. OK.
+
+**Event 6: Wait after Attempt 3**
+-   Action: Apply wait time (Next wait doubles from 4s to 8s). Cost = 8.
+-   State Update: `wait_s` increases by 8. `total_spend` increases by 8.
+-   Current Spend: 20. Limit: 39. OK.
+
+**Event 7: Attempt 4 (Successful)**
+-   Action: Run attempt. Cost = 2.
+-   State Update: `attempts` becomes 4. `total_spend` increases by 2.
+-   Current Spend: 22. Limit: 39. OK.
+
+**Final Reconciliation:**
+-   Total Spend (`total_spend`) = 20 (waits) + 8 (attempts) = 28? **Correction**: Let's re-sum carefully.
+    -   Waits: 2 + 4 + 8 = 14.
+    -   Attempts: 2 * 4 attempts = 8.
+    -   Total Spend = 14 + 8 = 22.
+-   Check against Budget (39): 22 <= 39.
+-   Condition for Doubling: Spend > Budget? No.
+-   Effective Budget remains 39.
+-   `budget_after` = 39 - 22 = 17.
+-   `suppressed` = false.
+
+*Self-Correction on "Job Needs 3 failed attempts before the 4th succeeds":*
+The prompt states: "the job needs 3 failed attempts before the 4th succeeds."
+Sequence: Fail, Wait, Fail, Wait, Fail, Wait, Success.
+Total Attempts = 4.
+Total Waits = 3 (after each of the first 3 failures).
+Wait values: 2, 4, 8. Sum = 14.
+Attempt costs: 2 * 4 = 8.
+Total Spend = 14 + 8 = 22.
+Budget = 39.
+Spend (22) < Budget (39). No doubling triggered.
+Final State: `attempts`: 4, `wait_s`: 14, `budget_after`: 17, `suppressed`: false.
+
+---
+
+### Final Answer JSON
+
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 17, "suppressed": false}
+```

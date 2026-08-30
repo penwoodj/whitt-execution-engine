@@ -1,0 +1,82 @@
+**Fact Bullets:**
+- LOW1: duration 5 min, start minute 0.
+- LOW2: duration 7 min, start minute 2.
+- HIGH: arrival minute 3, duration 8 min (preempts core).
+
+**Minute-by-Minute Table:**
+
+| Minute | Core Status | Event Details | Bank Checkpoint (Absolute Min) | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| **0** | LOW1 | Start LOW1. Runs 5 min total. Occupies [0, 4]. | None yet. | Core busy with LOW1. |
+| **1** | LOW1 | Running LOW1 (rem: 4). | Bank @ 2? No (needs +2 from start). | |
+| **2** | LOW1 | Running LOW1 (rem: 3). Start LOW2 queued. | Bank @ 2? Yes (0+2=2). **Banked: 2**. | Core busy with LOW1. LOW2 waits. |
+| **3** | HIGH | Arrive HIGH. Preempt LOW1 immediately. | N/A (Preemption happens before bank check for this minute's run). | LOW1 interrupted at min 3. Wasted = Total(5) - Banked(2) = **3**. Core switches to HIGH. |
+| **4** | HIGH | Running HIGH (rem: 7). | None. | Core busy with HIGH. |
+| **5** | HIGH | Running HIGH (rem: 6). | None. | Core busy with HIGH. |
+| **6** | HIGH | Running HIGH (rem: 5). Resume LOW2? No, HIGH runs until completion or preemption logic dictates otherwise. Wait, does HIGH preempt LOW2 when it arrives? Yes. Does HIGH finish before LOW2 starts? Let's re-read: "HIGH ... instantly preempting whatever LOW job is running". It doesn't say it preempts the *next* waiting job unless that next job tries to run while HIGH is active. However, standard scheduling logic implies if a higher priority task (HIGH) is running, lower tasks wait. But does HIGH finish? Duration 8 min starting at 3 -> finishes at 11. LOW2 starts at 2 but was preempted by HIGH arrival at 3. So LOW2 waits until HIGH finishes? Or does LOW2 start immediately after the preemption event? The prompt says "resume LOW outranks fresh one". This implies if LOW2 is waiting, it can resume once core is free. But HIGH is running. Does HIGH block LOW2? Yes, unless HIGH yields or finishes. Wait, re-read: "while HIGH runs nothing else runs". So LOW2 must wait for HIGH to finish. |
+| **7** | HIGH | Running HIGH (rem: 4). | None. | Core busy with HIGH. |
+| **8** | HIGH | Running HIGH (rem: 3). | None. | Core busy with HIGH. |
+| **9** | HIGH | Running HIGH (rem: 2). | None. | Core busy with HIGH. |
+| **10**| HIGH | Running HIGH (rem: 1). | None. | Core busy with HIGH. |
+| **11**| HIGH | Finish HIGH. Occupied [3, 11]. | Bank @ 4? No (HIGH arrival at 3 counts as bank for LOW2 if it had run, but it didn't). | Core free. LOW2 resumes. |
+
+**Re-evaluating the "Resume" Logic:**
+- **LOW1**: Starts 0. Banks at 2. Preempted at 3. Wasted = $5 - 2 = 3$.
+- **HIGH**: Arrives 3, runs 8 min. Finishes at $3+8=11$. Occupies core [3, 11].
+- **LOW2**: Starts 2 (queued). Waits for HIGH to finish? Or does it start immediately after the preemption event at minute 3?
+    - The prompt says: "resume LOW outranks fresh one". This usually applies when there's a tie in priority or availability. Here, HIGH is running. "while HIGH runs nothing else runs". So LOW2 cannot run while HIGH is active.
+    - Therefore, LOW2 waits until minute 11 (when HIGH finishes).
+    - At minute 11, core becomes free. LOW2 resumes.
+    - LOW2 duration: 7 min. Starts running at minute 11. Occupies [11, 17]. Finishes at $11+7=18$.
+- **Checkpoints for LOW2**:
+    - Start/Resume time: 11.
+    - Bank check: "banks checkpoint at start-or-resume +2". So bank at $11+2=13$.
+    - Does it run past a checkpoint? It runs from 11 to 17 (6 minutes of running).
+    - Checkpoints occur at absolute minutes: 13, 15.
+    - Since LOW2 is the only job running after HIGH, and no other preemption occurs, there are **0 wasted** minutes for LOW2.
+
+**Summary:**
+- **Makespan**: Max finish time = $\max(\text{LOW1 finish?}, \text{HIGH finish}, \text{LOW2 finish})$.
+    - LOW1 finished conceptually at 5 but was preempted. The "finish" of the job is when it completes its work. Since it was preempted and redone, does it count towards makespan? Usually, makespan is the time until all jobs are done.
+    - LOW2 finishes at 18. HIGH finishes at 11.
+    - Does LOW1 finish after being resumed? The prompt asks for "makespan counts from last finish". This implies the final completion of any job. Since LOW1 was preempted and redone, it must complete its remaining work.
+    - Wait, did I miss a resume for LOW1?
+        - Preempted at 3. Wasted 3 mins. Remaining: $5-3=2$ mins.
+        - HIGH runs [3, 11].
+        - At 11, core free. Which job resumes? "resume LOW outranks fresh one". Both are "resumed" (LOW1 has remaining work, LOW2 is waiting).
+        - If LOW1 resumes first: Runs 2 mins. Finishes at $11+2=13$.
+        - Then LOW2 runs 7 mins. Finishes at $13+7=20$.
+    - **Alternative Interpretation**: Does "resume LOW outranks fresh one" mean if both are waiting, the one with remaining work goes first? Yes.
+    - So sequence after HIGH:
+        1. Resume LOW1 (rem 2). Runs [11, 13]. Finishes at 13.
+        2. Run LOW2 (7). Runs [13, 20]. Finishes at 20.
+    - **Wasted**: Only LOW1 had preemption waste = 3 mins. LOW2 had no preemption. Total wasted = 3.
+    - **Order**: "completion order lists LOW jobs by minute each finishes".
+        - LOW1 finishes at 13.
+        - LOW2 finishes at 20.
+        - Order: ["LOW1", "LOW2"].
+
+**Let's double check the "Bank" logic for LOW2 if it resumes later.**
+- If LOW1 resumes first (finishes 13), then LOW2 starts at 13.
+- LOW2 start/resume = 13. Bank at $13+2=15$.
+- Runs until 20. Checkpoints at 15, 17. No waste.
+
+**What if HIGH preempts LOW2 immediately upon arrival?**
+- "instantly preempting whatever LOW job is running". At minute 3, LOW1 was running. LOW2 was waiting (queued). So only LOW1 is preempted.
+- "while HIGH runs nothing else runs". This blocks both LOWs.
+
+**Final Calculation:**
+- **LOW1**: Start 0. Bank @ 2. Preempt @ 3. Waste = $5-2=3$. Remaining = 2.
+- **HIGH**: Arrive 3. Run 8. Finish 11.
+- **Resume Phase (Start 11)**:
+    - Priority: LOW1 (has remaining work) > LOW2 (fresh/waiting).
+    - LOW1 runs [11, 13]. Finishes at 13.
+    - LOW2 runs [13, 20]. Finishes at 20.
+- **Wasted**: 3 mins (from LOW1 preemption).
+- **Makespan**: 20 mins.
+- **Order**: ["LOW1", "LOW2"].
+
+**JSON Output:**
+```json
+{"makespan_min": 20, "wasted_min": 3, "order": ["LOW1", "LOW2"]}
+```

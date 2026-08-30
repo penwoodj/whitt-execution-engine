@@ -1,0 +1,49 @@
+### Phase 1: Rule List & Event Triggers
+
+Based on the task description, here are the rules that change state during the event or claim list (arrivals, grants/preemptions/expiries), one line each:
+
+1.  **Arrival Order Rule**: LOW jobs take the core in order of their start minutes; a resumed LOW outranks a fresh one at any tie.
+2.  **Preemption Rule**: HIGH arrives and instantly preempts whatever LOW job is running (if any); while HIGH runs, nothing else runs.
+3.  **Checkpoint Banking Rule**: A job banks a checkpoint at `start_or_resume + 2` and every 2 running minutes after; absolute minute tracking applies.
+4.  **Waste/Resume Rule**: On preemption, work past the last bank is wasted (minutes run = total - banked); on resume, the job redoes the owed minutes.
+5.  **Idle Avoidance Rule**: The core never idles while a LOW job is waiting; the next waiting LOW starts in the same minute the previous one finishes or is preempted.
+
+**Event Triggers:**
+*   `LOW1` Arrival (Minute 0) -> Triggers Rule 1 (Queueing).
+*   `LOW2` Arrival (Minute 3) -> Triggers Rule 1 (Queueing behind LOW1 due to start time tie-breaker logic, though LOW1 is already running).
+*   `HIGH` Arrival (Minute 3) -> Triggers Rule 2 (Preemption of LOW1) and Rule 4 (Waste calculation for LOW1).
+*   `LOW1` Resume (Minute 6) -> Triggers Rule 4 (Redo owed minutes) and Rule 3 (New banking sequence).
+*   `LOW1` Finish (Minute 9) -> Triggers Rule 5 (Core moves to next waiting job, LOW2).
+*   `LOW2` Finish (Minute 12) -> End of simulation.
+
+---
+
+### Phase 2: Ledger Walk (Per-Minute Table)
+
+**Legend:**
+*   **Core**: The job currently running (`LOW1`, `LOW2`, or `HIGH`). If empty, the core is idle (which shouldn't happen per rules).
+*   **Event**: Description of state change.
+*   **Bank@**: Absolute minute where a checkpoint was banked.
+
+| Minute | Core | Event | Bank@ | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| 0 | LOW1 | Start `LOW1` (Total: 5). Runs min 0-2. | 2 | Banks at $0+2$. |
+| 1 | LOW1 | Continue running. | - | |
+| 2 | LOW1 | Finish min 2. Banked 2 mins. | - | Ready for next event. |
+| 3 | HIGH | `LOW2` arrives (Start: 3). `HIGH` arrives (Start: 3, Len: 6). **Preempt** `LOW1`. | - | `LOW1` had 0 unbanked mins ($5-2$). Wasted = 3. Core switches to `HIGH`. |
+| 4 | HIGH | Continue running. | - | |
+| 5 | HIGH | Continue running. | - | |
+| 6 | HIGH | Continue running. | - | |
+| 7 | HIGH | Continue running. | - | |
+| 8 | HIGH | Continue running. | - | |
+| 9 | HIGH | Finish min 9. Core free. `LOW1` resumes (Owed: 3). **Start** `LOW1`. | 11 | Banks at $6+2$ (resume start + 2). Note: Resume starts at 6, so bank is at 8? Wait, rule says "start-or-resume + 2". Resume happens at minute 6. Bank at $6+2=8$. Let's re-verify banking logic. |
+| **Correction on Banking**: Rule: "banks a checkpoint at minute s+2 and again every 2 running minutes after".<br>Resume Start ($s$) = Minute 6.<br>Bank 1: Minute $6+2 = 8$. |
+| 9 | LOW1 | Continue running (Owed remaining). | - | Running min 7-9. Total run time since resume = 3 mins? No, `LOW1` needs to run 3 mins total. It runs min 7, 8, 9. That is 3 minutes. |
+| **Re-evaluating Timeline**: <br>Min 0: Start LOW1 (5m). Runs 0,1,2. Bank @2.<br>Min 3: HIGH arrives. Preempts LOW1. LOW1 wasted = $5-2=3$ mins. Core -> HIGH.<br>Min 4,5,6,7,8: HIGH runs (6m total). Finishes at end of min 9? No, starts min 3, runs 3,4,5,6,7,8. That is 6 minutes. Ends after minute 8. Core free at start of Minute 9.<br>Min 9: Resume LOW1 (Owed 3). Runs 9, 10, 11. Banks @ $9+2=11$. Finishes after min 11? Wait, needs 3 mins. Runs 9, 10, 11. That is 3 minutes. Ends after minute 11.<br>Min 12: Resume LOW2 (Start 3). Runs 12, 13, 14. Banks @ $12+2=14$. Finishes after min 14? Needs 3 mins. Runs 12, 13, 14. Ends after minute 14.<br><br>**Let's re-read the "Start" vs "Finish" definition carefully.**<br>"LOW1 runs 5 minutes starting at minute 0". Usually means occupies [0, 1), [1, 2)... or discrete steps?<br>Example logic: "LOW1 held core minutes 0, 1 and 2... its 3rd minute was unbanked when swap came". This implies discrete minutes. <br>Min 0 (1st), Min 1 (2nd), Min 2 (3rd). Bank @2.<br>Swap at Min 3. Wasted = Total(5) - Banked(2) = 3 mins.<br>HIGH runs 6 mins starting min 3. Occupies [3,4), [4,5)...[8,9)? Or discrete 3,4,5,6,7,8? <br>Example: "HIGH ran minutes 3 to 5" (2 mins). This implies inclusive range or duration. Duration 2. Starts 3. Ends after 4? Or ends at 5?<br>"LOW1 resumed... ran them minutes 5 to 10". Duration 6? No, example says LOW1 had 7 total, 2 banked, owed 5. Ran 5 mins. "Minutes 5 to 10" implies duration 5 (5,6,7,8,9). Ends at 10.<br>So: Start Min $S$. Runs for $D$ minutes. Occupies $[S, S+D)$. Finishes at $S+D$. <br><br>**Recalculating with Discrete Duration Logic:**<br>1. **Min 0**: `LOW1` starts (Dur 5). Runs [0, 5). Banks @2.<br>2. **Min 3**: `HIGH` arrives (Dur 6). Preempts `LOW1`. <br>&nbsp;&nbsp;Waste: $5 - 2 = 3$ mins.<br>&nbsp;&nbsp;Core -> `HIGH`. Runs [3, 9).<br>3. **Min 9**: `HIGH` finishes. Core free.<br>&nbsp;&nbsp;Next in queue: `LOW1` (Resume) vs `LOW2` (Fresh). <br>&nbsp;&nbsp;Tie-breaker: Resumed outranks fresh. -> `LOW1`. <br>&nbsp;&nbsp;`LOW1` resumes with 3 mins owed. Runs [9, 12).<br>&nbsp;&nbsp;Banking for Resume: Start $S=9$. Bank @ $9+2 = 11$. <br>4. **Min 12**: `LOW1` finishes. Core free.<br>&nbsp;&nbsp;Next in queue: `LOW2`. <br>&nbsp;&nbsp;`LOW2` starts (Dur 3). Runs [12, 15).<br>&nbsp;&nbsp;Banking for Start: Start $S=12$. Bank @ $12+2 = 14$. <br>5. **Min 15**: `LOW2` finishes.<br><br>**Final Stats:**<br>Makespan: Last finish minute = 15.<br>Wasted: 3 mins (from LOW1 preemption).<br>Order: `LOW1`, `LOW2`. |
+
+| Minute | Core | Event | Bank@ | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| 0-5 | LOW1 | Start `LOW1` (Dur 5). Runs [0, 5). | 2 | Banks at $0+2$. |
+| 3-9 | HIGH | `HIGH` arrives. **Preempt** `LOW1`. | - | `LOW1` wasted = $5-2=3$ mins. Core -> `HIGH`. |
+| 9-12 | LOW1 | Resume `LOW1` (Owed 3). Runs [9, 12). | 11 | Banks at $9+2$. Resumed outranks fresh `LOW2`. |
+| 12-15 | LOW2 | Start `LOW2` (Dur

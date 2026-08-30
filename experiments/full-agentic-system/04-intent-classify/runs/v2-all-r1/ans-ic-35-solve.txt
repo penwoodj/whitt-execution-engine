@@ -1,0 +1,91 @@
+### Minute-by-Mute Walk Table
+
+| minute | core | event |
+| :--- | :--- | :--- |
+| 0 | LOW1 (Start) | Start LOW1 at min 0. Bank checkpoint @ 2. |
+| 1 | LOW1 (Run) | Run LOW1. Total run: 1. Banked: 0. |
+| 2 | HIGH (Preempt) | HIGH arrives. Preempts LOW1. LOW1 has 1 minute run, last bank at 2. Minutes past bank = 0 wasted? Wait, rule says "bank landing exactly on HIGH's arrival still counts". So 0 wasted. Core switches to HIGH. |
+| 3 | HIGH (Run) | Run HIGH. Total run: 1. |
+| 4 | HIGH (Run) | Run HIGH. Total run: 2. |
+| 5 | HIGH (Run) | Run HIGH. Total run: 3. |
+| 6 | HIGH (Run) | Run HIGH. Total run: 4. |
+| 7 | HIGH (Run) | Run HIGH. Total run: 5. |
+| 8 | HIGH (Finish) | HIGH finishes. Core becomes free. Waiting LOWs: LOW2 (start min 0), LOW1 (resumed, start min 0). Tie in start minute. Resolved by "resumed outranks fresh". Core picks LOW1. |
+| 9 | LOW1 (Resume) | Resume LOW1. Total run since resume: 1. Bank checkpoint @ 2 relative to resume? No, absolute minutes. Resume at 8. Run 1 min -> total run time = 6. Last bank was at 2. Next bank at 4 (relative). Absolute minute for next bank = 8 + 2 = 10. |
+| 10 | LOW1 (Run) | Run LOW1. Total run time: 7. Bank checkpoint @ absolute min 10? Yes, 8+2=10. Job finishes at end of minute 10. |
+| 11 | LOW2 (Start) | LOW1 finished. Core picks next waiting job: LOW2 (start min 0). Start LOW2 at min 11. Bank checkpoint @ 13. |
+| 12 | LOW2 (Run) | Run LOW2. Total run: 1. |
+| 13 | LOW2 (Finish) | Run LOW2. Total run: 2? Wait, duration is 3 minutes. Start at 11. Minute 11 (run 1), Minute 12 (run 2), Minute 13 (run 3). Finishes end of minute 13. |
+
+**Correction on Preemption Logic:**
+Let's re-evaluate the preemption at minute 2 carefully.
+Rule: "LOW jobs checkpoint every 2 completed minutes... a job that starts or resumes at minute s banks a checkpoint at minute s+2".
+LOW1 starts at 0. Banks at 2.
+At minute 2, HIGH arrives.
+Does LOW1 finish the minute? The table shows events happen *during* the minute.
+Minute 0: Start.
+Minute 1: Run (1 min completed).
+Minute 2: HIGH arrives. Preemption happens.
+Did LOW1 complete the full minute 2? No, it was preempted immediately upon arrival of HIGH at the start of minute 2 (or during).
+However, the bank is at absolute minute 2.
+If preemption occurs *at* minute 2, and the bank is *at* minute 2, does it count?
+Rule: "a bank landing on the exact minute HIGH arrives still counts".
+So even if LOW1 was running for only 0 minutes of minute 2 before being kicked, or 1 minute, as long as the bank time (absolute) matches the arrival time, no work is wasted.
+Wait, let's look at the "orientation" example logic again: "LOW1 held core minutes 0, 1 and 2... its 3rd minute was unbanked when swap came". In that example, LOW1 started at 0, duration 7. Banks at 2. HIGH arrives at 3. So at min 3, it has run mins 0,1,2 (3 mins). Bank is at 2. Next bank at 4. At min 3, it hasn't reached the next bank yet?
+Actually, in the example: "LOW1 held core minutes 0, 1 and 2... its 3rd minute was unbanked". This implies the bank happens *after* completing the interval.
+Interval 0-2 (2 mins). Bank at 2.
+If HIGH arrives at 3, LOW1 has completed min 0, 1, 2? No, "held core minutes 0, 1 and 2" means it ran during those minutes.
+So at the start of minute 3, it has run 3 minutes (end of min 2). The bank was placed at absolute time 2.
+The rule says: "bank landing on the exact minute HIGH arrives still counts".
+In our case: LOW1 starts at 0. Bank at 2. HIGH arrives at 2.
+So the bank lands exactly when HIGH arrives. No waste.
+
+**Re-evaluating Duration and Finish Times:**
+LOW1: Start 0, Dur 4.
+Minute 0: Run (rem 3).
+Minute 1: Run (rem 2).
+Minute 2: Preempted by HIGH. (Rem 2 carried over? No, work past last bank wasted. Last bank at 2. So 0 wasted).
+LOW1 resumes later. Needs to run remaining 4 minutes? Or does it restart from checkpoint?
+"on preemption the work past the last checkpoint is wasted and redone".
+Checkpoint was at absolute min 2.
+So LOW1 effectively has 0 progress saved towards its goal of 4 minutes?
+Wait, if bank is at 2, and job needs 4 mins total. Does it need to run 4 more? Or does the "bank" represent completed work?
+Usually, checkpoint means "I have done X". If I am preempted before reaching next checkpoint, I lose progress since last checkpoint.
+Last checkpoint was at absolute min 2.
+So LOW1 has effectively completed 0 minutes of *valid* work towards its duration goal (assuming the bank marks a milestone).
+Actually, if the job needs to run for 4 minutes total, and it ran during min 0 and 1 (2 mins), but got preempted at start of min 2.
+Did it complete min 0? Yes. Min 1? Yes.
+But checkpoints are every 2 minutes. So after min 2, a checkpoint is placed.
+If preemption happens *at* minute 2, and the bank is *at* minute 2, then the system considers the job to have reached the checkpoint state.
+So LOW1 needs to run 4 more minutes? Or does it need to reach total duration of 4?
+"LOW jobs take the core in order... a resumed LOW outranks a fresh one".
+If LOW1 was preempted at min 2, and bank is at 2, then LOW1 has "banked" its progress.
+Does "banking" mean it has completed the work up to that point? Yes.
+So if LOW1 needs 4 minutes total, and it reached the checkpoint at minute 2 (which implies it finished min 0 and 1?), wait.
+If checkpoints are every 2 minutes, then after 2 minutes of running, a checkpoint is saved.
+If HIGH arrives at minute 2, does that mean LOW1 has run for 2 minutes?
+"HIGH arrives at minute 2". Usually means start of minute 2.
+So LOW1 ran min 0 (1 min), min 1 (1 min). Total 2 mins.
+At the end of min 1, checkpoint saved? Or during min 2?
+"a job that starts or resumes at minute s banks a checkpoint at minute s+2".
+Starts at 0 -> Bank at 2.
+So at absolute time 2, a bank is created.
+If HIGH arrives at absolute time 2, the bank lands exactly on arrival. "still counts".
+This implies LOW1 has successfully reached the state of having completed enough to trigger the bank (i.e., 2 minutes).
+So LOW1 has effectively completed 2 minutes of its required 4?
+Or does it mean it has completed the *interval* leading up to minute 2? Yes.
+So LOW1 needs to run remaining 2 minutes?
+Wait, if it runs min 0 and 1, that's 2 minutes. Bank at 2.
+If HIGH arrives at 2, and bank counts, then LOW1 has "banked" its progress.
+Does "banking" mean the work is saved? Yes.
+So LOW1 resumes with 0 wasted. It needs to run remaining 2 minutes to finish (total 4).
+
+Let's re-read the orientation example: "LOW1 runs 7 minutes... banked a checkpoint at minute 2, and its 3rd minute was unbanked when swap came".
+Start 0 -> Bank 2.
+Runs min 0, 1. At end of min 1? Or during min 2?
+"its 3rd minute was unbanked". This implies the bank happens *after* completing the interval.
+So at absolute time 2, the bank is placed.
+If HIGH arrives at 3 (in example), then LOW1 has run mins 0, 1, 2 (3 minutes). Bank at 2. Next bank at 4.
+At min 3, it hasn't reached next bank yet? No, "unbanked" means the current minute of work is not part of a completed checkpoint interval yet.
+In our case: HIGH arrives at 2. LOW1 has run mins 0, 1 (2 minutes). Bank placed at 2.
+So LOW1 has completed exactly 2 minutes. The bank counts.

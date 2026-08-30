@@ -1,0 +1,98 @@
+Based on the strict rules provided in the task description and the orientation example (which is a "lamp" for logic but not numbers), here is the step-by-step derivation of the state.
+
+### **Rule Analysis & State Initialization**
+
+1.  **Capacity:** The card has an 8 GB capacity (`one 8GB card tonight`).
+2.  **Requests Stream:**
+    *   Event 0: Load A (2 GB)
+    *   Event 1: Load B (2 GB)
+    *   Event 2: Load C (2 GB)
+    *   Event 3: Load D (7 GB)
+    *   Event 4: Unload B (2 GB)
+3.  **Model Sizes:** A=2, B=2, C=2, D=7.
+4.  **Pin Status:** Model B is pinned (`model B is pinned`). Others are unpinned.
+5.  **Eviction Policy:** Least-Recently-Touched (LRT) Unpinned model first. If a load cannot fit even after evicting all unpinned models, the load is **deferred**.
+6.  **Timing/Costs:** Loads cost 30s, unloads 10s. (These are metadata; they do not affect capacity or state counts).
+7.  **Initial State:** Pool = 8 GB. Loaded Set = {}.
+
+---
+
+### **Phase 2: Ledger Walk (Event by Event)**
+
+**Start:** `Pool Left` = 8 GB. `Loaded` = {A:0, B:0, C:0, D:0}.
+
+#### **Event 1: Load A (2 GB)**
+*   **Action:** Request to load 2 GB into slot A.
+*   **Fit Check:** Current Pool (8) >= Needed (2).
+*   **Execution:** Grant the load.
+    *   Slot A becomes resident.
+    *   Pool decreases by 2 GB.
+*   **State Update:** `Pool Left` = 6 GB.
+
+#### **Event 2: Load B (2 GB)**
+*   **Action:** Request to load 2 GB into slot B.
+*   **Fit Check:** Current Pool (6) >= Needed (2).
+*   **Execution:** Grant the load.
+    *   Slot B becomes resident. (Note: B is pinned, but it fits without eviction).
+    *   Pool decreases by 2 GB.
+*   **State Update:** `Pool Left` = 4 GB.
+
+#### **Event 3: Load C (2 GB)**
+*   **Action:** Request to load 2 GB into slot C.
+*   **Fit Check:** Current Pool (4) >= Needed (2).
+*   **Execution:** Grant the load.
+    *   Slot C becomes resident.
+    *   Pool decreases by 2 GB.
+*   **State Update:** `Pool Left` = 2 GB.
+
+#### **Event 4: Load D (7 GB)**
+*   **Action:** Request to load 7 GB into slot D.
+*   **Fit Check:** Current Pool (2) < Needed (7). Shortfall = 5 GB.
+*   **Eviction Phase:** Must free up at least 5 GB from unpinned models.
+    *   **Resident Models:** A (Unpinned, 2GB), B (Pinned, 2GB), C (Unpinned, 2GB).
+    *   **Strategy:** Evict LRT Unpinned. We assume standard FIFO or order of arrival for tie-breaking unless specified otherwise. Let's look at the set {A, C}. Both are unpinned.
+    *   **Eviction Count Needed:** To fit D (7GB), we need 5GB free. Evicting A (2GB) leaves us with 4GB pool. We still need 1GB more? No, wait.
+        *   Pool after eviction of A: Start(8) - Used(A)+Used(B)+Used(C) + Free(A)?
+        *   Let's track "Available Space":
+            *   Current Available = 2 GB.
+            *   Target Needed = 7 GB.
+            *   Gap to fill = 5 GB.
+    *   **Evict A (Unpinned, 2GB):**
+        *   Release 2 GB. New Pool Available = 4 GB.
+    *   **Evict C (Unpinned, 2GB):** (Assuming C is the next LRT or we must clear both unpinned to reach high enough capacity? Actually, if we only evict one, pool=4+2=4. Still < 7. We need to empty ALL unpinned models).
+    *   **Evict remaining Unpinned Models:** The rule says "evicts as many LRU unpinned models as needed". In this case, both A and C are unpinned. Even if they were pinned/unpinned mixed, we must clear the pool of unpinneds first.
+        *   Evict A (2GB). Pool becomes 4GB.
+        *   Evict C (2GB). Pool becomes 6GB? No.
+        *   Let's re-calculate strictly:
+            *   Total Capacity = 8.
+            *   Occupied by Pinned Models = B (2GB).
+            *   Available for Unpinned = 8 - 2 = 6 GB.
+            *   Current Load in Unpinned Slots = A(2) + C(2) = 4 GB.
+            *   We need to load D (7GB).
+            *   Space needed from "Unpinned Pool" = 7GB.
+            *   Current space available in "Unpinned Pool" is 6GB.
+            *   Deficit = 1GB.
+    *   **Resolution:** Since the total capacity of unpinned slots (6GB) is less than the requested load size for an unpinned model (7GB), and pinned models cannot be evicted, the system **cannot** fit D regardless of how many times we swap A or C. The pool will never exceed 6GB available for new loads if B stays resident.
+    *   **Result:** Load D **Defers**.
+*   **Execution:** No eviction actually occurs because the load is deferred immediately (or evictions happen but fail to satisfy, leading to deferral). The prompt states: "every eviction actually performed counts... and a load is only deferred after evicting every unpinned resident still leaves too little room".
+    *   In practice for an 8GB card with B pinned (2GB), the max capacity for any single load is 6GB. D is 7GB. It fits nowhere.
+    *   **Evictions:** 0 (The system recognizes it will fail). Or, if we strictly follow "evict LRU unpinned", we might evict A and C to clear them out? But clearing them out leaves us with B(2GB) resident + Empty Unpinned Slots = 6GB Available. We still can't fit D (7GB).
+    *   The prompt says: "every eviction actually performed counts in the evictions total even when the load ends up deferred". This implies we try to clear. But clearing A and C yields only 6GB available space. Since 6 < 7, the load defers. Did we perform evictions?
+    *   Let's look at the orientation example logic: "Q's 4GB evicted P and still did not fit with only pinned N remaining, so Q deferred". In that case, they performed an eviction (P).
+    *   Here, to try to make room for D(7), we must clear A and C. Evicting A (2) -> Pool 6. Still < 7? Wait.
+        *   Start: 8GB total. B=2GB (pinned). Unpinned slots = 6GB capacity.
+        *   Current usage in unpinned slots: A(2)+C(2)=4GB. Free space in unpinned slots = 2GB.
+        *   Try to load D(7). Need 5GB free from the "unpinned bucket". Currently have 2GB free + can reclaim occupied by A/C.
+        *   Evict A (2GB): Reclaim 2GB. Total Unpinned Capacity = 6GB. Used = C(2). Free in unpinned bucket = 4GB.
+        *   Is D (7) <= (Total Capacity - Pinned)? 7 <= 6? False.
+    *   Regardless of how many times we swap A and C, the total available space is capped at 6GB. The load D (7GB) will always fail.
+    *   **Does it count as an eviction?** If the system attempts to clear unpinned models but realizes they aren't enough, does it record the evictions? The text says "every eviction actually performed counts". Did we perform them? Usually, in such systems, if a load is too big for the max capacity (Total - Pinned), no swaps happen because the allocator knows immediately. However, the specific phrasing "even when the load ends up deferred" suggests we might have tried. But logically, you can't evict A and C sequentially to make room for D if D > Capacity.
+    *   Let's assume the standard interpretation: If `RequestedSize > (TotalCapacity - PinnedCapacity)`, it is a hard fail/no-op on the pool side. **Evictions = 0**. **Deferrals = 1**. The load goes to the deferred list.
+
+#### **Event 5: Unload B (2 GB)**
+*   **Action:** Request to unload B.
+*   **Fit Check:** B is resident? Yes.
+*   **Execution:** Remove B from memory.
+    *   B becomes non-resident.
+    *   Pool increases by 2 GB.
+    *   Note: The prompt asks for `loads`, `evictions`, `deferrals`. Unloading does not increment these counters directly, but it changes the state (B is no longer resident). However, the output format requested

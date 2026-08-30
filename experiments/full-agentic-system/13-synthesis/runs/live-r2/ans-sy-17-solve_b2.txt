@@ -1,0 +1,74 @@
+Based on the strict instructions to **re-derive the SECOND HALF** of tonight's task (the residency/eviction logic) and output **ONLY** that specific JSON object (no `part_a`, no merged keys), here is the step-by-step derivation:
+
+### Phase 1: Rule Analysis & State Initialization
+*   **Capacity:** 8 GB.
+*   **Resident Sizes:** A=2, B=1, C=4, D=3. Total Current = $2+1+4+3 = 10$ GB.
+    *   *Note:* The initial state provided in the prompt implies these models are already resident (sum > capacity). However, standard LRU logic usually starts with an empty or valid set. Given the explicit list "A2 B1 C4 D3", we assume this is the current content of the cache before processing the stream.
+    *   **Current Content:** {A: 2GB, B: 1GB, C: 4GB, D: 3GB}. Total = 10GB.
+*   **Pinned Models:** Model B (1GB) is pinned and never evicted.
+*   **Eviction Policy:** Least-Recently-Touched (LRT) unpinned model.
+*   **Costs:** Load = 30s, Unload = 10s (irrelevant for counts).
+*   **Stream:** `Load(2GB)`, `Load(C)`, `Load(D)`, `Unload(D)`.
+
+### Phase 2: Walk Execution
+
+**Initial State Check:**
+The cache currently holds 10GB. The capacity is 8GB. This implies the system is already overfilled or the "residents" list represents the target state before the stream starts. However, looking at the stream commands: `Load(2GB)`, `Load(C)`, etc., these are requests to bring data in.
+*   *Correction on Initial State:* In typical cache problems, if a list is given as "Resident sizes", it represents what is currently inside. If the sum (10GB) exceeds capacity (8GB), the system must have evicted something previously or the problem implies we start with these specific items occupying slots regardless of immediate overflow (perhaps they are just labels).
+*   *Alternative Interpretation:* The prompt says "one 8GB card tonight, models through D...". It lists sizes. If we assume the cache is empty at $t=0$ and we must load them? No, it says "Resident sizes: A2 B1 C4 D3". This implies they are present.
+*   *Critical Logic Check:* If the cache holds 10GB of data in an 8GB card, it's impossible unless some are evicted immediately or the capacity rule applies to the *new* stream additions. Let's assume the standard interpretation: The cache contains {A, B, C, D}.
+    *   Wait, if A(2)+B(1)+C(4)+D(3) = 10GB > 8GB, then at least one unpinned model must have been evicted to make room for the others, OR the system allows temporary overflow.
+    *   Let's look at the stream: `Load(2GB)` (unspecified ID), `Load(C)`, `Load(D)`.
+    *   If A, B, C, D are already there, why load them again?
+    *   *Re-reading carefully:* "Resident sizes: A2 B1 C4 D3 GB respectively." This likely defines the size of models A, B, C, and D. It does **not** necessarily mean all four are currently resident at $t=0$. Usually, in these problems, unless specified as "Current Cache Content", a list of sizes implies the *definitions* of the models available to be loaded/evicted.
+    *   *Hypothesis:* The cache is initially empty (or we only care about the stream). But the text says "Resident sizes...". Let's assume the cache contains **only** the items that fit, or perhaps the list describes the current state which is valid? No, 10GB > 8GB.
+    *   *Most Logical Path:* The cache starts with a specific set of residents defined by the problem context (often implied to be empty if not explicitly "Current Cache: {A,B,C,D}"). However, the phrase "Resident sizes" strongly suggests these are the items currently occupying space. If they occupy 10GB in an 8GB card, there is a contradiction unless we assume the "Load" commands are for *new* data and the existing residents are subject to eviction if new loads don't fit?
+    *   Let's try the interpretation: **Cache starts with {A, B, C, D} (10GB)**. This is physically impossible in 8GB. Therefore, the list "Resident sizes" must define the models available, and we assume a standard starting state (Empty) OR the problem implies that at $t=0$, only a subset exists?
+    *   Let's look at the stream again: `Load(2GB)` -> This is likely Model A (since A=2). `Load(C)` -> Model C. `Load(D)` -> Model D.
+    *   If the cache starts empty:
+        1.  **Start:** Empty (0/8 GB).
+        2.  **Cmd 1: Load(2GB) [Model A]:** Fits. Cache: {A:2}. Used: 2/8.
+        3.  **Cmd 2: Load(C) [4GB]:** Needs 4GB. Space available: $8-2=6$. Fits. Cache: {A:2, C:4}. Used: 6/8.
+        4.  **Cmd 3: Load(D) [3GB]:** Needs 3GB. Space available: $8-6=2$. Does not fit.
+            *   Eviction needed? Capacity is 8. Current is 6. Need to add 3 -> Total 9. Over by 1.
+            *   Must evict unpinned LRT model. Residents: A (unpinned), C (unpinned). B is pinned but not resident yet.
+            *   Which is LRT? Order of arrival: A arrived first, then C. So **A** is LRT.
+            *   Evict A (2GB). New Total: $6 - 2 + 3 = 7$ GB. Fits.
+            *   Cache: {C:4, D:3}. Used: 7/8.
+            *   Counters: Loads executed? Yes. Evictions performed? Yes (1).
+        5.  **Cmd 4: Unload(D) [3GB]:** Model D is resident. Remove it. Cache: {C:4}. Used: 4/8.
+
+    *Let's check the alternative interpretation where "Resident sizes" means they are ALREADY there.*
+    If A, B, C, D are already there (10GB), and we try to Load(2GB) [A again?]:
+    Usually, "Load X" implies bringing X into cache. If X is already there, it's a hit or no-op unless the stream implies updating. But standard LRU problems treat "Load" as an insertion request.
+    Given the contradiction of 10GB > 8GB, the "Empty Start" hypothesis is the only one that yields a valid physical state progression without assuming magic overflow. The list "Resident sizes: A2 B1 C4 D3" defines the *types* and their sizes for the eviction policy (specifically identifying B as pinned).
+
+    **Recalculating with Empty Start:**
+    1.  **Init:** Cache = {}.
+    2.  **Event 1: Load(2GB) [Model A]:**
+        *   Fits in 8GB? Yes.
+        *   Action: Insert A (2GB).
+        *   State: {A}. Size: 2/8.
+        *   Loads Count: 1. Evictions: 0.
+    3.  **Event 2: Load(C) [Model C]:**
+        *   Fits in remaining space? $8 - 2 = 6 \ge 4$. Yes.
+        *   Action: Insert C (4GB).
+        *   State: {A, C}. Size: 6/8.
+        *   Loads Count: 1+0=1. Evictions: 0.
+    4.  **Event 3: Load(D) [Model D]:**
+        *   Fits? $8 - 6 = 2 < 3$. No.
+        *   Action: Evict LRT unpinned model.
+            *   Residents: A (unpinned), C (unpinned). B is pinned but not resident.
+            *   Arrival order: A then C. LRT is **A**.
+            *   Evict A (2GB). New Size: $6 - 2 + 3 = 7$. Fits.
+        *   State: {C, D}. Size: 7/8.
+        *   Loads Count: 1. Evictions: 1.
+    5.  **Event 4: Unload(D) [Model D]:**
+        *   Action: Remove D.
+        *   State: {C}. Size: 4/8.
+        *   Loads Count: 1. Evictions: 1.
+
+    **Final Totals:**
+    *   Loads executed: 3 (A, C, D). Note: The prompt says "loads counts every load command... actually executed". All three loads resulted in a state change or insertion. Even if A was evicted immediately after being loaded? No, A was loaded, then later evicted by the third load. Wait, did the first load count as "executed"? Yes.
+    *   Evictions performed: 1 (Eviction of A).
+    *   Deferrals: None (Space was always found after eviction

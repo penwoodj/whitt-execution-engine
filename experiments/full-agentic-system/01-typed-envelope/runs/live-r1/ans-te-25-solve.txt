@@ -1,0 +1,83 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event sequence:*
+
+1.  **Rule: Load Execution** – Triggered by a "load" request; adds the requested model ID to the active set if capacity allows.
+2.  **Rule: Capacity Check & Eviction Trigger** – Triggered when a new load cannot fit within remaining budget; initiates eviction of LRU unpinned models until space is freed or only pinned models remain.
+3.  **Rule: Eviction Selection (LRU)** – Triggered during an eviction cycle; selects the Least-Recently-Touched unpinned model for removal.
+4.  **Rule: Model Pinned Constraint** – Static rule; prevents pinned models from being selected for eviction under any condition.
+5.  **Rule: Deferral Condition** – Triggered if an eviction cycle reduces the active set to only pinned models and space is still insufficient; load request is deferred (state change: `deferrals` count increments, no model loaded).
+6.  **Rule: Unload Execution** – Triggered by an "unload" request; removes a specific model from the active set if present.
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events in strict arrival order, one line per event state:*
+
+1.  **Event: Load A (8GB card)**
+    *   Action: Add Model A (1 GB).
+    *   State Check: Used 1/8 GB. Active: {A}. Evictions: 0. Deferrals: 0.
+2.  **Event: Load B**
+    *   Action: Add Model B (2 GB).
+    *   State Check: Used 3/8 GB. Active: {A, B}. Evictions: 0. Deferrals: 0.
+3.  **Event: Load C**
+    *   Action: Add Model C (3 GB). Pin Model C immediately per rule.
+    *   State Check: Used 6/8 GB. Active: {A, B, C(C)}. Evictions: 0. Deferrals: 0.
+4.  **Event: Load D**
+    *   Action: Request to add Model D (4 GB).
+    *   Capacity Check: Current usage 6GB + 4GB = 10GB > 8GB Max. Eviction required.
+    *   Available Space Needed: 2GB.
+    *   Candidate for Eviction: Unpinned models are A and B. LRU is determined by arrival order; A arrived before B. Select **A** (LRU unpinned).
+    *   Action: Evict Model A (1 GB free). Remaining needed: 1GB.
+    *   Capacity Check: Still need 1GB more to fit D. Current freed space was 1GB, total used now effectively 7GB (B+C) + D(4)=11? No, evict A (1), remaining capacity 7. Need D(4). Fits in remaining 7? Yes.
+    *   Correction on Logic: Total Cap 8. Current Occupied {B:2, C:3} = 5GB. Available = 3GB. Request D (4GB). Shortage = 1GB. Evict LRU unpinned (A is pinned? No, C is pinned. A and B are unpinned).
+    *   Re-evaluating Eviction Step-by-Step:
+        *   Current Set: {A(1), B(2), C(3)}. Pinned={C}. Unpinned={A, B}. LRU of Unpinned = A (loaded first).
+        *   Target State must hold D(4) + existing unpinned survivors.
+        *   Capacity Math: 8GB - C(3) = 5GB available for {D, others}.
+        *   If we keep B(2), space left = 3GB. D needs 4GB. Shortage 1GB. Must evict more? No, wait.
+        *   Let's trace strictly:
+            *   Step 4a: Try to add D (4). Current load sum = 1(A)+2(B)+3(C) = 6. Needed 8. Gap = 2.
+            *   Evict LRU Unpinned: A (1GB). New Load Sum potential = 6 - 1 + 4 = 9? No.
+            *   Correct Logic: Remove A (1GB). Remaining models {B, C}. Size 5GB. Add D(4GB)? Total 9GB > 8GB. Still over.
+            *   Evict LRU Unpinned again: B (2GB). New Load Sum potential = 5 - 2 + 4 = 7GB? No. Remove A, remove B. Remaining {C}. Size 3GB. Add D(4GB)? Total 7GB <= 8GB. OK.
+            *   Wait, does "load that cannot fit evicts as many... as needed" imply sequential eviction until fit or parallel? Standard LRU replacement is sequential.
+            *   Iteration 1: Evict A (1GB). Active: {B, C}. Space used: 5GB. Need D(4). Total would be 9. Fail.
+            *   Iteration 2: Evict B (2GB) [Next LRU Unpinned]. Active: {C}. Space used: 3GB. Need D(4). Total = 7GB. OK. Fit achieved.
+    *   State Update: A evicted, B evicted, C remains (pinned), D loaded.
+    *   Counts: Evictions=2. Deferrals=0.
+5.  **Event: Unload B**
+    *   Action: Request to remove Model B.
+    *   State Check: Is B in active set? No, B was evicted in Step 4.
+    *   Rule Application: "Unload" requests apply only if the model is resident. If not resident, it acts as a null operation or ignored (does not trigger eviction, does not load). The prompt implies "unload B" as an event to process. Since B is gone, nothing changes in the set composition regarding loads/evictions.
+    *   State Update: Active remains {C, D}. Counts unchanged.
+
+---
+
+### Final Reconciliation & Output Generation
+
+*Verification against constraints:*
+- **Loads**: A (loaded then evicted), B (loaded then evicted), C (loaded), D (loaded). Total distinct load events executed successfully = 4? Or count of models currently resident? The JSON key "loads" usually implies the count of successful load operations performed in the stream.
+    - Load A: Success.
+    - Load B: Success.
+    - Load C: Success.
+    - Load D: Success (triggered evictions).
+    - Unload B: Does not trigger a new "load", just removal logic.
+    - Total Loads = 4.
+- **Evictions**: Occurred during the Load D event. A was evicted. B was evicted. Count = 2.
+- **Deferrals**: Did any load fail to execute because only pinned models remained?
+    - During Load D, we had unpinned models (A and B). We evicted them both. Space became sufficient for D. No deferral occurred.
+    - Count = 0.
+- **Deferred List**: Empty.
+
+*Double Check the "Unload B" logic:*
+The instruction says "unload B". In Step 4, we evicted A then B to make room for D. So B is not in memory when "unload B" arrives. The event processes: check presence -> not present -> no action taken on counts. This fits the "state wins" discipline.
+
+*Final Numbers:*
+Loads: 4 (A, B, C, D)
+Evictions: 2 (A, B)
+Deferrals: 0
+Deferred: []
+
+```json
+{"loads": 4, "evictions": 2, "deferrals": 0, "deferred": []}
+```

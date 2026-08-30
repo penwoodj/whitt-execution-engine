@@ -1,0 +1,61 @@
+### Phase 1 RULE SCAN
+This phase lists every rule that changes state during the event stream, identifying the specific trigger for each.
+
+1.  **Load Rule**: Triggered by `load A`. Action: If capacity allows, add model to resident set; if not, proceed to eviction logic.
+2.  **Eviction Selection Rule (LRU Unpinned)**: Triggered by `load A` (if needed). Action: Identify the least-recently-touched unpinned model for removal.
+3.  **Eviction Execution Rule**: Triggered by `load A` (if needed). Action: Remove selected unpinned model, decrement capacity, increment eviction counter; repeat until fit or no unpinned models remain.
+4.  **Deferred Load Rule**: Triggered by `load D`. Action: If load cannot fit after exhausting all unpinned evictions and only pinned models remain, defer the load (increment deferral counter, record ID).
+5.  **Unload Rule**: Triggered by `unload B`. Action: Remove model from resident set if present; increment free capacity; no-op if not resident.
+
+### Phase 2 LEDGER WALK
+This phase applies events in strict arrival order, showing the state after each step.
+
+**Initial State:** Capacity = 8GB. Residents = {}. Free = 8GB. Recency = []. Evictions = 0. Deferrals = 0. Loads = 0. Deferred List = [].
+
+1.  **Event: `load A` (2 GB)**
+    *   Check Fit: Current Free (8) >= Request (2). Fits.
+    *   Action: Add A to residents. Update Recency. Decrease Free. Increment Load count.
+    *   State: resident {A} free 6 recency {A}.
+
+2.  **Event: `load B` (2 GB)**
+    *   Check Fit: Current Free (6) >= Request (2). Fits.
+    *   Action: Add B to residents. Update Recency. Decrease Free. Increment Load count.
+    *   State: resident {A, B} free 4 recency {B}.
+
+3.  **Event: `load C` (2 GB)**
+    *   Check Fit: Current Free (4) >= Request (2). Fits.
+    *   Action: Add C to residents. Update Recency. Decrease Free. Increment Load count.
+    *   State: resident {A, B, C} free 2 recency {C}.
+
+4.  **Event: `load D` (7 GB)**
+    *   Check Fit: Current Free (2) < Request (7). Does not fit.
+    *   Eviction Phase: Identify unpinned models for eviction. Residents are {A, B, C}. All are unpinned.
+        *   LRU Unpinned is A. Evict A. Capacity += 2. Evictions = 1. Recency updates to {B, C} (A removed). Free becomes 4.
+    *   Check Fit Again: Current Free (4) < Request (7). Still does not fit.
+        *   LRU Unpinned is B. Evict B. Capacity += 2. Evictions = 2. Recency updates to {C} (B removed). Free becomes 6.
+    *   Check Fit Again: Current Free (6) < Request (7). Still does not fit.
+        *   LRU Unpinned is C. Evict C. Capacity += 2. Evictions = 3. Recency updates to {} (C removed). Free becomes 8.
+    *   Check Fit Again: Current Free (8) >= Request (7). Fits? Wait, Model D size is 7GB.
+        *   Let's re-verify the math carefully.
+        *   Start: Free=2. Need 7. Deficit 5.
+        *   Evict A (2): Free becomes 4. Deficit 3.
+        *   Evict B (2): Free becomes 6. Deficit 1.
+        *   Evict C (2): Free becomes 8. Fits!
+    *   Action: Add D to residents. Update Recency. Decrease Free. Increment Load count.
+    *   State: resident {D} free 1 recency {D}.
+
+5.  **Event: `unload B` (2 GB)**
+    *   Check Presence: Is B in residents? No (B was evicted in step 4).
+    *   Action: Unload is a no-op. Capacity remains unchanged. Free remains unchanged.
+    *   State: resident {D} free 1 recency {D}.
+
+**Final Totals Calculation:**
+*   Loads (successful): A, B, C, D = 4.
+*   Evictions: A, B, C = 3.
+*   Deferrals: None (Load D fit after evicting all unpinned).
+*   Deferred IDs: [].
+
+### Final Answer JSON
+```json
+{"loads": 4, "evictions": 3, "deferrals": 0, "deferred": []}
+```

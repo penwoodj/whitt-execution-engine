@@ -1,0 +1,101 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event or claim list.*
+
+1.  **Grant Rule**: A request arriving at a non-zero pool is granted `min(ask, current_pool)`. State change: Pool decreases by grant amount; Request status becomes "Granted".
+2.  **Denial Rule**: A request arriving when the pool is exactly zero is denied (listed by ID). State change: Request status becomes "Denied"; Pool remains zero.
+3.  **Expiry Trigger Rule**: Upon completion of a specific request (the trigger), any grant associated with that request expires. State change: The system prepares to return tokens based on the expired grant's history.
+4.  **Return Calculation Rule**: An expired grant returns `floor(granted_amount / 2)` tokens. State change: Pool increases by returned amount; Grant record is cleared.
+5.  **Timing Rule (Precedence)**: The expiry return happens *before* the next request in arrival order is processed, but strictly after the trigger request completes.
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order.*
+
+**Initial State**: Pool = 60. Grants Map = {}. Request List = [r1..r7].
+
+**Event 1: r1 arrives (Ask: 6)**
+*   Rule Applied: Grant Rule.
+*   Calculation: `grant = min(6, 60) = 6`.
+*   State Change: Pool becomes $60 - 6 = 54$.
+*   Ledger Line: `r1 granted 6 (pool: 54)`
+
+**Event 2: r2 arrives (Ask: 10)**
+*   Rule Applied: Grant Rule.
+*   Calculation: `grant = min(10, 54) = 10`.
+*   State Change: Pool becomes $54 - 10 = 44$.
+*   Ledger Line: `r2 granted 10 (pool: 44)`
+
+**Event 3: r3 arrives (Ask: 12)**
+*   Rule Applied: Grant Rule.
+*   Calculation: `grant = min(12, 44) = 12`.
+*   State Change: Pool becomes $44 - 12 = 32$.
+*   Ledger Line: `r3 granted 12 (pool: 32)`
+
+**Event 4: r4 arrives (Ask: 15)**
+*   Rule Applied: Grant Rule.
+*   Calculation: `grant = min(15, 32) = 15`.
+*   State Change: Pool becomes $32 - 15 = 17$.
+*   Ledger Line: `r4 granted 15 (pool: 17)`
+
+**Event 5: r5 arrives (Ask: 19)**
+*   Rule Applied: Grant Rule.
+*   Calculation: `grant = min(19, 17) = 17`. (Partial grant).
+*   State Change: Pool becomes $17 - 17 = 0$.
+*   Ledger Line: `r5 granted 17 partial (pool: 0)`
+
+**Event 6: r6 arrives (Ask: 21)**
+*   Rule Applied: Denial Rule.
+*   Condition: Pool is exactly zero.
+*   State Change: Request denied. Pool remains 0.
+*   Ledger Line: `r6 denied (pool: 0)`
+
+**Event 7: r7 arrives (Ask: 24)**
+*   Rule Applied: Denial Rule.
+*   Condition: Pool is exactly zero.
+*   State Change: Request denied. Pool remains 0.
+*   Ledger Line: `r7 denied (pool: 0)`
+
+**Post-Event Processing (Expiry Logic Application):**
+The task states: "the grant for r1 expires after request r2 completes". This implies a specific trigger mechanism where the completion of *any* request triggers the expiry of its own grant. However, looking at the flow:
+-   r1 completed -> r1's grant expires? The text says "after request r2 completes", which is slightly ambiguous phrasing ("the grant for r1 expires after request r2 completes"). Let's re-read carefully: "the grant for r1 expires after request r2 completes". This suggests a specific dependency or perhaps a typo in the prompt's narrative vs rule.
+-   *Correction based on strict reading of "expiry sentence names exactly one request id"*: The prompt says "the grant for r1 expires after request r2 completes". This is an explicit instruction linking r1's expiry to r2's completion.
+    -   **Trigger**: r2 completes.
+    -   **Target**: Grant for r1.
+    -   **Amount Granted to r1**: 6.
+    -   **Return Calculation**: `floor(6 / 2) = 3`.
+    -   **Timing**: Return happens *before* the next request (r3). But wait, in my walk above, I processed r3 immediately after r2. The rule says "return arrives right before the request the trigger names". If r2 is the trigger for r1's expiry, does it happen between r2 and r3? Yes.
+    -   **Action**: Add 3 to pool. Pool was 44 (after r2). New Pool = $44 + 3 = 47$.
+
+Let's re-evaluate the "Orientation" hint: "the return arrives right before the request the trigger names". If r2 triggers r1's expiry, it happens between r2 and r3.
+However, usually in these problems, "after request X completes" implies immediate processing of that event's side effects before moving to the next arrival. But here the dependency is explicit: r1 expires *because* r2 finished.
+
+Let's trace with this specific trigger logic inserted into the stream:
+1.  **r1 arrives**: Pool $60 \to 54$. (Grant r1=6).
+2.  **r2 arrives**: Pool $54 \to 44$. (Grant r2=10).
+    *   *Side Effect*: r2 completes. Trigger: "grant for r1 expires".
+    *   *Calculation*: Return `floor(6/2) = 3`.
+    *   *Timing*: Before next request (r3).
+    *   *State Update*: Pool $44 \to 47$.
+3.  **r3 arrives**: Ask 12. Pool 47. Grant `min(12, 47) = 12`. Pool $47 \to 35$.
+4.  **r4 arrives**: Ask 15. Pool 35. Grant `min(15, 35) = 15`. Pool $35 \to 20$.
+    *   *Side Effect*: r4 completes. Does anything expire? The prompt only specified "the grant for r1 expires after request r2 completes". It did not specify others. Assuming only the named rule applies.
+5.  **r5 arrives**: Ask 19. Pool 20. Grant `min(19, 20) = 19`. Pool $20 \to 1$.
+6.  **r6 arrives**: Ask 21. Pool 1. Grant `min(21, 1) = 1`. (Partial). Pool $1 \to 0$.
+    *   *Side Effect*: r6 completes. No named expiry rule for r6.
+7.  **r7 arrives**: Ask 24. Pool 0. **Denied**.
+
+Wait, let's re-read the "Orientation" example to confirm the trigger logic interpretation.
+Orientation: "first ask was 11... second 7, then the first grant expired and returned 5".
+In orientation: Start 35. r1(11) -> Pool 24. r2(7) -> Pool 17. Then r1 expires (triggered by r2?). Return 5. Pool $17+5=22$. r3(13) -> Takes 12? No, "landed against only 22... took a partial and drained it". Wait, if pool is 22 and ask is 13, it takes 13, leaving 9. The text says "drained it" but then says "9 left on the books". This implies r3 didn't drain it completely? Or maybe r3 was larger?
+Actually, the orientation text says: "third ask of 13 landed against only 22... took a partial and drained it." If it drained it, pool should be 0. But then it says "9 left". This is contradictory unless "drained" refers to something else or my math on the example is wrong.
+Let's stick to the explicit rule in the main task: **"the grant for r1 expires after request r2 completes"**. This is a single, specific instruction overriding general assumptions about when expiries happen.
+
+So the sequence is:
+1.  **r1**: Grant 6. Pool $60-6=54$.
+2.  **r2**: Grant 10. Pool $54-10=44$.
+    *   Trigger: r2 completes -> r1 expires.
+    *   Return: `floor(6/2) = 3`.
+    *   Pool becomes $44+3=47$. (This happens before r3).
+3.  **r3**: Ask 12. Grant 12. Pool $47-12=35$.
+4.  **r4**: Ask 15. Grant 15. Pool $35-15=20$.
+5.  **r5**: Ask 19. Grant 19. Pool $20-19=1$.
+6.  **r6**: Ask 21. Grant `min(21, 

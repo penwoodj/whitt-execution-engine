@@ -1,0 +1,62 @@
+**Phase 1: RULE SCAN**
+Based on the text provided, here are the rules that change state during the event sequence (Arrivals in order), including expiry, return, revocation, refill, promotion, fallback, or source-ranking logic as described in the "orientation" and "tonight's" constraints.
+
+1.  **Attempt Cost Rule**: Each attempt consumes a fixed number of tokens from the budget (2 tokens per attempt).
+2.  **Wait Cost Rule**: Each wait second consumes a fixed number of tokens from the budget (1 token per second).
+3.  **Budget Depletion Rule**: The total spend is calculated as `sum(wait_seconds) + sum(attempt_costs)`.
+4.  **Suppression Trigger Rule**: If `total_spend > current_budget`, the job enters a suppressed state pending a fallback check.
+5.  **Fallback Budget Doubling Rule**: Upon suppression, the budget doubles exactly once (`budget = budget * 2`).
+6.  **Re-check Suppression Rule**: After doubling, if `total_spend <= new_doubled_budget`, the job runs with `suppressed = false`. If still over (not applicable here as it doubles once), it remains suppressed.
+7.  **Budget After Calculation Rule**: `budget_after` is computed against the *doubled* budget when doubling fired, defined as `new_doubled_budget - total_spend`.
+8.  **Arrival Order Rule**: Events must be processed in strict arrival order; state carries forward; no re-computation from scratch mid-stream.
+
+**Phase 2: LEDGER WALK**
+Applying the events one at a time in strict arrival order for "tonight's" numbers (Budget=24, Spend components: Waits 2s, 4s, 8s; Attempts: 3 failed + 1 success = 4 attempts).
+
+*   **Event 1**: Arrival of Wait #1 (2 seconds).
+    *   Cost: 2 wait-seconds.
+    *   State Update: `wait_s` accumulates 2.
+*   **Event 2**: Arrival of Attempt #1 (Failed).
+    *   Cost: 2 attempt-tokens.
+    *   State Update: `attempts` count increments to 1. Total spend increases by 2.
+*   **Event 3**: Arrival of Wait #2 (4 seconds).
+    *   Cost: 4 wait-seconds.
+    *   State Update: `wait_s` accumulates 4 (Total `wait_s` = 6).
+*   **Event 4**: Arrival of Attempt #2 (Failed).
+    *   Cost: 2 attempt-tokens.
+    *   State Update: `attempts` count increments to 2. Total spend increases by 2.
+*   **Event 5**: Arrival of Wait #3 (8 seconds).
+    *   Cost: 8 wait-seconds.
+    *   State Update: `wait_s` accumulates 8 (Total `wait_s` = 14).
+*   **Event 6**: Arrival of Attempt #3 (Failed).
+    *   Cost: 2 attempt-tokens.
+    *   State Update: `attempts` count increments to 3. Total spend increases by 2.
+*   **Event 7**: Arrival of Wait #4? No, the text says "Waits observed: 2, 4, 8". The job needs 3 failed attempts before the 4th succeeds. The sequence implies the waits happen between or around attempts. Let's re-read carefully: "after each failed attempt the retry waits... Waits observed: 2, 4, 8."
+    *   Sequence reconstruction based on standard retry logic and the specific list:
+        1.  Attempt 1 (Fail). Wait 2s.
+        2.  Attempt 2 (Fail). Wait 4s.
+        3.  Attempt 3 (Fail). Wait 8s.
+        4.  Attempt 4 (Success).
+    *   Let's re-calculate the walk with this specific interleaving which matches "Waits observed: 2, 4, 8" and "job needs 3 failed attempts before the 4th succeeds".
+
+    *   **Event A**: Attempt 1 (Fail). Cost: 2.
+    *   **Event B**: Wait 1 (2s). Cost: 2.
+    *   **Event C**: Attempt 2 (Fail). Cost: 2.
+    *   **Event D**: Wait 2 (4s). Cost: 4.
+    *   **Event E**: Attempt 3 (Fail). Cost: 2.
+    *   **Event F**: Wait 3 (8s). Cost: 8.
+    *   **Event G**: Attempt 4 (Success). Cost: 2.
+
+    *   **Total Attempts**: 4.
+    *   **Total Wait Seconds**: 2 + 4 + 8 = 14.
+    *   **Total Spend Calculation**: `wait_s` (14) + `attempt_costs` (4 attempts * 2 tokens/attempt = 8).
+    *   **Total Spend**: 14 + 8 = 22.
+    *   **Initial Budget**: 24.
+    *   **Check**: Is `Spend` (22) > `Budget` (24)? No. 22 <= 24.
+    *   **Result**: Job runs normally. No suppression triggered.
+    *   **Final Budget After**: Initial Budget - Total Spend = 24 - 22 = 2.
+
+**Final Answer JSON**
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 2, "suppressed": false}
+```

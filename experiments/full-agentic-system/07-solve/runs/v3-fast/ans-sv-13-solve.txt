@@ -1,0 +1,71 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the specific constraints provided (including the "EXPIRY DISCIPLINE" note which overrides general text regarding partials), here are the rules that change state during the event sequence:
+
+1.  **Arrival Rule**: Triggers on `one more discipline` / `arrivals in order`. Updates `attempts` count (+1) and adds to `wait_s` based on current wait time.
+2.  **Cost Rule**: Triggers on every attempt (failed or success). Deducts from budget: `cost_per_attempt` * `attempts_counted`.
+3.  **Budget Check Rule**: Triggers after cost deduction. If `budget < spend`, triggers the "Double Budget" event.
+4.  **Doubling Rule**: Triggers if budget is exceeded (and not yet doubled). Doubles the current budget limit exactly once.
+5.  **Re-Check Rule**: Triggers immediately after doubling. Re-evaluates if `spend <= new_budget`. If true, sets `suppressed` to false; if false, sets `suppressed` to true.
+6.  **Success/Failure Logic**: Determines the outcome of the attempt based on the "job needs 2 failed attempts before the 3rd succeeds" constraint (implicit in the event flow: Fail -> Wait -> Retry).
+
+**Trigger Mapping:**
+*   Event 1 (Arrival): Triggers Arrival Rule, Cost Rule.
+*   Event 2 (Wait/Retry): Triggers Arrival Rule (new wait), Cost Rule (retry cost).
+*   Event 3 (Success): Triggers Success Logic.
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   `attempts`: 0
+*   `wait_s`: 0
+*   `budget`: 24
+*   `spend`: 0
+*   `suppressed`: false (default)
+*   **Parameters**: Base Wait = 2s, Cost per attempt = 2.
+
+**Event 1: First Attempt Arrival**
+*   Action: Job starts first attempt.
+*   Rule Applied: Arrival Rule adds wait time; Cost Rule deducts attempt cost.
+*   Calculation:
+    *   `wait_s` += 2 (Base wait) -> Total `wait_s`: 2
+    *   `attempts` += 1 -> Total `attempts`: 1
+    *   `spend` += 2 (Cost per attempt) -> Total `spend`: 2
+*   State Check: `budget` (24) >= `spend` (2). No doubling. Job fails (per "needs 2 failed").
+
+**Event 2: First Wait & Retry Arrival**
+*   Action: First failure occurs. System waits, then retries.
+*   Rule Applied: Arrival Rule adds next wait time; Cost Rule deducts retry cost.
+*   Calculation:
+    *   Next Wait = Previous (2) * 2 = 4s.
+    *   `wait_s` += 4 -> Total `wait_s`: 6
+    *   `attempts` += 1 -> Total `attempts`: 2
+    *   `spend` += 2 (Cost per attempt) -> Total `spend`: 4
+*   State Check: `budget` (24) >= `spend` (4). No doubling. Job fails again (per "needs 2 failed").
+
+**Event 3: Second Wait & Success Arrival**
+*   Action: Second failure occurs. System waits, then retries (this one succeeds).
+*   Rule Applied: Arrival Rule adds next wait time; Cost Rule deducts success cost.
+*   Calculation:
+    *   Next Wait = Previous (4) * 2 = 8s.
+    *   `wait_s` += 8 -> Total `wait_s`: 14
+    *   `attempts` += 1 -> Total `attempts`: 3
+    *   `spend` += 2 (Cost per attempt) -> Total `spend`: 6
+*   State Check: `budget` (24) >= `spend` (6). No doubling. Job succeeds.
+
+**Final Calculation Verification:**
+*   Total Attempts (`attempts`): 3
+*   Total Wait Seconds (`wait_s`): 2 + 4 + 8 = 14
+*   Total Spend: 14 (waits) + 6 (attempt costs) = 20.
+*   Budget After (`budget_after`): Initial Budget (24) - Total Spend (20) = 4.
+*   Suppressed: false (Budget never exceeded).
+
+---
+
+### Final Answer
+
+```json
+{"attempts": 3, "wait_s": 14, "budget_after": 4, "suppressed": false}
+```

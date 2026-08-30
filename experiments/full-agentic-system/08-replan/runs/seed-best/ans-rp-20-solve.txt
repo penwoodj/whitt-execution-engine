@@ -1,0 +1,55 @@
+**Phase 1 RULE SCAN**
+1. **Load Rule**: A load request attempts to place a model of specific size into the pool; if it fits (including room for future growth), it succeeds immediately without eviction.
+2. **Eviction Rule**: If a load cannot fit, the system evicts one unpinned, least-recently-touched (LRT) resident at a time until enough space is free; each successful removal counts as an eviction.
+3. **Deferral Rule**: If after exhausting all unpinned LRT residents there is still insufficient space (because only pinned models remain), the load is deferred (no evictions counted for this specific step, but previous evictions count).
+4. **Touch Rule**: Every time a model is loaded or accessed during an eviction sequence, it becomes the most-recently-touched resident.
+5. **Unload Rule**: An unload request frees the specified amount of space immediately; if the model is not currently resident, this is a no-op.
+
+**Phase 2 LEDGER WALK**
+*Initial State*: Pool = 8GB. Residents: []. Recency: []. Free Space: 8GB.
+
+1. **Event**: `load A (3 GB)`
+   - Check Fit: $8 \ge 3$. Fits.
+   - Action: Load A.
+   - State Update: Residents: [A]. Free: 5GB. Touches: {A}.
+   - Log: `load A -> resident {A} free 5 recency {A}`
+
+2. **Event**: `load B (3 GB)`
+   - Check Fit: $5 \ge 3$. Fits.
+   - Action: Load B.
+   - State Update: Residents: [A, B]. Free: 2GB. Touches: {B} (A is older).
+   - Log: `load B -> resident {A, B} free 2 recency {B}`
+
+3. **Event**: `load C (1 GB)`
+   - Check Fit: $2 \ge 1$. Fits.
+   - Action: Load C.
+   - State Update: Residents: [A, B, C]. Free: 1GB. Touches: {C} (B is older).
+   - Log: `load C -> resident {A, B, C} free 1 recency {C}`
+
+4. **Event**: `load D (7 GB)`
+   - Check Fit: $1 < 7$. Does not fit. Need 6GB more.
+   - Eviction Step 1: Identify LRT Unpinned. Residents are [A, B, C]. All unpinned. Oldest is A.
+   - Evict A (3GB). New Free: $1 + 3 = 4$. Count Evictions: 1.
+   - Check Fit: $4 < 7$. Need 3GB more.
+   - Eviction Step 2: Identify LRT Unpinned. Residents are [B, C]. Oldest is B.
+   - Evict B (3GB). New Free: $4 + 3 = 7$. Count Evictions: 2.
+   - Check Fit: $7 < 7$? No, strictly greater or equal required to fit. Wait, current free is exactly 7GB. Model D needs 7GB. $7 \ge 7$. Fits.
+   - Action: Load D.
+   - State Update: Residents: [C, D]. (A and B evicted). Free: 0GB. Touches: {D} (C is older).
+   - Log: `load D -> resident {C, D} free 0 recency {D}`
+
+5. **Event**: `unload B (3 GB)`
+   - Check Resident: Is B in [C, D]? No.
+   - Action: No-op.
+   - State Update: Residents: [C, D]. Free: 0GB.
+   - Log: `unload B -> resident {C, D} free 0 recency {D}`
+
+**Final Calculation**:
+- Loads (successful): A, B, C, D = 4.
+- Evictions: A evicted, B evicted = 2.
+- Deferrals: 0.
+- Deferred IDs: [].
+
+```json
+{"loads": 4, "evictions": 2, "deferrals": 0, "deferred": []}
+```

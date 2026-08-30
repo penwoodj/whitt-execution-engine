@@ -1,0 +1,72 @@
+Based on the strict rules and event stream provided in the task, here is the step-by-step derivation of the final state.
+
+### **Rule Analysis (Phase 1)**
+The system operates under these specific constraints:
+1.  **Initial State:** One `8GB` card available tonight.
+2.  **Models & Sizes:**
+    *   A: 2 GB
+    *   B: 2 GB (Pinned, never evicted)
+    *   C: 2 GB
+    *   D: 7 GB
+3.  **Eviction Logic:** Choose the Least-Recently-Touched (LRT) *unpinned* model. Pinned models are ignored for eviction selection.
+4.  **Deferred Logic:** A load is deferred only if, after evicting all possible unpinned LRT residents, there is still insufficient space to fit the requested model. The `deferred` list contains the ID of that specific load.
+5.  **Event Order:** Strict arrival order: Load A -> Load B -> Load C -> Load D -> Unload B.
+
+### **State Walk (Phase 2)**
+
+*   **Event 1: `Load A` (2 GB)**
+    *   *Current Loaded:* None.
+    *   *Available Space:* 8 GB.
+    *   *Action:* Fits immediately. Load A is added to the resident set.
+    *   *State:* `{A}` | Free: 6 GB
+
+*   **Event 2: `Load B` (2 GB)**
+    *   *Current Loaded:* `[A]`.
+    *   *Available Space:* 6 GB.
+    *   *Action:* Fits immediately. Load B is added. Since this is the first time B is loaded in tonight's stream, it counts as a resident. The rule states "Model B is pinned", so upon loading (or if already present), it becomes pinned. Even if treated as unpinned initially, there is only A available for eviction, and space exists.
+    *   *State:* `{A, B}` | Free: 4 GB
+
+*   **Event 3: `Load C` (2 GB)**
+    *   *Current Loaded:* `[A, B]`.
+    *   *Available Space:* 4 GB.
+    *   *Action:* Fits immediately. Load C is added.
+    *   *State:* `{A, C, B}` | Free: 2 GB
+
+*   **Event 4: `Load D` (7 GB)**
+    *   *Current Loaded:* `[A, C, B]`. (Total Size 6 GB).
+    *   *Available Space:* 2 GB.
+    *   *Action Check:* Requested size is 7 GB. Current free space is 2 GB. Deficit: 5 GB.
+    *   *Eviction Phase:* We must evict unpinned LRT models to make room for D (or enough of them).
+        *   *Resident Status:* A (Unpinned), C (Unpinned), B (Pinned).
+        *   *Candidates for Eviction:* A and C. Both are unpinned.
+        *   *Eviction Action:* We evict both A and C to maximize space.
+            *   New Free Space = 2 GB + 2GB(A) + 2GB(C) = 6 GB.
+    *   *Re-evaluation:* Can D (7 GB) fit in the new 6 GB? No. Deficit is still 1 GB.
+    *   *Result:* Load D cannot be loaded, even after clearing all unpinned residents. The load is **Deferred**.
+    *   *State Update:* A and C are evicted. D remains unloaded (deferred). B remains pinned.
+    *   *Counts:* Evictions = 2. Deferrals = 1. Deferred ID = `D`.
+
+*   **Event 5: `Unload B`**
+    *   *Current Loaded:* `{B}`. (A and C were evicted; D is deferred).
+    *   *Action:* Unload B. This removes 2 GB from the resident set and adds it to free space.
+    *   *State Update:* Resident Set becomes empty (except for the fact that B was removed, which was required by the event). Free Space = 8 GB + 2GB(D_deferred does not occupy space) = 10 GB? No, deferred loads do not consume capacity.
+    *   *Final State Calculation:*
+        *   **Loads (Successful):** A and B were successfully loaded at some point. C was also successfully loaded before being evicted. The count usually refers to the number of successful load operations completed in the stream.
+            *   Load A: Success.
+            *   Load B: Success.
+            *   Load C: Success (evicted later, but the load event succeeded).
+            *   Load D: Failed (Deferred).
+            *   Total Successful Loads = 3.
+        *   **Evictions:** We evicted A and C during the attempt to load D. Total = 2.
+        *   **Deferrals:** We deferred Load D. Total = 1.
+        *   **Deferred List:** Contains `D`.
+
+### **Final Verification**
+*   **Loads:** A, B, C succeeded. (3)
+*   **Evictions:** A and C were evicted to try to fit D. (2)
+*   **Deferrals:** D failed completely after maxing out evictions. (1)
+*   **Deferred IDs:** ["D"]
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

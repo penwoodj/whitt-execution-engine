@@ -1,0 +1,74 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event or claim list, including triggers.*
+
+1. **Arrival Rule**: Request `r1` (ask: 4) arrives; Pool starts at 50. Action: Grant min(ask, pool). State change: Pool decreases by grant amount.
+2. **Arrival Rule**: Request `r2` (ask: 6) arrives. Action: Grant min(ask, pool). State change: Pool decreases by grant amount.
+3. **Expiry Rule**: Grant from `r2` expires after request `r3` completes. Trigger: Completion of `r3`. Action: Return floor(grant_r2 / 2) to pool. State change: Pool increases by returned amount.
+4. **Arrival Rule**: Request `r3` (ask: 9) arrives. Action: Grant min(ask, pool). State change: Pool decreases by grant amount.
+5. **Arrival Rule**: Request `r4` (ask: 13) arrives. Action: Grant min(ask, pool). State change: Pool decreases by grant amount.
+6. **Denial Rule**: Request `r5` (ask: 15) arrives against an empty pool. Trigger: Empty pool condition. Action: Deny request. State change: No tokens added/removed; ID recorded in denial list.
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order, showing state after each event.*
+
+**Initial State**: Pool = 50.
+
+1. **Event**: `r1` arrives (ask: 4).
+   - Logic: Grant min(4, 50) = 4.
+   - New Pool: 50 - 4 = 46.
+   - State: Pool=46, Granted=[4], Denied=[]
+
+2. **Event**: `r2` arrives (ask: 6).
+   - Logic: Grant min(6, 46) = 6.
+   - New Pool: 46 - 6 = 40.
+   - State: Pool=40, Granted=[4, 6], Denied=[]
+
+3. **Event**: `r3` arrives (ask: 9).
+   - Logic: Grant min(9, 40) = 9.
+   - New Pool: 40 - 9 = 31.
+   - State: Pool=31, Granted=[4, 6, 9], Denied=[]
+
+4. **Event**: `r2` Expiry Triggered (after `r3` completes).
+   - Logic: Return floor(grant_r2 / 2) = floor(6 / 2) = 3.
+   - New Pool: 31 + 3 = 34.
+   - State: Pool=34, Granted=[4, 6, 9], Denied=[]
+
+5. **Event**: `r4` arrives (ask: 13).
+   - Logic: Grant min(13, 34) = 13.
+   - New Pool: 34 - 13 = 21.
+   - State: Pool=21, Granted=[4, 6, 9, 13], Denied=[]
+
+6. **Event**: `r5` arrives (ask: 15).
+   - Logic: Grant min(15, 21) = 15.
+   - New Pool: 21 - 15 = 6.
+   - State: Pool=6, Granted=[4, 6, 9, 13, 15], Denied=[]
+
+*Verification against traps:*
+- Rounding: floor(6/2) = 3 (Correct).
+- Expiry timing: Returned before `r4` processed? No, rule says "after request r3 completes". The sequence is Arrival(r3) -> Completion(r3) triggers Expiry(r2) -> Next Event. My walk followed this strictly.
+- Denials: Pool never hit zero during the valid requests (min pool was 6 at end). No denials occurred.
+
+---
+
+### Final Answer Construction
+*Reconciling against the worked example shape:*
+- Example Shape Check: The example had an expiry return landing *before* a request in its specific narrative flow ("return arrives right before the request"). However, my walk adhered to the explicit rule text: "grant for r2 expires after request r3 completes". In the event list provided (`r1`, `r2`, `r3`, `r4`, `r5`), the completion of `r3` is an internal state transition triggered by the arrival/completion of `r3`. The return happens immediately upon that trigger.
+- Let's re-read the specific constraint: "the return arrives right before the request the trigger names, not after it." This refers to the *orientation story* logic ("first grant expired and returned 5... and the third ask of 13 landed against only 12"). In the orientation story, Event 2 (Ask 7) happens, then Expiry happens, then Event 3 (Ask 13).
+- Does "after request r3 completes" mean `r4` is the next event? Yes. The trigger is the completion of `r3`. The return happens *at that moment*. So the sequence is: Process `r3` -> Trigger Expiry -> Pool updated -> Next Event (`r4`) sees new pool.
+- My walk: `r3` processed (Pool 31) -> Expiry triggers (Pool 34) -> `r4` processes (Ask 13 vs 34). This matches the "return arrives right before the request" logic if we consider the next *arrival* as the reference point, but strictly speaking, the return happens immediately upon trigger. The state is updated instantly.
+- Wait, let's look closer at the orientation story trap: "the third ask of 13 landed against only 12 in the pool so it took a partial". In that story: Start 25 -> Ask 11 (Grant 11, Pool 14) -> Ask 7 (Grant 7, Pool 7) -> Expiry returns floor(11/2)=5? No, text says "first grant expired... returned 5, half of 11". Wait, in the story: Start 25. Ask 11 (Grant 11, Rem 14). Ask 7 (Grant 7, Rem 7). Expiry on *first* grant? Text says "the first grant expired and returned 5". If first grant was 11, half is 5. Pool becomes 7+5=12. Then third ask of 13 lands against 12.
+- My story: Start 50. Ask 4 (Grant 4, Rem 46). Ask 6 (Grant 6, Rem 40). Ask 9 (Grant 9, Rem 31). Expiry on *second* grant (`r2`, which was 6). Half of 6 is 3. Pool becomes 31+3=34. Next ask `r4` is 13. 13 < 34. Grant 13. Rem 21.
+- Is there any ambiguity on "after request r3 completes"? The rule says "grant for r2 expires after request r3 completes". This implies the event sequence is: Process R3 -> Trigger Expiry -> Process R4. My walk did exactly this.
+
+Final Totals:
+- Granted Units: 4 + 6 + 9 + 13 + 15 = 47.
+- Denied: [] (Empty list).
+- Pool Left: 6.
+
+JSON Output Generation.
+
+```json
+{"granted_units": 47, "denied": [], "pool_left": 6}
+```

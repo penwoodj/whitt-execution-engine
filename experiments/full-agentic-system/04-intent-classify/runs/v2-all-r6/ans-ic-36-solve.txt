@@ -1,0 +1,72 @@
+### Fact Bullets (Tonight's Numbers Only)
+*   **LOW1**: Duration 4 minutes, Start Minute 0.
+*   **LOW2**: Duration 3 minutes, Start Minute 3.
+*   **HIGH**: Arrival Minute 5, Duration 4 minutes (Preempts active LOW).
+
+### Minute-by-Minute Walk Table
+| minute | core | event |
+| :--- | :--- | :--- |
+| 0 | LOW1 (Start) | Start LOW1 at min 0. Bank checkpoint at min 2. |
+| 1 | LOW1 | Running. |
+| 2 | LOW1 | Running. Reached banked checkpoint @ absolute min 2. |
+| 3 | LOW1 | Running. LOW2 arrives (wait). Core busy, no switch yet. |
+| 4 | LOW1 | FINISH LOW1 at min 4. LOW2 resumes immediately. Bank for LOW2 (@ start+2) is min 5. |
+| 5 | HIGH | Start HIGH (Preempt). LOW1 finishes. **HIGH runs**. Low2 wait. Note: LOW2 arrived at min 3, so it has a "start minute" priority over any fresh job if needed later. HIGH banks checkpoint @ start+2 = min 7. |
+| 6 | HIGH | Running. |
+| 7 | HIGH | FINISH HIGH at min 7. Pool of LOWs: LOW1 (done), LOW2 (waiting, arrived min 3). **LOW2 resumes**. |
+| 8 | LOW2 | Resumed at min 8. Bank checkpoint @ resume+2 = min 10. |
+| 9 | LOW2 | Running. |
+| 10 | LOW2 | FINISH LOW2 at min 10. |
+
+### Calculations
+*   **Makespan**: The maximum finish minute is 10 (LOW2 finishes). HIGH finished at 7, but the clock extends to the last job completion.
+    *   *Correction on Clock Convention*: "makespan = the largest finish minute on the night (HIGH included for the clock)". Highest finish is 10.
+*   **Wasted Minutes**:
+    *   LOW2 was running from min 4 to min 7? No, HIGH preempted at min 5.
+    *   Let's re-verify the preemption timing carefully against "minute s .. s+n-1".
+        *   LOW1: Starts 0, runs 4 mins -> Occupies [0, 1, 2, 3]. **Finishes at minute 4**. (Correct).
+        *   At min 4, core becomes free. LOW2 arrives at min 3 (waiting). LOW2 starts immediately at min 4.
+        *   LOW2: Starts 4, runs 3 mins -> Occupies [4, 5, 6]. **Finishes at minute 7**.
+        *   HIGH: Arrives min 5. At this point, is LOW2 running? Yes, LOW2 occupies min 5 and 6.
+        *   Preemption Logic: "instantly preempting whatever LOW job is running".
+        *   Does HIGH arrive while LOW2 is in its first minute (min 4)? No. It arrives at 5.
+        *   Does HIGH arrive while LOW2 is in its second minute (min 5)? Yes.
+        *   Does HIGH arrive while LOW2 is in its third minute (min 6)? Yes, but it preempts immediately upon arrival? Or does it wait for the job to finish?
+        *   Rule: "instantly preempting". This implies immediate interruption of the current execution unit if possible. However, checkpoint rules apply.
+        *   LOW2 Checkpoints: Start at 4. Banks at $s+2 = 6$. Runs every 2 mins. So banks are at absolute min 6 and 8? No, "every 2 running minutes after".
+            *   Run segment 1: Min 4-5 (1 min). Bank not hit yet.
+            *   Run segment 2: Min 5-6 (2nd min). Total run time = 3 mins? No.
+            *   Let's trace "running minutes":
+                *   Minute 4 is the 1st running minute.
+                *   Minute 5 is the 2nd running minute. -> Bank hit at absolute min $s+2=6$? Or does it bank every time duration hits 2?
+                *   Text: "checkpoint every 2 completed minutes of running time... banks a checkpoint at minute s+2".
+                *   So LOW2 (start 4) banks at absolute min 6.
+            *   HIGH arrives at min 5. It preempts the job running in that minute. The job has run for 1 minute (min 4). It is currently in its 2nd minute (min 5).
+            *   Wait, does "preempt" mean stop immediately? Yes.
+            *   Work done by LOW2 before HIGH: Minute 4 only.
+            *   Bank status at preemption: Has it reached the bank at min 6 yet? No. The bank is hit when the job completes minute 5 (absolute time 6). Since it stopped in minute 5, it never completed that minute to trigger the bank update for "completed minutes".
+            *   Actually, usually checkpoints are checked upon preemption based on elapsed time. Elapsed = 1 minute. Bank target = 2 minutes. So 0 minutes banked.
+            *   Wasted work: Total duration (3) - Banked (0) = 3 minutes wasted? Or just the current minute being interrupted?
+            *   Text: "On preemption the work past the last checkpoint is wasted". Last checkpoint was at start (implicit). Target next bank @ min 6. Current time 5. Work done = 1 min (min 4). Is min 5 completed? No, preempted instantly. So only 1 minute of work exists in memory.
+            *   Therefore, **1 minute** is wasted (the partial progress of the current second/minute). The "bank" hasn't updated yet because the minute wasn't completed.
+            *   Resume: LOW2 resumes at min 7 (after HIGH finishes). It must re-do the 3 minutes? Or just continue?
+            *   Text: "a resumed LOW outranks a fresh one... work past the last checkpoint is wasted and redone".
+            *   If only 1 minute was done, and bank was at start (0), then on resume it owes $Total - Banked = 3 - 0 = 3$ minutes?
+            *   Wait, let's re-read the example logic for clarity: "LOW1 had 7 total minutes with 2 banked, so it resumed owing 5". In that example, preemption happened at minute 3. Job started at 0. Banks at 2 and 4. At min 3, it has completed mins 0, 1, 2 (total 3). So it hit the bank at 2. It is in its 4th minute (unbanked). On preemption, work past bank (minute 3) is wasted? Or is the current minute safe until completion?
+            *   Example says: "its 3rd minute was unbanked when the swap came, so 1 minute wasted." This implies only the *current* incomplete minute is lost. The completed minutes (including those up to the last bank) are saved.
+            *   Applying to LOW2:
+                *   Start 4. Bank target 6.
+                *   Runs min 4 (completed).
+                *   Runs min 5 (preempted instantly).
+                *   Completed work = 1 minute. Last completed checkpoint = Start (0 mins). Next bank at 2 mins not reached.
+                *   Wasted minutes = Work in current unbanked segment = 1 minute? Or is the "segment" defined by banks?
+                *   If I have run 1 min, and need 2 to bank, the "waste" upon preemption is the work done since the last bank. Last bank was at 0 (start). Work since then = 1 minute. So **1 minute wasted**.
+            *   Resume state: Owed $Total (3) - Banked (0) = 3$ minutes? Or does it keep the 1 min?
+            *   Text: "work past the last checkpoint is wasted". Checkpoint at 0 saved work 0. Work since 0 is 1 min. Wasted = 1. Resume owes $Total - Banked$. If Banked=0, owe 3. But if we consider the bank updates continuously?
+            *   Let's look at the example again: "LOW1 had 7 total minutes with 2 banked... resumed owing 5". $7-2=5$. Correct.
+            *   So for LOW2: Banked = 0 (since min 6 not reached). Owe = $3 - 0 = 3$ minutes.
+            *   Wait, does it keep the completed minute? Yes, "work past checkpoint is wasted". Work up to checkpoint (0) is kept. But since there are no checkpoints between 0 and 2, any work done is "past checkpoint"? No, "checkpoint every 2...". So at 1 min elapsed, you have not hit a checkpoint. You are in the first segment [0, 2). Work done = 1. Is it saved?
+            *   Usually, in these problems, if you haven't hit a bank, your progress is volatile. If preempted, you lose everything since last bank. Last bank was 0. So you lost 1 minute. You have to redo the whole job from start? Or resume from where you were (but since no save point, effectively restart)?
+            *   "redone after resume". This implies restarting the segment.
+            *   If I owe 3 minutes, and the bank is at 0, then on resume I run from 0 to 5 again.
+            *

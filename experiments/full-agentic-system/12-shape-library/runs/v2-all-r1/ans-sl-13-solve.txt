@@ -1,0 +1,77 @@
+### Phase 1 RULE SCAN
+This phase lists every rule that changes state during the event sequence (Arrivals), including expiry, return, revocation, refill, promotion, fallback, or source-ranking rules, marked with their trigger events.
+
+1.  **Per-Attempt Cost Rule**: Triggers on `Arrival` of an attempt; deducts cost from budget immediately upon arrival.
+2.  **Wait Time Cost Rule**: Triggers on `Arrival` of a wait interval (between attempts); deducts duration in seconds from budget immediately upon arrival.
+3.  **Budget Suppression Rule (Primary)**: Triggers if `Current Spend > Budget`; suppresses job and doubles budget for re-check.
+4.  **Budget Re-Check Rule**: Triggers after doubling; determines final suppression status based on doubled budget vs spend.
+5.  **Expiry Return Rule**: Triggers upon completion of the trigger request (successful attempt); returns half of the *granted* amount, rounded down, immediately before processing subsequent events.
+
+---
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at a time in strict arrival order (`Arrival`), showing the state after each event.
+
+**Initial State:**
+*   `Budget`: 24
+*   `Spend`: 0
+*   `Attempts`: 0
+*   `Wait_s`: 0
+*   `Suppressed`: false (initially)
+*   `Grant`: 0 (implicit for failed attempts, actual grant happens on success)
+
+**Event 1: Arrival of Attempt 1 (Failed)**
+*   *Rule Applied*: Per-Attempt Cost Rule.
+*   *Action*: Deduct cost (2).
+*   *State Update*: `Spend` = 0 + 2 = 2. `Attempts` = 1.
+
+**Event 2: Arrival of Wait Interval 1 (2s)**
+*   *Rule Applied*: Wait Time Cost Rule.
+*   *Action*: Deduct duration (2).
+*   *State Update*: `Spend` = 2 + 2 = 4. `Wait_s` = 0 + 2 = 2.
+
+**Event 3: Arrival of Attempt 2 (Failed)**
+*   *Rule Applied*: Per-Attempt Cost Rule.
+*   *Action*: Deduct cost (2).
+*   *State Update*: `Spend` = 4 + 2 = 6. `Attempts` = 2.
+
+**Event 4: Arrival of Wait Interval 2 (4s)**
+*   *Rule Applied*: Wait Time Cost Rule.
+*   *Action*: Deduct duration (4).
+*   *State Update*: `Spend` = 6 + 4 = 10. `Wait_s` = 2 + 4 = 6.
+
+**Event 5: Arrival of Attempt 3 (Failed)**
+*   *Rule Applied*: Per-Attempt Cost Rule.
+*   *Action*: Deduct cost (2).
+*   *State Update*: `Spend` = 10 + 2 = 12. `Attempts` = 3.
+
+**Event 6: Arrival of Wait Interval 3 (8s)**
+*   *Rule Applied*: Wait Time Cost Rule.
+*   *Action*: Deduct duration (8).
+*   *State Update*: `Spend` = 12 + 8 = 20. `Wait_s` = 6 + 8 = 14.
+
+**Event 7: Arrival of Attempt 4 (Successful)**
+*   *Rule Applied*: Per-Attempt Cost Rule.
+*   *Action*: Deduct cost (2).
+*   *State Update*: `Spend` = 20 + 2 = 22. `Attempts` = 4.
+
+**Event 8: Completion of Trigger Request (Success)**
+*   *Rule Applied*: Expiry Return Rule.
+*   *Context*: The job succeeded on the 4th attempt. No partial grant was issued previously (failed attempts consume budget but do not grant tokens). Therefore, `Granted` = 0.
+*   *Action*: Calculate return: `floor(0 / 2)` = 0. Deduct return from spend? No, returns add back to the pool/budget effectively or reduce the net cost. The prompt defines `budget_after` as `Budget - Spend`. If a return occurs, it reduces the effective spend.
+    *   *Correction on Logic*: "Expiry rule... expired grant returns half of what it was GRANTED". Since this is a success event for the job, there is no "expired partial" from previous steps. The "grant" happens now. Is there an expiry return? Usually, expiry applies to *failed* grants that didn't complete. Here, the attempt succeeded. There is nothing to expire/return.
+    *   *Re-evaluating "Expiry Return Rule"*: The rule says "when the trigger request completes... returns half of what it was GRANTED". If the job succeeds, the grant is consumed by the success. There is no "expired" portion to return unless a partial was given earlier and failed. No partials were given.
+    *   *Result*: Return = 0. `Spend` remains 22.
+
+**Final State Check:**
+*   `Attempts`: 4 (1, 2, 3, 4).
+*   `Wait_s`: 14 (2 + 4 + 8).
+*   `Budget`: 24.
+*   `Spend`: 22.
+*   `Suppression Check`: Spend (22) <= Budget (24). No suppression triggered. Even if it were, the task states "the job needs 3 failed attempts before the 4th succeeds", implying the process completes successfully unless suppressed *before* success. The spend is under budget at all times (Max Spend = 22 < 24).
+*   `Budget_after`: Budget - Spend = 24 - 22 = 2.
+
+**Final Answer JSON:**
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 2, "suppressed": false}
+```

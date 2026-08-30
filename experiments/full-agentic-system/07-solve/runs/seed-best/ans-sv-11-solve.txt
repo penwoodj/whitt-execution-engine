@@ -1,0 +1,84 @@
+### Phase 1 RULE SCAN
+This phase lists every rule in the task that changes state during the event sequence (the "flaky upstream" scenario), identifying the specific trigger for each.
+
+1.  **Per-Attempt Cost Rule**: Triggers on every attempt (failed or successful). Adds `2` tokens to spend.
+2.  **Wait Second Cost Rule**: Triggers after a failed attempt before the next retry. Adds `N` seconds (where $N$ is the current wait time) to spend.
+3.  **Budget Accumulation Rule**: Triggers on every cost event (attempt or wait). Updates total `spend`.
+4.  **Suppression Threshold Rule**: Triggers when `spend > budget`. Sets initial state of `suppressed` to true and flags the "doubling" condition.
+5.  **Budget Doubling Rule**: Triggers exactly once if suppression is active. Doubles the `budget` value immediately for re-evaluation.
+6.  **Re-Check Suppression Rule**: Triggers after budget doubling. Re-evaluates `suppressed` based on new doubled budget vs current spend. Sets final `suppressed` state (false if under, true if over).
+7.  **Final Budget After Calculation Rule**: Triggers at the end of the sequence. Computes `budget_after` as `final_budget - total_spend`.
+
+---
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at a time in strict arrival order (Arrival -> Attempt 1 Fail -> Wait 1 -> Attempt 2 Fail -> Wait 2 -> Attempt 3 Fail -> Wait 3 -> Attempt 4 Success), tracking state changes.
+
+**Initial State:**
+*   `budget`: 36
+*   `spend`: 0
+*   `attempts_count`: 0
+*   `wait_s_total`: 0
+*   `suppressed`: false (initially)
+
+**Event 1: Attempt 1 (Fail)**
+*   Rule Applied: Per-Attempt Cost Rule.
+*   Action: Add cost of attempt to spend.
+*   Calculation: `spend` = $0 + 2 = 2$.
+*   State Update: `attempts_count` = 1, `spend` = 2.
+
+**Event 2: Wait 1 (After Fail)**
+*   Rule Applied: Wait Second Cost Rule.
+*   Action: Add wait time to spend.
+*   Calculation: Current wait is 2s. `spend` = $2 + 2 = 4$. `wait_s_total` = 2.
+*   State Update: `spend` = 4, `wait_s_total` = 2.
+
+**Event 3: Attempt 2 (Fail)**
+*   Rule Applied: Per-Attempt Cost Rule.
+*   Action: Add cost of attempt to spend.
+*   Calculation: `spend` = $4 + 2 = 6$.
+*   State Update: `attempts_count` = 2, `spend` = 6.
+
+**Event 4: Wait 2 (After Fail)**
+*   Rule Applied: Wait Second Cost Rule.
+*   Action: Add wait time to spend.
+*   Calculation: Current wait is 4s ($2 \times 2$). `spend` = $6 + 4 = 10$. `wait_s_total` = $2 + 4 = 6$.
+*   State Update: `spend` = 10, `wait_s_total` = 6.
+
+**Event 5: Attempt 3 (Fail)**
+*   Rule Applied: Per-Attempt Cost Rule.
+*   Action: Add cost of attempt to spend.
+*   Calculation: `spend` = $10 + 2 = 12$.
+*   State Update: `attempts_count` = 3, `spend` = 12.
+
+**Event 6: Wait 3 (After Fail)**
+*   Rule Applied: Wait Second Cost Rule.
+*   Action: Add wait time to spend.
+*   Calculation: Current wait is 8s ($4 \times 2$). `spend` = $12 + 8 = 20$. `wait_s_total` = $6 + 8 = 14$.
+*   State Update: `spend` = 20, `wait_s_total` = 14.
+
+**Event 7: Attempt 4 (Success)**
+*   Rule Applied: Per-Attempt Cost Rule.
+*   Action: Add cost of attempt to spend.
+*   Calculation: `spend` = $20 + 2 = 22$.
+*   State Update: `attempts_count` = 4, `spend` = 22.
+
+**Post-Sequence Evaluation (Suppression Logic):**
+*   Current Spend: 22.
+*   Original Budget: 36.
+*   Check: Is $22 > 36$? No.
+*   Result: The job was never suppressed because the spend remained under the original budget throughout the entire sequence. The "doubling" rule does not trigger.
+
+**Final State Derivation:**
+*   `attempts`: 4 (Total attempts made).
+*   `wait_s`: 14 (Sum of wait seconds: $2 + 4 + 8$).
+*   `budget_after`: $36 - 22 = 14$.
+*   `suppressed`: false.
+
+---
+
+### Final Answer
+
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 14, "suppressed": false}
+```

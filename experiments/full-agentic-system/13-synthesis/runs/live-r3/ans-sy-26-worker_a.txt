@@ -1,0 +1,75 @@
+### Phase 1 Rule Scan (First Half Only)
+
+Based on the "night desk sy-26" task description for the first crew, here are the rules governing state changes during the event list:
+
+1.  **Arrival Order & Preemption:** `HIGH` arrives at minute 3 and instantly preempts any running `LOW` job; while `HIGH` runs, nothing else runs.
+2.  **Core Allocation (Tie-Breaking):** `LOW` jobs take the core in order of their start minutes; a resumed `LOW` outranks a fresh one at any tie.
+3.  **Waiting Logic:** A `LOW` whose start minute arrives while the core is busy simply waits until the current job finishes or is preempted.
+4.  **Checkpoint Banking:** `LOW` jobs checkpoint every 2 completed minutes of running time; on preemption, work past the last checkpoint is wasted and redone after resume.
+5.  **Banking Schedule:** A job starting/resuming at minute $s$ banks a checkpoint at minute $s+2$ and again every 2 running minutes thereafter (tracked in absolute minutes).
+6.  **Resume Cost:** After resume, a job redoes every minute past its last bank; e.g., a job with 5 total minutes and 2 banked resumes with 3 minutes left.
+
+### Phase 2 Ledger Walk (First Half Only)
+
+**Event List & State Application:**
+
+*   **Minute 0:** `LOW1` starts (Duration: 4 min). Core busy with `LOW1`.
+    *   *State:* `LOW1` running (Time elapsed: 0/4).
+*   **Minute 1:** `LOW2` arrives (Start time: 3, but rule says "take core in order of start minutes"? Wait, re-reading: "LOW jobs take the core in order of their start minutes". `LOW1` starts at 0. `LOW2` starts at 3. So `LOW1` has priority regardless of arrival? No, usually arrival matters for waiting. Let's look closer: "a LOW whose start minute arrives while the core is busy simply waits."
+    *   *Correction on Rule Interpretation:* The rule says "take the core in order of their start minutes". This implies a queue based on Start Time ($T_{start}$). `LOW1` has $T_{start}=0$. `LOW2` has $T_{start}=3$. Therefore, `LOW1` is always ahead of `LOW2`.
+    *   *State:* `LOW1` running (Time elapsed: 1/4). `LOW2` waiting.
+*   **Minute 2:** `LOW1` continues. Checkpoint banked at $T=0+2=2$.
+    *   *State:* `LOW1` running (Time elapsed: 2/4). Banked: Yes ($T=2$).
+*   **Minute 3:** `HIGH` arrives. Preempts `LOW1`. `LOW1` has run 2 minutes. Last bank was at $T=2$. Work past last checkpoint is wasted. `LOW1` resumes with $4-2=2$ minutes left. `HIGH` starts (Duration: 6 min).
+    *   *State:* `HIGH` running (Time elapsed: 0/6). `LOW1` waiting/resumed pending core free. `LOW2` waiting.
+*   **Minute 4:** `HIGH` continues.
+    *   *State:* `HIGH` running (Time elapsed: 1/6).
+*   **Minute 5:** `HIGH` continues.
+    *   *State:* `HIGH` running (Time elapsed: 2/6).
+*   **Minute 6:** `HIGH` continues.
+    *   *State:* `HIGH` running (Time elapsed: 3/6).
+*   **Minute 7:** `HIGH` continues.
+    *   *State:* `HIGH` running (Time elapsed: 4/6).
+*   **Minute 8:** `HIGH` finishes. Core becomes free.
+    *   *Queue Check:* Who is next?
+        *   `LOW1`: Resumed, needs 2 minutes. Start time effectively when it resumed? Or original start? Rule: "take the core in order of their start minutes". Original start was 0.
+        *   `LOW2`: Fresh, needs 3 minutes. Start time is 3.
+        *   Comparison: $T_{start}(LOW1) = 0$ vs $T_{start}(LOW2) = 3$. `LOW1` wins.
+    *   *Action:* Resume `LOW1`. It has 2 minutes left.
+    *   *State:* `LOW1` running (Time elapsed: 0/2).
+*   **Minute 9:** `LOW1` continues.
+    *   *State:* `LOW1` running (Time elapsed: 1/2).
+*   **Minute 10:** `LOW1` finishes. Core becomes free.
+    *   *Queue Check:* Only `LOW2` remains. Needs 3 minutes. Start time was 3.
+    *   *Action:* Run `LOW2`.
+    *   *State:* `LOW2` running (Time elapsed: 0/3).
+*   **Minute 11:** `LOW2` continues.
+    *   *State:* `LOW2` running (Time elapsed: 1/3).
+*   **Minute 12:** `LOW2` continues.
+    *   *State:* `LOW2` running (Time elapsed: 2/3).
+*   **Minute 13:** `LOW2` finishes.
+
+**Calculations for First Half:**
+*   **Makespan:** Last finish time = Minute 13.
+*   **Wasted Minutes:** `LOW1` was preempted at minute 3 (after running 2 mins). It had a checkpoint banked at minute 2 ($T=0+2$). Work past last checkpoint is wasted. Since it ran exactly to the bank, 0 minutes were wasted?
+    *   Re-evaluating "Work past the last checkpoint is wasted".
+    *   `LOW1` runs $t=0 \to 1$, $t=1 \to 2$. At $t=2$, a checkpoint banks.
+    *   Preemption happens at minute 3 (start of minute 3). The job has completed minutes 0, 1, and the start of 2? No, "runs 4 minutes starting at minute 0". Usually means it occupies the core during intervals [0,1), [1,2), [2,3), [3,4).
+    *   At Minute 3 (start), `HIGH` arrives. `LOW1` has completed intervals [0,1), [1,2), [2,3). That is 3 minutes of work? Or does "minute 0" mean the first minute block?
+    *   Let's assume standard discrete time steps: Minute 0 = step 1, Minute 1 = step 2...
+    *   Step 1 (Min 0): Run.
+    *   Step 2 (Min 1): Run. Bank at end of Min 1? Rule: "banks a checkpoint at minute s+2". Start $s=0$. Bank at absolute minute 2.
+    *   Absolute Minute 2 corresponds to the completion of the 3rd step (Min 0, 1, 2).
+    *   Preemption happens when `HIGH` arrives at "minute 3". Does this mean start of Min 3 or end? "arrives at minute 3 and runs... instantly preempting". Usually implies the event occurs at $t=3$.
+    *   If bank is at absolute minute 2, and preemption is at absolute minute 3. The job ran for minutes 0, 1, 2 (3 steps). It has a checkpoint. Work past last checkpoint (minute 2) is wasted? No, work *past* the checkpoint. If it finished exactly at the checkpoint, nothing is wasted.
+    *   Wait, let's re-read carefully: "LOW jobs checkpoint every 2 completed minutes... on preemption the work past the last checkpoint is wasted".
+    *   Timeline:
+        *   Min 0 (Step 1): Run.
+        *   Min 1 (Step 2): Run.
+        *   Min 2 (Step 3): Run. Checkpoint banks at absolute minute $s+2 = 2$. So checkpoint is valid after Step 3? Or does "minute s+2" mean the time point? If start is 0, bank at 2. This usually means after completing 2 minutes of work?
+        *   Let's check the example logic provided in the prompt: "LOW1 runs 7 minutes... LOW1 held core minutes 0, 1 and 2, banked a checkpoint at minute 2". Here, holding minutes 0, 1, 2 means 3 steps. Banked at minute 2 (absolute).
+        *   In our case: `LOW1` runs 4 mins. Holds Min 0, 1, 2, 3.
+        *   Bank at absolute minute 2 ($s+2$). This happens after holding minutes 0 and 1? Or after 0, 1, 2? The example says "held core minutes 0, 1 and 2... banked a checkpoint at minute 2". This implies the bank occurs *during* or *at the end of* minute 2.
+        *   If `HIGH` arrives at minute 3 (start), it preempts before minute 3 completes.
+        *   Did `LOW1` complete minute 2? Yes, if it ran continuously from 0 to 4.
+        *   So at $t=3$, `LOW1` has completed minutes 0, 1, 2 (3 steps). The bank was at absolute minute 2. Since the job reached absolute minute 2 and continued, is there waste?

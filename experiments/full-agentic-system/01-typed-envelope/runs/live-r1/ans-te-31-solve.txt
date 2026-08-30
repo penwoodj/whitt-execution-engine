@@ -1,0 +1,74 @@
+### Phase 1: RULE SCAN
+
+The following rules govern the state changes during tonight's shift. Each line lists the rule logic and the specific event or claim that triggers it.
+
+1. **Arrival Rule**: Upon an arrival (HIGH, LOW1, LOW2), the system records the job start time and initial progress; triggered by the *arrival event* of each job in strict order.
+2. **Preemption Trigger Rule**: When the HIGH job starts at minute 0, it instantly preempts any running or queued jobs; triggered by the *start of the HIGH job*.
+3. **HIGH Execution Rule**: The HIGH job runs to completion uninterrupted for its full duration (8 minutes); triggered by the *arrival and start* of the HIGH job.
+4. **LOW Checkpoint Logic**: LOW jobs track progress in 2-minute increments; a checkpoint is logically recorded at t=0, t=2, t=4, etc.; triggered by the *passage of time* within a LOW job's execution window.
+5. **Wasted Work Rule**: If a LOW job is preempted, any work done past the last valid checkpoint (multiple of 2) is marked as wasted; triggered by the *preemption event*.
+6. **Resumption Priority Rule**: A resumed LOW job (one that was interrupted and will restart) outranks a fresh LOW job (new arrival) in scheduling order at any time tie; triggered by the *comparison of pending jobs* upon HIGH completion or new arrivals.
+7. **LOW Execution Completion Rule**: A resumed LOW job continues from its last checkpoint, not zero; triggered by the *re-scheduling of the preempted job*.
+8. **Fresh Start Logic**: A fresh LOW job starts at full speed from minute 0 relative to its own arrival window; triggered by the *arrival event* of a new LOW job while others are waiting or completed.
+9. **Makespan Calculation Rule**: The makespan is calculated as the time difference between the first start (minute 0) and the last finish among all jobs; triggered by the *completion of the final job*.
+10. **Order Determination Rule**: The completion order list records jobs strictly in the sequence they reach a "finished" state, ignoring idle gaps or preemption history; triggered by the *finish event* of each job.
+
+---
+
+### Phase 2: LEDGER WALK
+
+We apply events one at a time based on strict arrival/execution order.
+**Initial State**: Time = 0. Jobs: HIGH (8min), LOW1 (5min, start 0), LOW2 (7min, start 2).
+
+**Event 1: Arrival & Start of HIGH and LOW1**
+*   **Time**: 0 min.
+*   **Action**: HIGH arrives and starts immediately. LOW1 arrives and starts immediately.
+*   **Conflict Resolution**: The prompt states "HIGH preempts instantly". Since both start at t=0, we assume the system initiates the HIGH job first or allocates resources to it exclusively upon its arrival, effectively preempting LOW1 immediately (waste 0 for LOW1 as no work was done).
+*   **State**: HIGH running. LOW1 paused/preempted with 0 progress.
+*   **Current Time**: 0.
+
+**Event 2: Execution of HIGH Job**
+*   **Time**: Advances from 0 to 8 min.
+*   **Action**: HIGH runs for 8 minutes and completes at t=8.
+*   **State Check**: During [0, 8], LOW1 is waiting (preempted). LOW2 has not started yet (starts at minute 2 relative to *its* schedule? No, prompt says "LOW2 runs... starting at minute 2". This implies absolute time or relative to the start of the shift?
+    *   Re-reading: "HIGH runs 8 minutes, LOW1 runs 5 minutes starting at minute 0, LOW2 runs 7 minutes starting at minute 2."
+    *   Interpretation A: Absolute times. HIGH starts t=0 (preempts). LOW1 starts t=0 (preempted by HIGH? Or does it start and run until preempted?). The text says "HIGH preempts instantly". If both arrive at t=0, HIGH takes the resource.
+    *   Interpretation B: LOW2's start is conditional or delayed. "Starting at minute 2" usually means absolute time t=2.
+    *   Let's refine the timeline based on standard scheduling problems of this type (Batch/Preemption):
+        *   **t=0**: HIGH and LOW1 arrive. HIGH preempts instantly. HIGH starts running. LOW1 is suspended at 0 progress.
+        *   **t=2**: The prompt says LOW2 runs starting at minute 2. Does it mean "Low 2 arrives/starts at t=2"? Or does it mean "Low 2 is scheduled to start, but can only start after 2 minutes"? Given the phrasing "starting at minute 2", we treat this as an absolute start time for LOW2.
+        *   However, usually in these puzzles, if a job starts at t=0 and another at t=2, they are queued. But HIGH preempts everything.
+        *   Let's assume the standard "Preemptive Priority" model:
+            1.  **t=0**: HIGH (8m) starts. LOW1 (5m) is preempted immediately (Progress = 0).
+            2.  **t=2**: LOW2 arrives/starts? If it's a new arrival, does it get preempted by the currently running HIGH? Yes, "HIGH preempts instantly". So at t=2, if HIGH is still running (it has 6m left), LOW2 starts but is immediately preempted or runs concurrently? The prompt implies a single processor ("one core"). Therefore, only one job runs at a time.
+            *   **Correction**: "One core tonight". Only one job executes at any given moment.
+            *   **Timeline Reconstruction**:
+                *   **t=0**: HIGH starts. LOW1 is in the queue (arrived). Since HIGH preempts instantly, LOW1 gets 0 runtime before HIGH takes over? Or does it mean LOW1 was running and got preempted? "LOW1 runs... starting at minute 0". If they start together on one core, one must yield. Rule: "HIGH preempts instantly". So HIGH takes the core. LOW1 is paused at 0.
+                *   **t=2**: Event for LOW2 ("starting at minute 2"). Since it's one core and HIGH is running (until t=8), LOW2 arrives/requests but must wait in queue until HIGH finishes? OR does "starting at minute 2" mean it forces a start? If it forces a start, it would preempt HIGH? No rule says that. Rule says HIGH preempts others. So HIGH continues.
+                *   **Wait**: Does "LOW2 runs... starting at minute 2" mean it arrives at t=2 and enters the queue immediately? Yes. It waits for the core.
+                *   **Current Running Job**: HIGH (Remaining: 8 - 0 = 8 min).
+                *   **Queue**: LOW1 (needs 5m, progress 0), LOW2 (needs 7m, progress 0).
+                *   **t=8**: HIGH finishes.
+                    *   State at t=8: Core free.
+                    *   Pending jobs: LOW1 (fresh? No, it was preempted at t=0. Is it "fresh" or "resumed"? It had 0 progress. A resumed job outranks a fresh one. If progress is 0, does it matter? The rule says "work past the last checkpoint is wasted". Checkpoints are every 2 mins.
+                    *   LOW1 Progress at t=8: 0. Last checkpoint: 0 (start). Work done since last checkpoint: 0. Wasted = 0. Status: Resumed from 0? Or Fresh? It was interrupted. So it is a "resumed" job with 0 progress remaining to catch up.
+                    *   LOW2 Progress at t=8: 0 (arrived at t=2, waited). Status: Fresh (never ran).
+                    *   **Priority**: Resumed (LOW1) > Fresh (LOW2).
+                *   **Action at t=8**: Start LOW1.
+
+**Event 3: Execution of LOW1**
+*   **Time**: Starts at t=8. Duration needed to finish: 5 minutes.
+*   **Timeline**: Runs from t=8 to t=13.
+*   **Checkpoints for LOW1**:
+    *   Starts at 8 (Checkpoint 0).
+    *   Passes t=10 (2 mins elapsed since last checkpoint? 8->10 is 2 mins). Checkpoint recorded at 10 (Progress = 2).
+    *   Passes t=12 (4 mins elapsed total, 2 mins since prev). Checkpoint recorded at 12 (Progress = 4).
+    *   Finish happens at t=13.
+*   **Wasted Calculation**:
+    *   Total duration: 5 mins.
+    *   Last checkpoint reached before finish: t=12 (total progress 4 mins).
+    *   Work done in the final interval (t=12 to t=13): 1 minute.
+    *   Is this work wasted? The prompt says "work past the last checkpoint is wasted on preemption".
+    *   Wait, LOW1 finishes naturally at t=13. There is no preemption here. Why would work be wasted?
+    *   Re-read: "LOW jobs checkpoint every 2 completed minutes; work past the last checkpoint is wasted on preemption". This implies waste only happens if there is a **preemption**. If the job finishes naturally, the work since the last checkpoint counts towards completion and is **not** wasted. Waste is defined by the condition "on preemption".
+    *   So for LOW1 finishing at t=13: Progress = 5. All 5 mins are valid. Wasted =

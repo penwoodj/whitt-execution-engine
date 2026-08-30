@@ -1,0 +1,93 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the "Residency Discipline" constraints, here are the rules that change state during the event stream:
+
+1.  **Load Rule**: If a requested model fits in remaining free space (after evictions), it loads; otherwise, proceed to eviction logic.
+2.  **Eviction Selection Rule**: When a load cannot fit, identify all unpinned resident models and sort them by recency (Least Recently Touched first).
+3.  **Eviction Execution Rule**: Evict the Least Recently Touched unpinned model one at a time until enough space exists for the requested load; increment `evictions` counter for each actual eviction performed.
+4.  **Recency Update Rule**: Upon successful loading or touching of a model, move that model to the Most Recently Used position in the resident list.
+5.  **Deferred Load Rule**: If after evicting all unpinned models, the requested load still does not fit (only pinned models remain), mark the request as deferred; increment `deferrals` counter and record the ID in `deferred`. No further evictions occur for this specific load attempt.
+6.  **Unload Rule**: Upon an unload event, free the specified model's size from the pool immediately. If the model is not resident, treat as a no-op (state change: none).
+
+**Trigger Mapping:**
+*   Event `load A` triggers Rules 1, 4.
+*   Event `load B` triggers Rules 1, 2, 3, 4.
+*   Event `load C` triggers Rules 1, 2, 3, 4.
+*   Event `load D` triggers Rules 1, 2, 3, 4, 5 (due to size constraint).
+*   Event `unload B` triggers Rule 6.
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   Pool: 8 GB
+*   Residents: []
+*   Recency List: []
+*   Pinned Models: {B} (Note: In this specific stream, Model B is requested *after* being loaded. The rule says "Model B is pinned and never evicted". This implies once loaded, it becomes pinned, or it starts as a special case. Given the sequence `load A`, `load B`, `load C`, `load D`, `unload B`:
+    *   If B is pinned *before* load: It cannot be evicted later.
+    *   If B is pinned *after* load: It becomes pinned upon loading.
+    *   Standard interpretation for "Model X is pinned": Once loaded, it stays. Let's trace carefully.
+    *   Start: Pool 8GB. Residents [].
+    *   **Event 1: Load A (2 GB)**
+        *   Fits? Yes (8 >= 2).
+        *   Action: Load A.
+        *   State: Residents [A], Free 6, Recency [A]. Loads=1.
+    *   **Event 2: Load B (2 GB)**
+        *   Fits? Yes (6 >= 2).
+        *   Action: Load B.
+        *   State: Residents [A, B] (Order depends on implementation, usually LRU list updates). Let's assume standard LRU stack where newest is right or top. Recency: A (oldest), B (newest). Free 4. Loads=2.
+        *   *Constraint Check*: "Model B is pinned". Does this mean it was pre-pinned? Or does it become pinned now? Usually, in these problems, if a model is named as "pinned", it acts as such immediately upon loading or permanently. If it becomes pinned now, it cannot be evicted later.
+    *   **Event 3: Load C (2 GB)**
+        *   Fits? Yes (4 >= 2).
+        *   Action: Load C.
+        *   State: Residents [A, B, C]. Recency: A (oldest), B, C (newest). Free 2. Loads=3.
+    *   **Event 4: Load D (7 GB)**
+        *   Fits? No (Free is 2, need 7).
+        *   Eviction Logic: Need to free at least $7 - 2 = 5$ GB.
+        *   Candidates for eviction: Unpinned models.
+            *   Is A pinned? No.
+            *   Is B pinned? Yes (by rule definition "Model B is pinned").
+            *   Is C pinned? No.
+        *   LRU Order (Oldest to Newest): A, B, C.
+        *   Evict A (2 GB). Free becomes $2 + 2 = 4$. Count=1. Fits? No ($4 < 7$).
+        *   Next candidate: B is pinned. Skip B.
+        *   Next candidate: C (2 GB). Evict C. Free becomes $4 + 2 = 6$. Count=2. Fits? No ($6 < 7$).
+        *   Remaining unpinned: None. Only B remains (pinned).
+        *   Can we evict B? No, it is pinned.
+        *   Result: Cannot fit even after exhausting all unpinned models.
+        *   Action: Defer Load D.
+        *   State: Residents [A, B, C] (unchanged by eviction attempts that failed or were skipped? Wait. "Every eviction actually performed counts". We evicted A and C. Did we load D? No. So residents are still A, B, C).
+        *   Recency Update: Since the load was deferred, did we touch D? No. The resident list remains [A, B, C]. Wait, if we evicted A and C, they are gone. Residents should be just [B]?
+        *   Let's re-read: "a load that cannot fit evicts as many LRU unpinned models as needed... every eviction actually performed counts".
+        *   Sequence of Evictions for Load D:
+            1. Check A (Unpinned). Evict A. Residents [B, C]. Free $2+2=4$. Fits? No.
+            2. Check B (Pinned). Skip.
+            3. Check C (Unpinned). Evict C. Residents [B]. Free $4+2=6$. Fits? No.
+            4. Check remaining unpinned: None.
+        *   Conclusion: Load D is deferred.
+        *   State after Event 4: Residents [B] (since A and C were evicted). Free 6. Loads=3, Evictions=2, Deferrals=1, Deferred=[D].
+    *   **Event 5: Unload B (2 GB)**
+        *   Action: Remove B from residents. Add 2 GB to free pool.
+        *   State: Residents []. Free $6+2=8$. Loads=3, Evictions=2, Deferrals=1, Deferred=[D].
+
+**Final Verification:**
+*   Loads (successful): A, B, C. Total = 3.
+*   Evictions: A and C were evicted to make room for D. Total = 2.
+*   Deferrals: D was deferred because only pinned B remained. Total = 1.
+*   Deferred IDs: [D].
+
+**Ledger Walk Lines:**
+1.  `load A (2GB) -> resident {A} free {6}`
+2.  `load B (2GB) -> resident {A, B} free {4}`
+3.  `load C (2GB) -> resident {A, B, C} free {2}`
+4.  `load D (7GB) -> evict A(2), evict C(2) -> resident {B} free {6} -> DEFERRED`
+5.  `unload B (2GB) -> resident {} free {8}`
+
+---
+
+### Final Answer
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

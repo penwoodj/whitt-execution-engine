@@ -1,0 +1,170 @@
+case_id: flg-07-sc-trf-a-f2
+meta:
+  domain: scientific-compute
+  archetype: transform-refine
+  complexity: A
+  class: F2
+  source: case-matrix row 82 (sc-trf-a-f2)
+  words_prompt: ~1030
+task:
+  prompt: |
+    You are the data pipeline engineer for a university research group
+    studying coastal erosion. The group operates a network of eighteen
+    tide and wave monitoring stations along a two-hundred-kilometer
+    stretch of coastline. Each station logs raw sensor telemetry to a
+    shared storage bucket as daily newline-delimited JSON files. The raw
+    files are messy in ways that are typical of field equipment: sensor
+    dropouts produce gap markers, firmware updates change field names
+    mid-stream, one station timestamps in local time despite the schema
+    calling for UTC, and occasional salt-crusted connectors produce
+    physically implausible spikes. The group's analysis stack, however,
+    expects a single clean monthly table in Parquet with a fixed schema.
+
+    Your task is to write a transformation specification document for the
+    pipeline that converts the raw daily JSON logs into the monthly
+    analysis-ready Parquet table. The deliverable is a Markdown document
+    with embedded pseudo-code, not a running program. It must contain, in
+    order: a schema mapping section that walks field-by-field from raw
+    variants to the target schema and explicitly states the resolution
+    rule for each renamed or retyped field; a cleaning rules section that
+    defines every filter, clamp, and interpolation rule with its
+    parameters and the rationale grounded in the domain; a gap handling
+    section that defines how missing readings are represented in the
+    output and why; a validation section that lists invariants the output
+    table must satisfy and how each is checked; and a reproducibility
+    section explaining how the transformation guarantees that identical
+    input files produce identical output bytes.
+
+    The target schema is fixed by the analysis stack and is as follows:
+    one row per station per ten-minute observation window, with columns
+    for the station identifier, the window start timestamp in UTC with
+    second precision, mean and maximum wave height in meters, dominant
+    wave period in seconds, wind direction in degrees from north, wind
+    speed in meters per second, tide stage as a categorical from a closed
+    set of six values, and a quality flag per physical quantity drawn
+    from a closed set of four values meaning good, suspect, corrected,
+    and missing.
+
+    The raw schema variants you must reconcile are as follows. Firmware
+    v1 logged fields named hs_mean, hs_max, tp_dominant, dir_wind,
+    spd_wind, tide_stage, and used a field named station_id holding
+    integers. Firmware v2 renamed the height fields to wave_height_mean
+    and wave_height_max, the period field to period_dominant, kept the
+    wind fields, and changed station identifiers to short strings.
+    Firmware v3, deployed only at the four offshore stations, added a
+    field for water temperature that the target schema does not carry,
+    and expressed wind direction in radians. The mapping section must
+    state, for every target column and every firmware variant, where the
+    value comes from, what unit conversions apply, and what happens when
+    the source field is absent.
+
+    Cleaning rules required by the domain scientists: wave heights above
+    twenty-five meters or below zero are physically implausible at these
+    sites and must be flagged suspect rather than deleted. Spike
+    sequences shorter than three consecutive samples, defined as readings
+    more than eight standard deviations from the rolling one-hour median
+    for that station, are treated as connector noise and flagged
+    corrected after replacement by the median. Longer excursions are
+    kept as observations and flagged suspect because they may be real
+    storm events. Wind direction must be normalized to the range zero to
+    three hundred sixty degrees. Readings from the station that logs
+    local time must be shifted to UTC using its fixed offset, and the
+    document must explain why dynamic DST handling is deliberately not
+    attempted. Tide stage must be derived from the tide gauge reading by
+    the thresholds the group has published in their methods paper, which
+    you should treat as a given constant table reproduced in the
+    document.
+
+    Gap handling policy: the analysis methods accept missing values but
+    degrade statistically when gaps exceed four consecutive windows, so
+    the document must define the gap mask representation, forbid
+    interpolation across gaps longer than forty minutes, and define
+    linear interpolation for shorter gaps with the interpolated values
+    flagged corrected. Dropout markers in the raw feed, which arrive as
+    JSON nulls rather than absent fields, must be distinguished from
+    fields absent because the firmware variant predates the sensor, and
+    the document must state how that distinction is preserved into the
+    quality flags.
+
+    Validation invariants the section must cover: no duplicate
+    station-window pairs; window starts aligned to ten-minute
+    boundaries; wind direction within range after normalization; quality
+    flags drawn only from the closed sets; every target column present
+    with the declared physical units; and row counts per station per
+    month reconciling against the count of raw records adjusted for
+    windowing, with any mismatch surfaced as a pipeline error rather
+    than silently absorbed.
+
+    Reproducibility requirements: sorting by station then window before
+    any aggregation, fixed-precision decimal formatting for floats
+    before Parquet serialization, and a stated rule for tie-breaking
+    identical timestamps within a window, which occur because the two
+    wave sensors on some stations report independently.
+
+    OPERATING CONTEXT (binding on the specification). The pipeline runs
+    nightly for the previous day and on demand for monthly backfills,
+    and the specification must define the reprocessing semantics: when
+    a nightly run reprocesses a day whose output already exists, the
+    transformation is idempotent by construction, and the document must
+    state which stages must be skipped versus recomputed and why. Schema
+    evolution policy: the group version-controls the target Parquet
+    schema, and any change to it requires a new versioned schema file;
+    the document must specify how the transformation reacts to
+    discovering records that match no known firmware variant — the
+    pipeline must fail loudly with a diagnostic naming the unknown
+    field set, never silently drop rows, and never guess a mapping.
+    The document must also specify the per-stage log fields the
+    pipeline emits — input file path, record counts in and out, rows
+    flagged by each rule, and wall-clock duration — because the
+    station technicians use those counts to spot sensor faults the
+    cleaning rules miss. Include a short worked example: a single raw
+    record from firmware v2 with a spike reading, traced field by
+    field through the mapping, cleaning, windowing, and flagging
+    rules to its final output row, with every intermediate value
+    shown.
+
+    Write the document for a reviewer who knows data engineering but not
+    oceanography: every domain constant must appear with its value and a
+    one-line justification, and every rule must be checkable by reading
+    the document alone. Do not include instructions for operating the
+    pipeline; this document is the specification of the transformation
+    only.
+  expected_schema:
+    type: object
+    required:
+      - schema_mapping
+      - cleaning_rules
+      - gap_handling
+      - validation_invariants
+      - reproducibility
+    properties:
+      schema_mapping: { type: string }
+      cleaning_rules: { type: string }
+      gap_handling: { type: string }
+      validation_invariants: { type: string }
+      reproducibility: { type: string }
+  output_contract: |
+    JSON object, one key per document section, each value a string of
+    prose or pseudo-code.
+failure:
+  class: F2
+  injection_profile:
+    attempts_failed: [1]
+    notes: |
+      F2 schema/format failure on attempt 1: output wraps all sections
+      under a single "document" key, omits "gap_handling" entirely, and
+      nests "validation_invariants" as a string inside an array rather
+      than a top-level key. tool_reselect heal (worker_coder, schema-
+      focused re-read of contract) on attempt 2 produces the flat
+      six-key object and passes.
+  signals: [schema_missing_keys, schema_nested_wrong, tool_error]
+expected:
+  final: accept
+  path: [attempt, classify, heal_tool_reselect, attempt, classify, accept, report]
+  attempts_to_success: 2
+oracle:
+  llm_calls:
+    worker: 2
+    heavy: 0
+    judge: 0
+  gate_flags: { need_replan: false, need_judge: false, budget_exhausted: false }

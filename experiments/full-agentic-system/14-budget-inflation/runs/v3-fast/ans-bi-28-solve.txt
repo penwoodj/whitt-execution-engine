@@ -1,0 +1,81 @@
+### Phase 1: Rule Scan & State Initialization
+
+**Fact Bullets (Tonight's Numbers Only):**
+*   **LOW1**: Duration = 4 minutes, Start = minute 0.
+*   **LOW2**: Duration = 3 minutes, Start = minute 3.
+*   **HIGH**: Arrival = instant (minute 0), Duration = 6 minutes.
+
+**Rule Application Logic:**
+1.  **Arrival Order**: LOW1 arrives at t=0. LOW2 arrives at t=3. HIGH is present at t=0 with preemption priority.
+2.  **Preemption Priority**: At any moment, if a job is running and a higher-priority job (HIGH) becomes ready or needs to run, the current job is preempted. Since HIGH arrives instantly and has highest priority, it runs immediately upon arrival of LOW1.
+3.  **Checkpoint/Banking Rule**: A job banks a checkpoint at `start + 2` and every subsequent even running minutes relative to its start/resume.
+    *   For LOW1 (Start=0): Banks at t=2, t=4...
+    *   For LOW2 (Start=3): Banks at t=5, t=7...
+4.  **Wasted Calculation**: Minutes run past the last bank are wasted and must be redone after resume. `Owed = Total Duration - Banked`.
+5.  **Resume Priority**: A resumed job outranks a fresh one.
+
+### Phase 2: Ledger Walk (Minute-by-Minute Table)
+
+| Minute | Core | Event | Notes/State Update |
+| :--- | :--- | :--- | :--- |
+| 0 | HIGH | Start HIGH | LOW1 is waiting (fresh). HIGH preempts immediately. |
+| 1 | HIGH | Run HIGH | HIGH running [0,1]. |
+| 2 | HIGH | Bank@2 | HIGH banks checkpoint at absolute minute 2. |
+| 3 | HIGH | Run HIGH | HIGH running [2,3]. LOW2 arrives (fresh). |
+| 4 | HIGH | Finish HIGH | HIGH completes. Total run: 5 mins? Wait, duration is 6. Let's re-verify duration logic. <br> **Correction**: Duration = 6 minutes means it occupies t=0..5 and finishes at t=6. <br> Re-walk with correct duration (6). |
+| 0 | HIGH | Start HIGH | LOW1 waiting. |
+| 1 | HIGH | Run HIGH | |
+| 2 | HIGH | Bank@2 | High banks at abs min 2. |
+| 3 | HIGH | Run HIGH | |
+| 4 | HIGH | Run HIGH | |
+| 5 | HIGH | Finish HIGH | HIGH finishes (Duration 6: occupies 0..5, finish at 6). Wait, standard convention: Start s, run n -> occupy s..s+n-1, finish s+n. <br> If duration is 6, it runs t=0,1,2,3,4,5 and finishes at t=6. |
+| **Correction on HIGH Finish**: The table above shows HIGH finishing at minute 5 in the first pass, but the rule says "Duration = 6". <br> Let's re-calculate strictly: <br> Start t=0. Run n=6. Occupies t=0,1,2,3,4,5. Finishes at t=6. |
+| **Re-Walk Correctly**: |
+| 0 | HIGH | Start HIGH | LOW1 waiting (fresh). |
+| 1 | HIGH | Run HIGH | |
+| 2 | HIGH | Bank@2 | High banks at abs min 2. |
+| 3 | HIGH | Run HIGH | LOW2 arrives (fresh). |
+| 4 | HIGH | Run HIGH | |
+| 5 | HIGH | Run HIGH | |
+| 6 | HIGH | Finish HIGH | HIGH completes. Core becomes free. |
+
+**Post-HIGH State:**
+*   **LOW1**: Waiting since t=0. Needs to run 4 mins.
+    *   Resume at t=6 (Core free).
+    *   Start LOW1 at t=6.
+    *   Bank check: `Start + 2` = 8.
+    *   Run duration: 4 minutes -> Occupies t=6,7,8,9. Finishes at t=10.
+    *   Did it bank? It runs from 6 to 10. Banks at 8 (absolute). Yes, it banks at 8.
+    *   Banked amount: 2 minutes (from start of resume).
+    *   Wait, the rule says "minutes past the last bank are wasted". <br> LOW1 resumes at t=6. It runs for 4 mins total. <br> Banks at `resume + 2` = 8. <br> Does it reach minute 8? Yes (runs 6,7,8,9). <br> So it banks 2 minutes of work.
+    *   Is there wasted work? No, because the job finishes before or exactly when the next bank would occur? Or does "past the last bank" imply if it was preempted again? HIGH is done. LOW1 runs to completion.
+    *   **Wait**, let's re-read the "Wasted" rule carefully: "On preemption, minutes past the last bank are wasted". <br> Preemption happened at t=6 (end of HIGH). <br> Last bank for LOW1 was at t=-2? No, it didn't run yet. <br> When it resumes at t=6, does it count previous banks? No, it's a fresh resume. The rule says "A job that gets the core at minute s with owed k...". <br> Here `owed` = Total Duration - Banked (before preemption). Since LOW1 never ran before HIGH, Banked = 0. <br> So `owed` = 4 - 0 = 4.
+    *   It runs for 4 minutes starting at t=6. Finishes at t=10.
+    *   Does it bank? Banks at s+2 = 8. Yes, minute 8 is within [6, 9]. So it banks 2 minutes of work.
+    *   Wait, the definition of "Wasted" in this specific context usually implies: If a job runs for `D` minutes, and banks every 2 minutes starting at +2. <br> Run 0..1 (no bank), 2..3 (bank), 4..5 (no bank). <br> If it stops after 1 minute (preempted), wasted = 1 - 0 = 1? No, banks happen at absolute minutes. <br> Let's stick to the prompt's explicit formula: `owed = duration − banked`.
+    *   LOW1 resumes at t=6. Runs for 4 mins. Banks at t=8 (absolute). <br> Does it reach t=8? Yes. So Banked = 2. <br> Owed = 4 - 2 = 2? No, that logic applies if it was preempted *after* banking but before finishing the full duration. Here it finishes.
+    *   **Alternative Interpretation**: Maybe "Bank" only counts if the job is interrupted? No, "A LOW banks a checkpoint...". <br> Let's assume standard behavior: If it runs to completion, `wasted` = 0 unless preempted mid-run. Since HIGH finishes at t=6 and LOW1 runs until t=10 without interruption, **Wasted for LOW1 = 0**.
+    *   Finish time LOW1 = 10.
+
+*   **LOW2**: Waiting since t=3. Needs to run 3 mins.
+    *   Resume at t=10 (after LOW1 finishes).
+    *   Start LOW2 at t=10.
+    *   Run duration: 3 minutes -> Occupies t=10,11,12. Finishes at t=13.
+    *   Bank check: `Start + 2` = 12. <br> Does it reach minute 12? Yes (runs 10,11,12). <br> So it banks 2 minutes of work.
+    *   Since it runs to completion without interruption, **Wasted for LOW2 = 0**.
+
+**Wait, let me double check the "Orientation" trap.**
+The prompt says: "HIGH preempts instantly and runs to completion."
+My walk: HIGH runs t=0..5 (finish at 6). Correct.
+Then LOW1 runs t=6..9 (finish at 10). Correct.
+Then LOW2 runs t=10..12 (finish at 13). Correct.
+
+**Is there any wasted time?**
+The rule: "On preemption, minutes past the last bank are wasted".
+Preemption event 1: End of HIGH (t=6). LOW1 resumes.
+Did LOW1 have a previous bank? No, it never ran. So Banked = 0.
+Does it run long enough to hit its first bank at t=8? Yes (runs 4 mins: 6,7,8,9).
+So effectively, the work done is valid. `Wasted` usually refers to work that must be *redone*. If the job finishes, no work needs redoing.
+Unless... "minutes past the last bank" implies if it was preempted at t=5 (end of HIGH), and LOW1 resumes at t=6. The "last bank" for LOW1 conceptually doesn't exist yet. So `owed` = 4 - 0 = 4? No, that would mean all work is wasted. That contradicts the idea of banking.
+The banking rule implies: You get credit for every 2 minutes starting at +2.
+If you run 4 mins, you hit +2 (minute 8). So you have 2 mins of credit. The remaining 2 mins (minutes 6-7)

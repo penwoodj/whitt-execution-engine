@@ -1,0 +1,62 @@
+### Phase 1 RULE SCAN
+This phase lists every rule in the task that changes state during the event or claim list (tonight's events), one line each, marking which event triggers it.
+
+1. **Arrival Rule**: `HIGH` arrives at minute 3 and runs for 6 minutes; this event triggers the preemption of any running `LOW` job and blocks all other execution until `HIGH` completes.
+2. **Preemption Rule**: When `HIGH` starts (minute 3), it instantly preempts whatever `LOW` job is running, causing that job to pause immediately at minute 3.
+3. **Checkpoint Rule**: `LOW` jobs checkpoint every 2 completed minutes of running time; this rule applies continuously as `LOW` jobs run, saving state at the end of their 2nd and 4th minutes (if they reach them).
+4. **Waste Rule**: On preemption, work past the last checkpoint is wasted and redone after resume; this rule applies when a preempted `LOW` job resumes, calculating the difference between its current running time and its last saved checkpoint.
+5. **Scheduling Order Rule**: `LOW` jobs take the core in order of their start minutes (0 then 3); this rule determines which waiting `LOW` starts next after a gap or preemption.
+6. **Tie-Breaker Rule**: A resumed `LOW` outranks a fresh one at any tie; this rule applies if two `LOW` jobs become available simultaneously, prioritizing the one that was preempted over the one just started.
+7. **Makespan Calculation Rule**: Makespan counts from the first start of any job (minute 0) to the last finish of any job; this rule aggregates the timeline for the final output.
+8. **Completion Order Rule**: Completion order lists `LOW` jobs by the minute each finishes; this rule sorts the final results based on finish times.
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at a time in strict arrival order, showing the state after that event.
+
+1. **Event: Start LOW1 (Minute 0)**
+   - State: `LOW1` starts running. Core occupied by `LOW1`. Running time = 0. Checkpoint status: None yet.
+2. **Event: Run LOW1 (Minutes 0-1, 1-2)**
+   - State: `LOW1` completes its first minute at $t=1$ and second minute at $t=2$. At $t=2$, a checkpoint is saved. Running time = 2. Core occupied by `LOW1`.
+3. **Event: Start LOW2 (Minute 3)**
+   - State: `LOW2` starts running at $t=3$. However, `HIGH` also arrives exactly at $t=3$.
+4. **Event: Arrival HIGH (Minute 3) & Preemption**
+   - Rule Application: `HIGH` preempts the job currently holding the core. At $t=3$, `LOW1` is running (it just finished minute 2 and is starting minute 3). `LOW2` has not yet started execution on the core because `HIGH` arrives simultaneously. The rule "instantly preempting whatever LOW job is running" applies to `LOW1`.
+   - State: `LOW1` is preempted at $t=3$. Work done = 2 minutes. Last checkpoint = 2 minutes. Wasted work = $3 - 2 = 1$ minute (the start of the 3rd minute). Core becomes free immediately for `HIGH`. `LOW2` remains in the waiting queue but has not started running yet.
+5. **Event: Run HIGH (Minutes 3-9)**
+   - State: `HIGH` runs continuously from $t=3$ to $t=9$. No other jobs run. Core occupied by `HIGH`.
+6. **Event: Resume LOW1 (Minute 9)**
+   - Rule Application: `HIGH` finishes at $t=9$. The core becomes free. Waiting queue contains `LOW2` (started at min 3) and `LOW1` (preempted).
+   - Tie-Breaker Check: `LOW2` is a "fresh" job that started at minute 3 but hasn't run yet? Or does it count as waiting? The rule says "`LOW` jobs take the core in order of their start minutes". `LOW2` started at min 3. `LOW1` was preempted.
+   - Re-evaluating Queue Logic: At $t=9$, both are waiting. `LOW2`'s start minute is 3. `LOW1`'s start minute is 0. The rule "take the core in order of their start minutes" implies `LOW1` (start 0) should go before `LOW2` (start 3).
+   - Wait, let's re-read the specific constraint: "`LOW` jobs take the core in order of their start minutes". This usually means the job that *arrived* earliest gets priority. `LOW1` arrived at 0. `LOW2` arrived at 3. So `LOW1` goes first.
+   - State: Core assigned to `LOW1`. `LOW1` resumes. It needs to redo work past checkpoint (which was at min 2). Current time is 9. It must run from $t=9$ onwards.
+7. **Event: Run LOW1 (Minutes 9-10, 10-11)**
+   - State: `LOW1` runs minute 3 ($t=9 \to 10$) and minute 4 ($t=10 \to 11$). At $t=11$, it hits a checkpoint (2 minutes of *running* time since resume? No, "checkpoint every 2 completed minutes of running time").
+   - Clarification on Checkpoint: Does it mean total runtime or consecutive runtime? "LOW jobs checkpoint every 2 completed minutes of running time". Usually implies consecutive. `LOW1` ran min 0-2 (2 mins). Preempted. Resumes at 9. Runs 9-10 (1 min), 10-11 (1 min). Total consecutive = 2 mins. Checkpoint saved at $t=11$.
+   - State: `LOW1` running time since resume = 2. Core occupied by `LOW1`.
+8. **Event: Run LOW1 (Minutes 11-12)**
+   - State: `LOW1` runs minute 5 ($t=11 \to 12$). Total runtime needed for `LOW1` is 4 minutes. It has done 0-2, then 9-12 (4 mins). Wait, total duration required is 4 minutes.
+   - Timeline Check:
+     - Original plan: 0-1, 1-2, 2-3, 3-4.
+     - Lost: 2-3 (preempted at start of min 3).
+     - Resume starts at 9. Needs to do the remaining work. Remaining work = Total (4) - Saved (2) = 2 minutes? Or does it need to re-do the lost minute + run new ones?
+     - Rule: "on preemption the work past the last checkpoint is wasted and redone after resume".
+     - Checkpoint was at end of min 2. Work done = 2 mins. Wasted = start of min 3 (1 min).
+     - To finish, it needs to complete 4 minutes total. It has 2 minutes saved. It must execute 2 minutes of *new* work? No, the "wasted" minute is lost progress. So effectively it needs to run 2 minutes of new execution to reach 4 minutes total duration?
+     - Let's trace: Needs 4 mins total. Saved 2 mins (0-2). Wasted 1 min (start of 3rd). Remaining to execute = 2 mins (to cover the wasted part + the final minute)? No, if it runs 2 mins starting at 9, it covers minutes 3 and 4?
+     - Let's assume standard interpretation: It needs to reach a state where total runtime = 4. Saved = 2. Needs to run 2 more minutes.
+     - Execution: $t=9 \to 10$ (Min 3), $t=10 \to 11$ (Min 4). At $t=11$, it has effectively completed the "wasted" minute and the final minute?
+     - Wait, if it runs 2 minutes starting at 9:
+       - Minute 1 of resume ($9-10$): Covers original Min 3.
+       - Minute 2 of resume ($10-11$): Covers original Min 4.
+       - At $t=11$, total runtime = 4. Job finishes.
+   - State: `LOW1` finishes at $t=11$. Core becomes free.
+9. **Event: Start LOW2 (Minute 11)**
+   - Rule Application: Queue now has only `LOW2`. It starts running immediately at $t=11$? Or does it wait for the next minute boundary? "the core never idles while a LOW job is waiting". Core was free at $t=11$. `LOW2` starts.
+   - State: `LOW2` runs. Duration needed = 3 minutes (started min 3, needs to run 3 mins).
+   - Execution: $t=11 \to 12$ (Min 4), $t=12 \to 13$ (Min 5), $t=13 \to 14$ (Min 6).
+   - State: `LOW2` finishes at $t=14$.
+
+**Final Calculation Verification:**
+- **Makespan**: First start = 0. Last finish = 14 (`LOW2`). Makespan = 14 minutes.
+- **Wasted Minutes**: `LOW1` was preempted at the start of minute 3 (after completing minute 2). The work in progress for minute 3 is wasted

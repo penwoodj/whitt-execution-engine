@@ -1,0 +1,35 @@
+**Phase 1 RULE SCAN**
+1. Load Rule: If requested stream fits in current free space, load the model; otherwise proceed to eviction logic.
+2. Eviction Logic (Fit): If a load cannot fit, evict least-recently-touched (LRT) **unpinned** models one at a time until it fits or only pinned models remain.
+3. Deferral Rule: If a load still does not fit after exhausting all unpinned models (only pinned remain), defer the load; no eviction occurs.
+4. Touch Rule: Every successful load or partial load moves the model to Most-Recent position in recency list.
+5. Unload Rule: Freeing a resident model adds its size to free space; freeing a non-resident model is a no-op.
+6. Expiry Return Rule (Triggered by Load): Upon completion of a load event, if that specific grant was previously marked expired/partial, return half the **granted** amount (rounded down) immediately before processing subsequent events.
+
+**Phase 2 LEDGER WALK**
+*Initial State:* Resident: [], Free: 8GB, Recency: []
+
+1. Event `load A (2 GB)` -> Fits in 8GB. Load A.
+   *State:* Resident {A}, Free 6GB, Recency [A]
+
+2. Event `load C (4 GB)` -> Fits in 6GB. Load C.
+   *State:* Resident {A, C}, Free 2GB, Recency [C, A] (C touched)
+
+3. Event `load D (3 GB)` -> Needs 3GB, have 2GB. Cannot fit. Evict LRT unpinned models.
+   *Recency Check:* A is oldest (LRT). C is newer. Both unpinned.
+   *Eviction 1:* Evict A (+2GB free). Free becomes 4GB. Resident {C}. Recency [C].
+   *Fit Check:* Need 3GB, have 4GB. Fits. Load D.
+   *State:* Resident {C, D}, Free 1GB, Recency [D, C] (D touched)
+
+4. Event `unload D (3 GB)` -> D is resident. Free +3GB.
+   *State:* Resident {C}, Free 4GB, Recency [C]
+
+**Final Answer Calculation:**
+* Loads: A, C, D were successfully loaded. Total = 3.
+* Evictions: Only A was evicted to make room for D. Total = 1.
+* Deferrals: No deferrals occurred (D fit after eviction). Total = 0.
+* Deferred List: Empty.
+
+```json
+{"loads": 3, "evictions": 1, "deferrals": 0, "deferred": []}
+```

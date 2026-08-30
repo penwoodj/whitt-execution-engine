@@ -1,0 +1,79 @@
+Based on the strict rules and event log provided in the task, here is the step-by-step execution of the "Pool" logic:
+
+**Initial State:**
+- Pool Start: 50 tokens.
+- Rule for Granting: `pool = pool - ask`. If partial (negative result), grant what remains (`grant = abs(ask + new_pool)`? No, rule says "grants are partial when the pool cannot cover the full ask". Logic: `if pool < ask`: `grant = pool`, `new_pool = 0`. Wait, let's re-read carefully: "grants are partial... grant what is there and the pool drops to zero". This implies if `pool < ask`, we give everything (`pool`) and pool becomes 0.
+- Rule for Expiry: "the grant for r1 expires after request r2 completes... an expired grant returns half its granted tokens rounded down to the pool". Triggered by the completion of the event named in the expiry rule (r2). Timing: The return happens *after* the trigger event.
+
+**Event Walkthrough:**
+
+1.  **Event `r1`**: Asks for 4.
+    -   Current Pool: 50.
+    -   Check: $50 \ge 4$. Full grant possible.
+    -   Action: Grant 4. New Pool = $50 - 4 = 46$.
+    -   State Log: `r1` granted, pool is 46.
+
+2.  **Event `r2`**: Asks for 6.
+    -   Current Pool: 46.
+    -   Check: $46 \ge 6$. Full grant possible.
+    -   Action: Grant 6. New Pool = $46 - 6 = 40$.
+    -   **Rule Trigger**: The task states "the grant for r1 expires after request r2 completes".
+    -   Expiry Logic: Return half of `r1`'s granted tokens (which was 4), rounded down. $\lfloor 4 / 2 \rfloor = 2$.
+    -   Timing Rule: "return arrives right before the request the trigger names" -> Wait, re-reading: "watch the slot the expiry lands in, the return arrives right before the request the trigger names". This phrasing is confusing. Let's look at the other instruction: "a partial result is still a result and still depletes...".
+    -   Re-evaluating timing based on standard "after" logic vs specific text: "the grant for r1 expires after request r2 completes". Usually, this means Event r2 happens -> then Expiry r1 happens.
+    -   Let's check the alternative interpretation from the "sister pool" example to resolve ambiguity: "third ask... landed against only 12 in the pool so it took a partial and drained it." (This implies depletion).
+    -   Back to `r1` expiry after `r2`: The return adds tokens back. Return amount = 2.
+    -   New Pool calculation: Previous Pool (40) + Return (2) = 42? Or does the "after" imply it happens immediately following? Yes.
+    -   State Log: After `r2` completes and `r1` expires, pool is 42.
+
+3.  **Event `r3`**: Asks for 9.
+    -   Current Pool: 42.
+    -   Check: $42 \ge 9$. Full grant possible.
+    -   Action: Grant 9. New Pool = $42 - 9 = 33$.
+    -   State Log: `r3` granted, pool is 33.
+
+4.  **Event `r4`**: Asks for 13.
+    -   Current Pool: 33.
+    -   Check: $33 \ge 13$. Full grant possible.
+    -   Action: Grant 13. New Pool = $33 - 13 = 20$.
+    -   State Log: `r4` granted, pool is 20.
+
+5.  **Event `r5`**: Asks for 15.
+    -   Current Pool: 20.
+    -   Check: $20 \ge 15$. Full grant possible.
+    -   Action: Grant 15. New Pool = $20 - 15 = 5$.
+    -   State Log: `r5` granted, pool is 5.
+
+**Final Calculation:**
+-   Total Granted Units: $4 (r1) + 6 (r2) + 9 (r3) + 13 (r4) + 15 (r5) = 47$.
+    -   Note: The expiry return of 2 was added back to the pool, but it is not "granted units" for a request. It replenishes the pool.
+-   Denied List: Empty.
+-   Pool Left: 5.
+
+Let's double check the "sister pool" logic to ensure I didn't miss a partial grant rule application.
+Sister Pool Example: Start 25. Ask 11 -> Grant 11, Rem 14. Ask 7 -> Grant 7, Rem 7. Expiry (returns 5). Pool becomes $7+5=12$. Ask 13 -> Partial grant? "landed against only 12 in the pool so it took a partial and drained it".
+Wait, if I start with 14, ask 7 -> rem 7. If expiry returns 5 -> rem 12. Ask 13. $12 < 13$. So grant 12, pool 0.
+In my main task:
+Start 50.
+r1 (ask 4) -> 46.
+r2 (ask 6) -> 40.
+Expiry r1 returns 2 -> 42.
+r3 (ask 9) -> 33.
+r4 (ask 13) -> 20.
+r5 (ask 15) -> 5.
+No partials occurred in the main task because the pool remained sufficient for every request after replenishment.
+
+Total Granted = Sum of all asks granted fully or partially.
+$r1: 4$
+$r2: 6$
+$r3: 9$
+$r4: 13$
+$r5: 15$
+Sum = $47$.
+
+Pool Left = 5.
+Denied = [].
+
+```json
+{"granted_units": 47, "denied": [], "pool_left": 5}
+```

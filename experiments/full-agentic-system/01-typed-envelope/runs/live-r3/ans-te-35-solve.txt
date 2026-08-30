@@ -1,0 +1,73 @@
+Phase 1 RULE SCAN
+- Arrival Rule: Jobs arrive at specified start minutes (LOW1 at 0, LOW2 at 0, HIGH at 2) and add entries to the job queue keyed by their start minute; ties resolved by insertion order of arrival.
+- Preemption Rule: When HIGH arrives, it instantly preempts any currently running LOW job regardless of checkpoint status.
+- Checkpoint Rule: LOW jobs accumulate runtime in 1-minute increments; a checkpoint is recorded every time total runtime reaches an even number (2, 4, etc.).
+- Waste Rule: Upon preemption or completion, if the current minute count is odd, the partial minute accumulated since the last even checkpoint is wasted and reset to 0.
+- Resume Rule: After HIGH finishes, the scheduler picks the lowest-priority job from the queue based on start minute (lowest first); if multiple exist, priority among them follows their original arrival order/resumption status logic defined by "start minute wins".
+- Completion Order Rule: Jobs are recorded as finished in strict chronological order of their finish events.
+
+Phase 2 LEDGER WALK
+Event 0: LOW1 arrives (Start=0). State: Queue=[LOW1]. Core Free.
+Event 0+epsilon: LOW2 arrives (Start=0). State: Queue=[LOW1, LOW2] (Order by arrival time: LOW1 arrived first in the stream description "LOW1 runs... LOW2 runs...", implying sequential listing or strict FIFO for same start time unless specified otherwise; standard convention is FIFO for simultaneous arrivals listed sequentially). Core Free.
+Event 0+delta: Scheduler picks lowest priority from queue. Both have Start=0. Tie-breaker: Arrival Order. LOW1 arrived first in the text description ("LOW1 runs..." then "LOW2 runs..."). State: Running=[LOW1]. Queue=[LOW2].
+Event 2: HIGH arrives (Start=2). Preemption triggers. Current running job: LOW1. Runtime of LOW1 = 2 minutes. Checkpoint status: Even number reached? Yes (2 is even). Last checkpoint at t=2. Waste calculation: Time since last checkpoint (t=2) to preemption (t=2) = 0. Wait, let's re-read the checkpoint rule carefully: "checkpoint every 2 completed minutes".
+Re-evaluating LOW1 runtime at t=2: It ran from t=0 to t=2. Total time = 2. Checkpoints occur at T=2, T=4... So a checkpoint exists exactly at T=2.
+Waste calculation logic from example: "LOW1 held the core... banked a checkpoint at minute 2, and its next minute was unbanked when the swap came". In the example, HIGH arrived at min 3. LOW1 ran 0-5. At t=2 (check), it had 2 mins (checkpoint). Then ran 2-3 (unbanked). Swapped at 3. Waste = 1 minute (the interval 2 to 3).
+In tonight's case: HIGH arrives at min 2. LOW1 runs 0 to 2. At t=2, it has completed exactly 2 minutes. A checkpoint is recorded. The "unbanked" time starts counting after the checkpoint. Since the swap happens *at* minute 2, and the job just hit a checkpoint, there are 0 unbanked minutes. Waste = 0.
+State: Running=[HIGH]. Queue=[LOW1 (paused, resumed), LOW2 (waiting)]. Low1 runtime reset to 0 effectively for progress purposes? No, "work past last checkpoint is wasted". Since checkpoint was at 2 and we are at 2, work done 0-2 counts. Runtime counter resets to 0 for the next segment.
+Event 3: HIGH continues running (Duration 6). Runs until t=6.
+Event 4, 5, 6: LOW1 waits. LOW2 waits. No events occur in the queue order change because only one core and one job running.
+Event 6: HIGH finishes. Preemption ends. Scheduler picks next job from Queue. Queue contents: [LOW1, LOW2]. Tie-breaker: Start minute. Both started at 0. Next tie-breaker per text "LOW jobs take the core in order of their start minutes, a resumed LOW outranks a fresh one at any tie".
+Status check: LOW1 was paused by preemption. Is it considered "resumed" or "fresh"? The rule says "a resumed LOW outranks a fresh one". LOW1 is waiting to resume. LOW2 is "fresh" (never started). Therefore, LOW1 (Resumed) > LOW2 (Fresh).
+Scheduler picks LOW1.
+State: Running=[LOW1]. Queue=[LOW2].
+Event 8: LOW1 resumes. Previous work (0-2) was saved via checkpoint at t=2. It needs to run remaining time. Original duration 4 mins. Ran 2 mins. Remaining = 2 mins. Runs from t=6 to t=8. Total runtime reaches 4. Checkpoint recorded at T=4? Yes, 4 is even.
+Event 10: LOW1 finishes. Job LOW1 completed.
+State: Running=[None]. Queue=[LOW2].
+Event 10+epsilon: Scheduler picks LOW2 (Fresh). Runs full duration 3 mins. Starts t=10, Ends t=13.
+Event 13: LOW2 finishes. Job LOW2 completed.
+
+Final State Calculation:
+- Makespan: Start of first job (LOW1 at 0) to End of last job (LOW2 at 13). Span = 13 minutes.
+- Wasted Minutes:
+    - LOW1: Checkpoint at t=2. Preemption at t=2. Unbanked time = 0. Waste = 0.
+    - LOW2: Never preempted, ran full duration. Waste = 0.
+    - Total Wasted = 0.
+- Completion Order: LOW1 finished at 10. LOW2 finished at 13. Order: ["LOW1", "LOW2"].
+
+Double Check Logic against Example Trap:
+The example had HIGH arrive at min 3. LOW1 ran 0->5 (hypothetically). In the example description: "HIGH arrived at minute 3... LOW1 held core from 0, banked checkpoint at 2, next minute unbanked when swap came". The key is whether the preemption event aligns with a checkpoint tick.
+Tonight: HIGH arrives at min 2. LOW1 runs 0->4 total? No, LOW1 runs 4 mins starting at 0. So it finishes at t=4 normally. But gets preempted at t=2.
+At t=2, LOW1 has run exactly 2 minutes. Rule: "checkpoint every 2 completed minutes". At t=2, the counter hits 2. Checkpoint saved. Time since last checkpoint = 0. Waste = 0.
+If HIGH arrived at min 3 (like example), LOW1 would have run 0->3. Checkpoint at 2. Interval 2->3 unbanked. Swap at 3. Waste = 1.
+Tonight's numbers: High @ 2. Waste = 0.
+
+Final Verification of Rules applied:
+- Arrivals: LOW1(0), LOW2(0), HIGH(2). Correct.
+- Preemption: At t=2, LOW1 preempted by HIGH. Correct.
+- Checkpoint: T=2 is a checkpoint boundary (even number). Waste = 0. Correct.
+- Resume Logic: "resumed LOW outranks fresh". LOW1 is resumed candidate. LOW2 is fresh. LOW1 picks up. Correct.
+- Completion Order: LOW1 finishes first (at t=8? Wait, let's re-calc LOW1 finish time).
+    - LOW1 ran 0->2 (saved). HIGH runs 2->6 (4 mins).
+    - LOW1 resumes at 6. Needs 2 more mins to reach total 4. Runs 6->8. Finishes at 8. Checkpoint at 4? Yes, reached total 4.
+    - Queue has LOW2 (Start=0, Fresh).
+    - At t=8, LOW1 finishes. Core free.
+    - Pick next: Only LOW2 left. Starts at 8. Runs 3 mins. Finishes at 11.
+    - Wait, my previous calculation said 13? Let's re-add durations.
+    - LOW1 duration = 4 mins.
+        - Phase 1: 0 to 2 (2 mins). Checkpoint hit.
+        - Pause: 2 to 6 (HIGH runs).
+        - Phase 2: 6 to X. Needs 2 more mins. Finishes at 8.
+    - LOW2 duration = 3 mins. Starts after LOW1 finishes? Or concurrent? Core is single.
+    - Timeline:
+        - t=0: LOW1 starts.
+        - t=2: HIGH arrives, preempts LOW1. LOW1 saved (checkpoint at 2).
+        - t=2 to t=6: HIGH runs (4 mins duration given in task "HIGH...runs 6 minutes"). Wait, task says "HIGH ... runs 6 minutes".
+        - Correction on HIGH duration: Task says "HIGH arrives at minute 2 and runs 6 minutes to completion". So HIGH runs from t=2 to t=8.
+        - Re-calculation with correct HIGH duration:
+            - t=0: LOW1 starts.
+            - t=2: Preempted by HIGH. Checkpoint hit (2 mins). Waste = 0.
+            - t=2 to t=8: HIGH runs (6 mins). Ends at t=8.
+            - t=8: LOW1 resumes. Needs remaining time. Total needed 4. Already did 2. Need 2. Runs 8->10. Finishes at t=10. Checkpoint hit (total 4, even).
+            - t=10: LOW1 done. Core free. Queue has LOW2 (Start 0, Fresh).
+            - t=10:

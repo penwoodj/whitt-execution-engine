@@ -1,0 +1,107 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event or claim list, including triggers.*
+
+1. **Arrival Rule**: Request `r1` (ask: 4) arrives; Pool starts at 50. Action: Grant min(ask, pool). State change: Pool decreases by grant amount.
+2. **Arrival Rule**: Request `r2` (ask: 6) arrives. Action: Grant min(ask, pool). State change: Pool decreases by grant amount.
+3. **Expiry Rule**: Grant from `r1` expires after request `r2` completes. Action: Return floor(grant_r1 / 2) to pool. State change: Pool increases by returned amount.
+4. **Arrival Rule**: Request `r3` (ask: 9) arrives. Action: Grant min(ask, pool). State change: Pool decreases by grant amount.
+5. **Arrival Rule**: Request `r4` (ask: 13) arrives. Action: Grant min(ask, pool). State change: Pool decreases by grant amount.
+6. **Arrival Rule**: Request `r5` (ask: 15) arrives against empty pool. Action: Deny request. State change: Record denial for `r5`.
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order, showing state after each.*
+
+**Initial State**: Pool = 50. Grants = {}. Denied = [].
+
+1. **Event**: Request `r1` arrives (ask: 4).
+   - Rule Applied: Arrival/Grant.
+   - Calculation: Grant = min(4, 50) = 4. New Pool = 50 - 4 = 46.
+   - State After Event: Pool=46, Grants={r1:4}, Denied=[].
+
+2. **Event**: Request `r2` arrives (ask: 6).
+   - Rule Applied: Arrival/Grant.
+   - Calculation: Grant = min(6, 46) = 6. New Pool = 46 - 6 = 40.
+   - State After Event: Pool=40, Grants={r1:4, r2:6}, Denied=[].
+
+3. **Event**: Expiry of `r1` grant triggers (after `r2` completes).
+   - Rule Applied: Expiry/Return.
+   - Calculation: Return = floor(4 / 2) = 2. New Pool = 40 + 2 = 42.
+   - State After Event: Pool=42, Grants={r1:expired, r2:6}, Denied=[].
+
+4. **Event**: Request `r3` arrives (ask: 9).
+   - Rule Applied: Arrival/Grant.
+   - Calculation: Grant = min(9, 42) = 9. New Pool = 42 - 9 = 33.
+   - State After Event: Pool=33, Grants={r1:expired, r2:6, r3:9}, Denied=[].
+
+5. **Event**: Request `r4` arrives (ask: 13).
+   - Rule Applied: Arrival/Grant.
+   - Calculation: Grant = min(13, 33) = 13. New Pool = 33 - 13 = 20.
+   - State After Event: Pool=20, Grants={r1:expired, r2:6, r3:9, r4:13}, Denied=[].
+
+6. **Event**: Request `r5` arrives (ask: 15).
+   - Rule Applied: Arrival/Denial (Pool insufficient for full ask? No, pool is 20, ask is 15. Wait, re-read rule: "grants are partial when the pool cannot cover the full ask". Pool=20, Ask=15. 20 >= 15. Full grant possible.)
+   - *Correction on Rule Interpretation*: The prompt says "grants are partial when the pool cannot cover the full ask". It does not say grants expire immediately upon completion unless specified by a specific expiry rule. Only `r1` has an explicit expiry rule ("the grant for r1 expires after request r2 completes"). There is no general rule stating all grants expire at end of window or per-request basis other than the specific one mentioned.
+   - Re-evaluating Step 6: Pool=20, Ask=15. Since 20 >= 15, a full grant of 15 occurs. New Pool = 20 - 15 = 5.
+   - State After Event: Pool=5, Grants={r1:expired, r2:6, r3:9, r4:13, r5:15}, Denied=[].
+
+*Wait, let me double check the "partial" logic and expiry logic against the text carefully.*
+Text: "the grant for r1 expires after request r2 completes". This is a specific rule.
+Text: "grants never return any other way." -> Only the specific expiry returns tokens.
+Text: "a request arriving at an empty pool is denied".
+
+Let's re-run the walk to ensure no hidden expiries or partials were missed.
+- Start: 50.
+- r1 (ask 4): Grant 4. Pool 46.
+- r2 (ask 6): Grant 6. Pool 40.
+- Expiry r1: Returns floor(4/2)=2. Pool 42.
+- r3 (ask 9): Grant 9. Pool 33.
+- r4 (ask 13): Grant 13. Pool 20.
+- r5 (ask 15): Grant 15. Pool 5.
+
+Total Granted: 4 + 6 + 9 + 13 + 15 = 47.
+Denied: [].
+Pool Left: 5.
+
+*Self-Correction Check*: Did I miss a rule about partials? "grants are partial when the pool cannot cover the full ask". In step 6, pool is 20, ask is 15. Pool covers ask. So full grant.
+Did I miss an expiry for r2, r3, etc.? Text says: "the grant for r1 expires after request r2 completes... grants never return any other way." This implies only r1 expires. The others stay granted until the end? Or do they expire at the end of the window? The prompt asks for `granted_units` (total sum) and `pool_left`. Usually, in these ledger problems, "granted units" refers to the sum of all successful grants issued during the window, regardless of whether they are returned later via expiry. The expiry rule specifically handles r1 returning tokens. If other grants don't have an expiry rule attached, their value remains part of the "granted" history, but do they affect the final pool?
+The prompt asks for `pool_left`. This is the physical state of the pool at the end.
+The prompt asks for `granted_units`. Is this cumulative sum of all grants ever issued? Yes, typically.
+Let's verify the orientation story logic to ensure I'm not missing a "general expiry" rule hidden in text.
+Orientation: "first grant expired and returned 5". It was specific to the first grant.
+Text: "grants never return any other way." This confirms no automatic end-of-window expiry for r2, r3, r4, r5. They remain as granted units.
+
+So:
+Total Granted = 4 (r1) + 6 (r2) + 9 (r3) + 13 (r4) + 15 (r5) = 47.
+Denied = [].
+Pool Left = 50 - 47 + 2 (return from r1) = 5.
+
+Let's re-read the "partial" instruction again. "grants are partial when the pool cannot cover the full ask".
+Is it possible I miscalculated a step?
+Start: 50.
+r1: -4 -> 46.
+r2: -6 -> 40.
+Expiry r1: +2 -> 42.
+r3: -9 -> 33.
+r4: -13 -> 20.
+r5: -15 -> 5.
+
+Everything seems consistent. The "trap" mentioned is "results that behave like full ones in your head". Maybe r5 was supposed to be partial? No, math says 20 >= 15.
+Maybe the expiry happens differently? "return half its granted tokens rounded down". floor(4/2) = 2. Correct.
+Maybe the order of operations for r5 is tricky? No, simple subtraction.
+
+Wait, looking at the orientation story again: "the third ask of 13 landed against only 12 in the pool so it took a partial and drained it." This confirms partials happen when Pool < Ask.
+In my run, no step had Pool < Ask until potentially if I made an error.
+Let's check the math one more time.
+50 - 4 = 46.
+46 - 6 = 40.
+40 + 2 (return) = 42.
+42 - 9 = 33.
+33 - 13 = 20.
+20 - 15 = 5.
+
+Is there any rule I missed? "the grant for r1 expires after request r2 completes".
+Does this imply that *only* r1 expires? Yes, "grants never return any other way."
+So the final state has tokens from r2, r3, r4, r5 still conceptually "granted" but physically sitting in the pool? No, once granted and not returned, they are gone from the pool. The `pool_left` is what remains. The `granted_units` is the sum of all successful grants.
+The orientation story

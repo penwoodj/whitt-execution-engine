@@ -1,0 +1,88 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event sequence, triggered by specific events.*
+
+1. **Load Rule**: Triggered by `load A`. Action: Allocate memory for Model A (3GB). State change: Resident set adds A; Free space decreases.
+2. **Load Rule**: Triggered by `load C`. Action: Allocate memory for Model C (1GB). State change: Resident set adds C; Free space decreases.
+3. **Pinned Constraint Rule**: Implicitly active during all loads/evictions. Action: Prevent eviction of pinned models regardless of LRU status or free space needs. Triggered by any potential eviction logic.
+4. **Load Rule**: Triggered by `load D`. Action: Attempt to allocate memory for Model D (2GB). State change: Check fit; if insufficient, trigger eviction logic.
+5. **Eviction Selection Rule**: Triggered by `load D` (if needed). Action: Identify LRU unpinned models in resident set to evict. Pinned models are skipped.
+6. **Load/Unload Timing Rule**: Triggered by all load/unload events. Action: Update internal timestamps for LRU ordering; record duration costs (30s load, 10s unload) as metadata (not affecting capacity).
+7. **Deferral Rule**: Triggered by `load D` (if eviction fails or no unpinned models exist). Action: Add Model D to deferred list; do not evict pinned models further; deny immediate load.
+8. **Unload Rule**: Triggered by `unload D`. Action: Remove Model D from resident set if present; return memory to free pool. State change: Free space increases; Resident set removes D.
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order, showing state after each.*
+
+**Initial State**: Capacity = 8GB. Resident = []. Free = 8GB. Pinned = {C}. Deferred = [].
+
+**Event 1: `load A`**
+- Rule Applied: Load Rule (Allocate A).
+- Calculation: Model A size = 3GB. Available = 8GB. 8 >= 3. Fit confirmed.
+- Action: Add A to Resident. Update LRU timestamp for A.
+- State After Event 1:
+  - Resident: [A] (Size: 3GB)
+  - Free Space: 5GB
+  - Pinned Status: C is pinned (not resident yet), A is unpinned.
+  - Deferred: []
+
+**Event 2: `load C`**
+- Rule Applied: Load Rule (Allocate C).
+- Calculation: Model C size = 1GB. Available = 5GB. 5 >= 1. Fit confirmed.
+- Action: Add C to Resident. Mark C as Pinned. Update LRU timestamp for C.
+- State After Event 2:
+  - Resident: [A, C] (Total Size: 4GB)
+    - A: Unpinned, LRU=Time1
+    - C: Pinned, LRU=Time2
+  - Free Space: 4GB
+  - Deferred: []
+
+**Event 3: `load D`**
+- Rule Applied: Load Rule (Allocate D) -> Eviction Selection Rule -> Deferral Rule.
+- Calculation: Model D size = 2GB. Available = 4GB.
+- Check Fit: 4 >= 2? Yes. No eviction needed.
+- Action: Add D to Resident. Update LRU timestamp for D.
+- State After Event 3:
+  - Resident: [A, C, D] (Total Size: 6GB)
+    - A: Unpinned, LRU=Time1
+    - C: Pinned, LRU=Time2
+    - D: Unpinned, LRU=Time3
+  - Free Space: 2GB
+  - Deferred: []
+
+**Event 4: `unload D`**
+- Rule Applied: Unload Rule.
+- Calculation: Model D is present in Resident set.
+- Action: Remove D from Resident. Add 2GB to Free Space.
+- State After Event 4:
+  - Resident: [A, C] (Total Size: 4GB)
+    - A: Unpinned, LRU=Time1
+    - C: Pinned, LRU=Time2
+  - Free Space: 4GB
+  - Deferred: []
+
+---
+
+### Final Answer Calculation
+- **Loads**: Events where a model was successfully loaded into memory.
+  - `load A`: Success (Load #1)
+  - `load C`: Success (Load #2)
+  - `load D`: Success (Load #3)
+  - Total Loads = 3.
+
+- **Evictions**: Events where a model was removed from resident set due to lack of space during a load attempt.
+  - No eviction occurred in this sequence (Space was always sufficient).
+  - Total Evictions = 0.
+
+- **Deferrals**: Events where a load could not be completed because the system ran out of unpinned models to evict and pinned models blocked further action.
+  - `load D` succeeded immediately, so no deferral occurred.
+  - Total Deferrals = 0.
+
+- **Deferred List**: IDs of models currently waiting on the deferred list.
+  - Empty list.
+
+**Final JSON Output:**
+```json
+{"loads": 3, "evictions": 0, "deferrals": 0, "deferred": []}
+```

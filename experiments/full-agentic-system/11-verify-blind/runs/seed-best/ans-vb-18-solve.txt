@@ -1,0 +1,71 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the "orientation story" provided as a reference for rule shape (which must be applied to tonight's numbers), here are the rules that change state during an event or claim list:
+
+1.  **Arrival Rule**: Upon arrival of an attempt, increment `attempts` by 1 and add the per-attempt cost (2) to `spend`.
+2.  **Wait Rule**: Upon failure (or completion), add the wait duration (seconds) to `wait_s` and add that amount to `spend`.
+3.  **Budget Check Rule**: After every spend increment, check if `spend > budget`. If true, trigger a "double" event: set `budget = budget * 2`, reset `suppressed` to false (pending re-check), and log the doubling.
+4.  **Suppression Re-Check Rule**: Immediately after a double, compare current `spend` against the new doubled `budget`. If `spend > new_budget`, set `suppressed = true`; otherwise, set `suppressed = false`.
+5.  **Completion Rule**: Upon success of an attempt (after failures), finalize the job state. The final `attempts` count includes all attempts made (failed + successful).
+
+**Trigger Mapping:**
+*   **Event "Attempt Start/Arrival"**: Triggers Rules 1 & 2 (if failed) or Rule 4 (if success logic applies immediately, though usually wait happens on failure). *Correction based on text: "after each failed attempt the retry waits". So Wait triggers on Failure.*
+    *   **Rule 1** triggered by: Every Attempt Arrival.
+    *   **Rule 2** triggered by: Every Failed Attempt completion.
+    *   **Rule 3** triggered by: Any state where `spend > budget`.
+    *   **Rule 4** triggered by: The specific moment Rule 3 fires (the "double" event).
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   `attempts`: 0
+*   `wait_s`: 0
+*   `budget`: 36
+*   `spend`: 0
+*   `suppressed`: false (default)
+*   **Constants**: Per-attempt cost = 2. Wait sequence: 2s, then 4s.
+
+**Event 1: First Attempt Arrival & Failure**
+*   *Action*: Arrive attempt #1. Cost incurred.
+*   *Rule Apply*: Rule 1 (Arrival). `attempts` becomes 1. `spend` increases by 2.
+    *   State: `attempts`=1, `spend`=2.
+*   *Outcome*: Attempt fails (Task says "job needs 2 failed attempts before the 3th succeeds").
+*   *Action*: Wait for retry. First wait is 2s.
+*   *Rule Apply*: Rule 2 (Wait). `wait_s` increases by 2. `spend` increases by 2.
+    *   State: `attempts`=1, `wait_s`=2, `spend`=4.
+*   *Check*: Is `spend` (4) > `budget` (36)? No.
+
+**Event 2: Second Attempt Arrival & Failure**
+*   *Action*: Arrive attempt #2. Cost incurred.
+*   *Rule Apply*: Rule 1 (Arrival). `attempts` becomes 2. `spend` increases by 2.
+    *   State: `attempts`=2, `spend`=6.
+*   *Outcome*: Attempt fails.
+*   *Action*: Wait for retry. Second wait is 4s (doubles from previous).
+*   *Rule Apply*: Rule 2 (Wait). `wait_s` increases by 4. `spend` increases by 4.
+    *   State: `attempts`=2, `wait_s`=6, `spend`=10.
+*   *Check*: Is `spend` (10) > `budget` (36)? No.
+
+**Event 3: Third Attempt Arrival & Success**
+*   *Action*: Arrive attempt #3. Cost incurred.
+*   *Rule Apply*: Rule 1 (Arrival). `attempts` becomes 3. `spend` increases by 2.
+    *   State: `attempts`=3, `spend`=12.
+*   *Outcome*: Attempt succeeds ("the 3th succeeds"). No wait occurs after success.
+*   *Check*: Is `spend` (12) > `budget` (36)? No.
+
+**Final Calculation Verification:**
+*   Total Attempts: 3
+*   Total Wait Seconds: 2 + 4 = 6
+*   Total Spend: (Attempt 1 cost 2) + (Wait 1 cost 2) + (Attempt 2 cost 2) + (Wait 2 cost 4) + (Attempt 3 cost 2) = 12.
+    *   Alternatively: `wait_s` (6) + `attempts` * cost_per_attempt (3 * 2 = 6) = 12. Matches.
+*   Budget After: Initial Budget (36) - Spend (12) = 24.
+*   Suppressed: False (Spend never exceeded budget).
+
+---
+
+### Final Answer
+
+```json
+{"attempts": 3, "wait_s": 6, "budget_after": 24, "suppressed": false}
+```

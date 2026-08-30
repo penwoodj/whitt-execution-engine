@@ -1,0 +1,86 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event sequence (Load A, Load C, Load D, Unload D), including expiry/return logic implied by the "deferred" status.*
+
+1. **Rule: Model Loading** – Triggered by `load X` events; adds model to resident set if capacity allows.
+2. **Rule: Capacity Check & Eviction** – Triggered by `load X` when insufficient space; evicts Least-Recently-Touched (LRU) unpinned models until fit or only pinned remain.
+3. **Rule: Pinned Model Protection** – Triggered implicitly during eviction checks; prevents eviction of pinned models (Model B).
+4. **Rule: Load Failure/Deferral** – Triggered if capacity cannot be met even after exhausting all evictable unpinned models; model moves to deferred list, no state change for resident set.
+5. **Rule: Unload Operation** – Triggered by `unload X`; removes model from resident set and frees capacity (no-op if not resident).
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events in strict arrival order with initial state: Card=8GB, Resident={}, Pinned={B}, Deferred=[].*
+
+**Event 1: `load A`**
+- **Action:** Attempt to load Model A (2GB).
+- **Check:** Current usage 0GB. Available 8GB. Fits? Yes.
+- **State Change:** Add A to resident set.
+- **Result:** Resident={A}, Usage=2GB, Evictions=0, Deferrals=0.
+
+**Event 2: `load C`**
+- **Action:** Attempt to load Model C (4GB).
+- **Check:** Current usage 2GB. Available 6GB. Fits? Yes.
+- **State Change:** Add C to resident set.
+- **Result:** Resident={A, C}, Usage=6GB, Evictions=0, Deferrals=0.
+
+**Event 3: `load D`**
+- **Action:** Attempt to load Model D (3GB).
+- **Check:** Current usage 6GB. Available 2GB. Fits? No (Need 3GB).
+- **Eviction Logic:** Must free at least 1GB. Identify unpinned models in resident set: {A, C}. Both are unpinned.
+- **LRU Selection:** Assume arrival order defines LRU (A arrived before C). Evict A (2GB).
+- **Post-Eviction Check:** Removed 2GB. New usage = 4GB. Available = 4GB. Does D (3GB) fit? Yes.
+- **State Change:** Remove A, Add D.
+- **Result:** Resident={C, D}, Usage=7GB, Evictions=1, Deferrals=0.
+
+**Event 4: `unload D`**
+- **Action:** Attempt to unload Model D.
+- **Check:** Is D resident? Yes.
+- **State Change:** Remove D from resident set. Free capacity (3GB).
+- **Result:** Resident={C}, Usage=4GB, Evictions=1, Deferrals=0.
+
+---
+
+### Final Answer Calculation
+- **Loads:** Models A and C were successfully loaded. Model D was requested but deferred? No, it fit after eviction. So successful loads = 2 (A, C). Note: The prompt asks for "loads" count. Usually, this implies successful resident additions.
+    - Event 1 (Load A): Success.
+    - Event 2 (Load C): Success.
+    - Event 3 (Load D): Success (after eviction).
+    - Total Loads = 3? Or does "load" refer to the event count where a model entered residency? Yes, 3 models entered residency over time. However, standard interpretation of "loads" in such ledgers often counts successful load *events*. Let's re-read carefully: "counts and sums cover tonight's listed events only".
+    - Event 1: Load A (Success).
+    - Event 2: Load C (Success).
+    - Event 3: Load D (Success, via eviction).
+    - Total successful load operations = 3.
+- **Evictions:** Only Model A was evicted during the sequence. Count = 1.
+- **Deferrals:** No model failed to fit even after max evictions. Count = 0.
+- **Deferred List:** Empty.
+
+*Self-Correction on "Loads":* In many system contexts, a "load" event that triggers an eviction is still counted as a load operation. The count of models currently resident vs total loaded? The JSON key `loads` usually implies the count of successful load operations performed.
+Sequence:
+1. Load A -> Success.
+2. Load C -> Success.
+3. Load D -> Success (evicted A).
+Total Loads = 3.
+
+*Wait, let's double check the "deferred" logic in the orientation story vs tonight.*
+Orientation story: Load A, Load C, Load D (fails).
+Tonight: Load A, Load C, Load D (fits after evicting A).
+So no deferrals today.
+
+Final State Check:
+- Resident: {C} (4GB) + B (Pinned, 1GB? Wait, resident sizes are A2, B1, C4, D3).
+- Initial: Empty.
+- +A(2) -> {A}.
+- +C(4) -> {A, C} (Total 6).
+- +D(3): Need 3. Have 2 free. Evict LRU unpinned. Unpinned are A and C. A is older than C? Yes, arrived first. Evict A (2GB). Free space becomes 4GB. D (3GB) fits. Resident: {C, D}. Total 7GB.
+- -D -> Resident: {C}.
+
+Counts:
+Loads: 3 (A, C, D all entered residency).
+Evictions: 1 (A).
+Deferrals: 0.
+Deferred List: [].
+
+```json
+{"loads": 3, "evictions": 1, "deferrals": 0, "deferred": []}
+```

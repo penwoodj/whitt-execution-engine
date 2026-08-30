@@ -1,0 +1,92 @@
+### Phase 1 RULE SCAN
+The following rules govern state changes during the event sequence:
+
+1. **Arrival Rule**: `HIGH` arrives at $t=3$; transitions Core from `Idle/LOW-running` to `Busy(HIGH)`.
+2. **Preemption Rule (Start)**: Upon `HIGH` arrival, if a LOW job is running, execution halts immediately; work since last checkpoint becomes wasted.
+3. **Completion Rule**: A job finishes when its remaining duration reaches 0 while Core is free.
+4. **Resume Rule**: When `HIGH` departs ($t=5$), the system selects the next eligible LOW job based on: (a) Start Time priority, (b) Resumed vs Fresh tie-breaker, (c) FIFO for same start/resume status.
+5. **Checkpoint Logic**: LOW jobs checkpoint every 2 minutes of *running time*; preemption invalidates work post-checkpoint.
+6. **Wasted Calculation Rule**: `wasted_min` = sum of durations between last checkpoint and preemption point for any preempted job.
+7. **Makespan Definition**: Time from first start ($t=0$) to final completion of all LOW jobs.
+
+**Triggers:**
+- Event $E_1$ (Start LOW1): Triggers Rule 3 (Initial Start).
+- Event $E_2$ (Checkpoint LOW1 @ t=2): Triggers Rule 5 (Checkpointing).
+- Event $E_3$ (Arrival HIGH @ t=3): Triggers Rule 2 (Preemption) and Rule 6 (Wasted Initiation).
+- Event $E_4$ (Finish HIGH @ t=5): Triggers Rule 4 (Resume Selection).
+- Event $E_5$ (Completion LOW1 @ t=8): Triggers Rule 3 (Finalization).
+- Event $E_6$ (Start/Completion LOW2 @ t=8->t=10): Triggers Rule 3 & 7.
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+- Core: Idle
+- Jobs: `LOW1` (5m, start 0), `LOW2` (2m, start 1) pending.
+- Checkpoints: None recorded yet.
+- Wasted: 0.
+
+**Event 1: Start LOW1 at $t=0$**
+- Action: Core becomes busy with `LOW1`.
+- State: Core=`LOW1`, Remaining(`LOW1`)=5, CurrentTime=0.
+
+**Event 2: LOW1 Checkpoint at $t=2$**
+- Logic: `LOW1` has run for 2 minutes ($0 \to 2$). This hits the checkpoint threshold (every 2 mins running time).
+- Action: Record Checkpoint at progress = 2.
+- State: Core=`LOW1`, Remaining(`LOW1`)=3, CurrentTime=2, `LOW1`.CheckpointPos=2.
+
+**Event 3: HIGH Arrives at $t=3$**
+- Logic: Preemption rule applies. `HIGH` interrupts `LOW1` immediately.
+- Wasted Calculation: `LOW1` ran from checkpoint (2) to preemption (3). Duration = $3 - 2 = 1$.
+- Action: Set Core=`HIGH`. Mark `LOW1` as suspended at progress=2 with 1 minute wasted.
+- State: Core=`HIGH`, Remaining(`HIGH`)=8, CurrentTime=3, Wasted=1, `LOW1` status=Suspended(rem=3), `LOW2` status=Pending(start=1).
+
+**Event 4: HIGH Finishes at $t=5$**
+- Logic: `HIGH` duration is 8m. Start $3 \to$ End $5+8=13$? Wait, task says "runs 8 minutes".
+  - *Correction on Rehearsal Clue*: The rehearsal example said "HIGH ran minutes 3 to 5" for a 2-minute job. Here HIGH runs 8 minutes starting at minute 3. Finish time = $3 + 8 = 11$.
+- Action: Core becomes free at $t=11$. Resume LOW jobs.
+- Selection Logic:
+  - Candidates: `LOW1` (Suspended, Start=0), `LOW2` (Fresh, Start=1).
+  - Tie-breaker: "a resumed LOW outranks a fresh one".
+  - Winner: `LOW1`.
+- Action: Core=`LOW1`. Resume from Checkpoint Pos=2. Remaining needed = $5 (\text{total}) - 2 (\text{done}) = 3$.
+- State: Core=`LOW1`, Remaining(`LOW1`)=3, CurrentTime=11.
+
+**Event 5: LOW1 Completes at $t=14$**
+- Logic: Needs 3 more minutes. Start resume at 11. Finish at $11 + 3 = 14$.
+- Action: Mark `LOW1` Complete. Order list: [`LOW1`].
+- State: Core Idle at $t=14$. Remaining LOWs: `LOW2`.
+
+**Event 6: Start/Complete LOW2 at $t=15$**
+- Logic: Check if pending jobs exist based on start times vs current time.
+  - Note: The prompt says "LOW2 starts at minute 1". In the rehearsal, they waited for the core to be free regardless of their specific start timestamp relative to the *current* clock, as long as they were in the queue. However, standard scheduling with "start minute" usually implies eligibility.
+  - Let's re-read carefully: "LOW jobs take the core in order of their start minutes... a LOW whose start minute arrives while the core is busy simply waits."
+  - `LOW2` started at $t=1$. Current time is $t=14$. The core was busy, so it waited. It has been waiting since $t=1$ (or effectively since $t=3$ when HIGH arrived? No, it entered the queue).
+  - When Core frees at $t=14$, `LOW2` is eligible. Is there a "Fresh" penalty? No, it just waits. It resumes from start=0 relative to its own clock or starts fresh? "on preemption... redone". `LOW2` was never preempted; it just started late. Does it run full duration or resume from 0?
+  - Rule: "a resumed LOW outranks a fresh one". `LOW1` is Resumed. `LOW2` has not run yet, so effectively "Fresh" relative to the core state at $t=14$. But wait, `LOW2` didn't run *any* minutes because it was waiting. So its progress is 0. Is it "Resumed"? No. It is "Waiting then Starting".
+  - Priority: Only one job (`LOW2`) is left to run. Selection is trivial.
+- Action: Core=`LOW2`. Run full duration of 7 minutes? Or does "start minute" mean it only runs if $t \ge 1$? Yes, $14 > 1$. So it starts now.
+- Duration: 7 minutes. Start $t=14$, End $t=14+7=21$.
+- Checkpoints for `LOW2`: Needs to check every 2 mins.
+  - Runs $0\to2$ (internal clock), checkpoint?
+  - Since it runs continuously from 14 to 21, does it hit a checkpoint?
+  - The rule "checkpoints every 2 completed minutes of running time" applies if it gets preempted later. Here, no preemption occurs after start.
+  - Wait, is there a wasted minute for `LOW2`? No, it wasn't preempted. It just started late.
+- Completion: `LOW2` finishes at $t=21$. Order list: [`LOW1`, `LOW2`].
+
+**Re-evaluating the "Start Minute" Constraint vs Rehearsal:**
+In the rehearsal: LOW2 (start 1) waited while HIGH ran. When Core freed, LOW1 went first because it was Resumed. Then LOW2 went.
+Here: LOW1 (Resumed) goes first. LOW2 (Fresh/Waiting) goes second.
+Does `LOW2` have any wasted time? No preemption occurred for `LOW2`. It just sits in the queue from $t=0$ to $t=14$.
+Wait, did `LOW2` start running at $t=1$ and pause? "a LOW whose start minute arrives while the core is busy simply waits." This implies it does not consume time while waiting. Its internal clock pauses until the core is free. So when core frees at 14, `LOW2` has effectively done 0 minutes of work. It starts fresh from 0 to 7.
+Duration = 7. Start = 14. End = 21.
+
+**Final State Calculation:**
+- Makespan: First start ($t=0$) to last finish ($t=21$). Total = 21 minutes.
+- Wasted Min: Only `LOW1` was preempted. Checkpoint at $t=2$. Preemption at $t=3$. Wasted = $3 - 2 = 1$. `LOW2` wasted 0. Total Wasted = 1.
+- Order: `LOW1` finished first (at 14), `LOW2` finished second (at 21).
+
+**Verification against Rehearsal Shape:**
+Rehearsal: HIGH(2m) from 3 to 5. LOW1(rem 3) resumes 5->8. LOW2 runs 8->10. Makespan 10. Wasted 1. Order L1, L2.
+Our Case: HIGH(8m) from 3 to 11. LOW1(rem 3) resumes 11->14. LOW2 runs 7m (14->21). Makespan 21.

@@ -1,0 +1,112 @@
+### Phase 1: RULE SCAN
+*List of rules changing state during the event sequence:*
+
+1. **Load Request Rule**: Triggered by `load A`. Adds model 'A' (8GB resident size) to memory if capacity allows; otherwise triggers eviction logic.
+2. **Pinned Model Exclusion Rule**: Triggered implicitly by all load/eviction steps. Prevents evictions of pinned models ('C') regardless of LRU status or capacity pressure.
+3. **Capacity Check & Eviction Selection Rule**: Triggered by `load D` (which fails immediately). Checks free space; selects least-recently-touched (LRU) *unpinned* model for eviction to make room.
+4. **Eviction Execution Rule**: Triggered by the capacity check in step 3. Removes selected unpinned model(s) from memory, freeing their resident size (A1=1GB, B2=2GB). Note: Model sizes are A=1, B=2, C=3, D=4 GB.
+5. **Deferred Load Rule**: Triggered by `load D` after evictions still fail to fit the load. Since only pinned model 'C' remains and it cannot be evicted, the load is deferred (not added yet).
+6. **Unload Request Rule**: Triggered by `unload D`. Removes model 'D' from memory if present; no eviction logic required as this is a voluntary removal.
+
+---
+
+### Phase 2: LEDGER WALK
+*Applying events in strict arrival order:*
+
+**Initial State:** Memory = {} (Empty). Capacity = 8GB. Pinned = {C}. Sizes: A=1, B=2, C=3, D=4.
+
+**Event 1: `load A`**
+- *Action*: Attempt to load model 'A' (Size 1GB).
+- *Check*: Free space = 8GB >= 1GB. No eviction needed.
+- *Result*: Model 'A' added. Memory = {A:1}. Evictions = 0. Deferrals = 0.
+
+**Event 2: `load C`**
+- *Action*: Attempt to load model 'C' (Size 3GB).
+- *Check*: Free space = 7GB >= 3GB. No eviction needed. Model 'C' is pinned but that only restricts eviction, not loading.
+- *Result*: Model 'C' added. Memory = {A:1, C:3}. Evictions = 0. Deferrals = 0.
+
+**Event 3: `load D`**
+- *Action*: Attempt to load model 'D' (Size 4GB).
+- *Check Current State*: Memory contains A(1GB) + C(3GB) = 4GB used. Free space = 8 - 4 = 4GB.
+- *Fit Check*: Required 4GB <= Available 4GB? Yes, exactly fits.
+- *Correction on Previous Logic*: Wait, let's re-evaluate the "Orientation" trap vs strict math.
+  - Resident Sizes: A=1, B=2, C=3, D=4.
+  - Current Memory after Ev2: {A(1), C(3)}. Total Used = 4GB. Free = 4GB.
+  - Load Request: D (4GB).
+  - Does it fit? Yes. 4 <= 4.
+  - *Result*: Model 'D' added. Memory = {A:1, C:3, D:4}. Total Used = 8GB. Evictions = 0. Deferrals = 0.
+
+**Event 4: `unload D`**
+- *Action*: Remove model 'D'.
+- *Check*: Model 'D' exists in memory.
+- *Result*: Model 'D' removed. Memory = {A:1, C:3}. Total Used = 4GB. Evictions = 0. Deferrals = 0.
+
+*Self-Correction/Verification Check:*
+Did I misread the "Orientation" story influence? The prompt warns against copying numbers from a different night. My calculation above used strict math on *tonight's* numbers (A=1, B=2, C=3, D4).
+- Start: 8GB free.
+- Load A (1): Used 1, Free 7. OK.
+- Load C (3): Used 4, Free 4. OK.
+- Load D (4): Used 8, Free 0. Fits exactly? Yes. No eviction needed because it fits.
+- Unload D: Remove D.
+
+*Wait, let me re-read the "Orientation" hint to ensure I didn't miss a hidden rule about "fits".*
+"a load that cannot fit evicts... and if only pinned models remain it defers."
+In my trace for Event 3 (`load D`), it *did* fit. Therefore no eviction, no deferral occurred. The orientation story mentioned an eviction because on *that* night the numbers forced it (e.g., maybe A+B+C was already full or sizes were different). Tonight's specific math allows D to fit perfectly into the remaining slot after A and C are loaded.
+
+Let's double check the resident sizes provided: "A1 B2 C3 D4 GB respectively".
+Total Capacity: 8GB.
+State after Load A, Load C: Occupied = 1 + 3 = 4GB. Free = 4GB.
+Request: Load D (4GB).
+4GB requested <= 4GB free? YES.
+So Event 3 is a successful load without eviction.
+
+Let's re-read the "Orientation" warning carefully: "the orientation story... its numbers are not tonight's numbers". This confirms I must ignore the logic of an eviction happening in the second part of that story if tonight's math says otherwise. My math says it fits.
+
+Final Tally Check:
+- Loads executed successfully (added to memory): A, C, D. Total = 3.
+- Evictions executed: None. (D fit).
+- Deferrals: None. (D fit).
+- Deferred list: Empty.
+
+Wait, is there a trick with "one 8GB card"? No, standard constraint.
+Is there a trick with "models A through D"? No.
+Is there a trick with "A1 B2 C3 D4"? Sum of all = 10GB > 8GB. So we can't hold all four at once. We held A(1)+C(3)=4, then added D(4) making it full (8). Then removed D.
+
+Let's re-verify the "Orientation" text to see if it implies a specific rule interpretation I might be missing.
+"a 4GB card... one pinned 1GB model, two 1.5GB loads walked in, the second forced one eviction..."
+In that story: Card=4. Pinned(1) + Load1(1.5) = 2.5 free. Load2(1.5). Needs 1.5. Fits? Yes. Why did it force an eviction?
+Ah, "two 1.5GB loads walked in". Maybe there was a third load or the pinned one took more space? Or maybe the first load wasn't A/B/C/D but something else?
+Actually, looking closely at the orientation: "one pinned 1GB model, two 1.5GB loads walked in... the second forced one eviction".
+If Card=4. Pinned(1). Load1(1.5) -> Used 2.5, Free 1.5. Load2(1.5) -> Fits exactly? Why eviction?
+Perhaps "two 1.5GB loads" implies there were *other* residents already there? Or the pinned model wasn't the only thing?
+Regardless, the prompt explicitly says: "read every rule twice... nothing carries over from the orientation story and its numbers are not tonight's numbers". The orientation text is a *shape* guide (how to walk), but the *numbers* (sizes, capacities) for tonight are strictly defined in the first paragraph.
+
+Tonight's Numbers:
+Cap = 8.
+Residents: A=1, B=2, C=3, D=4.
+Events: Load A, Load C, Load D, Unload D.
+
+Trace again with extreme caution:
+1. **Load A**: Mem={A(1)}. Used=1. Free=7. OK.
+2. **Load C**: Mem={A(1), C(3)}. Used=4. Free=4. OK. (C is pinned, but we are adding it, not evicting).
+3. **Load D**: Req=4. Free=4. 4<=4? YES. Load succeeds. Mem={A(1), C(3), D(4)}. Used=8. Free=0.
+4. **Unload D**: Remove D. Mem={A(1), C(3)}.
+
+Counts:
+Loads (successful additions): A, C, D = 3.
+Evictions: 0.
+Deferrals: 0.
+Deferred IDs: [].
+
+Is it possible "Load D" fails because of some hidden rule? "evictions choose the least-recently-touched unpinned model". This implies evictions happen when needed. If not needed, they don't happen.
+"a load that cannot fit evicts... and if only pinned models remain it defers."
+Since D *can* fit, this branch is not taken.
+
+Let's consider if "A through D" implies B must be loaded? No, the stream lists specific actions: "load A, load C, load D". It does not say "load all models in order". The stream is explicit.
+
+Is it possible I misinterpreted "resident sizes"? "A1 B2 C3 D4 GB respectively".
+A=1, B=2, C=3, D=4. Correct.
+
+Could the "Orientation" hint imply that Load D *must* fail?
+"the second forced one eviction of the older unpinned resident... nothing deferred".
+In the orientation story: Card 4GB. Pinned 1GB. Two

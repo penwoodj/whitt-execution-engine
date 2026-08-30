@@ -1,0 +1,106 @@
+Based on the strict rules and events provided for "tonight", here is the step-by-step state walk and the final answer.
+
+### State Walk (Tonight's Events)
+
+1.  **Event: Load A (1 GB)**
+    *   **Rule:** Arrivals in order, budgets and limits exactly as stated. Pool starts empty/available.
+    *   **Action:** Fits immediately. Grant = 1 GB.
+    *   **Pool State:** `5 - 1 = 4` GB available. (Assuming standard initial pool size derived from the "8GB card" context, but strictly following the arithmetic: Start=8, Used=1). *Correction:* The task implies a specific capacity. Let's trace the math relative to the card size mentioned ("one 8GB card").
+    *   **State:** `loads`={A}, `evictions`=0, `deferrals`=0, `pool_left`=7 GB (assuming start=8).
+
+2.  **Event: Load B (4 GB)**
+    *   **Rule:** Arrivals in order.
+    *   **Action:** Fits immediately into remaining space ($7 - 4 = 3$ GB left? Or does the card total define the limit?). Let's re-evaluate the "orientation" vs "tonight".
+        *   Tonight: Card is 8GB (implied by "one 8GB card tonight").
+        *   Orientation: Card was 5GB.
+    *   **Action:** Load B (4 GB) fits in remaining space.
+    *   **Pool State:** $7 - 4 = 3$ GB available? Wait, if the total capacity is 8GB and we have A(1)+B(4)=5GB used, then $8-5=3$ GB free.
+    *   **State:** `loads`={A, B}, `evictions`=0, `pool_left`=3 GB.
+
+3.  **Event: Load C (2 GB)**
+    *   **Rule:** Arrivals in order.
+    *   **Action:** Fits immediately ($3 - 2 = 1$ GB free).
+    *   **Pool State:** $1$ GB available.
+    *   **State:** `loads`={A, B, C}, `evictions`=0, `pool_left`=1 GB.
+
+4.  **Event: Load D (6 GB)**
+    *   **Rule:** If a load cannot fit... evicts the least-recently-touched unpinned model.
+        *   Current Used: A(1) + B(4) + C(2) = 7 GB.
+        *   Required: 6 GB.
+        *   Remaining Space: $8 - 7 = 1$ GB.
+    *   **Action:** Load D (6 GB) does not fit in 1 GB space.
+    *   **Eviction Logic:**
+        *   Models resident: A(1), B(4), C(2).
+        *   Pinned models: B is pinned ("model B is pinned and never evicted").
+        *   Unpinned models available for eviction: A, C.
+        *   LRU (Least Recently Used) order of unpinned models: The stream was A -> B -> C -> D.
+            *   Last touched by resident load before this event request: C (just loaded). Then B. Then A.
+            *   Wait, "least-recently-touched" means the one whose timestamp is oldest among residents.
+            *   Timestamps: A (t1), B (t2), C (t3). D is pending.
+            *   Unpinned candidates for eviction: A, C.
+            *   LRU of unpinned set {A, C}: A was touched at t1. C was touched at t3. A is the least recently touched unpinned model.
+    *   **Eviction Execution:** Evict A (1 GB).
+        *   New Used: $7 - 1 = 6$ GB (B+C).
+        *   Available Space for D: $8 - 6 = 2$ GB.
+    *   **Check Fit:** Does Load D (6 GB) fit in 2 GB? No.
+    *   **Secondary Eviction:** Need more space. Next LRU unpinned model is C (2 GB).
+        *   Evict C (2 GB).
+        *   New Used: $6 - 2 = 4$ GB (B only, since A and C gone).
+        *   Available Space for D: $8 - 4 = 4$ GB.
+    *   **Check Fit:** Does Load D (6 GB) fit in 4 GB? No.
+    *   **Tertiary Check:** Only pinned model B (4 GB) remains resident. Cannot evict B.
+    *   **Result:** Load D cannot fit even after emptying all unpinned residents.
+    *   **Deferral Rule:** "a load that cannot fit evicts as many LRU unpinned models as needed... and if only pinned models remain and it still does not fit it defers."
+        *   Deferral triggers: Yes.
+    *   **Deferred ID:** The load's own id -> `D`.
+    *   **State Update:** Load D is deferred. It is NOT added to the resident list yet.
+    *   **Counts:** `evictions` = 2 (A and C). `deferrals` = 1. `deferred` = ["D"].
+
+5.  **Event: Unload B (4 GB)**
+    *   **Rule:** "an unload for a model no longer resident is a no-op." / Standard unload logic.
+        *   Model B is currently resident (pinned).
+    *   **Action:** Remove B from pool.
+    *   **Pool State:** Used = 0 GB. Available = 8 GB.
+    *   **State Update:** `loads`={}.
+
+6.  **Final Totals Check**
+    *   **Loads Active:** 0 (A was evicted, C evicted, D deferred then never loaded because the stream ended or we just count current state? The output format asks for totals based on the process).
+        *   Wait, does "Loads" mean total loads ever initiated successfully into memory at any point, or currently resident?
+        *   Standard interpretation in these ledger walks: `loads` usually refers to the number of items currently occupying space (resident count) OR the sum of granted sizes if interpreted differently. However, looking at the contract keys `{"loads": N, ...}`, and typical state tracking, this is likely the **number of resident loads** or potentially a specific counter defined in the "orientation" logic.
+        *   Let's re-read the orientation example: "three loads... Q on the deferred list". The output format usually tracks current residents. In the final state of tonight, B was unloaded. A and C were evicted. D is deferred (not loaded).
+        *   Therefore, Resident Count = 0.
+    *   **Evictions:** 2.
+    *   **Deferrals:** 1.
+    *   **Deferred List:** ["D"].
+
+    *Alternative Interpretation Check:* Could `loads` mean the count of successful loads ever?
+    *   If so: A(loaded), B(loaded), C(loaded). D(deferred/failed). Count = 3?
+    *   However, usually `loads` in a state snapshot implies current occupancy. But let's look at the "orientation" description again. It lists events and counts. The final answer JSON keys are fixed.
+    *   Let's assume the question asks for the **current number of resident loads** (standard state). Result: 0.
+
+    *Wait, is there an expiry?* No expiry event occurred in tonight's stream. All loads were "clean" grants.
+
+    *Refining the `loads` count:* In many similar puzzles, `loads` might refer to the **number of distinct load operations that resulted in a grant**.
+    *   Load A: Granted (then evicted).
+    *   Load B: Granted (then unloaded).
+    *   Load C: Granted (then evicted).
+    *   Load D: Deferred (No Grant).
+    *   If `loads` = count of grants ever made = 3.
+    *   If `loads` = current resident count = 0.
+
+    Let's look at the "orientation" text again to infer the definition of `loads`.
+    "M and N loaded clean... P's 3GB did not fit... evicted... loaded." -> Here P is counted as a load event that succeeded (after eviction).
+    The output format `{"loads": N}` usually tracks the **current number of items in memory** for state consistency, BUT sometimes it tracks total successful grants.
+    Given "Unload B" happened at the end, leaving 0 items. If the answer is expected to be non-zero, then `loads` must mean something else (like total grants).
+    However, strict state walks usually output the current state. Current state: Empty.
+    
+    *Decision:* I will provide the count of **current resident loads** because that represents the "State". If the user intended total grants, they would likely ask for a log or sum of sizes. But let's double check if D counts as loaded? No, it deferred.
+    
+    *Wait, one more nuance:* Did A and C get evicted *before* B was unloaded? Yes.
+    So at the end: Memory is empty (B just unloaded).
+    
+    Let's reconsider the "orientation" example calculation in the text provided to see if `loads` implies total grants there.
+    Text: "three loads, two evictions, one deferral". This phrasing counts the events.
+    If the JSON key `loads` corresponds to the number of items currently resident, it is 0.
+    
+    However, often in these specific "ledger" problems, `loads` might be a counter incremented on every successful grant. Let's assume the question asks for the **number of loads successfully granted during the stream**.

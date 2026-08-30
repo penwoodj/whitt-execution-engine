@@ -1,0 +1,80 @@
+### Phase 1 RULE SCAN
+The following rules govern the state changes during the event stream:
+
+1.  **Arrival/Load Rule**: Upon request of a model ID, if the total free space on the card is $\ge$ the requested size, the model loads immediately into the resident set (moving to most-recent). If it fits without evictions, `loads` increments by 1.
+2.  **Eviction Selection Rule**: If the requested model does not fit in current free space, identify all unpinned models currently in residence. Sort them by recency (oldest first). Evict one at a time until enough space exists or only pinned models remain. Each eviction counts toward `evictions`.
+3.  **Deferral Rule**: If after evicting all available unpinned models, the requested model still does not fit because only pinned models remain, the load is deferred. Record the ID in `deferred` and increment `deferrals`. No eviction occurs for this specific event.
+4.  **Unload Rule**: Upon request to unload a model, free its size immediately. The model remains in the resident set (recency unchanged) until potentially evicted later or explicitly removed by logic not present here (standard LRU behavior implies it stays until touched again or evicted). *Correction based on standard residency logic implied*: Unload frees space; the model is effectively gone from the "active" pool for capacity purposes but usually remains in the set structure. However, strictly following "free its size", we subtract GB.
+5.  **Recency Update Rule**: Every time a model is loaded or touched (implicitly handled by load), it moves to the most-recent position. Evicted models are removed from the recency list.
+
+**Trigger Mapping:**
+*   `load A`: Triggers Arrival/Load Rule.
+*   `load B`: Triggers Arrival/Load Rule.
+*   `load C`: Triggers Arrival/Load Rule (Pinned).
+*   `load D`: Triggers Eviction Selection Rule -> Arrival/Load Rule.
+*   `unload B`: Triggers Unload Rule.
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   Card Capacity: 8 GB
+*   Residents: [] (Empty)
+*   Free Space: 8 GB
+*   Pinned Models: {C} (Note: C is pinned, meaning it cannot be evicted. It also implies C must exist or be treated specially? The prompt says "models A through D... resident sizes". Usually, a pinned model exists in the set. Let's assume C starts as empty but if requested, it loads and stays. Or does "pinned" mean it occupies space initially? "Model C is pinned and never evicted." Standard interpretation: It behaves like any other model regarding loading, but once loaded, it cannot be evicted. Does it start loaded? No, usually models are loaded on request unless specified "pre-loaded". The prompt says "load A... load B... load C...". This implies C is requested and loaded.)
+*   *Refinement*: If C is pinned, does it take up space before the first `load C` event? No. It takes up space when `load C` happens. Once there, it cannot be evicted.
+
+**Event 1: `load A` (Size 1 GB)**
+*   Current Free: 8 GB. Requested: 1 GB.
+*   Fits? Yes ($8 \ge 1$).
+*   Action: Load A.
+*   Residents: [A]
+*   Recency: [A] (Most recent)
+*   State Line: `load A -> resident {A} free 7 recency {A}`
+
+**Event 2: `load B` (Size 2 GB)**
+*   Current Free: 7 GB. Requested: 2 GB.
+*   Fits? Yes ($7 \ge 2$).
+*   Action: Load B. Move B to most recent.
+*   Residents: [A, B] (B is newer)
+*   Recency: [A, B]
+*   State Line: `load B -> resident {A, B} free 5 recency {A, B}`
+
+**Event 3: `load C` (Size 3 GB)**
+*   Current Free: 5 GB. Requested: 3 GB.
+*   Fits? Yes ($5 \ge 3$).
+*   Action: Load C. Move C to most recent.
+*   Residents: [A, B, C] (C is newer)
+*   Recency: [A, B, C]
+*   State Line: `load C -> resident {A, B, C} free 2 recency {A, B, C}`
+
+**Event 4: `load D` (Size 4 GB)**
+*   Current Free: 2 GB. Requested: 4 GB.
+*   Fits? No ($2 < 4$). Need $4 - 2 = 2$ GB more.
+*   Eviction Candidates (Unpinned): A, B. (C is pinned).
+*   Sort by Recency (Oldest first): [A, B].
+*   Evict A (Size 1 GB)? Free becomes $2 + 1 = 3$. Still need 4. Space needed: 4. Current free: 3. Gap: 1.
+    *   Wait, logic check: "Evicts as many... as needed".
+    *   Step 4a: Evict A (Size 1). Free = $2 + 1 = 3$. Total space available for D is still insufficient ($3 < 4$).
+    *   Step 4b: Evict B (Size 2). Free = $3 + 2 = 5$. Total space available for D is now sufficient ($5 \ge 4$).
+*   Action: Evict A, Evict B. Load D. Move D to most recent.
+*   Residents: [C, D] (D is newer)
+*   Recency: [C, D]
+*   State Line: `load D -> resident {C, D} free 1 recency {C, D}`
+
+**Event 5: `unload B`**
+*   Target: B.
+*   Is B in residents? No (Evicted in Event 4).
+*   Action: Cannot unload non-existent model? Or does it do nothing? Standard behavior: Unload request for a model not present is ignored or results in no state change. The prompt doesn't specify error handling, but "free its size" applies if it exists. Since B was evicted, it is not in the set.
+*   State Line: `unload B -> resident {C, D} free 1 recency {C, D}` (No change).
+
+**Final Counts:**
+*   Loads (successful): A, B, C, D = 4.
+*   Evictions (models removed): A, B = 2.
+*   Deferrals: 0.
+*   Deferred IDs: [].
+
+```json
+{"loads": 4, "evictions": 2, "deferrals": 0, "deferred": []}
+```

@@ -1,0 +1,91 @@
+The task requires processing two independent parts: `part_a` (the core scheduling logic) and `part_b` (the audit claim ranking). The final output must be a single JSON object containing both parts with specific keys.
+
+### Part A Analysis (Core Scheduling)
+**Rules & Events:**
+1.  **LOW1**: Starts at $t=0$, duration 5 min. Checkpoints every 2 running mins ($t=2, 4$).
+2.  **LOW2**: Starts at $t=1$, duration 2 min. Checkpoints every 2 running mins ($t=2$ relative to start $\rightarrow t=3$ absolute).
+3.  **HIGH**: Arrives at $t=4$, duration 4 min. Preempts current LOW.
+    *   **Preemption Logic**: "on preemption the work past the last checkpoint is wasted and redone after resume."
+    *   **LOW1 Status at $t=4$**: Running since $t=0$. At $t=4$, it has completed 4 minutes. Checkpoints are at running times 2 and 4. Since a bank lands on the exact minute HIGH arrives ($t=4$), nothing is wasted immediately upon arrival, but the job is preempted.
+    *   **Resume Logic**: LOW1 resumes with remaining time = Total (5) - Banked (2 mins). Remaining = 3 mins.
+    *   **LOW2 Status at $t=4$**: Started at $t=1$. At $t=4$, it has been waiting for 3 minutes ($4-1=3$). It is not running, so no work is wasted.
+
+**Timeline Walk:**
+*   **$t=0$**: LOW1 starts. (Running: LOW1)
+*   **$t=1$**: LOW2 arrives. Core busy with LOW1. LOW2 waits.
+    *   *Checkpoint Check*: LOW1 has run 1 min. No checkpoint yet.
+*   **$t=2$**: LOW1 runs 2nd minute. Checkpoint banked (Running time = 2).
+    *   *State*: LOW1 running, LOW2 waiting.
+*   **$t=3$**: LOW1 runs 3rd minute.
+    *   *Checkpoint Check*: LOW1 has run 3 mins. Next checkpoint at 4. No bank yet.
+    *   *LOW2 Status*: Arrived $t=1$, waited 2 mins ($t=1 \to t=3$). Still waiting.
+*   **$t=4$**: HIGH arrives. Preempts LOW1.
+    *   *Waste Check*: LOW1 ran 4 minutes. Banks at 2 and 4. Bank at 4 is exact arrival time. Waste = 0.
+    *   *Resume Setup*: LOW1 resumes with $5 - 2 = 3$ mins remaining.
+    *   *LOW2 Status*: Arrived $t=1$, waited 3 mins ($t=1 \to t=4$). Still waiting.
+*   **$t=4$ (Post-High)**: HIGH runs. Core busy with HIGH. LOW1 and LOW2 wait.
+*   **$t=5$**: HIGH finishes (ran $4 \to 5$, duration 1? Wait, rule says "runs 4 minutes to completion").
+    *   Correction on Duration: Rule says "HIGH arrives at minute 4 and runs 4 minutes". So it occupies $[4, 8)$.
+    *   Let's re-evaluate HIGH timeline. Arrives $t=4$, runs 4 mins $\rightarrow$ finishes $t=8$.
+*   **$t=5$**: LOW1 resumes (3 mins left). LOW2 waiting. Core goes to highest priority available LOW.
+    *   Priority Rule: "a resumed LOW outranks a fresh one". Both are waiting/resumed? LOW1 is resumed (owed 3), LOW2 is fresh (owed 2, arrived $t=1$).
+    *   Wait logic: "LOW jobs take the core in order of their start minutes... a resumed LOW outranks a fresh one at any tie".
+    *   Start times: LOW1 ($0$) vs LOW2 ($1$). LOW1 starts earlier.
+    *   Core goes to **LOW1**.
+*   **$t=5 \to t=8$**: LOW1 runs 3 minutes (finishes total 5 mins).
+    *   Checkpoints: Needs 2 more banks? No, job finished.
+    *   LOW1 finishes at $t=8$.
+*   **$t=8$**: HIGH finishes. Core free. LOW2 waiting.
+    *   LOW2 started $t=1$, duration 2 mins. Still owes full 2 mins (never ran).
+    *   Core goes to **LOW2**.
+*   **$t=8 \to t=10$**: LOW2 runs 2 minutes. Finishes at $t=10$.
+
+**Results Part A:**
+*   **Makespan**: Last finish is $t=10$. (Start was $t=0$, so duration 10 mins). The question asks for "makespan counts from the last finish" or just the time? Usually makespan is total time. Given the example format `{"makespan_min": N}`, and the example had start 0, end 13 $\rightarrow$ 13. Here $t=10$.
+*   **Wasted**: 0 mins (Bank at exact arrival).
+*   **Order**: LOW1 finished at 8, LOW2 finished at 10. Order: `["LOW1", "LOW2"]`.
+
+### Part B Analysis (Audit Claims)
+**Rules & Events:**
+Sources Ranked: Machine Log > Signed Handoff > Hearsay. Dashboard is KNOWN-BUGGY (cannot carry claim alone).
+*   **c1**: Source=Machine Log ("shard rebalanced at 02:10"). Status: True (Highest source, no contradiction).
+*   **c2**: Sources=Signed Handoff ("never moved") vs Machine Log ("moved at 02:10"). Contradiction. Higher wins (Log). Lower assertion counts FALSE. Result: False.
+*   **c3**: Sources=Signed Handoff ("backup at 03:00") + Hearsay ("03:00 too"). Agreement between Signed and Hearsay? No, they agree on value but sources differ in rank. Rule: "when a higher source contradicts a lower one the higher source wins". Here they don't contradict; they agree on the fact. Result: True.
+*   **c4**: Source=Hearsay ("cache cold"). Only hearsay. Dashboard is buggy (irrelevant here). Rule: "a claim resting only on hearsay... is UNVERIFIED". Result: Unverified.
+*   **c5**: Source=Buggy Dashboard ("queue depth peaking"). Only dashboard. Rule: "status dashboard ... can never carry a claim alone". Result: Unverified.
+
+**Results Part B:**
+*   True: `["c1", "c3"]` (Sorted lowercase).
+*   False: `["c2"]`.
+*   Unverified: `["c4", "c5"]`.
+
+### Final JSON Construction
+Keys required: `part_a`, `part_b`.
+`part_a`: `makespan_min`, `wasted_min`, `order`.
+`part_b`: `true`, `false`, `unverified`.
+
+```json
+{
+  "part_a": {
+    "makespan_min": 10,
+    "wasted_min": 0,
+    "order": [
+      "LOW1",
+      "LOW2"
+    ]
+  },
+  "part_b": {
+    "true": [
+      "c1",
+      "c3"
+    ],
+    "false": [
+      "c2"
+    ],
+    "unverified": [
+      "c4",
+      "c5"
+    ]
+  }
+}
+```

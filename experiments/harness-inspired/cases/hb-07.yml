@@ -1,0 +1,342 @@
+case_id: hb-07
+category: natural-ops
+difficulty: light
+hops: 4
+archetype: pipeline-freshness
+provenance: freshness rule. a source is fresh if its last refresh completed after 22.00 yesterday; orders refreshed 23.10 -> fresh; users refreshed 21.40 -> stale; events refreshed 23.55 -> fresh; metrics
+  refreshed 00.15 today, which is after 22.00 yesterday -> fresh; fresh = 3, stale = 1; views rebuild only for fresh sources -> 3 rebuilt; 12 duplicate partitions detected and removed before counting, removals
+  are not tables
+prompt: 'You run the morning data-platform check for the analytics warehouse, a
+
+  ritual performed with coffee before the first dashboard refreshes land on
+
+  executives'' screens. The check has three parts — freshness, cleanliness,
+
+  and rebuilds — and the rules come from the data-governance doc that was
+
+  rewritten after the quarter when a stale table quietly fed the board deck
+
+  for eleven days before anyone noticed the numbers had stopped moving.
+
+
+  The freshness rule first. The nightly orchestration aims to finish all
+
+  source refreshes before ten at night, but the governance doc does not
+
+  trust intentions, only timestamps: a source counts as fresh this morning
+
+  if and only if its last refresh completed after 22:00 yesterday evening.
+
+  Completed after 22:00 yesterday — not started, completed, and not 22:00
+
+  today, which would be a nonsensical criterion for a morning check. A
+
+  refresh that completed at 21:59 yesterday, however healthy it looks, is
+
+  classified stale, and stale sources get flagged for the on-call data
+
+  engineer to investigate. Note also that a refresh completing after
+
+  midnight, in the small hours of this morning, trivially completed after
+
+  22:00 yesterday, and is fresh.
+
+
+  The cleanliness rule second. The warehouse accumulates duplicate
+
+  partitions when orchestration retries overlap, and the morning check
+
+  counts how many duplicate partitions the janitor process detected and
+
+  removed overnight. These removals are maintenance on partitions inside
+
+  tables; they are not tables themselves, they are not sources, and they
+
+  have no interaction with the freshness classification of any source. They
+
+  get one number in the report and nothing more.
+
+
+  The rebuild rule third, and it is where lazy mornings go wrong.
+
+  Downstream reporting views are rebuilt for fresh sources only. Every
+
+  fresh source triggers exactly one view rebuild — its reporting view,
+
+  rebuilt from the new data. Stale sources trigger nothing: their views
+
+  intentionally hold yesterday''s state, because rebuilding a view from
+
+  stale data would just republish old numbers with a new timestamp, which
+
+  is worse than obviously-old numbers. The number of view rebuilds
+
+  performed this morning therefore equals the number of fresh sources, and
+
+  if you catch yourself computing it from the total source count, start
+
+  over.
+
+
+  Now this morning''s four sources, from the orchestration log.
+
+
+  The orders source, the biggest and slowest, completed its refresh at
+
+  23:10 last night — the ingestion queue had backed up behind a late
+
+  upstream file, pushing completion past the ten o''clock target but keeping
+
+  it after the 22:00 line. Fresh.
+
+
+  The users source completed at 21:40 last night. Twenty minutes. That is
+
+  all it missed by, and it hurt to type, but the rule is the rule and the
+
+  rule says 22:00: stale, flagged, and its view stays on yesterday''s state.
+
+
+  The events source, streaming-derived, completed at 23:55 last night after
+
+  a schema-evolution hiccup cost it an hour of reprocessing. Fresh.
+
+
+  The metrics source, computed downstream of the others, finished its
+
+  refresh at 00:15 this morning — quarter past midnight, comfortably after
+
+  22:00 yesterday by any honest reading. Fresh.
+
+
+  The janitor''s overnight report, appended to the same log, records twelve
+
+  duplicate partitions detected and removed across the events source''s
+
+  staging area, a residue of the schema-evolution retries. Twelve
+
+  partitions, gone before the morning check ran.
+
+
+  Two neighbors in the log that are not yours to count. The ML feature
+
+  store runs its own refresh cycle from the same orchestration system but
+
+  under the platform-science team''s namespace, which you do not manage; its
+
+  23:30 completion is their morning problem. And the metadata catalog''s
+
+  heartbeat query, which runs every fifteen minutes and logs a completion
+
+  time each run, is a monitor, not a source refresh; it has never fed a
+
+  view and never will.
+
+
+  The morning report needs: how many of your four sources are fresh, how
+
+  many are stale, how many reporting views were rebuilt, and how many
+
+  duplicate partitions were removed.
+
+
+  The freshness policy earned its current shape the hard way, which every
+
+  member of the platform group can recite with tired eyes. The original
+
+  specification set a single global threshold for every view — one number,
+
+  one rule, elegant on the whiteboard — and it survived exactly one
+
+  quarter of production traffic before the quarterly business review
+
+  caught a revenue-critical view reading stale while a debugging view
+
+  that nobody consulted was fresh by hours. The lesson landed hard enough
+
+  to fund a redesign week — thresholds would be per view, derived from the
+
+  actual cost of staleness — and the numbers in force tonight are the
+
+  third revision since, each one tuned by the same argument about which
+
+  views the business actually reads.
+
+
+  Partitioning maintenance, the nightly chore underneath the freshness
+
+  surface, follows its own quiet discipline. The lake rolls forward on a
+
+  rolling window — data arrives into fresh partitions, queries read the
+
+  window, and the maintenance job builds the next partition ahead of each
+
+  midnight so the window never slides into a hole. You watched tonight''s
+
+  build complete on schedule, checked the retention sweep only archived
+
+  partitions outside the window, and noted the disk headroom the sweep
+
+  recovered, a number the capacity team tracks but which never appears in
+
+  any freshness verdict.
+
+
+  Around the lake hums the usual machinery of a mature data platform,
+
+  most of it irrelevant to tonight''s counts. The catalog crawler you do
+
+  not manage reindexes table metadata nightly and occasionally flags
+
+  schema drift in a channel nobody reads over breakfast. A query-cost
+
+  analyzer ranks the platform''s most expensive queries for a tuning
+
+  board that meets monthly. And the replication pipeline shadows the
+
+  lake to a disaster-recovery region, its lag metrics watched by a
+
+  different on-call entirely — real infrastructure, real numbers, and
+
+  not one of them a partition that freshness counts would ever see.
+
+
+  A note on the one stale view before the report is filed, because
+
+  single anomalies deserve their stories told. The stale reading came
+
+  from the view whose upstream job slipped its slot — a scheduling
+
+  conflict with a longer-running export, resolved by the orchestrator
+
+  requeuing the work rather than by any failure in the data itself. The
+
+  freshness policy does not care about excuses, which is the point of
+
+  having a policy; the view reads older than its threshold and is stale,
+
+  and the morning''s data-on-call will chase the root cause through the
+
+  scheduler logs with the verdict as their starting lantern. What the
+
+  policy asks of you tonight is only the honest count.
+
+
+  One final cross-check completes the ritual. The lake''s own metadata
+
+  service tracks partition counts per table independently of the
+
+  maintenance job, and you reconcile your partition total against it
+
+  before filing — a disagreement would mean the window slid somewhere it
+
+  should not have, which is the kind of quiet structural drift that
+
+  freshness counts would surface only weeks later. The counts agree,
+
+  the views are tallied, and the platform''s morning brief will carry
+
+  exactly what the thresholds saw.
+
+
+  The data-on-call rotation''s stake in tonight''s numbers is worth a
+
+  closing thought, because freshness counts are the first lanterns of
+
+  their morning. A stale verdict is never just a number to that
+
+  rotation — it is a starting coordinate for a hunt through scheduler
+
+  logs, upstream jobs, and the occasional genuinely broken pipeline,
+
+  and a count that was sloppy would send the hunt in the wrong
+
+  direction for hours. The discipline of per-view thresholds paired
+
+  with honest counting is what makes the lantern trustworthy, and the
+
+  trust is mutual — the platform group counts carefully because the
+
+  on-call group chases faithfully, and each keeps the other''s
+
+  standards high by example.
+
+
+  The final numbers that matter are the ones the brief bolds, and they
+
+  deserve one last guard tonight — the distinction between a stale view
+
+  and a slow one. A view whose data arrived minutes after its threshold
+
+  passed is stale, full stop, however trivial the miss; a view that is
+
+  simply large and takes seconds to query is fresh if its last refresh
+
+  sits inside the window, however impatient its readers grow. The two
+
+  get conflated in hallway grumbling every few weeks, and the brief''s
+
+  job — tonight''s job — is to hold the line between them so the
+
+  on-call chases staleness, which is a disease, and not slowness,
+
+  which is a temperament. The thresholds define the line, the counts
+
+  report it, and the morning inherits it clean.
+
+
+  One closing paragraph on the view nobody asked about, because it is
+
+  the view the platform group watches most closely of all — the meta-
+
+  view that reports freshness compliance itself, a view about views,
+
+  refreshed as reliably as any it measures. Its green this time of
+
+  night is the platform''s small nightly reassurance that the machinery
+
+  of honest counting is itself being counted honestly. The morning
+
+  brief will not mention it, the thresholds do not govern it, and the
+
+  on-call rotation will not chase it, but its quiet steadiness under
+
+  everything else is the floor the whole policy stands on. It reads
+
+  green tonight, as it should, and the report files with the platform
+
+  resting on its own foundations.
+
+
+  Output ONLY this JSON with exactly
+
+  these keys: {"fresh_sources": N, "stale_sources": N, "views_rebuilt": N,
+
+  "partitions_removed": N}.'
+objective: Classify pipeline sources by refresh-timestamp freshness and derive rebuild counts.
+auxiliary: All facts needed are in the prompt itself.
+success_criteria:
+  deterministic_checks:
+    json_exact: '{"fresh_sources": 3, "stale_sources": 1, "views_rebuilt": 3, "partitions_removed": 12}'
+    forbidden_phrases:
+    - I cannot
+    - sorry
+v6:
+  entities:
+  - id: orders_fresh
+    question: A view is fresh if its last refresh completed after 22:00 yesterday — orders refreshed at 23:10; fresh? (1 if yes, 0 if no)
+    answer: true
+  - id: users_fresh
+    question: A view is fresh if its last refresh completed after 22:00 yesterday — users refreshed at 21:40, before the cutoff; fresh? (1 if yes, 0 if no)
+    answer: false
+  - id: events_fresh
+    question: A view is fresh if its last refresh completed after 22:00 yesterday — events refreshed at 23:55; fresh? (1 if yes, 0 if no)
+    answer: true
+  - id: metrics_fresh
+    question: is metrics fresh (completed 00.15 today, after 22.00 yesterday)
+    answer: true
+  - id: partitions_removed
+    question: The overnight janitor removes duplicate partitions it finds — 12 duplicates were found and removed; how many partitions were removed?
+    answer: 12
+  aggregate: '{"fresh_sources": len([e for e in entities if e["id"].endswith("_fresh") and a(e) is True]), "stale_sources": len([e for e in entities if e["id"].endswith("_fresh") and a(e) is False]), "views_rebuilt":
+    len([e for e in entities if e["id"].endswith("_fresh") and a(e) is True]), "partitions_removed": a(partitions_removed)}'

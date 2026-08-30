@@ -1,0 +1,95 @@
+Phase 1 RULE SCAN: List of rules changing state during tonight's events, triggered by specific claims/events:
+
+1. **Retry Backoff Rule**: Triggers on every failed attempt; sets wait time $W_{n+1} = W_n \times 2$ starting at base $3s$.
+2. **Attempt Cost Rule**: Consumes budget of $3$ tokens per failed or successful attempt execution.
+3. **Wait Cost Rule**: Consumes budget of $1$ token per second of wait time observed before an attempt runs.
+4. **Budget Check Rule (Pre-Execution)**: Checks if $(Cost_{attempt} + Cost_{wait}) > Budget$. If true, triggers suppression flow.
+5. **Suppression Double-Budget Rule**: Upon triggering the budget check fail, doubles the available budget exactly once and re-evaluates the same cost against the new limit.
+6. **Event Execution Rule**: Advances state only after a successful attempt (the 4th one in this sequence).
+7. **Final State Aggregation Rule**: Computes total attempts ($N$), total seconds waited, final remaining budget, and boolean suppression status based on the walked ledger.
+
+Phase 2 LEDGER WALK: Applying events in strict arrival order with state updates:
+
+**Initial State**: `Budget = 30`, `Wait_Base = 3`, `Current_Wait = 3`.
+`Attempts_Made = 0`, `Total_Spent = 0`, `Suppressed_Flag = false`.
+
+*   **Event 1 (Attempt 1 Failure)**:
+    *   Rule Applied: Attempt Cost & Wait Cost.
+    *   Action: Run attempt, fail. Add wait cost ($3s \times 1$) and attempt cost ($3$).
+    *   Cost this step: $3 + 3 = 6$.
+    *   Ledger Update: `Total_Spent` becomes $0 + 6 = 6$. Remaining Budget: $30 - 6 = 24$.
+    *   Rule Applied: Retry Backoff. Next wait doubles ($3 \to 6$).
+    *   State Line 1: `Attempts=1, Wait_s=6, Spent=6, Budget_Remaining=24`
+
+*   **Event 2 (Attempt 2 Failure)**:
+    *   Rule Applied: Attempt Cost & Wait Cost.
+    *   Action: Run attempt, fail. Add wait cost ($6s \times 1$) and attempt cost ($3$).
+    *   Cost this step: $3 + 6 = 9$.
+    *   Ledger Update: `Total_Spent` becomes $6 + 9 = 15$. Remaining Budget: $24 - 9 = 15$.
+    *   Rule Applied: Retry Backoff. Next wait doubles ($6 \to 12$).
+    *   State Line 2: `Attempts=2, Wait_s=12, Spent=15, Budget_Remaining=15`
+
+*   **Event 3 (Attempt 3 Failure)**:
+    *   Rule Applied: Attempt Cost & Wait Cost.
+    *   Action: Run attempt, fail. Add wait cost ($12s \times 1$) and attempt cost ($3$).
+    *   Cost this step: $3 + 12 = 15$.
+    *   Ledger Update: `Total_Spent` becomes $15 + 15 = 30$. Remaining Budget: $15 - 15 = 0$.
+    *   Rule Applied: Retry Backoff. Next wait doubles ($12 \to 24$).
+    *   State Line 3: `Attempts=3, Wait_s=24, Spent=30, Budget_Remaining=0`
+
+*   **Event 4 (Attempt 4 - Success Trigger)**:
+    *   Rule Applied: Attempt Cost & Wait Cost.
+    *   Action: Run attempt. It succeeds immediately upon execution (no wait needed for success). Add attempt cost ($3$).
+    *   Cost this step: $3$.
+    *   Ledger Update: `Total_Spent` becomes $30 + 3 = 33$. Remaining Budget: $0 - 3 = -3$.
+    *   **Check**: Does spend exceed budget? Yes ($33 > 30$).
+        *   *Correction on Logic*: The rule says "if the spend exceeds the budget the job is suppressed". This check happens *before* allowing the state to go negative or after calculating total cost.
+        *   Let's re-evaluate the strict order: Usually, checks happen before execution or immediately upon calculation.
+        *   Scenario A (Check pre-execution): At start of Event 4, Cost=3. Budget=0. $3 > 0$? Yes. Trigger Double-Budget Rule. New Budget = $0 \times 2 = 0$. Still $3 > 0$? Yes. Suppress job. State stops updating on success.
+        *   Scenario B (Check post-execution): Execute, cost becomes 3, total spent 33. Check: $33 > 30$. Trigger Double-Budget. New Budget = $60$. Re-check? "re-checked after doubling". Is current spend ($33$) over new budget ($60$)? No. Job allowed to proceed (Success).
+    *   **Interpretation of Text**: "if the spend exceeds the budget the job is suppressed... re-checked after doubling, suppressed only if still over."
+        *   Sequence: Calculate Cost -> Add to Spent -> Check Condition ($Spent > Budget_{original}$? No, usually $Remaining < 0$ triggers). Let's assume standard ledger logic: You try to deduct. If deduction fails (Insufficient Funds), you trigger the fix.
+        *   Start Event 4: Remaining = 0. Cost needed = 3. Deduction fails (Negative result).
+        *   Trigger Double-Budget Rule: Budget doubles ($0 \to 0$? Or does it double the limit capacity?). If remaining is 0, doubling usually implies $Limit_{new} = Limit_{old} \times 2$. But we are tracking `Budget_after` which is likely `(Initial - Spent)`.
+        *   Let's look at the "Orientation Story" logic for the definition of suppression: "spend exceeds budget".
+            *   Initial Budget = 30. Total Spend allowed = 30? Or is it a rolling buffer?
+            *   Text: "budget doubles exactly once, re-checked after doubling".
+            *   If Remaining Budget hits negative (i.e., Spent > Original), that is the trigger.
+            *   Current State before Event 4: `Spent=30`, `Budget_Limit=30`. `Remaining=0`.
+            *   Action: Attempt 4 runs. Cost = 3.
+            *   Check: Is `Spent (30) + Cost (3)` > `Budget (30)`? Yes ($33 > 30$).
+            *   Trigger Double-Budget Rule: New Budget Limit = $30 \times 2 = 60$.
+            *   Re-check: Is `Current_Spend (33)` > `New_Budget_Limit (60)`? No.
+            *   Result: Job is NOT suppressed. It succeeds.
+    *   Final State Update: Job succeeded. Total Attempts = 4. Total Spent = 33. Budget Remaining = $60 - 33 = 27$.
+
+*Wait, let's re-read carefully*: "the attempt budget is 30 tokens... if the spend exceeds the budget".
+Does "budget" mean the remaining pool or the total cap? Usually "budget after" implies `Initial - Final_Spend` or just `Final_Remaining`.
+If I interpret "Budget" as a hard cap on total consumption:
+1. Start Cap 30.
+2. After Event 3, Consumed = 30. Remaining = 0.
+3. Event 4 starts. Cost = 3. Total potential = 33.
+4. 33 > 30. Condition met.
+5. Apply Double Rule: Cap becomes $30 \times 2 = 60$.
+6. Re-check: Is 33 > 60? No.
+7. Proceed. Success.
+8. Final State: Attempts = 4. Wait time observed during failures = $3+6+12 = 21s$ (Wait for the successful attempt is not mentioned as a cost, usually success is instant or included in the "attempt" cost). The prompt says "waits observed: 3, 6, 12". It does not list a wait for the 4th. So `wait_s` = 21.
+9. Final Budget calculation: If the rule doubles the *budget limit*, and we consumed 33 from a new limit of 60, remaining is 27.
+   However, if "Budget_after" means "How much was left in the original bucket" (which would be negative) or "Current Available Credit"? The prompt asks for `budget_after`. In financial ledgers, this is `Limit - Consumed`.
+   Limit = 60. Consumed = 33. Remaining = 27.
+
+Let's double check the "suppressed" flag logic.
+"is suppressed and the budget doubles exactly once".
+If the re-check passes (which it does), then `suppressed` is false.
+The job succeeded on the 4th attempt.
+
+Re-verifying the "Wait" calculation:
+"Waits observed: 3, 6, 12."
+These correspond to the waits *before* the failed attempts.
+Attempt 1 fails -> Wait 3s.
+Attempt 2 fails -> Wait 6s.
+Attempt 3 fails -> Wait 12s.
+Attempt 4 succeeds -> No wait listed (or wait is negligible/zero).
+Total `wait_s` = $3 + 6 + 12 = 21$.
+
+Re-verifying

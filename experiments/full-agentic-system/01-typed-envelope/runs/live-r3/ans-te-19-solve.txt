@@ -1,0 +1,131 @@
+### Phase 1 RULE SCAN
+The following rules change state during the event sequence defined in the "tonight" scenario (ignoring the orientation story):
+
+1. **Attempt Execution Rule**: Triggers on every arrival event; increments `attempts` count by 1 and deducts cost per attempt (2) from `budget`.
+2. **Wait Accumulation Rule**: Triggers after a failed attempt (implied by "after each failed attempt the retry waits"); adds current wait duration to `wait_s`. Sequence: 2, then double to 4, then double to 8.
+3. **Failure Threshold Check Rule**: Implicitly triggers on every failure; if failures reach 3 before success, the job enters a suppression check state.
+4. **Budget Overflow & Suppression Rule**: Triggers when cumulative cost (`attempts`×2 + `wait_s`) exceeds initial budget (24); sets `suppressed` to true and doubles the effective budget for re-checking.
+5. **Success State Rule**: Triggers on the 4th attempt (after 3 failures); updates state to indicate success, stops further wait/attempt logic, and freezes final values.
+
+---
+
+### Phase 2 LEDGER WALK
+Applying events in strict arrival order (Tonight's Numbers: Base Wait=2s, Cost/Atrypt=2, Budget=24, Needs 3 failures before 4th succeeds):
+
+**Event 1: Arrival & Attempt #1**
+- Action: Run attempt. Failures = 0 → 1.
+- Cost: +2 tokens (Attempt).
+- Wait: No wait yet (wait happens *after* failure/retry logic).
+- Budget Used: 2. Remaining Budget: 24 - 2 = 22.
+- State Check: Spent (2) < Budget (24). OK.
+
+**Event 2: Retry Logic & Wait #1 (After Failure 1)**
+- Action: Apply wait rule for retry.
+- Wait Duration: 2s.
+- Cost: +2 tokens (Wait). *Correction based on text "every wait second costs 1"* -> Wait cost is 2 tokens.
+- Budget Used: 2 (atm) + 2 (wait) = 4. Remaining Budget: 24 - 4 = 20.
+- State Check: Spent (4) < Budget (24). OK.
+
+**Event 3: Arrival & Attempt #2**
+- Action: Run attempt. Failures = 1 → 2.
+- Cost: +2 tokens (Attempt).
+- Wait: No wait yet for this specific cycle's failure, but per sequence "after each failed attempt the retry waits", we are entering the loop again. The prompt says "waits observed: 2, 4, 8". This implies waits happen *between* attempts.
+- Re-evaluating flow based on "waits observed: 2, 4, 8":
+    - Wait 1 (2s) happens after Fail 1.
+    - Wait 2 (4s) happens after Fail 2.
+    - Attempt 3 succeeds? No, needs 3 failures before 4th succeeds. So Attempt 3 must fail.
+    - Wait 3 (8s) happens after Fail 3.
+
+Let's restart the walk with the explicit "waits observed" sequence to ensure correctness:
+
+**Event A: Attempt #1**
+- Status: Fail.
+- Failures Count: 1.
+- Cost: 2 tokens.
+- State: `attempts`=1, `wait_s`=0, `budget`=24-2=22.
+
+**Event B: Retry Wait #1 (Triggered by Fail 1)**
+- Rule: "after each failed attempt the retry waits". First wait is 2s.
+- Duration: 2 seconds.
+- Cost: 2 tokens (1 token/sec).
+- State: `attempts`=1, `wait_s`=0+2=2, `budget`=22-2=20.
+
+**Event C: Attempt #2**
+- Status: Fail.
+- Failures Count: 2.
+- Cost: 2 tokens.
+- State: `attempts`=2, `wait_s`=2, `budget`=20-2=18.
+
+**Event D: Retry Wait #2 (Triggered by Fail 2)**
+- Rule: "each next wait doubles". Previous was 2s, now 4s.
+- Duration: 4 seconds.
+- Cost: 4 tokens.
+- State: `attempts`=2, `wait_s`=2+4=6, `budget`=18-4=14.
+
+**Event E: Attempt #3**
+- Status: Fail (Needs 3 failures before 4th succeeds).
+- Failures Count: 3.
+- Cost: 2 tokens.
+- State: `attempts`=3, `wait_s`=6, `budget`=14-2=12.
+
+**Event F: Retry Wait #3 (Triggered by Fail 3)**
+- Rule: "each next wait doubles". Previous was 4s, now 8s.
+- Duration: 8 seconds.
+- Cost: 8 tokens.
+- State: `attempts`=3, `wait_s`=6+8=14, `budget`=12-8=4.
+
+**Event G: Attempt #4 (Success)**
+- Rule: "the job needs 3 failed attempts before the 4th succeeds". Failures count is now sufficient for success.
+- Status: Success.
+- Cost: 2 tokens.
+- State Check: Total Spent = 14 (wait) + 8 (attempts so far including this one? Wait, let's sum costs).
+    - Attempt Costs: 2 * 4 attempts = 8 tokens.
+    - Wait Costs: 2 + 4 + 8 = 14 tokens.
+    - Total Cost before Event G completion? No, cost is incurred on the attempt itself.
+    - Let's re-sum strictly:
+        1. Atm 1: -2 (Total Spent: 2)
+        2. Wait 1: -2 (Total Spent: 4)
+        3. Atm 2: -2 (Total Spent: 6)
+        4. Wait 2: -4 (Total Spent: 10)
+        5. Atm 3: -2 (Total Spent: 12)
+        6. Wait 3: -8 (Total Spent: 20)
+        7. Atm 4: Success attempt costs 2 tokens? Yes, "every attempt costs 2". Even successful ones cost budget unless specified otherwise. The text says "if the spend exceeds the budget the job is suppressed". It does not say success is free.
+    - Total Spent entering Event G = 20.
+    - Cost of Event G (Attempt 4) = 2.
+    - Total Final Spend = 22.
+    - Initial Budget = 24.
+    - Is 22 > 24? No. Suppression rule not triggered by overflow.
+
+Wait, let me re-read the "waits observed" and "suppressed" logic carefully.
+"the attempt budget is 24 tokens where every attempt costs 2 and every wait second costs 1."
+"after each failed attempt the retry waits... after the 4th succeeds".
+Sequence:
+1. Try 1 (Fail). Cost 2. Total Spend 2.
+   Wait 1 (2s). Cost 2. Total Spend 4.
+2. Try 2 (Fail). Cost 2. Total Spend 6.
+   Wait 2 (4s). Cost 4. Total Spend 10.
+3. Try 3 (Fail). Cost 2. Total Spend 12.
+   Wait 3 (8s). Cost 8. Total Spend 20.
+4. Try 4 (Success). Cost 2. Total Spend 22.
+
+Total Spend = 22. Budget = 24.
+Condition: "if the spend exceeds the budget the job is suppressed".
+22 is not > 24. So `suppressed` = false.
+`attempts` = 4 (the count of attempts made).
+`wait_s` = 2 + 4 + 8 = 14.
+`budget_after` = 24 - 22 = 2.
+
+Let's double check the "orientation story" trap to ensure I didn't swap numbers.
+Orientation: Base 5s, 3 attempts total (so no wait after last?), spend 30 vs budget 39.
+Tonight: Base 2s, waits 2,4,8 observed.
+My calculation of spends matches the "tonight" constraints exactly.
+
+Final State Check:
+Attempts: 4 (1,2,3 failed + 1 success).
+Wait_s: 2+4+8 = 14.
+Budget After: 24 - (4*2 + 14) = 24 - (8+14) = 24 - 22 = 2.
+Suppressed: false (2 <= 24).
+
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 2, "suppressed": false}
+```

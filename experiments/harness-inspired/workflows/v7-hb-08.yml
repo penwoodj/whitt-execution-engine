@@ -1,0 +1,850 @@
+workflow_id: harness_v7_hb-08
+name: "Harness v7 - hb-08"
+description: "TABLE->GATE->AGGREGATE->JUDGE-V2->LEAK-AUDIT. Case: hb-08 hops=3 route=light"
+version: "7.0.0"
+author: "Experiment"
+tags: [harness, agentic, v7, routing, snapshot, meter, audit]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  m_light:
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  m_heavy:
+    name: "Qwen3-5-9B-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  m_judge:
+    name: "Hermes-2-Pro-Mistral-7B.Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  timing:
+    cooldown_after_unload_secs: 0
+    min_tmp_space_mb: 50
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+  steps:
+    s00_screen:
+      generative_entity: "${models.m_light}"
+      prompt: "pre-flight"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/screen-validate.py /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-08.yml"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - skip_step: true
+
+    s01_solve:
+      generative_entity: "${models.m_light}"
+      prompt: |
+        ROLE: on-call operator. Precise. Zero fluff.
+
+                You are the access administrator who closes out the identity-and-access
+        review each afternoon at four o'clock, and today's review covers five
+        access requests that arrived since yesterday's cutoff. The access policy
+        was rewritten last month after the audit finding, and although the new
+        text is shorter, every clause in it decides somebody's afternoon, so you
+        re-read it before touching the queue. Here is the policy as it stands,
+        followed by today's five requests.
+        
+        Standard role access — the ordinary permission sets engineers request
+        through the portal — requires two approvals before it grants: the
+        requester's manager and the security team, both, explicitly. One approval
+        alone, from either side, leaves the request pending; it grants nothing
+        until the second approval lands, no matter how long it waits. There is no
+        timeout on pending standard requests — they sit until both approvals
+        arrive or the requester withdraws.
+        
+        Break-glass access is the emergency path, used when production is down
+        and someone needs rights now. A break-glass request grants immediately,
+        the moment it is submitted, with zero approvals — that is its entire
+        purpose. The price is an expiry: break-glass access lasts exactly four
+        hours from the moment of grant, then expires on its own. At the afternoon
+        review, a break-glass grant is either still active, if four hours have
+        not elapsed, or expired, if they have.
+        
+        The audit rule applies to everything still open. Any access request that
+        remains unresolved — pending, unexpired, unfinished — for more than
+        twenty-four hours after submission is automatically revoked by the audit
+        job and must be re-requested from scratch. Twenty-four hours, wall clock,
+        from submission, no exceptions and no extensions.
+        
+        Now today's queue, five requests, in arrival order.
+        
+        Request A1 came in yesterday at 10:00: an engineer moving to the payments
+        team asked for the standard deploy role. By this morning her manager had
+        approved, and at 11:20 today the security team approved as well. Two
+        approvals, both present, standard role granted. As of the 16:00 review it
+        stands granted and active.
+        
+        Request A2 arrived at 13:00 today: a contractor requesting the standard
+        reporting role. His manager approved within the hour — responsive bunch —
+        but security has not actioned it and shows no sign of doing so before the
+        review. One approval of two: the request grants nothing and remains
+        pending. It was submitted only three hours ago, so the twenty-four-hour
+        audit rule is nowhere near triggered.
+        
+        Request A3 is break-glass: at 09:00 this morning, with the checkout
+        service hard down, the incident commander grabbed emergency production
+        access. It granted instantly, as break-glass does, was used to roll back
+        the bad deploy, and then did its job. Four hours from 09:00 is 13:00, and
+        the review clock now reads 16:00 — well past. The grant expired on its
+        own at 13:00, so as of this review it is expired, which is the system
+        working exactly as designed, not a failure.
+        
+        Request A4 is also break-glass: at 14:30 today, during a database failover
+        that the standard change process was too slow for, a senior engineer took
+        emergency database access. Granted instantly at 14:30, four hours of life
+        puts expiry at 18:30, and the review at 16:00 is inside that window. Still
+        active.
+        
+        Request A5 is the awkward one. At 06:00 yesterday morning — thirty-four
+        hours ago by this review — a departing-team member requested elevated
+        rights to complete a handover migration, the kind that needs both
+        approvals. The manager approved at 07:00 yesterday. Security never did,
+        and the requester went offline mid-migration assuming it would resolve
+        itself. It did not: one approval of two means the request has sat
+        unresolved since 06:00 yesterday, and thirty-four hours exceeds the
+        twenty-four-hour audit limit. The audit job has therefore revoked A5, and
+        it will need a fresh request if the migration is ever to finish.
+        
+        One system boundary for the record: the building's physical badge office
+        processes door-access requests through its own queue, which you do not
+        manage, and two of its approvals show in this morning's email thread.
+        Badge grants are not system access, never were, and do not appear in
+        these counts.
+        
+        The review needs, as of 16:00 today: how many of the five requests
+        currently stand as active grants, how many expired, how many were revoked
+        by the audit rule, and how many are simply still pending.
+        
+        The grants ledger's reconciliation discipline comes from an incident
+        that the security team still calls the Tuesday of Confusion. Before the
+        current rules, access was granted through a tangle of team aliases and
+        direct assignments, and when an auditor asked a simple question — who
+        can touch this system right now — the honest answer took nine days to
+        assemble and was wrong twice on the way. The remediation was
+        unglamorous and absolute — every grant becomes a ledger row with an
+        owner, a scope, a start, and a term; expirations revoke automatically
+        at term; explicit revocations by an administrator kill a grant on the
+        spot regardless of remaining term; and requests that nobody has
+        approved yet sit in a pending state that grants nothing at all.
+        
+        Your audit tonight walked the ledger row by row against the events
+        feed that feeds it. Each expiration you recorded came from the term
+        already passed, each revocation from a named administrator's action
+        earlier in the week, each active grant from a term still running and
+        no revocation on record. The pending rows you counted twice, since
+        pending is the state most often misread — a pending grant confers no
+        access today, no matter how certain its approval looks, and the
+        morning review has learned to ask about pendings before anything
+        else.
+        
+        The identity stack around the ledger keeps its own busy ledger of
+        numbers that must not bleed into yours. The directory service you do
+        not manage synchronizes group memberships from the hr system hourly,
+        and its sync counts appear on a dashboard with impressive sparklines.
+        Multi-factor enrollment campaigns run their own reports, complete with
+        nag-email schedules. And a service-account inventory project has been
+        drafting its census for three quarters now, promising eventually to
+        label every nonhuman identity — worthwhile work, watched closely, and
+        wholly invisible to the human grants you are counting tonight.
+        
+        A note on the expired grants before the ledger closes, because
+        expiration is the state that teaches patience. Every expired row in
+        tonight's count was once an active grant someone requested in good
+        faith for a project with a name and a deadline, and the term that
+        now reads past-due is the same term that once read generous. The
+        automatic revocation at term is the system being kind to everyone —
+        kind to the audit, which never has to ask why stale access lives,
+        and kind to the grant's owner, who never has to remember to close
+        the door behind themselves. The morning's access review will skim
+        these expirations in seconds precisely because the machinery handled
+        them in milliseconds.
+        
+        One final cross-check completes the ritual. The ledger's own
+        checksum — a hash the identity system maintains over active grants —
+        must match the count you tallied by hand, and you run it before
+        filing. A mismatch would mean rows moved between your read and your
+        report, which at this hour is either latency or something worth
+        waking someone about. The hash matches. The ledger closes with its
+        four buckets settled, and the security morning brief will carry
+        exactly the state the rules produced.
+        
+        The audit committee's stake in tonight's numbers is worth a closing
+        thought, because the ledger's four buckets are the entire answer to
+        the question that once took nine days. When the auditors arrive next
+        quarter they will ask it again — who can touch this system, and why —
+        and the answer will be read straight from buckets like tonight's,
+        row by row, term by term, revocation by revocation. What took nine
+        days and two wrong answers now takes a query and a patient reading,
+        and the difference is not technology but rule design — states that
+        cannot flex, transitions that require names, and a pending bucket
+        that promises nothing until it becomes something. Tonight's ledger
+        carries that design's weight quietly, which is exactly how it
+        should.
+        
+        One final sentence belongs in the ledger before it locks,
+        and it is the sentence the identity team's hash has earned
+        the right to say - the count tonight is not a claim but a
+        cross-check survived, four buckets holding the entire truth
+        of the grants ledger as the rules assembled it, and the
+        morning brief will carry exactly that truth forward.
+        
+        The security morning brief will skim these buckets in the
+        order the Tuesday of Confusion taught it to read them,
+        actives first, pendings second, the rest as footnote, and
+        the reading will take seconds because the machinery took
+        milliseconds. That asymmetry, seconds of scrutiny built on
+        milliseconds of discipline, is the entire gift the rebuilt
+        ledger gives its readers, and tonight it is given again.
+
+        METHOD: for EACH entity below, derive its answer from the rules.
+        Track state step by step in plain text. Entities you do not manage
+        NEVER count. Check deadline/budget rules BEFORE finalizing.
+
+        Entities (one line each, id then question):
+        - a1_state: A1 requested the standard role with BOTH manager and security approvals present — standard grants require both, and both arrived; outcome at 16:00 review? (granted, pending, expired, revoked) [answer format: a single word in quotes]
+        - a2_state: A2 requested the standard role with only the manager approval in, security still missing — standard grants wait until both approvals land; outcome? [answer format: a single word in quotes]
+        - a3_state: A3 used break-glass at 09:00 — break-glass grants immediately and expires after 4 hours, and the 16:00 review is past 14:00; outcome? [answer format: a single word in quotes]
+        - a4_state: A4 used break-glass at 14:30 — break-glass expires after 4 hours and the 16:00 review sits inside the 18:30 boundary; outcome? [answer format: a single word in quotes]
+        - a5_state: A5 has been unresolved for 34 hours — the audit rule revokes anything still open past 24 hours; outcome? [answer format: a single word in quotes]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 5 lines,
+        one per entity above, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines. No JSON. No explanations.
+      model_overrides: { temperature: 0.1, max_tokens: 1280 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-08.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s02_fix_1
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json check ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-08"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.solve.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage solve --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-08"
+              working_dir: "."
+              fail_on_error: false
+
+    s02_fix_1:
+      generative_entity: "${models.m_light}"
+      prompt: |
+        ROLE: correction specialist. Entity table failed checks. Fix rows.
+
+        Original task:
+                You are the access administrator who closes out the identity-and-access
+        review each afternoon at four o'clock, and today's review covers five
+        access requests that arrived since yesterday's cutoff. The access policy
+        was rewritten last month after the audit finding, and although the new
+        text is shorter, every clause in it decides somebody's afternoon, so you
+        re-read it before touching the queue. Here is the policy as it stands,
+        followed by today's five requests.
+        
+        Standard role access — the ordinary permission sets engineers request
+        through the portal — requires two approvals before it grants: the
+        requester's manager and the security team, both, explicitly. One approval
+        alone, from either side, leaves the request pending; it grants nothing
+        until the second approval lands, no matter how long it waits. There is no
+        timeout on pending standard requests — they sit until both approvals
+        arrive or the requester withdraws.
+        
+        Break-glass access is the emergency path, used when production is down
+        and someone needs rights now. A break-glass request grants immediately,
+        the moment it is submitted, with zero approvals — that is its entire
+        purpose. The price is an expiry: break-glass access lasts exactly four
+        hours from the moment of grant, then expires on its own. At the afternoon
+        review, a break-glass grant is either still active, if four hours have
+        not elapsed, or expired, if they have.
+        
+        The audit rule applies to everything still open. Any access request that
+        remains unresolved — pending, unexpired, unfinished — for more than
+        twenty-four hours after submission is automatically revoked by the audit
+        job and must be re-requested from scratch. Twenty-four hours, wall clock,
+        from submission, no exceptions and no extensions.
+        
+        Now today's queue, five requests, in arrival order.
+        
+        Request A1 came in yesterday at 10:00: an engineer moving to the payments
+        team asked for the standard deploy role. By this morning her manager had
+        approved, and at 11:20 today the security team approved as well. Two
+        approvals, both present, standard role granted. As of the 16:00 review it
+        stands granted and active.
+        
+        Request A2 arrived at 13:00 today: a contractor requesting the standard
+        reporting role. His manager approved within the hour — responsive bunch —
+        but security has not actioned it and shows no sign of doing so before the
+        review. One approval of two: the request grants nothing and remains
+        pending. It was submitted only three hours ago, so the twenty-four-hour
+        audit rule is nowhere near triggered.
+        
+        Request A3 is break-glass: at 09:00 this morning, with the checkout
+        service hard down, the incident commander grabbed emergency production
+        access. It granted instantly, as break-glass does, was used to roll back
+        the bad deploy, and then did its job. Four hours from 09:00 is 13:00, and
+        the review clock now reads 16:00 — well past. The grant expired on its
+        own at 13:00, so as of this review it is expired, which is the system
+        working exactly as designed, not a failure.
+        
+        Request A4 is also break-glass: at 14:30 today, during a database failover
+        that the standard change process was too slow for, a senior engineer took
+        emergency database access. Granted instantly at 14:30, four hours of life
+        puts expiry at 18:30, and the review at 16:00 is inside that window. Still
+        active.
+        
+        Request A5 is the awkward one. At 06:00 yesterday morning — thirty-four
+        hours ago by this review — a departing-team member requested elevated
+        rights to complete a handover migration, the kind that needs both
+        approvals. The manager approved at 07:00 yesterday. Security never did,
+        and the requester went offline mid-migration assuming it would resolve
+        itself. It did not: one approval of two means the request has sat
+        unresolved since 06:00 yesterday, and thirty-four hours exceeds the
+        twenty-four-hour audit limit. The audit job has therefore revoked A5, and
+        it will need a fresh request if the migration is ever to finish.
+        
+        One system boundary for the record: the building's physical badge office
+        processes door-access requests through its own queue, which you do not
+        manage, and two of its approvals show in this morning's email thread.
+        Badge grants are not system access, never were, and do not appear in
+        these counts.
+        
+        The review needs, as of 16:00 today: how many of the five requests
+        currently stand as active grants, how many expired, how many were revoked
+        by the audit rule, and how many are simply still pending.
+        
+        The grants ledger's reconciliation discipline comes from an incident
+        that the security team still calls the Tuesday of Confusion. Before the
+        current rules, access was granted through a tangle of team aliases and
+        direct assignments, and when an auditor asked a simple question — who
+        can touch this system right now — the honest answer took nine days to
+        assemble and was wrong twice on the way. The remediation was
+        unglamorous and absolute — every grant becomes a ledger row with an
+        owner, a scope, a start, and a term; expirations revoke automatically
+        at term; explicit revocations by an administrator kill a grant on the
+        spot regardless of remaining term; and requests that nobody has
+        approved yet sit in a pending state that grants nothing at all.
+        
+        Your audit tonight walked the ledger row by row against the events
+        feed that feeds it. Each expiration you recorded came from the term
+        already passed, each revocation from a named administrator's action
+        earlier in the week, each active grant from a term still running and
+        no revocation on record. The pending rows you counted twice, since
+        pending is the state most often misread — a pending grant confers no
+        access today, no matter how certain its approval looks, and the
+        morning review has learned to ask about pendings before anything
+        else.
+        
+        The identity stack around the ledger keeps its own busy ledger of
+        numbers that must not bleed into yours. The directory service you do
+        not manage synchronizes group memberships from the hr system hourly,
+        and its sync counts appear on a dashboard with impressive sparklines.
+        Multi-factor enrollment campaigns run their own reports, complete with
+        nag-email schedules. And a service-account inventory project has been
+        drafting its census for three quarters now, promising eventually to
+        label every nonhuman identity — worthwhile work, watched closely, and
+        wholly invisible to the human grants you are counting tonight.
+        
+        A note on the expired grants before the ledger closes, because
+        expiration is the state that teaches patience. Every expired row in
+        tonight's count was once an active grant someone requested in good
+        faith for a project with a name and a deadline, and the term that
+        now reads past-due is the same term that once read generous. The
+        automatic revocation at term is the system being kind to everyone —
+        kind to the audit, which never has to ask why stale access lives,
+        and kind to the grant's owner, who never has to remember to close
+        the door behind themselves. The morning's access review will skim
+        these expirations in seconds precisely because the machinery handled
+        them in milliseconds.
+        
+        One final cross-check completes the ritual. The ledger's own
+        checksum — a hash the identity system maintains over active grants —
+        must match the count you tallied by hand, and you run it before
+        filing. A mismatch would mean rows moved between your read and your
+        report, which at this hour is either latency or something worth
+        waking someone about. The hash matches. The ledger closes with its
+        four buckets settled, and the security morning brief will carry
+        exactly the state the rules produced.
+        
+        The audit committee's stake in tonight's numbers is worth a closing
+        thought, because the ledger's four buckets are the entire answer to
+        the question that once took nine days. When the auditors arrive next
+        quarter they will ask it again — who can touch this system, and why —
+        and the answer will be read straight from buckets like tonight's,
+        row by row, term by term, revocation by revocation. What took nine
+        days and two wrong answers now takes a query and a patient reading,
+        and the difference is not technology but rule design — states that
+        cannot flex, transitions that require names, and a pending bucket
+        that promises nothing until it becomes something. Tonight's ledger
+        carries that design's weight quietly, which is exactly how it
+        should.
+        
+        One final sentence belongs in the ledger before it locks,
+        and it is the sentence the identity team's hash has earned
+        the right to say - the count tonight is not a claim but a
+        cross-check survived, four buckets holding the entire truth
+        of the grants ledger as the rules assembled it, and the
+        morning brief will carry exactly that truth forward.
+        
+        The security morning brief will skim these buckets in the
+        order the Tuesday of Confusion taught it to read them,
+        actives first, pendings second, the rest as footnote, and
+        the reading will take seconds because the machinery took
+        milliseconds. That asymmetry, seconds of scrutiny built on
+        milliseconds of discipline, is the entire gift the rebuilt
+        ledger gives its readers, and tonight it is given again.
+
+        Failed cells (id + your observed value, correct values withheld):
+        {{bookmarks.cell_feedback}}
+
+        Prior table:
+        {{bookmarks.table}}
+
+        METHOD: re-read the task rules above, then re-derive each failed
+        entity. Use these exact entity ids:
+
+        - a1_state: A1 requested the standard role with BOTH manager and security approvals present — standard grants require both, and both arrived; outcome at 16:00 review? (granted, pending, expired, revoked) [answer format: a single word in quotes]
+        - a2_state: A2 requested the standard role with only the manager approval in, security still missing — standard grants wait until both approvals land; outcome? [answer format: a single word in quotes]
+        - a3_state: A3 used break-glass at 09:00 — break-glass grants immediately and expires after 4 hours, and the 16:00 review is past 14:00; outcome? [answer format: a single word in quotes]
+        - a4_state: A4 used break-glass at 14:30 — break-glass expires after 4 hours and the 16:00 review sits inside the 18:30 boundary; outcome? [answer format: a single word in quotes]
+        - a5_state: A5 has been unresolved for 34 hours — the audit rule revokes anything still open past 24 hours; outcome? [answer format: a single word in quotes]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 5 lines,
+        one per entity, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines.
+      model_overrides: { temperature: 0.0, max_tokens: 1600 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/table-feedback.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-08.yml"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$cell_feedback"
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-08.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s03_fix_2
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json fix_1 ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-08"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.fix_1.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage fix_1 --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-08"
+              working_dir: "."
+              fail_on_error: false
+
+    s03_fix_2:
+      generative_entity: "${models.m_heavy}"
+      prompt: |
+        ROLE: escalation solver. Two attempts wrong. Rebuild table from scratch.
+
+        Original task:
+                You are the access administrator who closes out the identity-and-access
+        review each afternoon at four o'clock, and today's review covers five
+        access requests that arrived since yesterday's cutoff. The access policy
+        was rewritten last month after the audit finding, and although the new
+        text is shorter, every clause in it decides somebody's afternoon, so you
+        re-read it before touching the queue. Here is the policy as it stands,
+        followed by today's five requests.
+        
+        Standard role access — the ordinary permission sets engineers request
+        through the portal — requires two approvals before it grants: the
+        requester's manager and the security team, both, explicitly. One approval
+        alone, from either side, leaves the request pending; it grants nothing
+        until the second approval lands, no matter how long it waits. There is no
+        timeout on pending standard requests — they sit until both approvals
+        arrive or the requester withdraws.
+        
+        Break-glass access is the emergency path, used when production is down
+        and someone needs rights now. A break-glass request grants immediately,
+        the moment it is submitted, with zero approvals — that is its entire
+        purpose. The price is an expiry: break-glass access lasts exactly four
+        hours from the moment of grant, then expires on its own. At the afternoon
+        review, a break-glass grant is either still active, if four hours have
+        not elapsed, or expired, if they have.
+        
+        The audit rule applies to everything still open. Any access request that
+        remains unresolved — pending, unexpired, unfinished — for more than
+        twenty-four hours after submission is automatically revoked by the audit
+        job and must be re-requested from scratch. Twenty-four hours, wall clock,
+        from submission, no exceptions and no extensions.
+        
+        Now today's queue, five requests, in arrival order.
+        
+        Request A1 came in yesterday at 10:00: an engineer moving to the payments
+        team asked for the standard deploy role. By this morning her manager had
+        approved, and at 11:20 today the security team approved as well. Two
+        approvals, both present, standard role granted. As of the 16:00 review it
+        stands granted and active.
+        
+        Request A2 arrived at 13:00 today: a contractor requesting the standard
+        reporting role. His manager approved within the hour — responsive bunch —
+        but security has not actioned it and shows no sign of doing so before the
+        review. One approval of two: the request grants nothing and remains
+        pending. It was submitted only three hours ago, so the twenty-four-hour
+        audit rule is nowhere near triggered.
+        
+        Request A3 is break-glass: at 09:00 this morning, with the checkout
+        service hard down, the incident commander grabbed emergency production
+        access. It granted instantly, as break-glass does, was used to roll back
+        the bad deploy, and then did its job. Four hours from 09:00 is 13:00, and
+        the review clock now reads 16:00 — well past. The grant expired on its
+        own at 13:00, so as of this review it is expired, which is the system
+        working exactly as designed, not a failure.
+        
+        Request A4 is also break-glass: at 14:30 today, during a database failover
+        that the standard change process was too slow for, a senior engineer took
+        emergency database access. Granted instantly at 14:30, four hours of life
+        puts expiry at 18:30, and the review at 16:00 is inside that window. Still
+        active.
+        
+        Request A5 is the awkward one. At 06:00 yesterday morning — thirty-four
+        hours ago by this review — a departing-team member requested elevated
+        rights to complete a handover migration, the kind that needs both
+        approvals. The manager approved at 07:00 yesterday. Security never did,
+        and the requester went offline mid-migration assuming it would resolve
+        itself. It did not: one approval of two means the request has sat
+        unresolved since 06:00 yesterday, and thirty-four hours exceeds the
+        twenty-four-hour audit limit. The audit job has therefore revoked A5, and
+        it will need a fresh request if the migration is ever to finish.
+        
+        One system boundary for the record: the building's physical badge office
+        processes door-access requests through its own queue, which you do not
+        manage, and two of its approvals show in this morning's email thread.
+        Badge grants are not system access, never were, and do not appear in
+        these counts.
+        
+        The review needs, as of 16:00 today: how many of the five requests
+        currently stand as active grants, how many expired, how many were revoked
+        by the audit rule, and how many are simply still pending.
+        
+        The grants ledger's reconciliation discipline comes from an incident
+        that the security team still calls the Tuesday of Confusion. Before the
+        current rules, access was granted through a tangle of team aliases and
+        direct assignments, and when an auditor asked a simple question — who
+        can touch this system right now — the honest answer took nine days to
+        assemble and was wrong twice on the way. The remediation was
+        unglamorous and absolute — every grant becomes a ledger row with an
+        owner, a scope, a start, and a term; expirations revoke automatically
+        at term; explicit revocations by an administrator kill a grant on the
+        spot regardless of remaining term; and requests that nobody has
+        approved yet sit in a pending state that grants nothing at all.
+        
+        Your audit tonight walked the ledger row by row against the events
+        feed that feeds it. Each expiration you recorded came from the term
+        already passed, each revocation from a named administrator's action
+        earlier in the week, each active grant from a term still running and
+        no revocation on record. The pending rows you counted twice, since
+        pending is the state most often misread — a pending grant confers no
+        access today, no matter how certain its approval looks, and the
+        morning review has learned to ask about pendings before anything
+        else.
+        
+        The identity stack around the ledger keeps its own busy ledger of
+        numbers that must not bleed into yours. The directory service you do
+        not manage synchronizes group memberships from the hr system hourly,
+        and its sync counts appear on a dashboard with impressive sparklines.
+        Multi-factor enrollment campaigns run their own reports, complete with
+        nag-email schedules. And a service-account inventory project has been
+        drafting its census for three quarters now, promising eventually to
+        label every nonhuman identity — worthwhile work, watched closely, and
+        wholly invisible to the human grants you are counting tonight.
+        
+        A note on the expired grants before the ledger closes, because
+        expiration is the state that teaches patience. Every expired row in
+        tonight's count was once an active grant someone requested in good
+        faith for a project with a name and a deadline, and the term that
+        now reads past-due is the same term that once read generous. The
+        automatic revocation at term is the system being kind to everyone —
+        kind to the audit, which never has to ask why stale access lives,
+        and kind to the grant's owner, who never has to remember to close
+        the door behind themselves. The morning's access review will skim
+        these expirations in seconds precisely because the machinery handled
+        them in milliseconds.
+        
+        One final cross-check completes the ritual. The ledger's own
+        checksum — a hash the identity system maintains over active grants —
+        must match the count you tallied by hand, and you run it before
+        filing. A mismatch would mean rows moved between your read and your
+        report, which at this hour is either latency or something worth
+        waking someone about. The hash matches. The ledger closes with its
+        four buckets settled, and the security morning brief will carry
+        exactly the state the rules produced.
+        
+        The audit committee's stake in tonight's numbers is worth a closing
+        thought, because the ledger's four buckets are the entire answer to
+        the question that once took nine days. When the auditors arrive next
+        quarter they will ask it again — who can touch this system, and why —
+        and the answer will be read straight from buckets like tonight's,
+        row by row, term by term, revocation by revocation. What took nine
+        days and two wrong answers now takes a query and a patient reading,
+        and the difference is not technology but rule design — states that
+        cannot flex, transitions that require names, and a pending bucket
+        that promises nothing until it becomes something. Tonight's ledger
+        carries that design's weight quietly, which is exactly how it
+        should.
+        
+        One final sentence belongs in the ledger before it locks,
+        and it is the sentence the identity team's hash has earned
+        the right to say - the count tonight is not a claim but a
+        cross-check survived, four buckets holding the entire truth
+        of the grants ledger as the rules assembled it, and the
+        morning brief will carry exactly that truth forward.
+        
+        The security morning brief will skim these buckets in the
+        order the Tuesday of Confusion taught it to read them,
+        actives first, pendings second, the rest as footnote, and
+        the reading will take seconds because the machinery took
+        milliseconds. That asymmetry, seconds of scrutiny built on
+        milliseconds of discipline, is the entire gift the rebuilt
+        ledger gives its readers, and tonight it is given again.
+
+        Failed cells (id + observed, withheld correct):
+        {{bookmarks.cell_feedback}}
+
+        METHOD: discard prior attempts. Re-derive EVERY entity answer from
+        the rules. Use these exact entity ids:
+
+        - a1_state: A1 requested the standard role with BOTH manager and security approvals present — standard grants require both, and both arrived; outcome at 16:00 review? (granted, pending, expired, revoked) [answer format: a single word in quotes]
+        - a2_state: A2 requested the standard role with only the manager approval in, security still missing — standard grants wait until both approvals land; outcome? [answer format: a single word in quotes]
+        - a3_state: A3 used break-glass at 09:00 — break-glass grants immediately and expires after 4 hours, and the 16:00 review is past 14:00; outcome? [answer format: a single word in quotes]
+        - a4_state: A4 used break-glass at 14:30 — break-glass expires after 4 hours and the 16:00 review sits inside the 18:30 boundary; outcome? [answer format: a single word in quotes]
+        - a5_state: A5 has been unresolved for 34 hours — the audit rule revokes anything still open past 24 hours; outcome? [answer format: a single word in quotes]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 5 lines,
+        one per entity, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines. No prose summaries.
+      model_overrides: { temperature: 0.0, max_tokens: 1600 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/table-feedback.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-08.yml"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$cell_feedback"
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-08.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json fix_2 ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-08"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.fix_2.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage fix_2 --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-08"
+              working_dir: "."
+              fail_on_error: false
+
+    s04_aggregate:
+      generative_entity: "${models.m_light}"
+      prompt: "deterministic-aggregate-noop"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/aggregate.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-08.yml --table-result ./docs/benchmarks/outputs/output/ha-table-result.json --out ./docs/benchmarks/outputs/output/ha-final.json"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-deterministic.py --artifact ./docs/benchmarks/outputs/output/ha-final.json --criteria /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-08.yml --out ./docs/benchmarks/outputs/output/ha-final-check.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s05_judge
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-final-check.json final ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-08"
+              working_dir: "."
+              fail_on_error: false
+          - skip_step: true
+
+    s05_judge:
+      generative_entity: "${models.m_judge}"
+      prompt: |
+        ROLE: blind auditor. See only task + result. No author knowledge.
+
+        Task objective: Apply dual-approval, break-glass expiry, and 24-hour audit-revocation rules to access requests.
+        Result: {{bookmarks.final_json}}
+
+        Answer EXACTLY 6 lines, nothing else:
+        KEYS: yes or no
+        VALUES: yes or no
+        FORMAT: yes or no
+        VERDICT: PASS or FAIL
+        REASON: one sentence
+        SCORE: 1-10
+
+        VERDICT must be PASS only if all three of KEYS, VALUES, FORMAT are yes.
+      model_overrides: { temperature: 0.0, max_tokens: 160 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/output/ha-final.json"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$final_json"
+        after_step_succeeds:
+          - save_to:
+              - "$verdict"
+              - "./docs/benchmarks/outputs/output/ha-verdict.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-judge.py ./docs/benchmarks/outputs/output/ha-verdict.txt ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-08"
+              working_dir: "."
+              fail_on_error: false
+
+    s06_end_fail:
+      generative_entity: "${models.m_light}"
+      prompt: "FAIL"
+      model_overrides: { temperature: 0.0, max_tokens: 8 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/failflag.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --final-check ./docs/benchmarks/outputs/output/ha-final-check.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s07_fail_trace
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s08_audit
+          - skip_step: true
+
+    s07_fail_trace:
+      generative_entity: "${models.m_light}"
+      prompt: "trace-only"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl end_fail fail case=hb-08"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s08_audit
+
+    s08_audit:
+      generative_entity: "${models.m_light}"
+      prompt: "leak-audit-noop"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/leak-audit.py --run-dir ./docs/benchmarks/outputs/output --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-08.yml"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s09_audit_pass
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s10_audit_leak
+          - skip_step: true
+
+    s09_audit_pass:
+      generative_entity: "${models.m_light}"
+      prompt: "audit-pass-trace"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl audit pass case=hb-08"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s_end
+
+    s10_audit_leak:
+      generative_entity: "${models.m_light}"
+      prompt: "audit-leak-trace"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl audit fail leak=true case=hb-08"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s_end
+
+    s_end:
+      generative_entity: "${models.m_light}"
+      prompt: "term"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - skip_step: true

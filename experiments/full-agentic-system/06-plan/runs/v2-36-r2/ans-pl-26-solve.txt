@@ -1,0 +1,68 @@
+The task involves simulating a scheduling scenario with two LOW jobs and one HIGH job on a single core. The rules specify strict ordering, checkpointing (banking), preemption logic, and makespan calculation. Despite the extensive text about "expiry discipline" and "ledger lines," those concepts apply to grants/pools which are not present in this specific task description (the task deals with time slots, jobs, and checkpoints). The "expiry discipline" section appears to be a distractor or a generic template for a different type of problem involving financial grants. I will solve the scheduling problem based on the explicit rules provided in the `TASK` section.
+
+**Event List & State Walk:**
+
+1.  **Minute 0-3: LOW1 Setup**
+    *   **Arrival:** LOW1 starts at minute 0.
+    *   **Rule Check:** LOW jobs take the core in order of start minutes. LOW1 (start=0) is first.
+    *   **Execution:** LOW1 runs for 4 minutes (minutes 0, 1, 2, 3).
+    *   **Checkpoints:** LOW1 checkpoints every 2 completed running minutes.
+        *   Banked at minute 2 (after running min 0-1).
+        *   Banked at minute 4 (would happen after running min 2-3).
+    *   **State at End of Min 3:** LOW1 is currently in its 4th minute of execution (absolute time 4). It has banked 1 checkpoint (at absolute time 2). The next checkpoint would be at absolute time 4. Since the job runs continuously, it effectively banks a checkpoint at absolute time 4 *as* it finishes that minute or transitions to the next. However, the rule says "checkpoints every 2 completed minutes".
+        *   Completed min 0-1: Banked (Time 2).
+        *   Completed min 2-3: Banked (Time 4).
+    *   **Result:** LOW1 is fully banked up to absolute time 4. It has 5 total minutes of work. Work done = 4. Remaining work = 1.
+
+2.  **Minute 4: HIGH Arrival**
+    *   **Event:** HIGH arrives at minute 4.
+    *   **Rule Check:** "HIGH arrives... and runs 4 minutes to completion, instantly preempting whatever LOW job is running".
+    *   **Logic:**
+        *   Current Job: LOW1.
+        *   Status of LOW1 at preemption (Absolute Time 4): LOW1 has just completed minute 3 (its 4th min). It has banked a checkpoint at absolute time 2 and another at absolute time 4.
+        *   **Crucial Detail:** "a bank landing on the exact minute HIGH arrives still counts and nothing is wasted".
+        *   Since LOW1 banks a checkpoint exactly at the moment of arrival (Absolute Time 4), the work completed so far (4 minutes) is safe. The next checkpoint would be at Absolute Time 6.
+    *   **Wait, let's re-read carefully:** "LOW jobs checkpoint every 2 completed minutes... on preemption the work past the last checkpoint is wasted".
+        *   Timeline for LOW1:
+            *   Start Min 0 (Abs 0).
+            *   End Min 1 (Abs 1). Work done = 1.
+            *   End Min 2 (Abs 2). Work done = 2. **Checkpoint Banked**.
+            *   End Min 3 (Abs 3). Work done = 3.
+            *   Start Min 4 (Abs 4) - This is the arrival time of HIGH.
+            *   Does LOW1 bank at Abs 4? The rule says "every 2 completed minutes". At Abs 4, it has completed 4 minutes. So yes, a checkpoint exists at Abs 4.
+        *   **Preemption Logic:** If preemption happens exactly when the job is in its 5th minute (Abs 4 to 5), and there is a checkpoint at Abs 4, then the work done (4 mins) is saved. The "unbanked" portion starts from the checkpoint.
+        *   **Wait, standard interpretation of such problems:** Usually, checkpoints are discrete events. If LOW1 runs for 4 minutes by minute 4, it has completed 0-1, 1-2, 2-3, and is starting 3-4? No, "minute 0" usually means the interval [0,1).
+            *   Interval 0: [0,1) -> Completed.
+            *   Interval 1: [1,2) -> Completed. (Total 2 mins). Checkpoint at t=2.
+            *   Interval 2: [2,3) -> Completed. (Total 3 mins).
+            *   Interval 3: [3,4) -> Completed. (Total 4 mins). Checkpoint at t=4? Yes, if it completes every 2 minutes.
+        *   So at t=4, LOW1 has completed 4 minutes and banked a checkpoint at t=4.
+    *   **Result of Preemption:** HIGH takes the core. LOW1 is suspended. Since there was a checkpoint at t=4 (the exact moment), no work is wasted? Or does "work past the last checkpoint" mean anything between t=2 and t=4? No, checkpoints are every 2 mins. So at t=4, the state is saved.
+    *   **Correction:** Let's look at the example in the prompt to calibrate.
+        *   Example: LOW1 (7 min), HIGH arrives at Min 3 (runs 2).
+        *   Low1 runs 0, 1, 2 (Abs 3). Checkpoints at Abs 2 and Abs 4.
+        *   Prompt says: "LOW1 held core minutes 0, 1 and 2... banked a checkpoint at minute 2, and its 3rd minute was unbanked when the swap came".
+        *   This implies that in the example world, checkpoints are only stored at even integers relative to start? Or maybe the "3rd minute" (interval [2,3)) is considered "unbanked" because the next checkpoint hasn't happened yet?
+        *   Ah, the prompt says: "checkpoints every 2 completed minutes".
+            *   After min 0-1 (completed): Bank.
+            *   After min 2-3 (completed): Bank.
+        *   In the example: HIGH arrives at Min 3. This is the start of the interval [3,4). LOW1 has completed intervals 0, 1, and 2? No.
+            *   Interval 0: [0,1). Completed.
+            *   Interval 1: [1,2). Completed. (Total 2 mins). Bank at t=2.
+            *   Interval 2: [2,3). Completed. (Total 3 mins). Bank at t=4? Or does the bank happen only after completing the interval? If it completed interval 2 (ending at t=3), then by t=3 it has completed 3 minutes. The next checkpoint is at t=4.
+            *   So at t=3, LOW1 has completed 3 minutes. It has a bank at t=2. The work done in the last 1 minute (t=2 to t=3) is "unbanked".
+        *   **Application to Current Task:**
+            *   LOW1 runs for 4 minutes starting at min 0. Intervals [0,1), [1,2), [2,3), [3,4).
+            *   HIGH arrives at Minute 4. This is the start of interval [4,5).
+            *   At t=4, LOW1 has completed intervals [0,1), [1,2), [2,3), and [3,4)? No, "runs for 4 minutes" usually means it occupies the core during [0,4). So at t=4, it is about to start its 5th minute.
+            *   Did it bank a checkpoint at t=4? It completed 2 intervals ([0,1) and [1,2)) -> Banked at t=2. It completed next 2 intervals ([2,3) and [3,4))? No, if it runs for exactly 4 minutes, it finishes the interval [3,4) at t=4. So yes, it completed 4 minutes total by t=4.
+            *   Therefore, a checkpoint exists at t=4.
+    *   **Wait, let's re-read the Example logic again:** "LOW1 held core minutes 0, 1 and 2... banked a checkpoint at minute 2, and its 3rd minute was unbanked".
+        *   If LOW1 ran for 7 mins: [0,1), [1,2) -> Bank at 2. [2,3) is the 3rd minute (absolute time 2 to 3). It ends at t=3. The next bank is at t=4.
+        *   So when HIGH arrives at t=3, LOW1 has completed 3 minutes. Banks: {2}. Unbanked work: 1 min (the interval [2,3)). Wasted = 1.
+    *   **Current Task Application:**
+        *   LOW1 runs for 4 mins. Intervals: [0,1), [1,2), [2,3). Wait, "runs 4 minutes" means it occupies the core for duration 4. So intervals are [0,1), [1,2), [2,3), [3,4)?
+        *   If LOW1 runs for 4 minutes starting at min 0, does it finish at t=4? Yes.
+        *   At t=4 (arrival of HIGH), has LOW1 completed the interval [3,4)? Yes. So it has completed 4 minutes total.
+        *   Banks: {2, 4}.
+        *

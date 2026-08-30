@@ -1,0 +1,49 @@
+The previous attempt failed because it did not strictly follow the simulation logic defined in the "orientation" (rehearsal) section to derive the correct state for tonight's numbers, effectively pattern-matching a generic solution instead of walking the specific event list provided in the task contract. The core instruction is to apply rules event-by-event, respecting preemption, checkpointing, and wait-queue ordering exactly as demonstrated in the rehearsal example, then output only the requested JSON keys with values derived from that walk.
+
+**Phase 1: Event List & Rule Application Logic (Mental Walk)**
+1.  **Event T=0**: `LOW1` starts (Duration 5). State: Running LOW1 (T=0-5).
+2.  **Event T=1**: `LOW2` arrives (Duration 2). Queue: [LOW2]. Core busy with LOW1.
+3.  **Event T=2**: `LOW1` completes Minute 1 of its run. Total Run Time = 1m. Checkpoint? No (needs 2 mins). State: Running LOW1 (T=2-5 remaining). Queue: [LOW2].
+4.  **Event T=3**: `HIGH` arrives (Duration 8). Preemption occurs immediately at the start of Minute 3 for LOW1.
+    *   **Rule Application**: "on preemption the work past the last checkpoint is wasted". Last checkpoint was None. Wasted = 0? Wait, let's re-read the orientation carefully: "LOW1 held the core from minute 0, banked a checkpoint at minute 2... its next minute was unbanked when the swap came, so 1 minute wasted."
+    *   **Correction on Orientation Logic**: The orientation implies checkpoints happen at specific intervals relative to the job's *remaining* or *total* run? "LOW1 runs 5 minutes... banked a checkpoint at minute 2". This means after completing Minute 2 of its run.
+    *   **Re-evaluating Tonight's Walk with Orientation Logic**:
+        *   T=0: LOW1 starts. (Run Time = 0).
+        *   T=1: LOW1 Run Time = 1. Checkpoint? No.
+        *   T=2: LOW1 Run Time = 2. **Checkpoint Established**.
+        *   T=3: HIGH arrives. Preemption happens at the start of Minute 3 (transition from T=2 to T=3). The job has completed exactly 2 minutes. Since a checkpoint landed "the instant a LOW job finishes its 2nd running minute", and this instant is T=3, the work up to T=3 is saved.
+        *   **Orientation Clue**: "LOW1 runs 5 minutes... banked a checkpoint at minute 2... next minute was unbanked when swap came". This phrasing suggests the checkpoint happens *at* the end of Minute 2, but if the preemption hits exactly then, is it saved? The orientation says "1 minute wasted" in that specific scenario.
+        *   **Let's trace the Orientation Scenario to derive the rule**:
+            *   LOW1 (5m) starts T=0.
+            *   LOW2 (2m) starts T=1.
+            *   HIGH arrives T=3.
+            *   At T=3, LOW1 has run for 2 minutes (T=0->1, T=1->2). It is about to run Minute 3.
+            *   Orientation says: "LOW1 held core... banked checkpoint at minute 2". This implies the checkpoint was recorded *after* Minute 2 finished.
+            *   Then it says "its next minute was unbanked when swap came, so 1 minute wasted." The "next minute" is Minute 3 (T=3->4).
+            *   Therefore: If preemption happens while a job is *waiting to start* its next minute after a checkpoint, that upcoming minute is wasted. But if the preemption happens exactly when the previous minute finishes?
+            *   Actually, let's look at the math: "LOW1 ran minutes 0-2... swap came... 1 minute wasted." Total duration was 5. It finished Minute 3 and 4 (partially)? No, it resumed later.
+            *   Let's assume the standard interpretation of such systems based on the text: Checkpoint is saved at T=2 (end of Min 2). Preemption at T=3 (start of Min 3). The work "past the last checkpoint" refers to any execution that occurred after the checkpoint was set. If the checkpoint sets *at* the instant the minute finishes, and preemption happens immediately, there is no "work past".
+            *   **CRITICAL RE-READ**: "a checkpoint lands the instant a LOW job finishes its 2nd running minute... so a bank that lands on the arrival minute is safe and nothing is wasted". This contradicts the orientation story's "1 minute wasted" unless the timing in the orientation was different.
+            *   **Resolution**: The text explicitly says: "**so a bank that lands on the arrival minute is safe and nothing is wasted**". In tonight's scenario, LOW1 finishes Minute 2 exactly at T=3 (since it started at T=0). HIGH arrives at T=3. Thus, the checkpoint lands *on* the arrival minute. Per the explicit rule text for tonight: "**nothing is wasted**". The orientation story might have had a different timing or was illustrating a case where the bank didn't land exactly on the arrival (e.g., if it arrived 0.1s later), but tonight's numbers align perfectly with the "safe" condition described in the rules section.
+            *   **Wait for LOW2**: At T=3, LOW1 is preempted. LOW2 was waiting since T=1. Queue order: LOW2 (Start Min=1) vs fresh? No, LOW1 resumed later. But wait, LOW1 starts at 0. LOW2 starts at 1. When both are waiting?
+            *   Let's trace the core usage after HIGH finishes.
+            *   **HIGH Execution**: Runs T=3 to T=11 (8 mins). Core busy with HIGH. Nothing else runs.
+            *   **After HIGH**: At T=11, HIGH finishes. Queue check: LOW2 was waiting since T=1. Is LOW1 in the queue? Yes, it finished 4 minutes of its 5-minute task before preemption (T=0->3). It needs to resume 1 more minute (Total 5).
+            *   **Queue Ordering**: "LOW jobs take the core in order of their start minutes". LOW1 Start=0. LOW2 Start=1. LOW1 has priority.
+            *   **Resume Logic**: "a resumed LOW outranks a fresh one at any tie" -> Not relevant here (Start times differ). "a LOW whose start minute arrives while the core is busy simply waits". Both waited. Order by Start Time: LOW1 (0) > LOW2 (1).
+            *   **Core Action T=11**: Starts LOW1 (Resumed). Needs 1 minute. Runs T=11->12. Finishes at T=12.
+            *   **Next Core Action T=12**: Queue has LOW2 waiting. Starts LOW2. Needs 2 minutes. Runs T=12->14. Finishes at T=14.
+            *   **Final State**:
+                *   Makespan: End of last job = T=14. First start was T=0. Duration = 14 - 0 = 14 mins? Or just the clock time of completion? "makespan counts from the first start of any job to the last finish". Start T=0, Finish T=14. Makespan = 14 minutes.
+                *   Wasted: Per rule text ("bank lands on arrival minute is safe"), Wasted = 0.
+                *   Order: LOW1 finished at T=12. LOW2 finished at T=14. Order: ["LOW1", "LOW2"].
+
+Let's double check the orientation math vs tonight to ensure no hidden trick.
+Orientation:
+- LOW1 (5m) starts 0. Runs 0,1,2. Checkpoint at end of run 2 (T=3). HIGH arrives T=3. Text says "bank lands on arrival minute is safe". But then it says "LOW1 held core... banked checkpoint at minute 2... next minute was unbanked... so 1 minute wasted."
+- This implies a contradiction in my reading or the text. Let's re-read carefully: "**so a bank that lands on the arrival minute is safe and nothing is wasted**".
+- In the orientation story description: "LOW1 held the core from minute 0, banked a checkpoint at minute 2... its next minute was unbanked when the swap came". This implies the preemption happened *during* Minute 3 (the "next minute"), meaning the job had to execute Minute 3 before being swapped? Or does it mean the swap interrupted the start of Minute 3?
+- If the swap happens at T=3, and the checkpoint was set at the *end* of Minute 2 (which is exactly T=3), then no work in Minute 3 has been executed. Thus, nothing is wasted. The orientation text saying "1 minute wasted" seems to contradict the explicit rule block unless I am misinterpreting "minute 2".
+- **Hypothesis**: Maybe "minute 2" means the job started at T=0, finished Min 1 (T=1), finished Min 2 (T=2). So checkpoint is at T=2. HIGH arrives T=3. There is a full minute gap? No, HIGH runs "instantly preempting".
+- Let's look at the orientation numbers again: LOW1 runs 5 mins starting 0. Runs 0->1 (Min 1), 1->2 (Min 2), 2->3 (Min 3). Checkpoint after Min 2 is at T=2? Or T=3?
+- If "finishes its 2nd running minute", and it starts at 0.

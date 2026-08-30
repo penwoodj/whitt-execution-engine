@@ -1,0 +1,85 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event or claim list.*
+
+1.  **Grant Rule**: A request arriving at a non-zero pool is granted `min(ask, current_pool)`, reducing the pool by that amount; if the ask exceeds the remaining pool, the grant is partial but still counts as "granted" (never denied).
+2.  **Denial Rule**: A request arriving when the pool is exactly zero is denied and listed by ID; this state change adds an ID to the `denied` list.
+3.  **Expiry Trigger Rule**: Upon completion of a specific request (the trigger), any grant associated with that trigger expires if it was granted previously.
+4.  **Return Calculation Rule**: The expired grant returns `floor(granted_amount / 2)` tokens to the pool immediately before the next event is processed.
+5.  **Pool State Update Rule**: After every action (grant, return), the pool balance updates strictly: `new_pool = old_pool - granted + returned`.
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order.*
+
+**Initial State:** Pool = 60. Grants Map = {}. Denied List = [].
+
+1.  **Event r1 (Ask 6):**
+    *   Action: Grant `min(6, 60) = 6`.
+    *   Pool Update: $60 - 6 = 54$.
+    *   State: Pool=54, Grants={r1:6}.
+
+2.  **Event r2 (Ask 10):**
+    *   Action: Grant `min(10, 54) = 10`.
+    *   Pool Update: $54 - 10 = 44$.
+    *   State: Pool=44, Grants={r1:6, r2:10}.
+
+3.  **Event r3 (Ask 12):**
+    *   Action: Grant `min(12, 44) = 12`.
+    *   Pool Update: $44 - 12 = 32$.
+    *   State: Pool=32, Grants={r1:6, r2:10, r3:12}.
+
+4.  **Event r4 (Ask 15):**
+    *   Action: Grant `min(15, 32) = 15`.
+    *   Pool Update: $32 - 15 = 17$.
+    *   State: Pool=17, Grants={r1:6, r2:10, r3:12, r4:15}.
+
+5.  **Event r5 (Ask 19):**
+    *   Action: Grant `min(19, 17) = 17` (Partial).
+    *   Pool Update: $17 - 17 = 0$.
+    *   State: Pool=0, Grants={r1:6, r2:10, r3:12, r4:15, r5:17}.
+
+6.  **Event r6 (Ask 21):**
+    *   Action: Arrive at Pool=0. Deny.
+    *   State: Pool=0, Grants={r1:6, r2:10, r3:12, r4:15, r5:17}, Denied=[r6].
+
+7.  **Event r7 (Ask 24):**
+    *   Action: Arrive at Pool=0. Deny.
+    *   State: Pool=0, Grants={r1:6, r2:10, r3:12, r4:15, r5:17}, Denied=[r6, r7].
+
+8.  **Expiry Trigger (Request r2 completes):**
+    *   Rule: The grant for `r2` expires. Returns `floor(10 / 2) = 5`.
+    *   Action: Add 5 to pool immediately before next request.
+    *   Pool Update: $0 + 5 = 5$.
+    *   State: Pool=5, Grants={r1:6, r3:12, r4:15, r5:17} (r2 removed).
+
+9.  **Expiry Trigger (Request r3 completes):**
+    *   Rule: The grant for `r3` expires. Returns `floor(12 / 2) = 6`.
+    *   Action: Add 6 to pool immediately before next request.
+    *   Pool Update: $5 + 6 = 11$.
+    *   State: Pool=11, Grants={r1:6, r4:15, r5:17} (r3 removed).
+
+10. **Expiry Trigger (Request r4 completes):**
+    *   Rule: The grant for `r4` expires. Returns `floor(15 / 2) = 7`.
+    *   Action: Add 7 to pool immediately before next request.
+    *   Pool Update: $11 + 7 = 18$.
+    *   State: Pool=18, Grants={r1:6, r5:17} (r4 removed).
+
+11. **Expiry Trigger (Request r5 completes):**
+    *   Rule: The grant for `r5` expires. Returns `floor(17 / 2) = 8`.
+    *   Action: Add 8 to pool immediately before next request.
+    *   Pool Update: $18 + 8 = 26$.
+    *   State: Pool=26, Grants={r1:6} (r5 removed).
+
+12. **Expiry Trigger (Request r1 completes):**
+    *   Rule: The grant for `r1` expires. Returns `floor(6 / 2) = 3`.
+    *   Action: Add 3 to pool immediately before next request.
+    *   Pool Update: $26 + 3 = 29$.
+    *   State: Pool=29, Grants={} (r1 removed).
+
+**Final Totals:**
+*   **Granted Units**: Sum of all granted amounts ($6+10+12+15+17$) = 60.
+*   **Denied List**: [r6, r7].
+*   **Pool Left**: 29.
+
+```json
+{"granted_units": 60, "denied": ["r6", "r7"], "pool_left": 29}
+```

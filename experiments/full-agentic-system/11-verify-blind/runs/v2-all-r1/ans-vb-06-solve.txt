@@ -1,0 +1,78 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event or claim list.*
+
+1.  **Grant Rule**: A request arriving at a non-zero pool is granted `min(ask, current_pool)`, reducing the pool by that amount; if `current_pool` becomes zero after this grant, the next request will be denied.
+2.  **Denial Rule**: A request arriving when the pool is exactly zero is denied (listed by ID); a request arriving at a non-zero pool is never denied, even if the ask exceeds the remaining balance.
+3.  **Expiry Trigger Rule**: Upon completion of request `rN`, any grant associated with `r(N-1)` that has expired returns tokens to the pool immediately before processing `rN`.
+4.  **Return Amount Rule**: The expiry return equals `floor(granted_amount_of_expired_grant / 2)`.
+5.  **Expiry Target Rule**: Only the specific grant named by the trigger request ID (the one completing) causes a return; no other grants return.
+
+### Phase 2 LEDGER WALK
+*Applying events in strict arrival order.*
+
+**Initial State:** Pool = 60, Granted = 0, Denied = []
+
+1.  **Event r1 arrives (Ask: 6)**
+    *   Rule Applied: Grant Rule.
+    *   Action: Grant `min(6, 60) = 6`. Pool becomes `60 - 6 = 54`.
+    *   State: Pool=54, Granted=6 (r1).
+
+2.  **Event r2 arrives (Ask: 10)**
+    *   Rule Applied: Grant Rule.
+    *   Action: Grant `min(10, 54) = 10`. Pool becomes `54 - 10 = 44`.
+    *   State: Pool=44, Granted=6 (r1), 10 (r2).
+
+3.  **Event r3 arrives (Ask: 12)**
+    *   Rule Applied: Expiry Trigger Rule + Grant Rule.
+    *   Action: Request `r2` completes. Its grant expires. Return = `floor(10 / 2) = 5`. Pool becomes `44 + 5 = 49`. Then Grant `min(12, 49) = 12`. Pool becomes `49 - 12 = 37`.
+    *   State: Pool=37, Granted=6 (r1), 12 (r3).
+
+4.  **Event r4 arrives (Ask: 15)**
+    *   Rule Applied: Grant Rule.
+    *   Action: Grant `min(15, 37) = 15`. Pool becomes `37 - 15 = 22`.
+    *   State: Pool=22, Granted=6 (r1), 12 (r3), 15 (r4).
+
+5.  **Event r5 arrives (Ask: 19)**
+    *   Rule Applied: Grant Rule.
+    *   Action: Grant `min(19, 22) = 19`. Pool becomes `22 - 19 = 3`.
+    *   State: Pool=3, Granted=6 (r1), 12 (r3), 15 (r4), 19 (r5).
+
+6.  **Event r6 arrives (Ask: 21)**
+    *   Rule Applied: Expiry Trigger Rule + Grant Rule.
+    *   Action: Request `r5` completes. Its grant expires. Return = `floor(19 / 2) = 9`. Pool becomes `3 + 9 = 12`. Then Grant `min(21, 12) = 12`. Pool becomes `12 - 12 = 0`.
+    *   State: Pool=0, Granted=6 (r1), 12 (r3), 15 (r4), 12 (r6).
+
+7.  **Event r7 arrives (Ask: 24)**
+    *   Rule Applied: Denial Rule + Expiry Trigger Rule.
+    *   Action: Request `r6` completes. Its grant expires. Return = `floor(12 / 2) = 6`. Pool becomes `0 + 6 = 6`. Then Check Denial: Pool is non-zero (6). Grant `min(24, 6) = 6`. Pool becomes `6 - 6 = 0`.
+    *   State: Pool=0, Granted=6 (r1), 12 (r3), 15 (r4), 12 (r6), 6 (r7).
+
+**Final Totals:**
+*   **Granted Units**: Sum of all granted amounts = `6 + 10 + 12 + 15 + 19 + 12 + 6`? No, wait. The "granted_units" in the final JSON usually refers to the sum of successful grants *excluding* returns which are just pool adjustments. Let's re-verify the definition from the task: "31 granted... nothing denied". In the example story, they summed the partials/grants.
+    *   r1: 6
+    *   r2: 10
+    *   r3: 12
+    *   r4: 15
+    *   r5: 19
+    *   r6: 12 (partial)
+    *   r7: 6 (partial)
+    *   Total Granted = `6 + 10 + 12 + 15 + 19 + 12 + 6` = **80**.
+*   **Denied**: Empty list.
+*   **Pool Left**: 0.
+
+Let's double check the "Granted Units" logic against the example story provided in the text to ensure I'm not misinterpreting "granted".
+Example Story: Start 35. Ask 11 -> Grant 11 (Left 24). Ask 7 -> Grant 7 (Left 17). Expiry r1 returns 5 (Left 22). Ask 13 -> Grant 13 (Left 9). Total Granted = 11 + 7 + 13 = 31.
+My calculation: Start 60.
+r1: +6 (Total G=6)
+r2: +10 (Total G=16)
+r3: Expiry r2 (+5), Grant 12 (Total G=28)
+r4: +15 (Total G=43)
+r5: +19 (Total G=62)
+r6: Expiry r5 (+9), Grant 12 (Total G=74)
+r7: Expiry r6 (+6), Grant 6 (Total G=80).
+
+The math holds. The final pool is 0. No denials occurred because the expiry returns kept the pool alive for every subsequent request, including the large ones at the end.
+
+```json
+{"granted_units": 80, "denied": [], "pool_left": 0}
+```

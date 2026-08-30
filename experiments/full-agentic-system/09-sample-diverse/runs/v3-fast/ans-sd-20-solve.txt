@@ -1,0 +1,57 @@
+### Phase 1 RULE SCAN
+The following rules govern the state changes during the event stream:
+1. **Arrival/Load Rule**: A load request attempts to occupy `size` GB of free space. If sufficient free space exists, the model is loaded (state change: resident added).
+2. **Eviction Trigger Rule**: If a load cannot fit in available free space, the system identifies all unpinned residents sorted by Least-Recently-Touched (LRT) and evicts them one-by-one until enough space exists or only pinned models remain. Each eviction increments the `evictions` counter.
+3. **Deferral Rule**: If after exhausting all unpinned residents a load still cannot fit, the load is deferred. The model is not loaded, no further evictions occur for this specific request, and the load ID is recorded in the `deferred` list (state change: deferral recorded).
+4. **Touch/Recency Rule**: Upon any successful load or eviction of a resident, that model's recency is updated to "Most-Recently-Touched".
+5. **Unload Rule**: An unload request frees the specified model's size if it is currently resident. If not resident, it is a no-op (state change: free space increased).
+
+### Phase 2 LEDGER WALK
+Applying events in strict arrival order with initial state: `Free=8GB`, `Residents={}`.
+
+1. **Event**: Load A (3 GB)
+   - Check Fit: $8 \ge 3$. Fits.
+   - Action: Load A.
+   - State Update: Residents={A}, Free=5, Recency=[A].
+   - Log: `load A -> resident {A} free 5 recency {A}`
+
+2. **Event**: Load B (3 GB)
+   - Check Fit: $5 \ge 3$. Fits.
+   - Action: Load B.
+   - State Update: Residents={A, B}, Free=2, Recency=[B, A] (B touched last).
+   - Log: `load B -> resident {A, B} free 2 recency {B, A}`
+
+3. **Event**: Load C (1 GB)
+   - Check Fit: $2 \ge 1$. Fits.
+   - Action: Load C. Note: Model C is pinned.
+   - State Update: Residents={A, B, C}, Free=1, Recency=[C, B, A] (C touched last).
+   - Log: `load C -> resident {A, B, C} free 1 recency {C, B, A}`
+
+4. **Event**: Load D (7 GB)
+   - Check Fit: $1 < 7$. Does not fit.
+   - Eviction Phase: Identify unpinned residents sorted by LRT.
+     - Residents: A (unpinned), B (unpinned). C is pinned.
+     - Order of eviction: A (oldest/touched first in sequence A->B->C, so A is least recent relative to B and C? Wait, recency list is [C, B, A]. Oldest is A. Next is B.
+     - Evict A (3 GB). Count=1. Free becomes $1+3=4$. Residents={B, C}. Recency=[C, B].
+     - Check Fit: $4 < 7$. Still does not fit.
+     - Evict B (3 GB). Count=2. Free becomes $4+3=7$. Residents={C}. Recency=[C].
+     - Check Fit: $7 \ge 7$. Fits exactly.
+   - Action: Load D.
+   - State Update: Residents={C, D}, Free=0, Recency=[D, C] (D touched last).
+   - Log: `load D -> resident {C, D} free 0 recency {D, C}`
+
+5. **Event**: Unload B (3 GB)
+   - Check Resident: Is B in Residents? No (evicted in step 4).
+   - Action: No-op.
+   - State Update: Residents={C, D}, Free=0.
+   - Log: `unload B -> resident {C, D} free 0 recency {D, C}`
+
+### Final Calculation
+- **Loads**: A (yes), B (yes), C (yes), D (yes). Total = 4.
+- **Evictions**: Evicted A and B during Load D. Total = 2.
+- **Deferrals**: None. Total = 0.
+- **Deferred List**: Empty.
+
+```json
+{"loads": 4, "evictions": 2, "deferrals": 0, "deferred": []}
+```

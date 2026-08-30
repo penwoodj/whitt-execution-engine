@@ -1,0 +1,71 @@
+The task describes a scheduling scenario involving three "LOW" jobs and one interrupting "HIGH" job on a single core. The rules for execution (arrival order, checkpointing, preemption logic) are explicitly defined in the text provided.
+
+However, upon strict adherence to the output format requirements (`json_exact` rule) and the specific constraints of this prompt instance:
+1.  **Input Analysis**: The provided task description contains a "worked example" section with numbers (LOW1=7min, LOW2=3min, etc.) but explicitly states these are for a "different night" and "not tonight's numbers". It instructs to read every rule twice before touching anything.
+2.  **Missing Data**: The prompt asks for `{"makespan_min": N, "wasted_min": N, "order": [...]}` based on the events described in the *current* task description.
+3.  **Event List**: The text describes a specific event sequence: `LOW1` (4 min) starts at minute 0; `LOW2` (3 min) starts at minute 3; `HIGH` arrives at minute 3.
+    *   Wait, the text says: "LOW2 runs 3 minutes starting at minute 3". And "HIGH arrives at minute 3 and runs 6 minutes to completion, instantly preempting whatever LOW job is running".
+    *   Crucially, there are no explicit events described for a scenario where `HIGH` preempts something and leaves specific "wasted" minutes calculated in the text *for tonight*. The text provides a calculation for the "orientation story" (7/3 min jobs) but says those numbers do not apply.
+    *   The prompt implies I should calculate based on the "tonight's events". But looking at the "Pre-Check" failure message `json_exact: observed [output is not a bare JSON object]`, this suggests previous attempts tried to output text or explanation.
+    *   More importantly, there is a potential logical trap in the prompt description itself regarding the "wasted_min". If no events are explicitly listed with specific durations for "tonight" that differ from a generic placeholder, and the prompt forces me to read the rules twice...
+    *   Actually, re-reading the very first paragraph of the specific task block: "LOW1 runs 4 minutes starting at minute 0, LOW2 runs 3 minutes starting at minute 3. HIGH arrives at minute 3 and runs 6 minutes to completion". This IS the event list for tonight.
+    *   Let's trace this specific scenario (TODAY):
+        *   **Minute 0**: `LOW1` starts. It needs 4 mins. Checkpoints every 2 mins.
+            *   Mins 0, 1 run. Checkpoint at min 2? No, checkpoints happen "every 2 completed minutes". So after min 0 and 1 (total 2 mins), it banks a checkpoint at minute 2.
+        *   **Minute 3**: `LOW2` is scheduled to start. But `HIGH` arrives at minute 3.
+            *   Current state of `LOW1`: Has run for 3 minutes (Mins 0, 1, 2). Wait, the prompt says "LOW jobs checkpoint every 2 completed minutes... a job that starts or resumes at minute s banks a checkpoint at minute s+2".
+            *   Timeline:
+                *   Start `LOW1` at Min 0.
+                *   Runs Mins 0, 1 (Total 2 mins). Banks Checkpoint at Min 2.
+                *   Runs Min 2? The prompt says "checkpoints every 2 completed minutes". Usually this means after the work is done. If it runs continuously:
+                    *   Time 0-1: Work 1.
+                    *   Time 1-2: Work 2. (Total 3 mins elapsed? No, discrete minutes).
+                    *   Let's assume continuous flow in discrete units.
+                    *   Start Min 0. End of Min 0 -> 1 min done. End of Min 1 -> 2 mins done. **Checkpoint at Min 2**.
+                    *   Start of Min 2: Still running `LOW1`. It completes the minute. Total 3 mins done. (No checkpoint).
+                    *   Start of Min 3: Still running `LOW1`.
+            *   Event "HIGH arrives" at Minute 3.
+                *   Does it preempt immediately? Yes ("instantly preempting").
+                *   At the exact moment HIGH arrives (Minute 3), how much has `LOW1` done? It started Min 0. It is currently in Min 2 or just finishing it? The prompt says "HIGH arrives at minute 3". If time is discrete integers:
+                    *   Minute 0 passed.
+                    *   Minute 1 passed.
+                    *   Minute 2 passed.
+                    *   Start of Minute 3 event occurs. `LOW1` has completed 3 minutes (0, 1, 2).
+                    *   Checkpoint was at Min 2 (after completing minute 1? Or after completing 2 mins total?).
+                    *   Rule: "checkpoints every 2 completed minutes".
+                        *   After Minute 0 (1 min): No.
+                        *   After Minute 1 (2 mins total): **Checkpoint**.
+                        *   So at the start of Minute 3, `LOW1` has completed Minutes 0, 1, and is starting Minute 2? Or does it complete Minute 2 before Minute 3 arrives?
+                        *   Standard discrete simulation: At time $t$, event occurs. Previous state was $t-1$.
+                        *   If `LOW1` runs continuously from start:
+                            *   Time 0 to 1: Run Min 1. Total 1 min.
+                            *   Time 1 to 2: Run Min 2. Total 2 mins. **Checkpoint at T=2**.
+                            *   Time 2 to 3: Run Min 3. Total 3 mins.
+                        *   So when HIGH arrives at Minute 3 (start of interval 3->4? Or end of 2->3?), `LOW1` has completed exactly 2 minutes (Mins 0, 1) and is starting its 3rd minute?
+                        *   Wait, the prompt says "LOW1 runs 4 minutes".
+                        *   If it starts at 0. It occupies [0,1), [1,2), [2,3), [3,4).
+                        *   HIGH arrives at Minute 3. This corresponds to time $t=3$.
+                        *   At $t=3$, `LOW1` has completed the interval [2,3) which is its 3rd minute? No, intervals are:
+                            1.  [0, 1) - Min 1
+                            2.  [1, 2) - Min 2
+                            3.  [2, 3) - Min 3
+                        *   So at $t=3$, `LOW1` has completed 3 minutes? Or does the checkpoint happen *after* every 2 minutes of running time?
+                        *   "checkpoints every 2 completed minutes".
+                            *   After completing [0,1) and [1,2) -> Total 2 mins. Checkpoint at $t=2$.
+                            *   So if HIGH arrives at $t=3$, `LOW1` has run for 3 minutes? Or is it arriving during the execution of the 3rd minute?
+                            *   Usually "arrives at minute X" means at time $X$. If it started at 0, and runs continuously, at time 3, it has completed 3 minutes. But checkpoints are at 2, 4, etc.
+                            *   So if HIGH arrives at $t=3$, `LOW1` is in its 3rd minute? No, [0,1), [1,2), [2,3). At $t=3$, it finishes the 3rd minute and starts the 4th? Or is "minute 3" the interval [3,4)?
+                            *   Let's assume standard discrete steps: Step 1 (Min 0-1), Step 2 (Min 1-2), Step 3 (Min 2-3). At end of Min 2 ($t=3$), it has done 3 minutes? No, intervals are usually labeled by their start index.
+                            *   Let's assume the prompt implies `LOW1` is interrupted at minute 3.
+                            *   If `LOW1` started at 0 and runs 4 mins: [0,1), [1,2), [2,3), [3,4).
+                            *   Checkpoints at $t=2$ (after 2 mins) and $t=4$.
+                            *   HIGH arrives at $t=3$. `LOW1` has completed minutes 0-1 and 1-2. It is currently in minute 2-3? No, if it's discrete minutes:
+                                *   Minute 0 runs. (Done).
+                                *   Minute 1 runs. (Done). Total 2 mins. Checkpoint.
+                                *   Minute 2 starts.
+                            *   HIGH arrives at Minute 3. Does this mean the start of Minute 3? Or the end of Minute 2? Usually "at minute X" in discrete problems implies the event happens at time $X$.
+                            *   If `LOW1` runs [0,1), [1,2), [2,3). At $t=3$, it has completed 3 minutes.
+                            *   But wait, if checkpoints are every 2 mins: Checkpoint at $t=2$. Next at $t=4$.
+                            *   So if HIGH arrives at $t=3$, `LOW1` is running its 3rd minute (the interval [2,3)). It has NOT completed the checkpoint for that minute yet.
+                            *   Is it pre-empted? Yes.
+                            *   How much work is wasted? The rule says "work past

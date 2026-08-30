@@ -1,0 +1,131 @@
+The task requires processing two independent parts: `part_a` (the core scheduling simulation) and `part_b` (the audit claim verification). The final output must be a single JSON object containing both parts with specific keys.
+
+### Part A Analysis (Core Scheduling)
+**Rules & Events:**
+1.  **LOW1**: Starts at $t=0$, duration 5 min. Checkpoints every 2 running mins ($t=2, 4$).
+2.  **LOW2**: Starts at $t=2$, duration 7 min. Checkpoints every 2 running mins.
+3.  **HIGH**: Arrives at $t=3$, duration 8 min. Preempts current LOW job instantly. While HIGH runs, nothing else runs.
+4.  **Resumption Logic**: A resumed job redoes work past the last checkpoint.
+5.  **Ordering**: Jobs take the core in order of start minutes ($0 < 2$). If a tie occurs (e.g., both waiting), the one with the earlier start minute wins.
+
+**Simulation Walk:**
+*   **$t=0$**: LOW1 starts. Running time = 0.
+    *   State: `LOW1` running.
+*   **$t=1$**: LOW1 continues. Running time = 1.
+    *   State: `LOW1` running.
+*   **$t=2$**: LOW1 continues (Running time = 2). Checkpoint banked at $t=2$.
+    *   Event: LOW2 arrives ($t=2$).
+    *   Rule Application: Core is busy with LOW1. LOW2 waits.
+    *   State: `LOW1` running (banked 2 mins), `LOW2` waiting.
+*   **$t=3$**: HIGH arrives.
+    *   Event: Preemption of LOW1.
+    *   Rule Application: LOW1 has banked 2 mins. Work done = 2. Total needed = 5. Remaining work = $5 - 2 = 3$.
+    *   State: `HIGH` starts running (duration 8). `LOW1` suspended with 3 mins remaining. `LOW2` waiting.
+*   **$t=4, 5, 6, 7, 8, 9, 10$**: HIGH runs continuously for its duration of 8 minutes ($t=3$ to $t=10$).
+    *   State: `HIGH` running. `LOW1` suspended (3 mins left). `LOW2` waiting.
+*   **$t=11$**: HIGH finishes. Core becomes free.
+    *   Event: Resumption of LOW jobs.
+    *   Rule Application: Queue order by start minute: `LOW1` ($t=0$) vs `LOW2` ($t=2$). `LOW1` goes first.
+    *   State: `LOW1` resumes with 3 mins remaining.
+*   **$t=12, 13, 14$**: LOW1 runs its remaining 3 minutes.
+    *   $t=14$: LOW1 finishes. Total time = 15 (0 to 14 inclusive).
+    *   State: `LOW1` done. `LOW2` waiting.
+*   **$t=15$**: Core free. Resume `LOW2`.
+    *   Event: Start of LOW2.
+    *   Rule Application: LOW2 has not run yet (preempted before start). Remaining work = 7 mins.
+    *   State: `LOW2` running.
+*   **$t=16, \dots, 22$**: LOW2 runs for 7 minutes ($t=15$ to $t=21$).
+    *   $t=21$: LOW2 finishes. Total time = 22 (0 to 21 inclusive).
+
+**Results Part A:**
+*   **Makespan**: The last event finishes at $t=21$. Duration from start ($t=0$) is 22 minutes.
+*   **Wasted Minutes**:
+    *   LOW1 was preempted at $t=3$. It had banked a checkpoint at $t=2$. Work done = 2 mins. Remaining = 3 mins. No waste (work past checkpoint is redone, not wasted).
+    *   Wait, re-read rule: "on preemption the work past the last checkpoint is wasted and redone after resume."
+    *   LOW1 Checkpoints at $t=2$ and $t=4$. At $t=3$, it has completed 2 minutes. The next checkpoint would be at $t=4$. Since it hasn't reached $t=4$, the work done is exactly up to the last banked checkpoint ($t=2$). Work past checkpoint = 0. Wasted = 0.
+    *   Let's re-verify the "bank" logic: "LOW jobs checkpoint every 2 completed minutes... a job that starts or resumes at minute s banks a checkpoint at minute s+2".
+    *   LOW1 starts $t=0$. Banks at $t=2, t=4$.
+    *   At $t=3$, it has run for 2 minutes. It is between checkpoints ($t=2$ and $t=4$). The work done (2 mins) matches the last banked checkpoint. Work past checkpoint = 0. Wasted = 0.
+*   **Order**: LOW1 finishes at $t=14$. LOW2 starts at $t=15$, finishes at $t=21$. Order: `["LOW1", "LOW2"]`.
+
+### Part B Analysis (Audit Claims)
+**Rules & Events:**
+1.  **Source Hierarchy**: Machine Log > Signed Handoff > Hallway Hearsay. Dashboard is KNOWN-BUGGY and cannot carry a claim alone.
+2.  **Verification Logic**:
+    *   Claim resting only on hearsay or dashboard = UNVERIFIED.
+    *   Higher source contradicts lower source -> Higher wins, Lower assertion counts FALSE.
+    *   Sources agree -> Claim is TRUE.
+
+**Claims Analysis:**
+*   **c1**: "Machine log shows shard rebalanced at 02:10."
+    *   Source: Machine Log (Highest).
+    *   Status: **TRUE**.
+*   **c2**: "Signed handoff says shard never moved, machine log shows it moved at 02:10."
+    *   Sources involved: Signed Handoff vs Machine Log.
+    *   Conflict: Handoff (Never) vs Log (Moved).
+    *   Rule: Higher source wins. Machine Log > Signed Handoff.
+    *   Result: Log is true, so "shard moved" is true. Therefore, the assertion in c2 ("shard never moved") is **FALSE**.
+*   **c3**: "Signed handoff puts backup at 03:00, hallway hearsay says 03:00 too."
+    *   Sources involved: Signed Handoff vs Hearsay.
+    *   Agreement: Both say 03:00.
+    *   Rule: When sources agree -> TRUE. (Note: Dashboard is not involved here).
+    *   Result: **TRUE**.
+*   **c4**: "Hallway hearsay alone claims cache was cold at 04:00."
+    *   Source: Hearsay only.
+    *   Rule: Claim resting only on hearsay -> UNVERIFIED.
+    *   Result: **UNVERIFIED**.
+*   **c5**: "Only the buggy dashboard shows queue depth peaking at 05:00."
+    *   Source: Dashboard alone.
+    *   Rule: Dashboard can never carry a claim alone.
+    *   Result: **UNVERIFIED**.
+
+**Results Part B:**
+*   True: c1, c3.
+*   False: c2.
+*   Unverified: c4, c5.
+*   IDs sorted and lowercase: `["c1", "c2", "c3", "c4", "c5"]`.
+
+### Final JSON Construction
+Combining Part A and Part B into the required structure.
+
+```json
+{
+  "part_a": {
+    "makespan_min": 22,
+    "wasted_min": 0,
+    "order": ["LOW1", "LOW2"]
+  },
+  "part_b": {
+    "true": ["c1", "c3"],
+    "false": ["c2"],
+    "unverified": ["c4", "c5"]
+  }
+}
+```
+
+Double check keys: `makespan_min`, `wasted_min`, `order` for part_a. `true`, `false`, `unverified` for part_b. All IDs lowercase and sorted. No extra keys.
+
+One final check on Part A waste calculation logic based on the prompt's specific phrasing "work past the last checkpoint is wasted".
+- LOW1 Checkpoints at $t=2, t=4$.
+- Preemption at $t=3$.
+- Work done: 2 minutes.
+- Last checkpoint reached: $t=2$.
+- Work between checkpoints ($t=2$ to $t=4$): 0 minutes (since it stopped at 3).
+- Wasted = 0.
+
+Correct.
+
+```json
+{
+  "part_a": {
+    "makespan_min": 22,
+    "wasted_min": 0,
+    "order": ["LOW1", "LOW2"]
+  },
+  "part_b": {
+    "true": ["c1", "c3"],
+    "false": ["c2"],
+    "unverified": ["c4", "c5"]
+  }
+}
+```

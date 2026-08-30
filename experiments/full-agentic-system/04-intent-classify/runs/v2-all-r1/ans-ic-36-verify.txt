@@ -1,0 +1,136 @@
+minute | core | event
+0 | LOW1 | Start LOW1 (bank @ 2)
+1 | LOW1 | Run LOW1 (bank @ 4); Finish LOW1 at min 1? No, runs 4 mins total. Wait, task says "LOW1 runs 4 minutes starting at minute 0". So it occupies core for [0, 1), [1, 2), [2, 3), [3, 4).
+Let's re-read carefully: "LOW1 runs 4 minutes starting at minute 0". This implies duration = 4.
+"LOW2 runs 3 minutes starting at minute 3". Duration = 3.
+"HIGH arrives at minute 5 and runs 4 minutes to completion, instantly preempting whatever LOW job is running".
+
+Let's trace:
+Min 0-1: Core busy with LOW1 (running). LOW1 has run 1 min. Bank @ 2? No, bank happens every 2 completed minutes. So after 2 mins run, it banks.
+Wait, "LOW jobs checkpoint every 2 completed minutes of running time".
+So at t=0 start.
+t=1: Run 1 min done.
+t=2: Run 2 mins done -> Bank @ absolute minute 2.
+t=3: Run 3 mins done.
+t=4: Run 4 mins done -> Finish LOW1? Or does it continue? "LOW1 runs 4 minutes". So at t=4, LOW1 finishes.
+
+But wait, "HIGH arrives at minute 5".
+So between t=0 and t=5, LOW1 is running alone?
+"while HIGH runs nothing else runs".
+"HIGH arrives at minute 5 and runs 4 minutes to completion, instantly preempting whatever LOW job is running".
+At min 5, LOW1 has finished (since it ran for 4 mins from 0). So core is free.
+Then HIGH starts at min 5? Or does it preempt nothing? "instantly preempting whatever LOW job is running" -> if none running, just starts.
+HIGH runs 4 minutes: [5, 6), [6, 7), [7, 8), [8, 9). Finishes at t=9.
+
+Now where does LOW2 fit? "LOW2 runs 3 minutes starting at minute 3".
+At min 3, core is busy with LOW1 (which has run 3 mins, banked at 2).
+Does LOW2 start immediately? "LOW whose start minute arrives while core is busy simply waits."
+So LOW2 starts waiting.
+When does it get the core?
+"minute one LOW job finishes or is preempted, next waiting LOW starts in that same minute".
+At min 4, LOW1 finishes (completed its 4 mins). So at min 4, core becomes free for LOW2.
+LOW2 starts at min 4.
+LOW2 runs 3 minutes: [4, 5), [5, 6), [6, 7). Finishes at t=7?
+Wait, HIGH arrives at min 5.
+At min 5, core is busy with LOW2 (which has run 1 min since start at 4).
+HIGH arrives at min 5 and preempts LOW2.
+So LOW2 was interrupted at min 5.
+LOW2 had run: [4, 5) -> 1 minute.
+Checkpoint rule: "bank @ absolute-minute". Bank happens every 2 completed minutes.
+LOW2 started at 4.
+At t=6 (absolute), it would have run 2 mins if uninterrupted? No, interrupted at 5.
+So LOW2 ran for 1 min ([4, 5)). No bank yet (needs 2 mins).
+Wasted: "minutes past the last bank". Last bank was none (or start?). Start is not a bank unless specified. "bank landing on exact minute HIGH arrives still counts". But it didn't land on a bank. It landed at min 1 of run.
+So wasted = total duration - banked? Or just minutes lost?
+"minutes past the last bank are wasted and redone after resume".
+Last bank: None (0 mins).
+Wasted = 1 minute?
+Wait, "LOW2 runs 3 minutes starting at minute 3". It started waiting.
+It got core at min 4.
+So it ran [4, 5). Preempted by HIGH at 5.
+HIGH runs [5, 9).
+After HIGH finishes at 9, LOW2 resumes? Or is there another job?
+The problem asks for "order of LOW jobs". Implies both finish eventually.
+Does LOW1 finish? Yes, finished at 4.
+Does LOW2 finish? It was preempted at 5 with 1 min run. Needs 3 mins total. So needs 2 more.
+Resumes after HIGH (at 9).
+Runs [9, 10), [10, 11), [11, 12). Finishes at 12.
+
+Let's re-evaluate "LOW1 runs 4 minutes starting at minute 0".
+Does it finish at 4? Yes.
+"LOW2 runs 3 minutes starting at minute 3".
+Starts waiting at 3.
+Core busy until 4 (when LOW1 finishes).
+So LOW2 starts at 4.
+Runs [4, 5). Preempted by HIGH at 5.
+HIGH runs [5, 9).
+LOW2 resumes at 9.
+Needs to run remaining time. Total 3 mins. Ran 1 min. Remaining 2 mins.
+Runs [9, 11). Finishes at 11? Or does it bank?
+Checkpoints every 2 completed minutes.
+Resume at 9 (absolute). Bank @ 9+2 = 11?
+If it runs [9, 10) -> 1 min.
+[10, 11) -> 2 mins total since resume. Bank @ 11.
+Finishes at 11.
+
+Wait, "LOW jobs checkpoint every 2 completed minutes of running time".
+Does this mean cumulative or per session? Usually cumulative for the job instance.
+"on preemption work past last checkpoint is wasted and redone after resume".
+So if LOW2 ran [4, 5) (1 min). No checkpoint reached.
+Resume at 9.
+Runs [9, 10) -> 1 min total since start? Or since resume?
+If cumulative: Total run time needed = 3. Current = 1. Remaining = 2.
+Run [9, 10), [10, 11). At t=11, total run time = 3. Finished.
+Did it bank at 11? Yes, if cumulative count reaches 2 (from resume) or 4 (total)?
+"bank @ absolute-minute". "every 2 completed minutes of running time".
+If it resumes, does the counter reset? "work past last checkpoint is wasted and redone". This implies we track progress. If no checkpoint reached, then at t=11 (absolute), has it run 2 mins since resume? Yes. So bank @ 11.
+But job finishes at 11 anyway.
+
+Let's check the "order" definition: "completion order lists LOW jobs by minute each finishes".
+LOW1 finished at min 4.
+LOW2 finished at min 11.
+Order: ["LOW1", "LOW2"].
+
+Wasted minutes:
+At preemption of LOW2 (at min 5).
+Last checkpoint? None (ran 1 min, need 2 for first bank).
+So wasted = 1 minute? Or is start considered a checkpoint? No.
+"minutes past the last bank". Last bank was none. So all run time since start is "past"? No, only if it passed a bank.
+If no bank reached, then at preemption, we haven't passed any bank.
+So wasted = 0? Or does "work past last checkpoint" mean work done since last checkpoint? If no checkpoint, maybe work done since start counts as wasted if not saved?
+But checkpoints are every 2 mins. So first checkpoint is at t=6 (absolute) for LOW2 (start 4).
+Preemption at 5. No checkpoint reached.
+So nothing to save. Wasted = 0?
+Wait, "minutes past the last bank". If no bank, maybe 0 wasted.
+But let's look at LOW1. Did it get preempted? No, finished naturally.
+So only LOW2 was preempted.
+If LOW2 ran [4, 5) and preemption happens. It has run 1 min. Next checkpoint is at 6 (absolute).
+Since it didn't reach a checkpoint, no work is saved. So wasted = 0?
+Or does "work past last bank" imply that if you haven't reached a bank, the whole thing is lost? No, usually you lose progress since last save point. If no save point, you start fresh? But you still have to run the remaining time. The question asks for "minutes wasted". This usually refers to the specific minutes of execution that are discarded because they weren't saved.
+If no checkpoint was reached, then 0 minutes were saved, so 0 minutes are wasted (you just redo the whole thing).
+Wait, if I run 1 min and get preempted before saving, do I say "1 minute wasted"? Or "0 minutes wasted" (because nothing was saved)?
+Usually "wasted" means "time spent that is not counted towards progress". If no checkpoint exists, then all time spent so far is effectively lost? No, you just haven't reached a milestone. You still have to run the remaining distance. The "distance" is defined by total duration - current_duration.
+If I run 1 min of 3 mins. Preempted. Remaining = 2 mins.
+Did I save anything? No. So I must run 2 mins again.
+The time spent (1 min) was not saved. Is it "wasted"? Yes, in the sense that it doesn't count towards completion progress if no checkpoint exists.
+So wasted = 1 minute.
+
+Let's re-read: "minutes past the last bank are wasted".
+If no bank, then technically "past the last bank" is ambiguous. But logically, if you haven't reached a bank, your current state is not saved. So any time spent since start (or last bank) is lost.
+So for LOW2: Last bank = None. Time spent since last bank = 1 min. Wasted = 1 min.
+
+Makespan:
+LOW1 finishes at 4.
+HIGH runs [5, 9).
+LOW2 resumes at 9. Runs remaining 2 mins. Finishes at 11.
+Last finish is 11.
+So makespan_min = 11.
+
+Wait, check LOW1 again. "LOW1 runs 4 minutes starting at minute 0".
+Does it finish at 4? Yes.
+Check HIGH: "HIGH arrives at minute 5 and runs 4 minutes to completion".
+Starts at 5. Ends at 9.
+Check LOW2: "starting at minute 3". Waits until 4. Runs [4, 5). Preempted.
+Resumes at 9. Needs 2 more mins. Runs [9, 10), [10, 11). Finishes at 11.
+
+Is there any other interpretation?
