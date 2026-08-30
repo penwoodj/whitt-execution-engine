@@ -2,6 +2,7 @@ use crate::client::http_client::LlamaHttpClient;
 use crate::client::types::{ChatCompletionRequest, ChatMessage};
 use crate::client::disk_monitor;
 use crate::client::memory_monitor;
+use crate::client::resource_guard;
 use crate::agent::loop_hooks::HookContext;
 use crate::workflow::hooks::{HookEngine, HookResult};
 use crate::workflow::hooks::actions::execute_action;
@@ -129,6 +130,10 @@ pub struct BenchmarkRunner {
     // Issue Y: when true, load <output_dir>/checkpoint.jsonl before the
     // workflow loop and skip steps whose outputs are already recorded.
     resume: bool,
+    // E1: between-step pressure gate state (hysteresis machine). Blocks
+    // inference under RED pressure so desktop VRAM/RAM spikes fail the
+    // step instead of crashing the machine.
+    pressure_tracker: Arc<Mutex<resource_guard::PressureTracker>>,
 }
 
 impl BenchmarkRunner {
@@ -143,6 +148,7 @@ impl BenchmarkRunner {
             streaming_enabled: false,
             detail_template: None,
             resume: false,
+            pressure_tracker: Arc::new(Mutex::new(resource_guard::PressureTracker::new())),
         }
     }
 
@@ -232,30 +238,32 @@ fn hook_actions_as_vec(actions: &serde_json::Value) -> Vec<serde_json::Value> {
 
 /// Detect maximum concurrent inferences based on available system resources.
 ///
-/// Tries to detect VRAM first (for GPU inference), falls back to RAM.
-/// Rule of thumb: each inference needs ~2GB VRAM/RAM.
-/// Returns capped value: 1 (min) <= result <= 4 (max).
-/// Falls back to 2 on detection failure.
+/// Delegates sizing to `client::resource_guard` (single decision box):
+/// VRAM-total sizing, RAM fallback, and the 8GB→1 crash fix all live there.
 fn detect_max_concurrent_inferences() -> usize {
-    // Manual override for the 2GB-per-inference heuristic, which overestimates
-    // small-VRAM boxes (4× parallel crashed 8GB systems; SAFETY.md:5-9,88).
     if let Some(n) = env_concurrency_override() {
         info!("[benchmark] WHITT_MAX_CONCURRENT_INFERENCES={} overridden (clamped to {})", n, n);
         return n;
     }
 
-    if let Some(vram_gb) = detect_vram_gb() {
-        let max_concurrent = (vram_gb / 2.0).floor() as usize;
-        let capped = max_concurrent.clamp(1, 4);
-        info!("[benchmark] auto-detected max concurrent inferences: {} (based on {:.1} GB VRAM available)", capped, vram_gb);
-        return capped;
+    if let Some(vram) = resource_guard::read_vram_sensors_sysfs() {
+        let total_gb = resource_guard::bytes_to_gb(vram.total_bytes);
+        let n = resource_guard::max_concurrent_for(total_gb);
+        info!("[benchmark] auto-detected max concurrent inferences: {} (based on {:.1} GB VRAM total)", n, total_gb);
+        return n;
     }
 
-    if let Some(ram_gb) = detect_available_ram_gb() {
-        let max_concurrent = (ram_gb / 2.0).floor() as usize;
-        let capped = max_concurrent.clamp(1, 4);
-        info!("[benchmark] auto-detected max concurrent inferences: {} (based on {:.1} GB RAM available)", capped, ram_gb);
-        return capped;
+    if let Some(vram_gb) = read_proc_vram_nvidia().map(|mb| mb as f64 / 1024.0) {
+        let n = resource_guard::max_concurrent_for(vram_gb);
+        info!("[benchmark] auto-detected max concurrent inferences: {} (based on {:.1} GB VRAM total, nvidia)", n, vram_gb);
+        return n;
+    }
+
+    if let Some(ram) = resource_guard::read_ram_sensors_proc() {
+        let avail_gb = resource_guard::kb_to_gb(ram.mem_available_kb);
+        let n = resource_guard::max_concurrent_ram(avail_gb);
+        info!("[benchmark] auto-detected max concurrent inferences: {} (based on {:.1} GB RAM available)", n, avail_gb);
+        return n;
     }
 
     info!("[benchmark] could not detect available memory, using default: 2 concurrent inferences");
@@ -271,75 +279,7 @@ fn env_concurrency_override() -> Option<usize> {
         .filter(|n| *n >= 1)
 }
 
-/// amdgpu sysfs `mem_info_vram_total` reports BYTES (RX 580 8GiB = 8589934592).
-/// Dividing bytes as KB produced the "8192.0 GB VRAM" misreport (SAFETY.md:88).
-fn vram_bytes_to_gb(bytes: u64) -> f64 {
-    bytes as f64 / 1024.0 / 1024.0 / 1024.0
-}
-
-/// Detect available VRAM in GB from sysfs.
-///
-/// Returns Some(vram_gb) if successful, None otherwise.
-fn detect_vram_gb() -> Option<f64> {
-    if let Some(vram_bytes) = read_sysfs_vram_amd() {
-        return Some(vram_bytes_to_gb(vram_bytes));
-    }
-
-    if let Some(vram_mb) = read_proc_vram_nvidia() {
-        let vram_gb = vram_mb as f64 / 1024.0;
-        return Some(vram_gb);
-    }
-
-    None
-}
-
-/// Detect available RAM in GB from /proc/meminfo.
-///
-/// Returns Some(ram_gb) if successful, None otherwise.
-fn detect_available_ram_gb() -> Option<f64> {
-    let meminfo_content = fs::read_to_string("/proc/meminfo").ok()?;
-
-    for line in meminfo_content.lines() {
-        if line.starts_with("MemAvailable:") {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 2 {
-                let kb: u64 = parts[1].parse().ok()?;
-                let gb = kb as f64 / 1024.0 / 1024.0;
-                return Some(gb);
-            }
-        }
-    }
-
-    None
-}
-
-/// Read AMD GPU VRAM from sysfs.
-///
-/// Returns Some(vram_bytes) if successful — amdgpu `mem_info_vram_total`
-/// reports total VRAM in bytes, not KB.
-fn read_sysfs_vram_amd() -> Option<u64> {
-    if let Ok(entries) = fs::read_dir("/sys/class/drm") {
-        for entry in entries.flatten() {
-            let card_name = entry.file_name();
-            let card_name_str = card_name.to_string_lossy();
-
-            if card_name_str.starts_with("card") {
-                let vram_path = entry.path().join("device/mem_info_vram_total");
-                if let Ok(vram_content) = fs::read_to_string(&vram_path) {
-                    if let Ok(vram_bytes) = vram_content.trim().parse::<u64>() {
-                        return Some(vram_bytes);
-                    }
-                }
-            }
-        }
-    }
-
-    None
-}
-
-/// Read NVIDIA GPU VRAM from /proc/driver/nvidia/gpus.
-///
-/// Returns Some(vram_mb) if successful, None otherwise.
+/// NVIDIA /proc fallback (MiB); AMD sysfs + unit math live in resource_guard.
 fn read_proc_vram_nvidia() -> Option<u64> {
     if let Ok(entries) = fs::read_dir("/proc/driver/nvidia/gpus") {
         for entry in entries.flatten() {
@@ -480,8 +420,52 @@ impl BenchmarkRunner {
             }
         }
 
+        // L5 crash recovery: scan server logs for Vulkan/driver crash signatures
+        // from THIS server incarnation (restarts don't rotate docker logs, so
+        // scan from the container's StartedAt); proceeding would compound the fault.
+        let container = Self::server_container_name();
+        let started_at = TokioCommand::new("docker")
+            .args(["inspect", "-f", "{{.State.StartedAt}}", &container])
+            .output()
+            .await
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|s| !s.is_empty());
+        let mut logs_cmd = TokioCommand::new("docker");
+        logs_cmd.arg("logs");
+        if let Some(ts) = &started_at {
+            logs_cmd.args(["--since", ts]);
+        }
+        logs_cmd.args(["--tail", "300", &container]);
+        let log_output = logs_cmd.output().await;
+        match log_output {
+            Ok(output) => {
+                let logs = String::from_utf8_lossy(&output.stdout).to_string()
+                    + &String::from_utf8_lossy(&output.stderr);
+                let hits = resource_guard::vk_crash_signatures(&logs);
+                if hits.is_empty() {
+                    info!("[benchmark] ✓ server crash-signature scan clean ({} logs)", container);
+                } else {
+                    let msg = format!(
+                        "RESOURCE_ABORT: llama server log shows {} prior crash signature(s): {} \
+                         — restart the server before running (docker restart {})",
+                        hits.len(), hits.join(", "), container
+                    );
+                    info!("[benchmark] ✗ {}", msg);
+                    anyhow::bail!(crate::error::Error::benchmark(msg));
+                }
+            }
+            Err(e) => {
+                warn!("[benchmark] ⚠ server log scan skipped (docker logs failed: {})", e);
+            }
+        }
+
         info!("[benchmark] all preflight checks passed");
         Ok(())
+    }
+
+    fn server_container_name() -> String {
+        std::env::var("WHITT_SERVER_CONTAINER").unwrap_or_else(|_| "whitt-llama-server".to_string())
     }
 
     /// Runtime system health check: verify resources are adequate before operations.
@@ -1953,6 +1937,7 @@ impl BenchmarkRunner {
                     inference_max_attempts: 3,
                     refusal_patterns: DEFAULT_REFUSAL_PATTERS.iter().map(|s| s.to_string()).collect(),
                     streaming_enabled: false,
+                    pressure_tracker: Arc::new(Mutex::new(resource_guard::PressureTracker::new())),
                     detail_template: None,
                     resume: false,
                 };
@@ -2329,6 +2314,52 @@ impl BenchmarkRunner {
             Ok(_) => {}
             Err(e) => {
                 error!("[benchmark] after_step_starts hook error: {}, continuing", e);
+            }
+        }
+
+        // E1 gate: sample live sensors, advance the pressure hysteresis
+        // machine, and fail the step cleanly under RED pressure instead
+        // of letting inference crash the machine (storybook crash class).
+        {
+            let vram = resource_guard::read_vram_sensors_sysfs();
+            let ram = resource_guard::read_ram_sensors_proc();
+            let action = {
+                let mut tracker = self.pressure_tracker.lock().unwrap();
+                resource_guard::step_gate(&mut tracker, vram, ram)
+            };
+            match action {
+                resource_guard::GateAction::Block(reason) => {
+                    warn!("[benchmark] RESOURCE_CRITICAL step {} blocked: {}",
+                        step.step_id, reason);
+                    return Ok(WorkflowStepResult {
+                        benchmark_result: ModelBenchmarkResult {
+                            model_id: model_id.to_string(),
+                            model_path: model_path.clone(),
+                            file_size_bytes: 0,
+                            load_duration: Duration::ZERO,
+                            inference_results: vec![],
+                            unload_duration: Duration::ZERO,
+                            total_duration: Duration::ZERO,
+                            tokens_per_second: 0.0,
+                            avg_latency_ms: 0.0,
+                            p50_latency_ms: 0.0,
+                            p95_latency_ms: 0.0,
+                            p99_latency_ms: 0.0,
+                            error: Some(reason),
+                            gpu_mode: "gpu".to_string(),
+                            speedup_factor: None,
+                            step_id: Some(step.step_id.clone()),
+                        },
+                        route_to: None,
+                        skip_remaining: false,
+                        skip_loop: false,
+                    });
+                }
+                resource_guard::GateAction::Warn => {
+                    warn!("[benchmark] RESOURCE_PRESSURE amber at step {} — proceeding, close to limits",
+                        step.step_id);
+                }
+                resource_guard::GateAction::Proceed => {}
             }
         }
 
@@ -4209,7 +4240,17 @@ impl BenchmarkRunner {
                 };
 
                 let inf_start = Instant::now();
-                match client.chat_completion(request).await {
+                let guarded = resource_guard::guard_inference(
+                    self.pressure_tracker.clone(),
+                    750,
+                    || (resource_guard::read_vram_sensors_sysfs(), resource_guard::read_ram_sensors_proc()),
+                    client.chat_completion(request),
+                );
+                let outcome = match guarded.await {
+                    Ok(inner) => inner,
+                    Err(reason) => Err(anyhow::anyhow!("{}", reason)),
+                };
+                match outcome {
                     Ok(resp) => {
                         let raw_response = resp.choices.first()
                             .map(|c| c.message.content.clone())
@@ -4250,6 +4291,11 @@ impl BenchmarkRunner {
                         let err_str = e.to_string();
                         warn!("[benchmark] inference attempt {}/{} failed for {}: {}",
                             attempt + 1, max_retries, model_id, e);
+
+                        if err_str.contains(resource_guard::RESOURCE_CRITICAL) {
+                            warn!("[benchmark] RESOURCE_CRITICAL: in-flight inference cancelled for {} — not retrying under pressure", model_id);
+                            break;
+                        }
 
                         if err_str.contains("500") || err_str.contains("Could not establish") || err_str.contains("connection refused") {
                             warn!("[benchmark] Docker error detected, checking health...");
@@ -5907,46 +5953,33 @@ enabled: true
     }
 
     #[test]
-    fn test_detect_available_ram_gb_returns_some_on_linux() {
-        let ram_gb = detect_available_ram_gb();
-        // On Linux with /proc/meminfo, should return Some; on other platforms, None is OK
-        if cfg!(target_os = "linux") {
-            assert!(ram_gb.is_some(), "should detect RAM on Linux");
-            assert!(ram_gb.unwrap() > 0.0, "RAM should be positive");
-        }
+    fn given_new_runner_when_pressure_tracker_polled_then_starts_green() {
+        let tracker = resource_guard::PressureTracker::new();
+        assert!(matches!(tracker.state(), resource_guard::Pressure::Green));
+    }
+
+    #[test]
+    fn given_no_env_when_server_container_name_then_defaults() {
+        std::env::remove_var("WHITT_SERVER_CONTAINER");
+        assert_eq!(BenchmarkRunner::server_container_name(), "whitt-llama-server");
     }
 
     #[test]
     fn test_calculate_max_concurrent_from_ram() {
-        let ram_gb = 8.0_f64;
-        let max_concurrent = (ram_gb / 2.0_f64).floor() as usize;
-        let capped = max_concurrent.clamp(1, 4);
-        assert_eq!(capped, 4, "8GB RAM should allow 4 concurrent inferences");
+        assert_eq!(resource_guard::max_concurrent_ram(8.0), 4,
+            "8GB RAM should allow 4 concurrent inferences");
     }
 
     #[test]
     fn test_calculate_max_concurrent_floor_at_1() {
-        let ram_gb = 1.5_f64;
-        let max_concurrent = (ram_gb / 2.0_f64).floor() as usize;
-        let capped = max_concurrent.clamp(1, 4);
-        assert_eq!(capped, 1, "1.5GB RAM should allow 1 concurrent inference (floor at 1)");
+        assert_eq!(resource_guard::max_concurrent_ram(1.5), 1,
+            "1.5GB RAM should allow 1 concurrent inference (floor at 1)");
     }
 
     #[test]
     fn test_calculate_max_concurrent_cap_at_4() {
-        let ram_gb = 32.0_f64;
-        let max_concurrent = (ram_gb / 2.0_f64).floor() as usize;
-        let capped = max_concurrent.clamp(1, 4);
-        assert_eq!(capped, 4, "32GB RAM should be capped at 4 concurrent inferences");
-    }
-
-    #[test]
-    fn test_read_sysfs_vram_amd_returns_valid_or_none() {
-        let vram_kb = read_sysfs_vram_amd();
-        // May return Some (AMD GPU present) or None (no AMD GPU) — both valid
-        if let Some(kb) = vram_kb {
-            assert!(kb > 0, "VRAM should be positive if detected");
-        }
+        assert_eq!(resource_guard::max_concurrent_ram(32.0), 4,
+            "32GB RAM should be capped at 4 concurrent inferences");
     }
 
     #[test]
@@ -5964,10 +5997,9 @@ enabled: true
 
     #[test]
     fn given_rx580_vram_bytes_when_converted_then_reports_8gb_not_8192() {
-        // RX 580 8GiB: sysfs reports 8589934592 bytes.
-        assert!((vram_bytes_to_gb(8_589_934_592) - 8.0).abs() < 1e-9,
+        assert!((resource_guard::bytes_to_gb(8_589_934_592) - 8.0).abs() < 1e-9,
             "8GiB in bytes must convert to 8.0 GB, not 8192.0 GB");
-        assert!((vram_bytes_to_gb(0) - 0.0).abs() < 1e-9);
+        assert!((resource_guard::bytes_to_gb(0) - 0.0).abs() < 1e-9);
     }
 
     #[test]

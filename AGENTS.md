@@ -75,6 +75,7 @@ Dockerfile          docker-compose.yml  .dockerignore       .env.example
 README.md           CHANGELOG.md        LICENSE             AUTHORS.md
 CODE_OF_CONDUCT.md  config.yml          .gitignore          .git/
 .github/            AGENTS.md           CLAUDE.md           WORKFLOW_RELIABILITY_TRACKING.md
+.opencode/          experiments/
 .opencode-handoff.md (temp, session only)    .current-meta-run (temp)
 src/                tests/              benches/            examples/
 docs/               scripts/            models/             configs/

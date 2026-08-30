@@ -16,4 +16,5 @@ pub mod memory_monitor;
 pub mod model_discovery;
 pub mod model_download;
 pub mod prompt_chain;
+pub mod resource_guard;
 pub mod types;
