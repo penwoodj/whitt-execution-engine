@@ -43,6 +43,13 @@ def main() -> int:
     failed = failed_attempts_of(case)
     if args.attempt in failed:
         cls = case["failure"]["class"]
+        if not parsed:
+            # Unparsable real output cannot carry a class signature
+            # (structure signals would misroute the heal); a synthetic
+            # shell keeps the injected class observable to detectors.
+            required = case["task"]["expected_schema"]["required"]
+            attempt: dict = {k: f"<{k} content>" for k in required}
+            attempt["_meta"] = {}
         attempt = corrupt(attempt, cls, args.attempt, case["case_id"])
     else:
         attempt.setdefault("_meta", {})

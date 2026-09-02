@@ -51,12 +51,24 @@ def main() -> int:
     cls = triage["class"]
     strategy = CLASS_STRATEGY.get(cls, "corrective_prompt")
 
+    instruction = INSTRUCTIONS[strategy]
+    try:
+        detection = read_json(run_dir, f"detection_{args.round}.json")
+        missing = [k for k in detection.get("schema_missing_keys", []) if k]
+        if missing:
+            instruction += (
+                " Your output is MISSING these required top-level keys: "
+                f"{missing}. Emit each as a top-level key with substantive content."
+            )
+    except FileNotFoundError:
+        pass
+
     heal = {
         "round": args.round,
         "kind": "script",
         "class": cls,
         "strategy": strategy,
-        "instruction": INSTRUCTIONS[strategy],
+        "instruction": instruction,
     }
     write_json(run_dir, f"heal_{args.round}.json", heal)
     trace_append(run_dir, f"heal_{strategy}", f"heal_light_{args.round}",

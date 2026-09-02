@@ -16,20 +16,64 @@ Differences vs gen-v2.py (spoof):
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
+from typing import Final
 
 import yaml
 
 REPO = Path(__file__).resolve().parents[3]
 EXP = REPO / "experiments" / "self-healing"
 
-MODELS = {
-    "m_worker": "Qwen3-4B-Instruct-2507-Q4_K_M",
-    "m_fast": "Ministral-3-3B-Instruct-2512-Q4_K_M",
-    "m_coder": "Qwen2.5-Coder-3B-Instruct-Q8_0",
-    "m_heavy": "Qwen3-5-9B-Q4_K_M",
-    "m_judge": "Hermes-2-Pro-Mistral-7B.Q4_K_M",
+MODEL_SOURCES: Final[dict[str, str]] = {
+    "m_worker": "/run/media/jon/data/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+    "m_fast": "/run/media/jon/data/models/Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
+    "m_coder": "/run/media/jon/data/models/Qwen2.5-Coder-3B-Instruct-Q8_0.gguf",
+    "m_heavy": "/run/media/jon/data/models/Qwen3-8B-Q4_K_M.gguf",
+    "m_judge": "/run/media/jon/data/models/Hermes-2-Pro-Mistral-7B.Q4_K_M.gguf",
+}
+MODELS = {alias: Path(source_path).name for alias, source_path in MODEL_SOURCES.items()}
+LIVE_LOAD_PARAMS = {
+    "context_size": 4096,
+    "gpu_layers": 99,
+    "cont_batching": False,
+    "no_cache_prompt": True,
+    "parallel": 1,
+}
+LIVE_RESOURCE_ADMISSION = {
+    "enforcement_policy": "block",
+    "minimum_available": {"ram": "6GiB", "vram": "6GiB", "swap_free": "4GiB"},
+    "model_estimate": {
+        "kv_cache": "288MiB",
+        "compute_buffer": "512MiB",
+        "host_runtime": "700MiB",
+        "expected_runtime_secs": 900,
+    },
+    "telemetry": {"write_profile": True},
+}
+SCHEMA_LINE_COMMENTS: Final[dict[str, int]] = {
+    "source_path": 911,
+    "load_params": 75,
+    "context_size": 76,
+    "gpu_layers": 81,
+    "cont_batching": 85,
+    "no_cache_prompt": 86,
+    "parallel": 87,
+    "load_unload": 534,
+    "resource_admission": 562,
+    "enforcement_policy": 563,
+    "minimum_available": 564,
+    "ram": 565,
+    "vram": 566,
+    "swap_free": 567,
+    "model_estimate": 568,
+    "kv_cache": 569,
+    "compute_buffer": 570,
+    "host_runtime": 571,
+    "expected_runtime_secs": 572,
+    "telemetry": 573,
+    "write_profile": 574,
 }
 
 # step offsets within a round (round base + offset)
@@ -103,7 +147,7 @@ def build(case_path: Path) -> dict:
         st = {
             "generative_entity": "${models.%s}" % model,
             "prompt": prompt,
-            "model_overrides": overrides or {"temperature": 0.2, "max_tokens": 3500},
+            "model_overrides": overrides or {"temperature": 0.2, "max_tokens": 10000},
             "when": {"before_step_starts": before},
         }
         if after:
@@ -389,10 +433,17 @@ def build(case_path: Path) -> dict:
             "llama_cpp_with_vulkan": {"config": {"host": "localhost", "port": 8080}},
         },
         "models": {
-            alias: {"name": mname, "host": {"type": "llama_cpp_with_vulkan"}}
+            alias: {
+                "name": mname,
+                "source_path": MODEL_SOURCES[alias],
+                "host": {"type": "llama_cpp_with_vulkan"},
+                "load_params": LIVE_LOAD_PARAMS.copy(),
+            }
             for alias, mname in MODELS.items()
         },
         "workflow_execution_strategy": {
+            "load_unload": "one_at_a_time",
+            "resource_admission": LIVE_RESOURCE_ADMISSION,
             "timing": {"cooldown_after_unload_secs": 3, "min_tmp_space_mb": 1024},
             "memory": {"model_lifecycle": {"unload_unused": True}},
         },
@@ -402,6 +453,18 @@ def build(case_path: Path) -> dict:
         },
     }
     return wf
+
+
+def render_workflow(workflow: dict) -> str:
+    rendered = yaml.safe_dump(workflow, sort_keys=False, width=100)
+    for field, schema_line in SCHEMA_LINE_COMMENTS.items():
+        rendered = re.sub(
+            rf"^(\s*{field}:.*)$",
+            rf"\1 # schema line {schema_line}",
+            rendered,
+            flags=re.MULTILINE,
+        )
+    return rendered
 
 
 def main() -> None:
@@ -416,7 +479,7 @@ def main() -> None:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / ("sh-live-v2-%s.yml" % case_path.stem)
-    out.write_text(yaml.safe_dump(wf, sort_keys=False, width=100))
+    out.write_text(render_workflow(wf))
     print(out)
 
 

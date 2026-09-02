@@ -42,23 +42,29 @@ def score(det: dict, attempt_no: int) -> tuple[float, str]:
     S = 1.0
     E = 1.0
     cls = "clean"
-    if det["hallucination_keys"]:
+    # class priority F4 > F3 > F2 > F1 (docs/04-CASE-SUITE-SPEC):
+    # hard structure faults (wrap nesting, tool errors, missing keys with no
+    # extras) are F2; a renamed/restructured schema (missing keys AND extra
+    # keys, no hard fault) is naming drift — the F1 corrective prompt owns it.
+    if det["truncated_output"] or det.get("upstream_errors"):
+        E = min(E, 0.25)
+        cls = "F4"
+    if det["contradiction_pairs"]:
+        S = min(S, 0.15)
+        cls = "F3"
+    if cls == "clean" and (det["schema_nested_wrong"] or det["tool_errors"]
+                           or (det["schema_missing_keys"] and not det["hallucination_keys"])):
+        E = min(E, 0.45)
+        S = min(S, 0.40)
+        cls = "F2"
+    if cls == "clean" and det["hallucination_keys"]:
         C = min(C, 0.45)
         S = min(S, 0.20)
         cls = "F1"
     if det["confidence_degraded"]:
         C = min(C, 0.45)
-        cls = cls if cls != "clean" else "F1"
-    if det["schema_missing_keys"] or det["schema_nested_wrong"] or det["tool_errors"]:
-        E = min(E, 0.45)
-        S = min(S, 0.40)
-        cls = "F2" if cls == "clean" else cls
-    if det["contradiction_pairs"]:
-        S = min(S, 0.15)
-        cls = "F3"
-    if det["truncated_output"] or det.get("upstream_errors"):
-        E = min(E, 0.25)
-        cls = "F4"
+        if cls == "clean":
+            cls = "F1"
 
     R = round(OMEGA["C"] * C + OMEGA["S"] * S + OMEGA["E"] * E, 4)
     return R, cls

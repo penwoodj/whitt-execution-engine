@@ -298,12 +298,12 @@ FILLER_POOL = [
     "Failure loudness: where the described process encounters input it cannot classify, it halts with a diagnostic naming the offending input; silent drops and guessed mappings are prohibited.",
     "Review cadence: named sections carry named owners and the checkpoints at which they are reviewed; unowned sections are returned by default.",
     "Hand-off completeness: the artifact closes with the checklist of downstream consumers and the specific sections each must sign off before the artifact's status advances.",
-    "Versioning: the artifact carries a version field and a status vocabulary; supersession is explicit rather than implicit in filenames.",
     "Reconciliation: wherever totals and components both appear, the artifact states the reconciliation between them and treats mismatch as a hard error rather than a rounding note.",
-    "Terminology control: the artifact fixes its vocabulary in a short glossary paragraph before first use, and does not alternate between synonyms for the same concept; reviewers track referential integrity line by line.",
+    "Reconciliation: wherever totals and components both appear, the artifact states the reconciliation between them and treats mismatch as a hard error rather than a rounding note.",
+    "Terminology control: fix vocabulary in a short glossary passage inside an existing required section before first use, and do not alternate between synonyms for the same concept; no new top-level keys.",
     "Evidence recency: every supplied fact is treated as current as of this engagement; if the artifact depends on a fact changing, it marks that dependency explicitly rather than assuming staleness.",
     "Escalation path: wherever the artifact delegates a decision, it names the deciding role, the information that role needs, and the timeframe in which the decision blocks downstream work.",
-    "Negative space: the artifact states at least once what is deliberately out of scope and why, so reviewers can distinguish omission from oversight.",
+    "Negative space: inside an existing required section, state at least once what is deliberately out of scope and why, so reviewers can distinguish omission from oversight.",
     "Audit hooks: wherever the artifact asserts a property that could silently regress, it names the check that would catch the regression and where that check lives.",
     "Precision over fluency: where a precise but awkward formulation and a fluent but ambiguous one compete, the artifact chooses precision; polish that costs determinism is rejected in review.",
 ]
@@ -384,18 +384,19 @@ def expected_block(cls: str, attempts: list[int]) -> dict:
         }
     base = cls.replace("-persist", "")
     heal = f"heal_{CLASS_STRATEGY[base]}"
-    heals_used = n - 1  # a heal follows every failed attempt except the last
-    path: list[str] = []
-    for i in range(n):
-        path += ["attempt", "classify"]
-        if i < heals_used:
-            path.append(heal)
     final = "final_fail" if n >= 3 else "accept"
-    if final == "final_fail":
-        path.append("final_fail")
-    else:
-        path += ["judge_gate", "accept"]
-    path.append("report")
+    if final == "accept":
+        # every failed attempt gets a heal, then one clean success attempt
+        path = ["attempt", "classify", heal] * n
+        path += ["attempt", "classify", "judge_gate", "accept", "report"]
+        return {
+            "final": "accept",
+            "path": path,
+            "attempts_to_success": n + 1,
+        }
+    # final_fail (persist): heals follow failed rounds 1..n-1 only
+    path = ["attempt", "classify", heal] * (n - 1)
+    path += ["attempt", "classify", "final_fail", "report"]
     return {"final": final, "path": path, "attempts_to_success": (n if final == "accept" else None)}
 
 
@@ -518,7 +519,11 @@ def compose_prompt(row: dict, rng: random.Random) -> str:
     lo, hi = WORD_TARGET
     i = 0
     while base_words < lo and i < len(filler):
-        paras.append("PROCESS DISCIPLINE. " + filler[i])
+        paras.append(
+            "PROCESS DISCIPLINE. " + filler[i]
+            + " All such content belongs as prose inside an existing required "
+              "section's value — never as new top-level keys beyond the contract."
+        )
         base_words = sum(len(p.split()) for p in paras)
         i += 1
     if base_words > hi:
@@ -540,7 +545,7 @@ def schema_block(row: dict) -> dict:
         "type": "object",
         "required": arc["schema_keys"],
         "properties": props,
-        "optional": ["notes"],
+        "optional": ["notes", "status", "version"],
     }
 
 

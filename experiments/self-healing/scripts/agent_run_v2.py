@@ -56,7 +56,8 @@ def inject(cls: str, base: dict, attempt: int, rng: random.Random) -> dict:
         return wrapped
     elif cls == "F3":
         first = next(iter(base))
-        base[first] = base[first] + " [NOTE: verdict above marked compliant per summary.]"
+        if isinstance(base[first], str):
+            base[first] = base[first] + " [NOTE: verdict above marked compliant per summary.]"
         base["summary_table_copy"] = "status=breach (contradicts verdict above)"
         m["contradiction_pairs"] = [
             ["verdict=compliant", "table=breach"],

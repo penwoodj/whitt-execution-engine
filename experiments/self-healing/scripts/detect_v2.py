@@ -38,10 +38,12 @@ def detect(attempt: dict, case: dict) -> dict:
         k for k in keys - required - optional if not k.startswith("_")
     )
     missing_keys = sorted(required - keys)
+    # Real-generation truncation: the parse fell back to the unparsed_text
+    # shell (max_tokens exhaustion mid-JSON). Route it to F4/replan.
+    truncated = bool(meta.get("truncated")) or "unparsed_text" in attempt
     wrapped = list(attempt.keys()) == ["document", "_meta"] or (
         set(attempt.keys()) - {"_meta"} == {"document"}
     )
-    truncated = bool(meta.get("truncated"))
     tool_errors = int(meta.get("tool_errors", 0))
     contradictions = list(meta.get("contradiction_pairs", []))
     confidence = float(meta.get("confidence", 0.75))
