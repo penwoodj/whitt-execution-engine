@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::error::Error;
 use crate::error::Result;
-use crate::model::schema::ModelsConfig;
+use crate::model::schema::{parse_resource_bytes, ModelsConfig};
 
 pub use super::execution::WorkflowExecutionStrategy;
 pub use super::permissions::ToolPermissions;
@@ -163,8 +163,7 @@ impl WorkflowFile {
         if let Some(ref execution_strategy) = self.workflow_execution_strategy {
             if let (Some(ref load_unload), Some(ref memory)) = (&execution_strategy.load_unload, &execution_strategy.memory) {
                 if let Some(ref model_lifecycle) = memory.model_lifecycle {
-                    // Compare LoadUnloadStrategy values
-                    if load_unload == &model_lifecycle.load_unload_strategy {
+                    if model_lifecycle.load_unload_strategy.as_ref() == Some(load_unload) {
                         return Err(Error::Validation {
                             message: "model_lifecycle.load_unload_strategy duplicates load_unload — remove redundant key".into(),
                         });
@@ -186,6 +185,63 @@ impl WorkflowFile {
             return Err(Error::Validation {
                 message: "name must be non-empty".into(),
             });
+        }
+        if let Some(admission) = self
+            .workflow_execution_strategy
+            .as_ref()
+            .and_then(|strategy| strategy.resource_admission.as_ref())
+        {
+            for (field, value) in [
+                ("minimum_available.ram", &admission.minimum_available.ram),
+                ("minimum_available.vram", &admission.minimum_available.vram),
+                ("minimum_available.swap_free", &admission.minimum_available.swap_free),
+                ("model_estimate.kv_cache", &admission.model_estimate.kv_cache),
+                (
+                    "model_estimate.compute_buffer",
+                    &admission.model_estimate.compute_buffer,
+                ),
+                (
+                    "model_estimate.host_runtime",
+                    &admission.model_estimate.host_runtime,
+                ),
+            ] {
+                if parse_resource_bytes(value).is_none() {
+                    return Err(Error::Validation {
+                        message: format!(
+                            "workflow_execution_strategy.resource_admission.{field} must be a positive B, KB, MB, GB, KiB, MiB, or GiB value"
+                        ),
+                    });
+                }
+            }
+            if admission.model_estimate.expected_runtime_secs == 0 {
+                return Err(Error::Validation {
+                    message: "workflow_execution_strategy.resource_admission.model_estimate.expected_runtime_secs must be positive".into(),
+                });
+            }
+            if let Some(models) = self.models.as_ref() {
+                for (model_key, model) in &models.models {
+                    let source_path = model.source_path.as_ref().ok_or_else(|| Error::Validation {
+                        message: format!(
+                            "workflow_execution_strategy.resource_admission model '{model_key}' requires source_path"
+                        ),
+                    })?;
+                    let source = Path::new(source_path);
+                    if !source.is_absolute() {
+                        return Err(Error::Validation {
+                            message: format!(
+                                "workflow_execution_strategy.resource_admission model '{model_key}' source_path must be absolute"
+                            ),
+                        });
+                    }
+                    if source.file_name().and_then(|name| name.to_str()) != Some(model.name.as_str()) {
+                        return Err(Error::Validation {
+                            message: format!(
+                                "workflow_execution_strategy.resource_admission model '{model_key}' source_path basename must match name"
+                            ),
+                        });
+                    }
+                }
+            }
         }
         if let Some(ref providers) = self.providers {
             for provider_name in providers.providers.keys() {
@@ -832,3 +888,27 @@ fn default_permission_mode() -> PermissionMode {
     PermissionMode::OwnerFullGroupReadExecOtherReadExec
 }
 
+#[cfg(test)]
+mod tests {
+    use super::WorkflowFile;
+
+    #[test]
+    fn workflow_file_when_lifecycle_omits_load_strategy_then_top_level_strategy_is_valid() {
+        // Given: unload behavior without an explicit nested load strategy.
+        let yaml = r#"
+workflow_id: lifecycle-default
+name: Lifecycle default
+workflow_execution_strategy:
+  load_unload: one_at_a_time
+  memory:
+    model_lifecycle:
+      unload_unused: true
+"#;
+
+        // When: the workflow is parsed and validated.
+        let result = WorkflowFile::from_yaml(yaml);
+
+        // Then: defaulted nested values do not create a false duplicate.
+        assert!(result.is_ok());
+    }
+}

@@ -42,6 +42,10 @@ pub struct ModelSpec {
     #[garde(skip)]
     pub name: String,
 
+    #[serde(default)]
+    #[garde(skip)]
+    pub source_path: Option<String>,
+
     /// Host configuration.
     #[serde(default)]
     #[garde(skip)]
@@ -363,6 +367,48 @@ impl ResourceLimit {
             ResourceLimit::Percentage(_) => None,
         }
     }
+}
+
+pub fn parse_resource_bytes(value: &str) -> Option<u64> {
+    let value = value.trim();
+    let unit_index = value.find(|c: char| !c.is_ascii_digit() && c != '.')?;
+    let (number, unit) = value.split_at(unit_index);
+    if number.is_empty() || unit.is_empty() || number.matches('.').count() > 1 {
+        return None;
+    }
+
+    let multiplier = match unit.to_ascii_lowercase().as_str() {
+        "b" => 1_u128,
+        "kb" => 1_000,
+        "mb" => 1_000_000,
+        "gb" => 1_000_000_000,
+        "kib" => 1_024,
+        "mib" => 1_048_576,
+        "gib" => 1_073_741_824,
+        _ => return None,
+    };
+
+    let (whole, fraction) = match number.split_once('.') {
+        Some((whole, fraction)) if !whole.is_empty() && !fraction.is_empty() => (whole, fraction),
+        Some(_) => return None,
+        None => (number, ""),
+    };
+    let whole = whole.parse::<u128>().ok()?;
+    let whole_bytes = whole.checked_mul(multiplier)?;
+    let fraction_bytes = if fraction.is_empty() {
+        0
+    } else {
+        let fraction_digits = fraction;
+        let fraction_value = fraction_digits.parse::<u128>().ok()?;
+        let divisor = 10_u128.checked_pow(fraction_digits.len().try_into().ok()?)?;
+        fraction_value
+            .checked_mul(multiplier)?
+            .checked_add(divisor - 1)?
+            .checked_div(divisor)?
+    };
+    u64::try_from(whole_bytes.checked_add(fraction_bytes)?)
+        .ok()
+        .filter(|bytes| *bytes > 0)
 }
 
 // ============================================================================
@@ -1272,6 +1318,16 @@ test-model:
         let limit = ResourceLimit::parse_resource_limit("4GB");
         assert_eq!(limit.parse_absolute_mb(), Some(4096));
         assert_eq!(limit.parse_percentage(), None);
+    }
+
+    #[test]
+    fn parse_exact_resource_bytes() {
+        assert_eq!(parse_resource_bytes("3.7GB"), Some(3_700_000_000));
+        assert_eq!(parse_resource_bytes("6GiB"), Some(6 * 1024 * 1024 * 1024));
+        assert_eq!(parse_resource_bytes("512MiB"), Some(512 * 1024 * 1024));
+        assert_eq!(parse_resource_bytes("0.5GB"), Some(500_000_000));
+        assert_eq!(parse_resource_bytes("0GiB"), None);
+        assert_eq!(parse_resource_bytes("6G"), None);
     }
 
     #[test]

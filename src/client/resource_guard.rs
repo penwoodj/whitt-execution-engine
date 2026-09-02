@@ -50,9 +50,23 @@ pub struct RamSensors {
 }
 
 pub fn read_vram_sensors_sysfs() -> Option<VramSensors> {
-    let base = Path::new("/sys/class/drm/card0/device");
+    for card_index in 0..16 {
+        let base = Path::new("/sys/class/drm")
+            .join(format!("card{card_index}"))
+            .join("device");
+        if let Some(sensors) = read_vram_sensors_from_device(&base) {
+            return Some(sensors);
+        }
+    }
+    None
+}
+
+fn read_vram_sensors_from_device(base: &Path) -> Option<VramSensors> {
     let total = read_u64_file(&base.join("mem_info_vram_total"))?;
-    let free = read_u64_file(&base.join("mem_info_vram_free"))?;
+    let free = read_u64_file(&base.join("mem_info_vram_free")).or_else(|| {
+        read_u64_file(&base.join("mem_info_vram_used"))
+            .and_then(|used| total.checked_sub(used))
+    })?;
     Some(VramSensors { total_bytes: total, free_bytes: free })
 }
 
@@ -133,9 +147,26 @@ pub struct LoadRequest {
     pub host_footprint_kb: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowLoadRequest {
+    pub model_name: String,
+    pub weights_bytes: u64,
+    pub minimum_ram_bytes: u64,
+    pub minimum_vram_bytes: u64,
+    pub minimum_swap_free_bytes: u64,
+    pub kv_cache_bytes: u64,
+    pub compute_buffer_bytes: u64,
+    pub host_runtime_bytes: u64,
+}
+
 /// Greppable rejection codes (crash-debug skill contract).
 pub const REJECT_VRAM_FIT: &str = "RESOURCE_REJECT_VRAM_FIT";
 pub const REJECT_RAM_FLOOR: &str = "RESOURCE_REJECT_RAM_FLOOR";
+pub const REJECT_WORKFLOW_RAM: &str = "RESOURCE_REJECT_WORKFLOW_RAM";
+pub const REJECT_WORKFLOW_VRAM: &str = "RESOURCE_REJECT_WORKFLOW_VRAM";
+pub const REJECT_WORKFLOW_SWAP: &str = "RESOURCE_REJECT_WORKFLOW_SWAP";
+pub const REJECT_WORKFLOW_SENSORS: &str = "RESOURCE_REJECT_WORKFLOW_SENSORS";
+pub const REJECT_WORKFLOW_MODEL_FIT: &str = "RESOURCE_REJECT_WORKFLOW_MODEL_FIT";
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Admission {
@@ -168,6 +199,139 @@ pub fn admit_load(req: &LoadRequest, vram_free_bytes: u64, ram_sensors: &RamSens
             detail: format!(
                 "model {} leaves {} MB host RAM, floor {} MB",
                 req.model_name, ram_left_kb / KB, floor_kb / KB
+            ),
+        };
+    }
+    Admission::Admitted
+}
+
+pub fn admit_workflow_load(
+    req: &WorkflowLoadRequest,
+    vram: &VramSensors,
+    ram: &RamSensors,
+) -> Admission {
+    let ram_available_bytes = ram.mem_available_kb.saturating_mul(KB);
+    if ram_available_bytes < req.minimum_ram_bytes {
+        return Admission::Rejected {
+            code: REJECT_WORKFLOW_RAM,
+            detail: format!(
+                "model {} requires {} bytes RAM available, found {}",
+                req.model_name, req.minimum_ram_bytes, ram_available_bytes
+            ),
+        };
+    }
+    if vram.free_bytes < req.minimum_vram_bytes {
+        return Admission::Rejected {
+            code: REJECT_WORKFLOW_VRAM,
+            detail: format!(
+                "model {} requires {} bytes VRAM free, found {}",
+                req.model_name, req.minimum_vram_bytes, vram.free_bytes
+            ),
+        };
+    }
+    let swap_free_bytes = ram.swap_free_kb.saturating_mul(KB);
+    if swap_free_bytes < req.minimum_swap_free_bytes {
+        return Admission::Rejected {
+            code: REJECT_WORKFLOW_SWAP,
+            detail: format!(
+                "model {} requires {} bytes swap free, found {}",
+                req.model_name, req.minimum_swap_free_bytes, swap_free_bytes
+            ),
+        };
+    }
+    let host_footprint_kb = req
+        .weights_bytes
+        .saturating_add(req.host_runtime_bytes)
+        .saturating_add(KB - 1)
+        / KB;
+    match admit_load(
+        &LoadRequest {
+            model_name: req.model_name.clone(),
+            weights_bytes: req.weights_bytes,
+            kv_bytes: req.kv_cache_bytes,
+            compute_buffer_bytes: req.compute_buffer_bytes,
+            ctx_tokens: 0,
+            host_footprint_kb,
+        },
+        vram.free_bytes,
+        ram,
+    ) {
+        Admission::Admitted => Admission::Admitted,
+        Admission::Rejected { detail, .. } => Admission::Rejected {
+            code: REJECT_WORKFLOW_MODEL_FIT,
+            detail,
+        },
+    }
+}
+
+pub fn admit_workflow_preflight(
+    req: &WorkflowLoadRequest,
+    vram: &VramSensors,
+    ram: &RamSensors,
+) -> Admission {
+    let ram_available_bytes = ram.mem_available_kb.saturating_mul(KB);
+    if ram_available_bytes < req.minimum_ram_bytes {
+        return Admission::Rejected {
+            code: REJECT_WORKFLOW_RAM,
+            detail: format!(
+                "model {} requires {} bytes RAM available, found {}",
+                req.model_name, req.minimum_ram_bytes, ram_available_bytes
+            ),
+        };
+    }
+    if vram.total_bytes < req.minimum_vram_bytes {
+        return Admission::Rejected {
+            code: REJECT_WORKFLOW_VRAM,
+            detail: format!(
+                "model {} requires {} bytes total VRAM, found {}",
+                req.model_name, req.minimum_vram_bytes, vram.total_bytes
+            ),
+        };
+    }
+    let swap_free_bytes = ram.swap_free_kb.saturating_mul(KB);
+    if swap_free_bytes < req.minimum_swap_free_bytes {
+        return Admission::Rejected {
+            code: REJECT_WORKFLOW_SWAP,
+            detail: format!(
+                "model {} requires {} bytes swap free, found {}",
+                req.model_name, req.minimum_swap_free_bytes, swap_free_bytes
+            ),
+        };
+    }
+    Admission::Admitted
+}
+
+pub fn admit_workflow_inference(
+    req: &WorkflowLoadRequest,
+    vram: &VramSensors,
+    ram: &RamSensors,
+) -> Admission {
+    let ram_available_bytes = ram.mem_available_kb.saturating_mul(KB);
+    if ram_available_bytes < req.minimum_ram_bytes {
+        return Admission::Rejected {
+            code: REJECT_WORKFLOW_RAM,
+            detail: format!(
+                "model {} requires {} bytes RAM available, found {}",
+                req.model_name, req.minimum_ram_bytes, ram_available_bytes
+            ),
+        };
+    }
+    let swap_free_bytes = ram.swap_free_kb.saturating_mul(KB);
+    if swap_free_bytes < req.minimum_swap_free_bytes {
+        return Admission::Rejected {
+            code: REJECT_WORKFLOW_SWAP,
+            detail: format!(
+                "model {} requires {} bytes swap free, found {}",
+                req.model_name, req.minimum_swap_free_bytes, swap_free_bytes
+            ),
+        };
+    }
+    if vram.free_bytes < req.compute_buffer_bytes {
+        return Admission::Rejected {
+            code: REJECT_WORKFLOW_VRAM,
+            detail: format!(
+                "model {} requires {} bytes inference VRAM headroom, found {}",
+                req.model_name, req.compute_buffer_bytes, vram.free_bytes
             ),
         };
     }
@@ -340,6 +504,30 @@ pub fn max_concurrent_ram(available_gb: f64) -> usize {
 
 // ── E1 runner seam ─────────────────────────────────────────────────────────
 
+/// L1 pre-load admission for the runner's load path: weights from the model
+/// file, KV estimated with a conservative GQA shape (Qwen-class 36L/8H/128D,
+/// q8 KV, 30k ctx), 512MB compute buffer, host footprint = weights (mmap) +
+/// 700MB llama-server runtime.
+pub fn admission_for_load(
+    model_id: &str,
+    weights_bytes: u64,
+    vram_free_bytes: u64,
+    ram: &RamSensors,
+) -> Admission {
+    admit_load(
+        &LoadRequest {
+            model_name: model_id.to_string(),
+            weights_bytes,
+            kv_bytes: kv_cache_bytes(36, 8, 128, 30_000, 1),
+            compute_buffer_bytes: 512 * 1024 * 1024,
+            ctx_tokens: 30_000,
+            host_footprint_kb: weights_bytes / 1024 + 700 * 1024,
+        },
+        vram_free_bytes,
+        ram,
+    )
+}
+
 /// One live gate decision: feed a sensor sample through the tracker and
 /// return the action the runner must take before starting an inference.
 /// Missing sensors (headless/CI boxes) never gate.
@@ -488,6 +676,52 @@ mod tests {
         let vram = VramSensors { total_bytes: 8 * KB * KB * KB, free_bytes: 1_400 * MB() };
         let r = ram(8_000_000);
         assert_eq!(classify_sample(&vram, &r), Pressure::Amber);
+    }
+
+    #[test]
+    fn t44_reads_vram_from_non_card0_device_path() {
+        let device = std::env::temp_dir().join(format!(
+            "whitt-vram-sensor-{}",
+            std::process::id(),
+        ));
+        std::fs::create_dir_all(&device).expect("create test sensor path");
+        std::fs::write(device.join("mem_info_vram_total"), "8589934592\n")
+            .expect("write total VRAM");
+        std::fs::write(device.join("mem_info_vram_free"), "6442450944\n")
+            .expect("write free VRAM");
+
+        assert_eq!(
+            read_vram_sensors_from_device(&device),
+            Some(VramSensors {
+                total_bytes: 8 * 1024 * 1024 * 1024,
+                free_bytes: 6 * 1024 * 1024 * 1024,
+            }),
+        );
+
+        std::fs::remove_dir_all(device).expect("remove test sensor path");
+    }
+
+    #[test]
+    fn t45_derives_free_vram_from_total_and_used() {
+        let device = std::env::temp_dir().join(format!(
+            "whitt-vram-used-sensor-{}",
+            std::process::id(),
+        ));
+        std::fs::create_dir_all(&device).expect("create test sensor path");
+        std::fs::write(device.join("mem_info_vram_total"), "8589934592\n")
+            .expect("write total VRAM");
+        std::fs::write(device.join("mem_info_vram_used"), "2147483648\n")
+            .expect("write used VRAM");
+
+        assert_eq!(
+            read_vram_sensors_from_device(&device),
+            Some(VramSensors {
+                total_bytes: 8 * 1024 * 1024 * 1024,
+                free_bytes: 6 * 1024 * 1024 * 1024,
+            }),
+        );
+
+        std::fs::remove_dir_all(device).expect("remove test sensor path");
     }
 
     fn MB() -> u64 {
@@ -711,5 +945,146 @@ mod tests {
         let tracker = std::sync::Arc::new(std::sync::Mutex::new(PressureTracker::new()));
         let out = guard_inference(tracker, 10, || (None, None), async { "ok" }).await;
         assert_eq!(out.unwrap(), "ok");
+    }
+
+    // ── L1 load-admission wrapper ───────────────────────────────────
+
+    #[test]
+    fn t38_admission_for_load_admits_roomy_host() {
+        let free = 8 * GB_U64;
+        match admission_for_load("m", 2_684_354_560, free, &ram(6_000_000)) {
+            Admission::Admitted => {}
+            other => panic!("expected Admitted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn t39_admission_for_load_rejects_storybook_squeeze() {
+        let free = 4 * GB_U64;
+        match admission_for_load("m", 2_684_354_560, free, &ram(6_000_000)) {
+            Admission::Rejected { code, .. } => assert_eq!(code, REJECT_VRAM_FIT),
+            other => panic!("expected Reject, got {other:?}"),
+        }
+    }
+
+    fn workflow_req() -> WorkflowLoadRequest {
+        WorkflowLoadRequest {
+            model_name: "m".into(),
+            weights_bytes: GB_U64,
+            minimum_ram_bytes: 6 * GB_U64,
+            minimum_vram_bytes: 6 * GB_U64,
+            minimum_swap_free_bytes: 4 * GB_U64,
+            kv_cache_bytes: GB_U64,
+            compute_buffer_bytes: 512 * 1024 * 1024,
+            host_runtime_bytes: 700 * 1024 * 1024,
+        }
+    }
+
+    #[test]
+    fn t40_workflow_admission_rejects_declared_available_resource_minimums() {
+        let vram = VramSensors { total_bytes: 8 * GB_U64, free_bytes: 8 * GB_U64 };
+        let ram = RamSensors {
+            mem_available_kb: 5 * 1024 * 1024,
+            swap_free_kb: 5 * 1024 * 1024,
+            mem_total_kb: 16 * 1024 * 1024,
+        };
+        match admit_workflow_load(&workflow_req(), &vram, &ram) {
+            Admission::Rejected { code, .. } => assert_eq!(code, REJECT_WORKFLOW_RAM),
+            other => panic!("expected declared-RAM rejection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn t41_workflow_admission_rejects_declared_model_fit() {
+        let mut request = workflow_req();
+        request.minimum_ram_bytes = 2 * GB_U64;
+        request.minimum_vram_bytes = 2 * GB_U64;
+        request.minimum_swap_free_bytes = GB_U64;
+        request.weights_bytes = 4 * GB_U64;
+        request.kv_cache_bytes = 4 * GB_U64;
+        let vram = VramSensors { total_bytes: 8 * GB_U64, free_bytes: 8 * GB_U64 };
+        let ram = RamSensors {
+            mem_available_kb: 12 * 1024 * 1024,
+            swap_free_kb: 12 * 1024 * 1024,
+            mem_total_kb: 16 * 1024 * 1024,
+        };
+        match admit_workflow_load(&request, &vram, &ram) {
+            Admission::Rejected { code, .. } => assert_eq!(code, REJECT_WORKFLOW_MODEL_FIT),
+            other => panic!("expected declared-model-fit rejection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn t42_workflow_admission_rejects_declared_vram_minimum() {
+        let mut request = workflow_req();
+        request.minimum_ram_bytes = 2 * GB_U64;
+        request.minimum_vram_bytes = 7 * GB_U64;
+        request.minimum_swap_free_bytes = GB_U64;
+        let vram = VramSensors { total_bytes: 8 * GB_U64, free_bytes: 6 * GB_U64 };
+        let ram = RamSensors {
+            mem_available_kb: 12 * 1024 * 1024,
+            swap_free_kb: 12 * 1024 * 1024,
+            mem_total_kb: 16 * 1024 * 1024,
+        };
+        match admit_workflow_load(&request, &vram, &ram) {
+            Admission::Rejected { code, .. } => assert_eq!(code, REJECT_WORKFLOW_VRAM),
+            other => panic!("expected declared-VRAM rejection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn t43_workflow_admission_rejects_declared_swap_minimum() {
+        let mut request = workflow_req();
+        request.minimum_ram_bytes = 2 * GB_U64;
+        request.minimum_vram_bytes = 2 * GB_U64;
+        request.minimum_swap_free_bytes = 4 * GB_U64;
+        let vram = VramSensors { total_bytes: 8 * GB_U64, free_bytes: 8 * GB_U64 };
+        let ram = RamSensors {
+            mem_available_kb: 12 * 1024 * 1024,
+            swap_free_kb: 3 * 1024 * 1024,
+            mem_total_kb: 16 * 1024 * 1024,
+        };
+        match admit_workflow_load(&request, &vram, &ram) {
+            Admission::Rejected { code, .. } => assert_eq!(code, REJECT_WORKFLOW_SWAP),
+            other => panic!("expected declared-swap rejection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn t46_workflow_inference_admission_uses_compute_headroom_after_load() {
+        let request = workflow_req();
+        let vram = VramSensors {
+            total_bytes: 8 * GB_U64,
+            free_bytes: 712 * 1024 * 1024,
+        };
+        let ram = RamSensors {
+            mem_available_kb: 8 * 1024 * 1024,
+            swap_free_kb: 8 * 1024 * 1024,
+            mem_total_kb: 16 * 1024 * 1024,
+        };
+
+        assert!(matches!(
+            admit_workflow_inference(&request, &vram, &ram),
+            Admission::Admitted
+        ));
+    }
+
+    #[test]
+    fn workflow_preflight_admits_total_vram_capacity_when_model_is_already_loaded() {
+        let request = workflow_req();
+        let vram = VramSensors {
+            total_bytes: 8 * GB_U64,
+            free_bytes: 712 * 1024 * 1024,
+        };
+        let ram = RamSensors {
+            mem_available_kb: 8 * 1024 * 1024,
+            swap_free_kb: 8 * 1024 * 1024,
+            mem_total_kb: 16 * 1024 * 1024,
+        };
+
+        assert!(matches!(
+            admit_workflow_preflight(&request, &vram, &ram),
+            Admission::Admitted
+        ));
     }
 }

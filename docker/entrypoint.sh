@@ -48,6 +48,19 @@ get_yaml_value() {
     fi
 }
 
+get_env_or_yaml_value() {
+    local env_name="$1"
+    local existing_value="${!env_name:-}"
+    shift
+
+    if [ -n "$existing_value" ]; then
+        echo "$existing_value"
+        return
+    fi
+
+    get_yaml_value "$@"
+}
+
 # Function to download model from HuggingFace
 download_model() {
     local model_path="$1"
@@ -206,31 +219,33 @@ translate_config() {
     fi
 
     # Context size (default from llama.cpp: 2048)
-    ctx_size=$(get_yaml_value ".context.size" "2048")
+    ctx_size=$(get_env_or_yaml_value "LLAMA_ARG_CTX_SIZE" ".context.size" "2048")
     export LLAMA_ARG_CTX_SIZE="$ctx_size"
 
     # Batch size (default from llama.cpp: 2048)
-    batch_size=$(get_yaml_value ".context.batch_size" "2048")
+    batch_size=$(get_env_or_yaml_value "LLAMA_ARG_BATCH_SIZE" ".context.batch_size" "2048")
     export LLAMA_ARG_BATCH_SIZE="$batch_size"
 
     # Micro-batch size (default from llama.cpp: 512)
-    ubatch_size=$(get_yaml_value ".context.ubatch_size" "512")
+    ubatch_size=$(get_env_or_yaml_value "LLAMA_ARG_UBATCH_SIZE" ".context.ubatch_size" "512")
     export LLAMA_ARG_UBATCH_SIZE="$ubatch_size"
 
     # CPU threads (default from llama.cpp: -1 = auto)
-    n_threads=$(get_yaml_value ".hardware.threads" "4")
+    n_threads=$(get_env_or_yaml_value "LLAMA_ARG_N_THREADS" ".hardware.threads" "4")
     if [ "$n_threads" -gt 0 ]; then
         export LLAMA_ARG_N_THREADS="$n_threads"
     fi
 
     # GPU layers (default from llama.cpp: auto)
-    n_gpu_layers=$(get_yaml_value ".hardware.gpu_layers" "999")
+    n_gpu_layers=$(get_env_or_yaml_value "LLAMA_ARG_N_GPU_LAYERS" ".hardware.gpu_layers" "999")
     export LLAMA_ARG_N_GPU_LAYERS="$n_gpu_layers"
 
     # Use mmap (default from llama.cpp: true)
-    use_mmap=$(get_yaml_value ".hardware.use_mmap" "true")
-    if [ "$use_mmap" = "false" ]; then
+    use_mmap=$(get_env_or_yaml_value "LLAMA_ARG_USE_MMAP" ".hardware.use_mmap" "true")
+    if [ "$use_mmap" = "false" ] || [ "$use_mmap" = "0" ]; then
         export LLAMA_ARG_USE_MMAP="0"
+    else
+        export LLAMA_ARG_USE_MMAP="1"
     fi
 
     # Lock memory
@@ -310,9 +325,13 @@ translate_config() {
     export LLAMA_ARG_PORT="$port"
 
     # Parallel processing
-    parallel=$(get_yaml_value ".server.parallel" "false")
+    parallel=$(get_env_or_yaml_value "LLAMA_ARG_PARALLEL" ".server.parallel" "false")
     if [ "$parallel" = "true" ]; then
-        export LLAMA_ARG_PARALLEL="1"
+        parallel="1"
+    fi
+    if [ "$parallel" != "false" ] && [ "$parallel" != "0" ] && [ -n "$parallel" ]; then
+        export LLAMA_ARG_PARALLEL="$parallel"
+        export LLAMA_ARG_N_SLOT="$parallel"
     fi
 
     # Timeout (default from llama.cpp: 600)
@@ -320,7 +339,7 @@ translate_config() {
     export LLAMA_ARG_TIMEOUT="$timeout"
 
     # Max slots
-    max_slots=$(get_yaml_value ".server.max_slots" "8")
+    max_slots=$(get_env_or_yaml_value "LLAMA_ARG_N_SLOT" ".server.max_slots" "8")
     if [ "$max_slots" -gt 0 ]; then
         export LLAMA_ARG_N_SLOT="$max_slots"
     fi
@@ -338,10 +357,10 @@ translate_config() {
     fi
 
     # Cache type
-    cache_type_k=$(get_yaml_value ".cache.cache_type_k" "f16")
+    cache_type_k=$(get_env_or_yaml_value "LLAMA_ARG_CACHE_TYPE_K" ".cache.cache_type_k" "f16")
     export LLAMA_ARG_CACHE_TYPE_K="$cache_type_k"
 
-    cache_type_v=$(get_yaml_value ".cache.cache_type_v" "f16")
+    cache_type_v=$(get_env_or_yaml_value "LLAMA_ARG_CACHE_TYPE_V" ".cache.cache_type_v" "f16")
     export LLAMA_ARG_CACHE_TYPE_V="$cache_type_v"
 
     # Log level (0=trace, 1=debug, 2=info, 3=warn, 4=error)
@@ -502,6 +521,12 @@ start_server() {
         server_args="$server_args -ngl $LLAMA_ARG_N_GPU_LAYERS"
     fi
 
+    if [ "${LLAMA_ARG_USE_MMAP:-1}" = "0" ] || [ "${LLAMA_ARG_USE_MMAP:-1}" = "false" ]; then
+        server_args="$server_args --no-mmap"
+    else
+        server_args="$server_args --mmap"
+    fi
+
     # Sampling parameters
     if [ -n "$LLAMA_ARG_TEMP" ]; then
         server_args="$server_args --temp $LLAMA_ARG_TEMP"
@@ -575,26 +600,24 @@ start_server() {
         server_args="$server_args --cache-type-v $LLAMA_ARG_CACHE_TYPE_V"
     fi
 
-    # Flash Attention (default: enabled for Vulkan/CUDA/Metal like LM Studio)
-    if [ "${LLAMA_ARG_FLASH_ATTN:-}" = "true" ] || [ "$(get_yaml_value '.hardware.flash_attn' 'true')" = "true" ]; then
+    flash_attn=$(get_env_or_yaml_value "LLAMA_ARG_FLASH_ATTN" ".hardware.flash_attn" "true")
+    if [ "$flash_attn" = "true" ] || [ "$flash_attn" = "1" ]; then
         server_args="$server_args --flash-attn on"
         log_info "Flash Attention enabled"
+    else
+        server_args="$server_args --flash-attn off"
+        log_info "Flash Attention disabled"
     fi
 
     # Prompt caching — DISABLED for Vulkan backend (known GGML_ASSERT crash in state_write_data)
     # Vulkan cannot serialize KV cache state; must use --no-cache-prompt explicitly
-    cache_prompt=$(get_yaml_value '.server.cache_prompt' 'false')
-    if [ "$cache_prompt" = "true" ]; then
-        server_args="$server_args --cache-prompt"
-        log_info "Prompt caching enabled (may be unstable with Vulkan)"
-    else
-        server_args="$server_args --no-cache-prompt"
-        log_info "Prompt caching disabled (Vulkan safe mode)"
-    fi
+    server_args="$server_args --no-cache-prompt --cache-ram 0"
+    log_info "Prompt caching disabled (Vulkan safe mode)"
 
     # Continuous batching — DISABLED for Vulkan backend (triggers KV cache serialization on slot release)
-    if [ "${LLAMA_ARG_CONT_BATCHING:-}" = "true" ] || [ "$(get_yaml_value '.server.cont_batching' 'false')" = "true" ]; then
-        server_args="$server_args --cont-batching"
+    cont_batching=$(get_env_or_yaml_value "LLAMA_ARG_CONT_BATCHING" ".server.cont_batching" "false")
+    if [ "$cont_batching" = "true" ] || [ "$cont_batching" = "1" ]; then
+        log_warn "Ignoring continuous batching request: Vulkan safe mode requires it disabled."
     fi
 
     # Metrics

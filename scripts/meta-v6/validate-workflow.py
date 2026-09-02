@@ -100,6 +100,72 @@ def extract_template_refs(text):
     return refs
 
 
+def positive_resource_quantity(value):
+    if not isinstance(value, str):
+        return False
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)(B|KB|MB|GB|KiB|MiB|GiB)", value)
+    return match is not None and float(match.group(1)) > 0
+
+
+def validate_resource_admission(wf, result):
+    strategy = wf.get('workflow_execution_strategy')
+    if not isinstance(strategy, dict) or 'resource_admission' not in strategy:
+        result.warn('resource-admission', 'Missing resource admission contract; required for new executable workflows')
+        return
+
+    admission = strategy['resource_admission']
+    if not isinstance(admission, dict):
+        result.fail('resource-admission', 'Must be a mapping')
+        return
+    if admission.get('enforcement_policy') != 'block':
+        result.fail('resource-admission-policy', "enforcement_policy must be 'block'")
+
+    minimum = admission.get('minimum_available')
+    if not isinstance(minimum, dict):
+        result.fail('resource-admission-minimum', 'minimum_available must be a mapping')
+    else:
+        for key in ('ram', 'vram', 'swap_free'):
+            if not positive_resource_quantity(minimum.get(key)):
+                result.fail('resource-admission-minimum', f'{key} must be a positive B/KB/MB/GB/KiB/MiB/GiB value')
+
+    estimate = admission.get('model_estimate')
+    if not isinstance(estimate, dict):
+        result.fail('resource-admission-estimate', 'model_estimate must be a mapping')
+    else:
+        for key in ('kv_cache', 'compute_buffer', 'host_runtime'):
+            if not positive_resource_quantity(estimate.get(key)):
+                result.fail('resource-admission-estimate', f'{key} must be a positive B/KB/MB/GB/KiB/MiB/GiB value')
+        runtime = estimate.get('expected_runtime_secs')
+        if not isinstance(runtime, int) or isinstance(runtime, bool) or runtime <= 0:
+            result.fail('resource-admission-estimate', 'expected_runtime_secs must be a positive integer')
+
+    telemetry = admission.get('telemetry')
+    if not isinstance(telemetry, dict) or telemetry.get('write_profile') is not True:
+        result.fail('resource-admission-telemetry', 'telemetry.write_profile must be true')
+
+    models = wf.get('models')
+    if not isinstance(models, dict) or not models:
+        result.fail('resource-admission-source', 'resource admission requires at least one model source_path')
+    else:
+        for model_key, model in models.items():
+            if not isinstance(model, dict):
+                result.fail('resource-admission-source', f'{model_key} must be a model mapping')
+                continue
+            name = model.get('name')
+            source_path = model.get('source_path')
+            if not isinstance(name, str) or not name:
+                result.fail('resource-admission-source', f'{model_key}.name must be non-empty')
+            elif not isinstance(source_path, str) or not source_path:
+                result.fail('resource-admission-source', f'{model_key}.source_path is required')
+            elif not Path(source_path).is_absolute():
+                result.fail('resource-admission-source', f'{model_key}.source_path must be absolute')
+            elif Path(source_path).name != name:
+                result.fail('resource-admission-source', f'{model_key}.source_path basename must match name')
+
+    if not any(check.startswith('resource-admission') for check, _ in result.failed):
+        result.ok('resource-admission', 'strict block contract valid')
+
+
 def topological_sort(steps):
     in_degree = defaultdict(int)
     adj = defaultdict(list)
@@ -147,6 +213,8 @@ def validate_workflow(wf_path, repo_root):
     if not isinstance(wf, dict):
         result.fail("yaml-structure", "Root must be a mapping")
         return result
+
+    validate_resource_admission(wf, result)
 
     agentic = wf.get('agentic_workflow')
     if not agentic or not isinstance(agentic, dict):
