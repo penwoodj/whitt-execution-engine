@@ -1,0 +1,222 @@
+```json
+{
+  "mapping": {
+    "input_variants": [
+      {
+        "name": "raw_cohort_counts",
+        "fields": {
+          "user_id": { "target": "cohort_user_id", "type": "string" },
+          "registration_date": { "target": "cohort_day", "type": "date", "format": "YYYY-MM-DD" },
+          "onboarded": { "target": "onboarding_complete", "type": "boolean", "default": null },
+          "activated": { "target": "activation_complete", "type": "boolean", "default": null },
+          "push_enabled": { "target": "push_engagement", "type": "boolean", "default": null },
+          "returned_day7": { "target": "day7_return", "type": "boolean", "default": null },
+          "android_doublefire_flag": {
+            "target": "instrumentation_quirk",
+            "type": "string",
+            "value": "android_doublefire"
+          }
+        },
+        "renames": {},
+        "retypes": {}
+      },
+      {
+        "name": "raw_counts_with_nulls",
+        "fields": {
+          "cohort_day": { "target": "cohort_day", "type": "date" },
+          "onboarding_rate_raw": { "target": "onboarding_rate", "type": "number", "clamp": 0, "max_precision": 4 },
+          "activation_rate_raw": { "target": "activation_rate", "type": "number", "clamp": 0, "max_precision": 4 },
+          "push_enablement_rate_raw": { "target": "push_enablement_rate", "type": "number", "clamp": 0, "max_precision": 4 },
+          "day7_return_rate_raw": { "target": "day7_return_rate", "type": "number", "clamp": 0, "max_precision": 4 },
+          "onboarding_count_null": {
+            "target": "instrumentation_note",
+            "type": "string",
+            "value": "raw_counts_missing_onboarding"
+          }
+        },
+        "renames": {},
+        "retypes": {}
+      },
+      {
+        "name": "legacy_percentage_decimals",
+        "fields": {
+          "onboarding_rate": { "target": "onboarding_rate", "type": "number", "convert": true, "precision": 4 },
+          "activation_rate": { "target": "activation_rate", "type": "number", "convert": true, "precision": 4 },
+          "push_enablement_rate": { "target": "push_enablement_rate", "type": "number", "convert": true, "precision": 4 },
+          "day7_return_rate": { "target": "day7_return_rate", "type": "number", "convert": true, "precision": 4 }
+        },
+        "renames": {},
+        "retypes": {}
+      }
+    ],
+    "edge_cases": {
+      "empty_input": {
+        "action": "halt",
+        "output": null,
+        "flags": ["input_empty"]
+      },
+      "single_record": {
+        "action": "flag_nulls_as_unknown",
+        "output": {
+          "cohort_day": "cohort_day",
+          "onboarding_rate": 0.0,
+          "activation_rate": 0.0,
+          "push_enablement_rate": 0.0,
+          "day7_return_rate": 0.0,
+          "instrumentation_note": null
+        },
+        "flags": ["single_record"]
+      },
+      "multiple_variants": {
+        "action": "prioritize_raw_counts_with_nulls",
+        "output": "raw_counts_with_nulls",
+        "flags": []
+      }
+    }
+  },
+
+  "rules": {
+    "filtering": [
+      {
+        "trigger": "android_doublefire_flag present",
+        "action": {
+          "onboarding_rate": { "clamp": 0.85, "note": "Android double-fire adjustment" },
+          "activation_rate": { "clamp": 0.48, "note": "Android double-fire adjustment" }
+        },
+        "flags": ["android_doublefire_adjustment"]
+      }
+    ],
+    "normalization": [
+      {
+        "name": "rate_conversion",
+        "description": "Convert legacy percentage strings to decimals (e.g., '86%' → 0.86)",
+        "trigger": "legacy_percentage_decimals variant present",
+        "action": {
+          "onboarding_rate": { "convert": true, "precision": 4 },
+          "activation_rate": { "convert": true, "precision": 4 },
+          "push_enablement_rate": { "convert": true, "precision": 4 },
+          "day7_return_rate": { "convert": true, "precision": 4 }
+        },
+        "flags": ["legacy_percentage_conversion"]
+      },
+      {
+        "name": "null_handling",
+        "description": "Replace unmeasured rates with null and attach instrumentation note",
+        "trigger": "onboarding_count_null present",
+        "action": {
+          "onboarding_rate": { "value": null, "note": "Missing raw onboarding count" },
+          "activation_rate": { "value": null, "note": "Unmeasured activation rate" }
+        },
+        "flags": ["unmeasured_cell_flagged"]
+      }
+    ],
+    "interpolation": [
+      {
+        "name": "zero_fill_defect",
+        "description": "Zero-filling is a reportable defect; use null instead",
+        "trigger": "onboarding_rate_raw = 0 or activation_rate_raw = 0",
+        "action": { "value": null, "note": "Zero-fill detected and replaced with null" },
+        "flags": ["zero_fill_detected"]
+      }
+    ],
+    "computation": [
+      {
+        "name": "daily_totals_reconciliation",
+        "description": "Summed numerator totals must reconcile with rate deltas; clamp if mismatch > 0.1%",
+        "trigger": "onboarding_rate_raw and prior_week_onboarding_rate present",
+        "action": {
+          "delta_onboarding_rate": {
+            "compute": "(raw - prev) / prev",
+            "precision": 4,
+            "note": "Delta computed from summed numerator totals"
+          }
+        },
+        "flags": ["reconciliation_check"]
+      }
+    ]
+  },
+
+  "gap_handling": {
+    "instrumentation_issues": [
+      {
+        "name": "android_doublefire",
+        "scope": "onboarding/activation rates for Android cohorts",
+        "rationale": "Double-fire events inflate raw counts; clamped to observed thresholds"
+      },
+      {
+        "name": "raw_counts_missing_onboarding",
+        "scope": "All records with null onboarding_count_raw",
+        "rationale": "Unmeasured cells flagged as null with instrumentation note"
+      }
+    ],
+    "edge_case_handling": [
+      {
+        "case": "empty_input",
+        "action": "halt",
+        "reason": "No data to process; no output produced"
+      },
+      {
+        "case": "single_record",
+        "action": "flag_nulls_as_unknown",
+        "reason": "Single record forces null defaults for all rates"
+      }
+    ]
+  },
+
+  "invariants": {
+    "data_quality": [
+      {
+        "name": "rate_decimals",
+        "description": "All rates must be decimals to four places; percentages are signed deltas",
+        "check": "onboarding_rate, activation_rate, push_enablement_rate, day7_return_rate all have precision ≤ 4"
+      },
+      {
+        "name": "null_handling",
+        "description": "Unmeasured cells are null with instrumentation note; zero-filling is a defect",
+        "check": "instrumentation_note present for any null rate or delta"
+      }
+    ],
+    "reconciliation": [
+      {
+        "name": "summed_numerator_totals",
+        "description": "Sum of raw counts must equal product of rate and cohort size; clamp if mismatch > 0.1%",
+        "check": "(raw_count * rate) - (cohort_size * computed_rate) ≤ 0.001"
+      }
+    ]
+  },
+
+  "reproducibility": {
+    "ordering": {
+      "fields": [
+        { "name": "cohort_day", "type": "date", "sort": "ascending" },
+        { "name": "onboarding_rate_raw", "type": "number", "sort": "descending" }
+      ]
+    },
+    "rounding": {
+      "precision": 4,
+      "method": "round_to_nearest",
+      "tolerance": 0.0001
+    },
+    "serialization": {
+      "date_format": "YYYY-MM-DD",
+      "decimal_separator": ".",
+      "percentage_formatting": "%"
+    }
+  },
+
+  "notes": {
+    "evidence_basis": [
+      { "fact": "7 daily cohorts between 16k and 25k registrations", "source": "supplied material" },
+      { "fact": "onboarding rates near 0.86", "source": "supplied material" },
+      { "fact": "Android double-fire quirk documented", "source": "supplied material" }
+    ],
+    "discovery_items": [
+      {
+        "item": "Ingest-outage scope not specified; assume all records processed",
+        "decision_role": "data_ingestion_team",
+        "timeframe": "within 48 hours of pipeline launch"
+      }
+    ]
+  }
+}
+```

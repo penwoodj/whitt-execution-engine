@@ -1,1 +1,213 @@
-Hello! How can I help you today? 😊
+```json
+{
+  "architecture_overview": "
+# Architecture Overview
+
+## Core Design Principles
+The `iridium-recon` crate is designed as a **streaming, async-first** reconciliation engine that processes two event streams (primary and secondary) with configurable lag tolerance while minimizing memory usage for historical backfills. The architecture prioritizes:
+- **Asynchronous I/O**: All input/output operations are non-blocking via `tokio`.
+- **Stream-based processing**: Events are processed in real-time without materializing full windows.
+- **Deterministic output**: Uses stable hashing and watermark boundaries to ensure reproducible results.
+- **Metrics integration**: Exposes Prometheus-compatible metrics for observability.
+
+## Crate Layout
+```
+- `iridium_recon` (core library):
+  - Public API (`reconciliation::Reconciler`, `error::ReconciliationError`)
+  - Internal state management (`StateMachine`, `WatermarkTracker`)
+  - Watermark and fingerprint logic (`PairingEngine`)
+- `iridium_recon_cli`: Command-line interface for tool execution
+- `iridium_recon_test`: Property-based test harness
+
+## Key Tradeoffs
+1. **Memory vs. Lag Tolerance**: Configurable watermark window balances lag handling with memory overhead.
+2. **Duplicate Handling**: Retry indicators in secondary events guide duplicate detection logic.
+3. **Deterministic Hashing**: Stable hashing order via `hashbrown::HashMap` with deterministic iteration.
+
+## Week-Band Plan
+- **Weeks 1–2**: Crate skeleton (trait surface, error types)
+- **Weeks 3–4**: Pairing engine implementation + property tests
+- **Weeks 5–6**: Metrics integration + deterministic output hardening
+
+---
+
+# Public API
+
+## Module Structure
+```rust
+pub mod reconciliation {
+    /// Core reconciliation trait with async-first interface.
+    pub trait Reconciler: Send + Sync {
+        fn new(config: Config) -> Self;
+        fn process(&mut self, primary_stream: impl AsyncStream<Item = PrimaryEvent>) -> AsyncResult<Report>;
+    }
+
+    /// Watermark configuration for lag tolerance.
+    #[derive(Debug, Clone)]
+    pub struct WatermarkConfig {
+        pub window_seconds: u64,
+    }
+
+    /// Event fingerprinting strategy.
+    pub enum FingerprintStrategy {
+        ByULID,
+        ByPayloadDigest,
+    }
+}
+
+pub mod error {
+    /// Comprehensive error taxonomy for reconciliation failures.
+    #[derive(Debug)]
+    pub enum ReconciliationError {
+        // ... (see full implementation below)
+    }
+
+    impl std::fmt::Display for ReconciliationError {
+        fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { /* ... */ }
+    }
+}
+```
+
+---
+
+# Algorithm Walkthrough
+
+## Core Logic: Watermark-Based Pairing
+```pseudo
+function process_stream(primary: Stream<PrimaryEvent>, secondary: Stream<SecondaryEvent>)
+    watermark = Config.watermark_window()
+    primary_buffer = empty_map()
+    secondary_buffer = empty_map()
+
+    for event in primary:
+        if event.timestamp < watermark:
+            continue  // Skip stale events
+        primary_buffer[event.ULID] = event
+
+    for event in secondary:
+        if event.timestamp > watermark:
+            continue  // Skip future events (lag handling)
+
+        // Check for ghosted events (no primary counterpart)
+        if event.ULID not in primary_buffer:
+            report_ghost(event.carrier, event.timestamp.hour())
+
+        // Check for orphaned primaries
+        if event.retry_indicator and event.ULID in primary_buffer:
+            orphaned = primary_buffer.remove(event.ULID)
+            report_orphan(orphaned)
+
+    // Final pass: resolve all remaining pairs
+    for (ulid, primary) in primary_buffer.items():
+        if ulid not in secondary_buffer:
+            report_orphan(primary)
+
+    return grouped_report_by_carrier_and_hour()
+```
+
+## Complexity Analysis
+- **Time**: O(N log N) for watermark window processing (due to hashmap lookups)
+- **Space**: O(M + S) where M = primary events, S = secondary events within watermark
+- **Deterministic Output**: Uses `hashbrown::HashMap` with stable iteration order via `iter().collect()`
+
+---
+
+# Error Taxonomy
+
+## Failure Mode Classes
+| Class               | Guarded Against                          | Example Scenario                     |
+|---------------------|------------------------------------------|---------------------------------------|
+| `OrphanEvent`       | Primary events without secondary matches  | Carrier lag > watermark window        |
+| `GhostEvent`        | Secondary events with no primaries       | Retry indicator misinterpreted         |
+| `WatermarkViolation`| Events outside configured bounds          | Timestamp skew > 5 minutes             |
+| `DuplicateDetected` | Duplicate secondary events               | Carrier retry mechanism failure        |
+
+## Error Implementation
+```rust
+impl ReconciliationError {
+    pub fn orphan_event(ulid: ULID, kind: EventKind) -> Self { /* ... */ }
+    pub fn ghost_event(carrier: CarrierCode, timestamp: Timestamp) -> Self { /* ... */ }
+    // ... other variants
+}
+```
+
+---
+
+# Testing Strategy
+
+## Property-Based Test Suite
+```rust
+use proptest::prelude::*;
+use iridium_recon::reconciliation::{Reconciler, WatermarkConfig};
+
+prop_compose! {
+    fn paired_streams(
+        watermark_window(seconds in 1..60),
+        primary_events(inject_orphaned(primary_events)),
+        secondary_events(inject_ghosts(secondary_events))
+    ) -> (WatermarkConfig, Vec<PrimaryEvent>, Vec<SecondaryEvent>)
+    {
+        (watermark_window, primary_events, secondary_events)
+    }
+}
+
+fn test_pairing_logic(watermark_window: u64) {
+    let reconciler = Reconciler::new(watermark_config!(watermark_window));
+    proptest! {
+        for ((primary, secondary), (orphaned_count, ghost_count)) in paired_streams().prop_map(|(w, p, s)| (
+            (p, s),
+            (inject_orphaned_count(p.len(), w),
+             inject_ghosts_count(s.len(), w))
+        )) {
+            let report = reconciler.process(primary_stream!(p), secondary_stream!(s)).unwrap();
+            assert_eq!(report.orphaned_events.len(), orphaned_count);
+            assert_eq!(report.ghosted_events.len(), ghost_count);
+        }
+    }
+}
+```
+
+## Shrunk Counterexamples
+- **Watermark Bug**: Shrunk example reveals a timestamp boundary miscalculation.
+- **Fingerprint Bug**: Shrunk example exposes hash iteration order instability (via `hashbrown`).
+- **Duplicate Handling**: Confirms retry indicator logic correctly flags duplicates.
+
+---
+
+# Assumptions
+
+## System Assumptions
+1. Primary stream emits at-most-once per sequence number.
+2. Secondary stream is at-least-once with retry indicators.
+3. Timestamp precision: primary ±1s, secondary ±5m.
+4. Historical backfills are immutable object storage snapshots.
+
+## Implementation Assumptions
+1. Shared types crate (`platform_types`) provides stable schemas.
+2. Storage facade trait enforces no direct access to object storage.
+3. Messaging facade handles queue consumption if direct queue access is used.
+4. Config loader resolves values via layered defaults (env > file > CLI).
+
+---
+**Metadata Header**:
+```json
+{
+  "team": "Iridium Logistics Orchestration Team",
+  "review_roster": ["jdoe", "ksmith", "lchang"],
+  "target_release_train": "2023-11-XYZ",
+  "status_vocabulary": {
+    "draft": "Initial submission for review",
+    "in-review": "Under team review",
+    "approved": "Team sign-off complete",
+    "superseded": "Replaced by newer version"
+  },
+  "document_status": "draft"
+}
+```
+
+**Hand-Off Checklist**:
+1. Reviewers: Approve crate skeleton (weeks 1–2) and error taxonomy.
+2. On-call rotation: Test CLI integration with metrics facade.
+3. Tooling team: Verify shared types crate compatibility.
+4. Storage facade owners: Confirm object storage snapshot partitioning.
+```

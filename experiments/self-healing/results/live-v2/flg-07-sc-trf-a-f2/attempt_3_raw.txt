@@ -1,158 +1,431 @@
-```markdown
-# **Coastal Erosion Data Pipeline Specification**
-*Raw Daily JSON → Monthly Analysis-Ready Parquet*
+```json
+{
+  "schema_mapping": {
+    "target_columns": [
+      {
+        "name": "station_id",
+        "firmware_v1": {"source": "station_id", "unit": "integer"},
+        "firmware_v2": {"source": "station_id", "unit": "string"},
+        "firmware_v3": {"source": "station_id", "unit": "string"},
+        "renamed_from": null,
+        "conversion": null,
+        "missing_behavior": "use_source_value_if_present"
+      },
+      {
+        "name": "window_start",
+        "firmware_v1": {"source": "timestamp", "unit": "local_time", "offset": "+02:00", "justification": "Station X logs local time with a fixed UTC+2 offset; DST is deliberately not handled to avoid ambiguity."},
+        "firmware_v2": {"source": "timestamp", "unit": "UTC"},
+        "firmware_v3": {"source": "timestamp", "unit": "UTC"},
+        "renamed_from": null,
+        "conversion": {
+          "type": "convert_to_utc",
+          "parameters": {"offset": "+02:00"}
+        },
+        "missing_behavior": "use_source_value_if_present"
+      },
+      {
+        "name": "wave_height_mean",
+        "firmware_v1": {"source": "hs_mean", "unit": "meters"},
+        "firmware_v2": {"source": "wave_height_mean", "unit": "meters"},
+        "firmware_v3": {"source": null, "missing_behavior": "use_source_value_if_present"},
+        "renamed_from": null,
+        "conversion": null,
+        "missing_behavior": "flag_as_missing"
+      },
+      {
+        "name": "wave_height_max",
+        "firmware_v1": {"source": "hs_max", "unit": "meters"},
+        "firmware_v2": {"source": "wave_height_max", "unit": "meters"},
+        "firmware_v3": {"source": null, "missing_behavior": "use_source_value_if_present"},
+        "renamed_from": null,
+        "conversion": null,
+        "missing_behavior": "flag_as_missing"
+      },
+      {
+        "name": "dominant_wave_period",
+        "firmware_v1": {"source": "tp_dominant", "unit": "seconds"},
+        "firmware_v2": {"source": "period_dominant", "unit": "seconds"},
+        "firmware_v3": {"source": null, "missing_behavior": "use_source_value_if_present"},
+        "renamed_from": null,
+        "conversion": null,
+        "missing_behavior": "flag_as_missing"
+      },
+      {
+        "name": "wind_direction",
+        "firmware_v1": {"source": "dir_wind", "unit": "degrees_north", "normalization": true, "justification": "Wind direction must be normalized to [0–360°]."},
+        "firmware_v2": {"source": "dir_wind", "unit": "degrees_north", "normalization": true},
+        "firmware_v3": {
+          "source": "dir_wind_rad",
+          "conversion": {"type": "convert_to_degrees", "parameters": {"factor": 180/π}},
+          "unit": "degrees_north"
+        },
+        "renamed_from": null,
+        "missing_behavior": "flag_as_missing"
+      },
+      {
+        "name": "wind_speed",
+        "firmware_v1": {"source": "spd_wind", "unit": "m/s"},
+        "firmware_v2": {"source": "spd_wind", "unit": "m/s"},
+        "firmwork_v3": {"source": null, "missing_behavior": "use_source_value_if_present"},
+        "renamed_from": null,
+        "conversion": null,
+        "missing_behavior": "flag_as_missing"
+      },
+      {
+        "name": "tide_stage",
+        "firmware_v1": {"source": "tide_stage", "unit": "categorical", "values": ["low", "rising", "high", "falling", "ebb", "flood"], "thresholds": {"low": -0.3, "high": 0.5}},
+        "firmware_v2": {"source": "tide_stage", "unit": "categorical", "values": ["low", "rising", "high", "falling", "ebb", "flood"], "thresholds": {"low": -0.3, "high": 0.5}},
+        "firmware_v3": {"source": null, "missing_behavior": "use_source_value_if_present"},
+        "renamed_from": null,
+        "conversion": {
+          "type": "derive_from_tide_gauge",
+          "parameters": {"thresholds": {"low": -0.3, "high": 0.5}}
+        },
+        "missing_behavior": "flag_as_missing"
+      }
+    ],
+    "quality_flags_mapping": [
+      {
+        "name": "wave_height_mean_quality",
+        "firmware_v1": {"source": null},
+        "firmware_v2": {"source": null},
+        "firmware_v3": {"source": null},
+        "renamed_from": "quality_flag_wave_height_mean",
+        "conversion": {
+          "type": "map_to_closed_set",
+          "parameters": {"good": 0, "suspect": 1, "corrected": 2, "missing": 3}
+        },
+        "justification": "Derived from cleaning rules: implausible values flagged suspect; spikes corrected and flagged corrected."
+      },
+      {
+        "name": "wave_height_max_quality",
+        "firmware_v1": {"source": null},
+        "firmware_v2": {"source": null},
+        "firmwork_v3": {"source": null},
+        "renamed_from": "quality_flag_wave_height_max",
+        "conversion": {
+          "type": "map_to_closed_set",
+          "parameters": {"good": 0, "suspect": 1, "corrected": 2, "missing": 3}
+        },
+        "justification": "Same as above."
+      },
+      {
+        "name": "dominant_wave_period_quality",
+        "firmware_v1": {"source": null},
+        "firmware_v2": {"source": null},
+        "firmwork_v3": {"source": null},
+        "renamed_from": "quality_flag_dominant_wave_period",
+        "conversion": {
+          "type": "map_to_closed_set",
+          "parameters": {"good": 0, "suspect": 1, "corrected": 2, "missing": 3}
+        },
+        "justification": "Derived from cleaning rules: implausible values flagged suspect."
+      },
+      {
+        "name": "wind_direction_quality",
+        "firmware_v1": {"source": null},
+        "firmware_v2": {"source": null},
+        "firmwork_v3": {"source": null},
+        "renamed_from": "quality_flag_wind_direction",
+        "conversion": {
+          "type": "map_to_closed_set",
+          "parameters": {"good": 0, "suspect": 1, "corrected": 2, "missing": 3}
+        },
+        "justification": "Derived from cleaning rules: normalized values are always good; spikes corrected."
+      },
+      {
+        "name": "wind_speed_quality",
+        "firmware_v1": {"source": null},
+        "firmware_v2": {"source": null},
+        "firmwork_v3": {"source": null},
+        "renamed_from": "quality_flag_wind_speed",
+        "conversion": {
+          "type": "map_to_closed_set",
+          "parameters": {"good": 0, "suspect": 1, "corrected": 2, "missing": 3}
+        },
+        "justification": "Derived from cleaning rules: no implausibility checks applied to wind speed."
+      }
+    ]
+  },
 
----
+  "cleaning_rules": {
+    "wave_height_cleaning": [
+      {
+        "rule_type": "clamp",
+        "condition": {"field": "wave_height_mean", "operator": ">=", "value": 25},
+        "action": {"flag": "suspect"},
+        "justification": "Wave heights above 25m are physically implausible at these sites."
+      },
+      {
+        "rule_type": "clamp",
+        "condition": {"field": "wave_height_mean", "operator": "<=", "value": 0},
+        "action": {"flag": "suspect"},
+        "justification": "Negative wave heights are physically implausible."
+      },
+      {
+        "rule_type": "spike_detection",
+        "condition": {
+          "field": "wave_height_mean",
+          "operator": ">", "value": 8 * stddev,
+          "window_size": "1 hour"
+        },
+        "action": {
+          "flag": "corrected",
+          "interpolation": {"method": "median", "window_size": "3 consecutive samples"}
+        },
+        "justification": "Spikes shorter than 3 samples are flagged corrected and replaced by median."
+      }
+    ],
+    "wind_direction_cleaning": [
+      {
+        "rule_type": "normalization",
+        "condition": {"field": "wind_direction", "operator": "<", "value": 0},
+        "action": {"flag": "corrected", "conversion": {"type": "add_360"}},
+        "justification": "Wind direction must be normalized to [0–360°]."
+      },
+      {
+        "rule_type": "normalization",
+        "condition": {"field": "wind_direction", "operator": ">=", "value": 360},
+        "action": {"flag": "corrected", "conversion": {"type": "subtract_360"}},
+        "justification": "Same as above."
+      }
+    ],
+    "tide_stage_cleaning": [
+      {
+        "rule_type": "derive_from_tide_gauge",
+        "condition": {"field": "tide_gauge", "operator": "<=", "value": -0.3},
+        "action": {"stage": "low"},
+        "justification": "Tide stage thresholds from published methods paper: low at <–0.3m."
+      },
+      {
+        "rule_type": "derive_from_tide_gauge",
+        "condition": {"field": "tide_gauge", "operator": ">=", "value": 0.5},
+        "action": {"stage": "high"},
+        "justification": "High tide at >0.5m."
+      }
+    ]
+  },
 
-## **1. Schema Mapping**
+  "gap_handling": {
+    "missing_value_representation": {
+      "raw_gap": {"flag": "missing", "interpolation": false},
+      "dropout_marker": {"flag": "corrected", "interpolation": true, "method": "linear"},
+      "justification": "Dropouts (JSON nulls) are distinguished from missing fields by the quality flag. Gaps >40 minutes are not interpolated."
+    },
+    "windowing_policy": {
+      "gap_threshold": 40,
+      "interpolation_method": {"type": "linear", "flag": "corrected"},
+      "justification": "Interpolation is only applied across gaps ≤40 minutes. Longer gaps are left as missing."
+    }
+  },
 
-### **Target Columns & Source Variants**
-| Target Column          | Unit       | Firmware v1 (Int)               | Firmware v2 (Str)               | Firmware v3 (Offshore)         |
-|------------------------|------------|----------------------------------|---------------------------------|-------------------------------|
-| `station_id`           | string     | `station_id` → lowercase ASCII   | `station_id` → lowercase ASCII  | `station_id` → lowercase ASCII |
-| `window_start_utc`     | seconds    | `timestamp` (local time) + offset | `timestamp` (UTC)              | `timestamp` (UTC)             |
-| `wave_height_mean`     | meters     | `hs_mean`                         | `wave_height_mean`              | `wave_height_mean`            |
-| `wave_height_max`      | meters     | `hs_max`                          | `wave_height_max`               | `wave_height_max`             |
-| `dominant_wave_period`| seconds    | `tp_dominant`                    | `period_dominant`              | `period_dominant`             |
-| `wind_direction`       | degrees    | `dir_wind` (0–360)                | `dir_wind` (0–360)              | `dir_wind_rad` → convert rad→deg |
-| `wind_speed`           | m/s        | `spd_wind`                        | `spd_wind`                      | `spd_wind`                     |
-| `tide_stage`           | categorical| `tide_stage` (raw)              | `tide_stage`                    | `tide_stage`                   |
-| **Quality Flags**      | -          | N/A                              | N/A                             | N/A                           |
+  "validation_invariants": [
+    {
+      "name": "duplicate_station_window",
+      "check": {"field": ["station_id", "window_start"], "operator": "not_unique"},
+      "error_message": "Duplicate station-window pair detected.",
+      "justification": "Ensures each observation is unique."
+    },
+    {
+      "name": "window_alignment",
+      "check": {"field": "window_start", "operator": "modulo", "value": 600, "expected": 0},
+      "error_message": "Window start not aligned to 10-minute boundaries.",
+      "justification": "Ensures window boundaries are precise."
+    },
+    {
+      "name": "wind_direction_range",
+      "check": {"field": "wind_direction", "operator": "<=", "value": 360},
+      "error_message": "Wind direction exceeds 360°.",
+      "justification": "Ensures normalized wind direction is valid."
+    },
+    {
+      "name": "quality_flag_closed_set",
+      "check": {"field": ["wave_height_mean_quality", "wave_height_max_quality"], "operator": "in", "values": [0, 1, 2, 3]},
+      "error_message": "Invalid quality flag for wave height.",
+      "justification": "Ensures flags are from the closed set {good, suspect, corrected, missing}."
+    },
+    {
+      "name": "row_counts_per_station",
+      "check": {"field": ["station_id", "window_start"], "operator": "count"},
+      "error_message": "Row count mismatch between input and output.",
+      "justification": "Ensures row counts reconcile with raw records adjusted for windowing."
+    }
+  },
 
-### **Handling Missing Fields**
-- If a firmware variant lacks a target column, the field is treated as `missing`.
-- Offshore stations (Firmware v3) drop `water_temp` entirely.
+  "reproducibility": {
+    "sorting_order": ["station_id", "window_start"],
+    "tie_breaking_rule": {"field": "wave_height_mean"},
+    "precision_rules": {
+      "floats": {"decimal_places": 6},
+      "justification": "Fixed-precision decimal formatting for floats before Parquet serialization."
+    },
+    "idempotency_stages": [
+      {
+        "stage": "schema_mapping",
+        "skip_if_exists": true,
+        "reason": "Schema mapping is deterministic and does not depend on input data."
+      },
+      {
+        "stage": "cleaning_rules",
+        "skip_if_exists": false,
+        "reason": "Cleaning rules are applied to all records, even if some already exist in output."
+      }
+    ],
+    "firmware_evolution_policy": {
+      "unknown_fields": {"error_type": "fail_loud", "diagnostic": "Unknown field set: [list_of_extra_fields]"},
+      "justification": "Pipeline must fail loudly for unknown fields; never silently drop or guess."
+    }
+  },
 
----
-
-## **2. Cleaning Rules**
-
-### **Wave Height Clamping & Flagging**
-```python
-def flag_wave_height(value):
-    if value > 25 or value < 0:
-        return "suspect"  # Physical implausibility
-    return None  # Good data
-```
-
-### **Spike Detection & Correction**
-- **Threshold**: Wave height spikes > 8σ from rolling 1-hour median.
-- **Rule**:
-  - Short sequences (<3 consecutive samples) → flagged `corrected` (median-replaced).
-  - Longer sequences → flagged `suspect` (preserved as-is).
-
-### **Wind Direction Normalization**
-```python
-def normalize_wind_dir(value):
-    return ((value % 2π) * (180/π)) % 360  # Convert rad→deg, clamp to [0–360]
-```
-
-### **Tide Stage Derivation**
-- Uses a published threshold table (e.g., `{+1.5m: "high", -0.5m: "low"}`).
-- If raw tide gauge reading falls outside thresholds → `missing`.
-
----
-
-## **3. Gap Handling**
-
-### **Representation**
-- Missing values in Parquet are represented as `NaN` for numeric fields.
-- Quality flag `missing` applied to all gaps > 4 consecutive windows.
-
-### **Interpolation Policy**
-- Gaps ≤ 40 minutes → linear interpolation with `corrected` flags.
-- Gaps > 40 minutes → no interpolation; rows dropped (not silently absorbed).
-
----
-
-## **4. Validation Invariants**
-
-| Invariant                          | Check Method                                                                 |
-|------------------------------------|------------------------------------------------------------------------------|
-| No duplicate station-window pairs   | Post-processing deduplication by `(station_id, window_start_utc)`.          |
-| Window starts aligned to 10-min     | `window_start_utc % 600 == 0` (UTC).                                       |
-| Wind direction in [0–360]           | Pre-validated via `normalize_wind_dir()`.                                   |
-| Quality flags from closed set       | Enforced via regex: `^good|suspect|corrected|missing$`.                          |
-| All target columns present          | Schema validation against fixed Parquet schema.                              |
-| Row counts per station/month        | Compare input records → windowed output rows (error if mismatch).             |
-
----
-
-## **5. Reproducibility**
-
-### **Sorting & Aggregation**
-- Sort by `station_id` → `window_start_utc` before aggregation.
-- Tie-breaker for identical timestamps: prefer the sensor with lower `wave_height_mean`.
-
-### **Fixed-Precision Formatting**
-- Floats serialized to 6 decimal places (e.g., `0.123456` instead of `0.123456789`).
-
----
-
-## **6. Schema Evolution & Error Handling**
-
-### **Unknown Firmware Variants**
-- If records lack mapped fields → pipeline fails with diagnostic:
-  ```json
-  {
-    "error": "Unmapped firmware variant detected: missing required fields [X, Y]",
-    "fields": ["X", "Y"]
+  "worked_example": {
+    "raw_record_firmware_v2": {
+      "timestamp": "2023-10-05T14:30:00+02:00",
+      "station_id": "STA002",
+      "wave_height_mean": 8.7,
+      "wave_height_max": 9.2,
+      "period_dominant": 6.5,
+      "dir_wind": 180,  // degrees_north
+      "spd_wind": 12.3,
+      "tide_stage": "high",
+      "quality_flags": null,
+      "interpolation_flag": false
+    },
+    "mapped_fields": {
+      "station_id": "STA002",
+      "window_start": "2023-10-05T14:30:00Z",  // UTC conversion applied
+      "wave_height_mean": 8.7,
+      "wave_height_max": 9.2,
+      "dominant_wave_period": 6.5,
+      "wind_direction": 180,  // normalized (no change)
+      "wind_speed": 12.3,
+      "tide_stage": "high",
+      "quality_flags": {
+        "wave_height_mean_quality": null,  // No spike or clamp applied
+        "wave_height_max_quality": null,
+        "dominant_wave_period_quality": null,
+        "wind_direction_quality": null,
+        "wind_speed_quality": null
+      }
+    },
+    "cleaned_fields": {
+      "window_start": "2023-10-05T14:30:00Z",
+      "wave_height_mean": 8.7,  // No spike or clamp applied
+      "wave_height_max": 9.2,
+      "dominant_wave_period": 6.5,
+      "wind_direction": 180,
+      "wind_speed": 12.3,
+      "tide_stage": "high",
+      "quality_flags": {
+        "wave_height_mean_quality": null,  // No flag applied
+        "wave_height_max_quality": null,
+        "dominant_wave_period_quality": null,
+        "wind_direction_quality": null,
+        "wind_speed_quality": null
+      }
+    },
+    "windowed_output": {
+      "station_id": "STA002",
+      "window_start": "2023-10-05T14:30:00Z",
+      "wave_height_mean": 8.7,
+      "wave_height_max": 9.2,
+      "dominant_wave_period": 6.5,
+      "wind_direction": 180,
+      "wind_speed": 12.3,
+      "tide_stage": "high",
+      "quality_flags": {
+        "wave_height_mean_quality": null,  // No flag applied
+        "wave_height_max_quality": null,
+        "dominant_wave_period_quality": null,
+        "wind_direction_quality": null,
+        "wind_speed_quality": null
+      }
+    },
+    "spike_example": {
+      "raw_record_firmware_v1_spike": {
+        "timestamp": "2023-10-05T14:30:00+02:00",
+        "station_id": 1002,
+        "hs_mean": 8.7,
+        "hs_max": 9.2,
+        "tp_dominant": 6.5,
+        "dir_wind": 180,
+        "spd_wind": 12.3,
+        "tide_stage": "high",
+        "quality_flags": null
+      },
+      "mapped_fields_spike": {
+        "station_id": "STA002",  // Integer to string conversion
+        "window_start": "2023-10-05T14:30:00Z",
+        "wave_height_mean": 8.7,
+        "wave_height_max": 9.2,
+        "dominant_wave_period": 6.5,
+        "wind_direction": 180,
+        "wind_speed": 12.3,
+        "tide_stage": "high",
+        "quality_flags_spike": {
+          "wave_height_mean_quality": null,  // No spike or clamp applied
+          "wave_height_max_quality": null,
+          "dominant_wave_period_quality": null,
+          "wind_direction_quality": null,
+          "wind_speed_quality": null
+        }
+      },
+      "cleaned_fields_spike": {
+        "window_start": "2023-10-05T14:30:00Z",
+        "wave_height_mean": 8.7,  // No spike or clamp applied (no spike detected)
+        "wave_height_max": 9.2,
+        "dominant_wave_period": 6.5,
+        "wind_direction": 180,
+        "wind_speed": 12.3,
+        "tide_stage": "high",
+        "quality_flags_spike": {
+          "wave_height_mean_quality": null,  // No flag applied
+          "wave_height_max_quality": null,
+          "dominant_wave_period_quality": null,
+          "wind_direction_quality": null,
+          "wind_speed_quality": null
+        }
+      },
+      "spike_detection_example": {
+        "raw_record_firmware_v1_spike_longer": {
+          "timestamp": "2023-10-05T14:30:00+02:00",
+          "station_id": 1002,
+          "hs_mean": 8.7 + 10 * stddev,  // Spike >8*stddev
+          "hs_max": 9.2 + 10 * stddev,
+          "tp_dominant": 6.5,
+          "dir_wind": 180,
+          "spd_wind": 12.3,
+          "tide_stage": "high",
+          "quality_flags": null
+        },
+        "mapped_fields_spike_longer": {
+          "station_id": "STA002",
+          "window_start": "2023-10-05T14:30:00Z",
+          "wave_height_mean": 8.7 + 10 * stddev,
+          "wave_height_max": 9.2 + 10 * stddev,
+          "dominant_wave_period": 6.5,
+          "wind_direction": 180,
+          "wind_speed": 12.3,
+          "tide_stage": "high",
+          "quality_flags_spike_longer": {
+            "wave_height_mean_quality": 1,  // Flagged suspect (spike >8*stddev)
+            "wave_height_max_quality": 1
+          }
+        },
+        "cleaned_fields_spike_longer": {
+          "window_start": "2023-10-05T14:30:00Z",
+          "wave_height_mean": 8.7 + 10 * stddev,
+          "wave_height_max": 9.2 + 10 * stddev,
+          "dominant_wave_period": 6.5,
+          "wind_direction": 180,
+          "wind_speed": 12.3,
+          "tide_stage": "high",
+          "quality_flags_spike_longer": {
+            "wave_height_mean_quality": 1,  // Suspect flag applied
+            "wave_height_max_quality": 1
+          }
+        }
+      }
+    }
   }
-  ```
-
----
-
-## **7. Log Fields (Per-Stage)**
-| Stage               | Metrics                                                                     |
-|---------------------|---------------------------------------------------------------------------|
-| Input File Path     | `input_file_path`                                                          |
-| Record Counts       | `raw_records`, `cleaned_records`, `windowed_rows`                           |
-| Flagged Rows         | `spikes_corrected`, `wave_height_suspect`, `tide_stage_missing`            |
-| Wall-Clock Duration | `processing_time_seconds`                                                  |
-
----
-
-## **8. Worked Example: Firmware v2 Spike**
-**Raw Input (Firmware v2):**
-```json
-{
-  "station_id": "ST10",
-  "timestamp": "2023-11-15T08:45:00Z",  # UTC
-  "wave_height_mean": 1.2,
-  "wave_height_max": 2.3,
-  "period_dominant": 6.7,
-  "dir_wind": 90,                     # deg
-  "spd_wind": 8.5,
-  "tide_stage": "high",
-  "_gap_marker": null                 # No dropout marker (field absent)
 }
-```
-
-**Processing Steps:**
-1. **Mapping**:
-   - `wave_height_mean` → `1.2m` (no unit conversion).
-   - `dir_wind=90°` → normalized to `90°`.
-   - Tide stage derived from thresholds.
-
-2. **Spike Check**:
-   - Assume rolling median = 1.5m, σ=0.3m.
-   - Max wave height (`2.3m`) is within bounds → no flag.
-
-3. **Output Row** (Parquet):
-```json
-{
-  "station_id": "ST10",
-  "window_start_utc": "2023-11-15T08:40:00Z",  # Aligned to 10-min
-  "wave_height_mean": 1.2,
-  "wave_height_max": 2.3,
-  "dominant_wave_period": 6.7,
-  "wind_direction": 90,
-  "wind_speed": 8.5,
-  "tide_stage": "high",
-  "quality_flags": {"wave_height_mean": "good", ...}
-}
-```
-
----
-**End of Specification**
 ```

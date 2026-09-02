@@ -1,0 +1,390 @@
+{
+  "mapping": {
+    "input_variants": [
+      "segmented_chargeback_ratio_with_units",
+      "decline_rate_by_bin_range",
+      "reserve_balance_vs_floor",
+      "holiday_season_projection_60_days",
+      "empty_input_record",
+      "single_record_input",
+      "record_matching_multiple_variants",
+      "record_matching_none"
+    ],
+    "target_shape": {
+      "portfolio_segment": "string",
+      "chargeback_ratio_percent": "number",
+      "chargeback_ratio_basis_points": "number",
+      "decline_rate_bin": "string",
+      "decline_rate_value": "number",
+      "reserve_balance_usd": "number",
+      "required_reserve_floor_usd": "number",
+      "reserve_coverage_ratio": "number",
+      "holiday_projection_days": "number",
+      "holiday_projection_exposure_usd": "number",
+      "override_appetite_paragraph": "string",
+      "override_rationale": "string",
+      "unit_label": "string"
+    },
+    "renames": [
+      {
+        "from": "chargeback_ratio",
+        "to": "chargeback_ratio_percent",
+        "condition": "input_variants[0]",
+        "rationale": "Original field name is ambiguous; standardization to percent aligns with regulatory requirement for explicit units."
+      },
+      {
+        "from": "reserve_balance",
+        "to": "reserve_balance_usd",
+        "condition": "input_variants[2]",
+        "rationale": "Field rename to reflect currency unit; all reserve values are in USD per settlement extract schema."
+      },
+      {
+        "from": "required_floor",
+        "to": "required_reserve_floor_usd",
+        "condition": "input_variants[2]",
+        "rationale": "Consistent naming with reserve_balance_usd for parity and auditability; avoids confusion between floor and balance."
+      }
+    ],
+    "retypes": [
+      {
+        "from": "chargeback_ratio_percent",
+        "to": "number",
+        "condition": "input_variants[0]",
+        "rationale": "Input is a string or float in percent form; conversion to number for arithmetic operations. All values are parsed as decimal fractions (e.g., 0.31 → 0.31)."
+      },
+      {
+        "from": "decline_rate_value",
+        "to": "number",
+        "condition": "input_variants[1]",
+        "rationale": "Input is a string or float; converted to number for binning and interpolation logic. Values range from 0.0 to 1.02 as per supplied material."
+      },
+      {
+        "from": "holiday_projection_days",
+        "to": "number",
+        "condition": "input_variants[3]",
+        "rationale": "Input is a string or integer; converted to number for exposure projection. All values are in days (e.g., 60)."
+      }
+    ],
+    "absences": [
+      {
+        "field": "chargeback_ratio_basis_points",
+        "condition": "input_variants[0]",
+        "action": "set_to_null",
+        "rationale": "Basis points field is not present in input; absence implies no basis-point value. Null indicates missing data, not a default."
+      },
+      {
+        "field": "decline_rate_bin",
+        "condition": "input_variants[1]",
+        "action": "set_to_null",
+        "rationale": "Bin range field is absent or unstructured; absence implies no bin assignment. This is a hard failure if the input lacks binning structure."
+      },
+      {
+        "field": "holiday_projection_exposure_usd",
+        "condition": "input_variants[3]",
+        "action": "set_to_null",
+        "rationale": \"Projection exposure is derived; absence of input means no projection. Output must not infer or interpolate.\"
+      }
+    ],
+    "branch_conditions": [
+      {
+        "trigger_condition": "segmented_chargeback_ratio_with_units",
+        "action": "apply_mapping_for_segmented_chargeback",
+        "effect_on_flags": {
+          "override_appetite_paragraph": "set_to_null",
+          "unit_label": "set_to_percent"
+        }
+      },
+      {
+        "trigger_condition": "decline_rate_by_bin_range",
+        "action": "apply_mapping_for_decline_bins",
+        "effect_on_flags": {
+          "override_appetite_paragraph": "set_to_null",
+          "unit_label": "set_to_percentage"
+        }
+      },
+      {
+        "trigger_condition": "reserve_balance_vs_floor",
+        "action": "apply_mapping_for_reserve_comparison",
+        "effect_on_flags": {
+          "override_appetite_paragraph": "set_to_null",
+          "unit_label": "set_to_usd"
+        }
+      },
+      {
+        "trigger_condition": "holiday_season_projection_60_days",
+        "action": "apply_mapping_for_holiday_projection",
+        "effect_on_flags": {
+          "override_appetite_paragraph": "set_to_null",
+          "unit_label": "set_to_usd"
+        }
+      },
+      {
+        "trigger_condition": "empty_input_record",
+        "action": "return_empty_output_with_flag",
+        "effect_on_flags": {
+          "portfolio_segment": "set_to_null",
+          "chargeback_ratio_percent": "set_to_null",
+          "unit_label": "set_to_missing"
+        }
+      },
+      {
+        "trigger_condition": "single_record_input",
+        "action": "return_single_record_with_standardized_fields",
+        "effect_on_flags": {
+          "override_appetite_paragraph": "set_to_null",
+          "unit_label": "set_to_percent"
+        }
+      },
+      {
+        "trigger_condition": "record_matching_multiple_variants",
+        "action": "halt_and_flag_conflict",
+        "effect_on_flags": {
+          "override_appetite_paragraph": "set_to_null",
+          "unit_label": "set_to_conflict"
+        }
+      },
+      {
+        "trigger_condition": "record_matching_none",
+        "action": "halt_with_diagnostic",
+        "effect_on_flags": {
+          "portfolio_segment": "set_to_null",
+          "chargeback_ratio_percent": "set_to_null",
+          "unit_label": "set_to_not_found"
+        }
+      }
+    ],
+    "negative_space": [
+      "The transformation does not include any processing of transaction-level data such as individual card or merchant records. This is outside the scope of quarterly exposure review and beyond the input material provided.",
+      "The artifact does not perform any macroeconomic modeling, interest rate forecasting, or scenario analysis. These are excluded because they are not part of the raw settlement extracts or required for regulatory compliance in this cycle.",
+      "No external data sources such as market volatility indices or credit ratings are used; all inputs are derived from the provided quarterly settlement extracts."
+    ]
+  },
+  "rules": {
+    "filters": [
+      {
+        "rule_name": "chargeback_ratio_in_range_filter",
+        "condition": "chargeback_ratio_percent >= 0.31 and chargeback_ratio_percent <= 1.02",
+        "action": "pass",
+        "parameters": {
+          "min_value": 0.31,
+          "max_value": 1.02
+        },
+        "rationale": "Regulatory threshold is set at 0.90 scheme level; chargeback ratios must fall within the supplied range to be valid. Values outside this range are invalid and trigger a halt."
+      },
+      {
+        "rule_name": "decline_rate_bin_validity_filter",
+        "condition": "decline_rate_value >= 0.0 and decline_rate_value <= 1.02",
+        "action": "pass",
+        "parameters": {
+          "min_value": 0.0,
+          "max_value": 1.02
+        },
+        "rationale": "Decline rates are bounded by the scheme network; values outside this range indicate data corruption or misclassification and must be flagged."
+      },
+      {
+        "rule_name": "reserve_coverage_ratio_filter",
+        "condition": "required_reserve_floor_usd > 0 and reserve_balance_usd >= required_reserve_floor_usd",
+        "action": "pass",
+        "parameters": {
+          "floor_threshold": 0
+        },
+        "rationale": "Reserve balance must meet or exceed floor; otherwise, coverage is inadequate. This rule ensures compliance with minimum capital requirements."
+      }
+    ],
+    "clamps": [
+      {
+        "rule_name": "clamp_chargeback_ratio_to_percent",
+        "input_field": "chargeback_ratio_percent",
+        "output_value": 0.31,
+        "condition": "chargeback_ratio_percent < 0.31",
+        "rationale": "Minimum threshold for chargeback ratio is 0.31%; values below this are invalid and clamped to minimum as per scheme network policy."
+      },
+      {
+        "rule_name": "clamp_decline_rate_to_1_point2",
+        "input_field": "decline_rate_value",
+        "output_value": 1.02,
+        "condition": "decline_rate_value > 1.02",
+        "rationale": "Maximum decline rate is capped at 1.02% as per scheme network limits; values above this are invalid and clamped to maximum."
+      },
+      {
+        "rule_name": "clamp_holiday_projection_days_to_60",
+        "input_field": "holiday_projection_days",
+        "output_value": 60,
+        "condition": "holiday_projection_days > 60",
+        "rationale": "Holiday season projection is defined as a 60-day window; any extension beyond this is invalid and clamped to 60 days."
+      }
+    ],
+    "normalizations": [
+      {
+        "rule_name": "convert_chargeback_ratio_to_basis_points",
+        "input_field": "chargeback_ratio_percent",
+        "output_field": "chargeback_ratio_basis_points",
+        "formula": "chargeback_ratio_percent * 100",
+        "parameters": {
+          "multiplier": 100
+        },
+        "rationale": "To comply with regulatory requirement that all ratios carry explicit units, chargeback ratio is normalized to basis points. This ensures no implicit unit mixing in the output."
+      },
+      {
+        "rule_name": "normalize_reserve_coverage_ratio",
+        "input_fields": [
+          "reserve_balance_usd",
+          "required_reserve_floor_usd"
+        ],
+        "output_field": "reserve_coverage_ratio",
+        "formula": "reserve_balance_usd / required_reserve_floor_usd",
+        "parameters": {
+          "denominator_threshold": 0
+        },
+        "rationale": "Coverage ratio is derived from balance and floor; must be positive. Division by zero is not allowed and triggers a hard error."
+      }
+    ],
+    "interpolations": [
+      {
+        "rule_name": "interpolate_decline_rate_by_bin",
+        "input_field": "decline_rate_value",
+        "bin_range": [0.0, 0.1], [0.1, 0.2], [0.2, 0.3],
+        "output_field": "decline_rate_value",
+        "method": "linear_interpolation",
+        "parameters": {
+          "bins": [
+            {"min": 0.0, "max": 0.1},
+            {"min": 0.1, "max": 0.2},
+            {"min": 0.2, "max": 0.3}
+          ]
+        },
+        "rationale": "Decline rates are provided by bin range; interpolation is used to assign a value when the input falls between bins. This ensures continuity in exposure modeling."
+      }
+    ],
+    "override_rules": [
+      {
+        "rule_name": "override_appetite_paragraph_reference",
+        "condition": "override_rationale != ''",
+        "action": "set_override_appetite_paragraph_to_referenced_paragraph",
+        "parameters": {
+          "appetite_paragraph_index": 1,
+          "reference_field": "override_rationale"
+        },
+        "rationale": "Every override must reference a specific appetite paragraph in the risk appetite document. This ensures traceability and regulatory compliance."
+      }
+    ],
+    "negative_space": [
+      "No interpolation is performed on chargeback ratios or reserve balances outside of bin ranges; such operations are not supported by input material.",
+      "No smoothing, averaging, or aggregation across segments is applied during transformation. All outputs are per-segment and derived from raw inputs."
+    ]
+  },
+  "invariants": {
+    "validation_invariants": [
+      {
+        "name": "chargeback_ratio_units_explicit",
+        "condition": "unit_label == 'percent'",
+        "check_method": "verify_unit_label_in_output_field('chargeback_ratio_percent')",
+        "rationale": "All chargeback ratios must carry explicit unit labels. The presence of 'percent' ensures no mixing with basis points, which would violate binding constraints."
+      },
+      {
+        "name": "basis_points_and_percent_not_coexisting",
+        "condition": "chargeback_ratio_basis_points != null and chargeback_ratio_percent != null",
+        "check_method": "assert_not_both_present_in_same_record",
+        "rationale": "Basis points and percentages must not appear in the same column. This prevents unit mixing, which was the root cause of last cycle’s error."
+      },
+      {
+        "name": "reserve_coverage_ratio_reconciliation",
+        "condition": "required_reserve_floor_usd > 0",
+        "check_method": "assert(reserve_balance_usd >= required_reserve_floor_usd)",
+        "rationale": "The reserve balance must meet or exceed the floor. Any mismatch is a hard error and triggers a halt in processing."
+      },
+      {
+        "name": "holiday_projection_days_within_bounds",
+        "condition": "holiday_projection_days <= 60",
+        "check_method": "assert(holiday_projection_days <= 60)",
+        "rationale": "Projection window is fixed at 60 days. Any value above this is invalid and must be clamped or flagged."
+      },
+      {
+        "name": "total_exposure_reconciliation",
+        "condition": "sum(portfolio_segment) == sum(holiday_projection_exposure_usd)",
+        "check_method": "assert(sum_of_components == sum_of_total)",
+        "rationale": "All exposure components must reconcile to the total. Mismatches are treated as hard errors, not rounding notes."
+      }
+    ],
+    "failure_conditions": [
+      {
+        "condition": "input_record_matches_multiple_variants",
+        "action": "halt_with_diagnostic",
+        "diagnostic_name": "variant_conflict_detected",
+        "rationale": "Multiple input variants cannot coexist in a single record. This would lead to ambiguous output and is prohibited by scope discipline."
+      },
+      {
+        "condition": "input_record_matches_none_of_variants",
+        "action": "halt_with_diagnostic",
+        "diagnostic_name": "no_variant_match_found",
+        "rationale": "No valid input variant was found. The transformation cannot proceed without a clear classification path."
+      }
+    ],
+    "reconciliation_checkpoints": [
+      {
+        "check_point": "reserve_coverage_ratio_reconciliation",
+        "method": "sum(reserve_balance_usd) == sum(required_reserve_floor_usd)",
+        "rationale": "The total reserve balance must equal or exceed the total required floor. Any deviation is a hard error."
+      }
+    ],
+    "negative_space": [
+      "No invariant checks are performed on derived ratios such as average decline rate across segments, which are not part of the input material.",
+      "No invariant checks are made on time-based exposures outside the 60-day window; these are not included in the raw extracts."
+    ]
+  },
+  "reproducibility": {
+    "ordering_rules": [
+      "All records are processed in lexicographic order by portfolio_segment field. This is consistent with input extract ordering and ensures deterministic output.",
+      "Within each segment, records are sorted by decline_rate_value ascending to ensure stable interpolation."
+    ],
+    "rounding_rules": [
+      "All numeric values are rounded to 4 decimal places using standard rounding (e.g., 0.3125 → 0.3125). This is consistent with scheme network reporting standards.",
+      "No rounding occurs during intermediate steps; all arithmetic operations use full precision before final output."
+    ],
+    "serialization_rules": [
+      "All outputs are serialized as JSON with double-quoted strings and ISO 8601 dates where applicable. All fields are in lowercase, snake_case format.",
+      "The target shape is fixed: no dynamic field addition or removal occurs during transformation."
+    ],
+    "idempotency": {
+      "description": "Repeated application of the process converges to identical output when applied to the same input variant and order.",
+      "reasons_for_skip_on_re_run": [
+        "No stateful operations are performed; all transformations are purely functional.",
+        "All inputs are processed in a fixed order, so re-run produces same result."
+      ]
+    },
+    "determinism": {
+      "ordering_effect": "Records are ordered by portfolio_segment then decline_rate_value. This ensures consistent output across runs.",
+      "rounding_effect": "Rounding occurs only at final output stage and is applied uniformly to all numeric fields."
+    },
+    "units_discipline": [
+      "Every numeric column has a unit label in its field name (e.g., 'chargeback_ratio_percent', 'reserve_balance_usd').",
+      "Unitless numbers are not permitted; any such value will trigger a hard error during validation."
+    ],
+    "negative_space": [
+      "Reproducibility does not extend to external data sources or model inputs. The transformation is solely based on the provided settlement extracts.",
+      "No assumptions about future input structure or schema evolution are made; all behavior is defined by current material."
+    ]
+  },
+  "gap_handling": {
+    "empty_input_record": {
+      "action": "halt_with_diagnostic",
+      "diagnostic_name": "empty_input_record_detected",
+      "rationale": "An empty record cannot be processed without a valid segment or field. This is a hard failure as per process discipline."
+    },
+    "single_record_input": {
+      "action": "return_single_record_with_standardized_fields",
+      "rationale": "A single-record input is valid and must be transformed into the target shape with full unit labeling and no aggregation."
+    },
+    "record_matching_multiple_variants": {
+      "action": "halt_and_flag_conflict",
+      "diagnostic_name": "multiple_variant_match_detected",
+      "rationale": "Multiple variants imply ambiguity; this violates input classification rules. The transformation must halt to prevent incorrect output."
+    },
+    "record_matching_none": {
+      "action": "halt_with_diagnostic",
+      "diagnostic_name": "no_valid_variant_found",
+      "rationale": "No known variant matches the input structure. This is a failure condition and requires manual review by the data governance team."
+    }
+  },
+  "notes": "This artifact is strictly scoped to quarterly exposure review of card portfolio risk based on raw settlement extracts. It does not include any modeling, forecasting beyond 60-day projection, or external data integration. All transformations are deterministic, reproducible, and compliant with binding constraints including unit labeling and override traceability."
+}

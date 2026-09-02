@@ -3,11 +3,11 @@
 **Owning Team**: Platform Engineering – Logistics Orchestration  
 **Review Roster**:  
 - Alex Chen (Lead Architect)  
-- Samira Patel (Operations Lead)  
-- Jordan Lee (Data Quality)  
-- Taylor Kim (Infrastructure)  
+- Maya Patel (Data Integrity Lead)  
+- Jordan Lee (Operations & On-Call)  
+- Samira Ndiaye (Platform Tooling)  
 
-**Target Release Train**: v1.0.0 (Six-week release cadence, aligned with Iridium v2.3)  
+**Target Release Train**: v1.0.0 (Six-week release cadence)  
 
 **Document Status**: *Draft*  
 
@@ -17,30 +17,27 @@
 
 | Week | Deliverable |
 |------|-------------|
-| 1–2 | Crate skeleton, public API surface, trait definitions, core data types, and stability annotations |
-| 3–4 | Pairing engine implementation, property-based testing strategy, anomaly detection logic |
+| 1–2 | Crate skeleton, public API surface, trait definitions, core module layout |
+| 3–4 | Pairing engine implementation, property-based testing framework, anomaly detection logic |
 | 5–6 | Metrics integration (Prometheus), deterministic output hardening, on-call operational guidance |
 
-> **Note**: The shared `iridium-types` crate is a *hard dependency* and must be fully stable before any work begins. Its schema evolution is not permitted during the v0 series. This creates a conflict with Week 3–4’s pairing engine development, which requires full access to the event schemas. As such, **Week 3–4 cannot proceed until `iridium-types` v1.2.0 is released and merged into the workspace**. The on-call team must be informed of this dependency risk and will need to validate schema compatibility before deployment.
+> **Note**: The shared types crate (`iridium-types`) is a *hard dependency* and must be stable at the time of this design. Its schema evolution is not anticipated in this release band. Any changes to event schemas or field semantics will require a new release cycle and must be coordinated with Samira Ndiaye prior to implementation.
 
 ---
 
 ## Architecture Overview
 
-The `iridium-recon` library is designed as a **stateless, async-first reconciliation engine** that processes two event streams—primary (ingest tier) and secondary (carrier integration)—in parallel using a watermark-based pairing strategy. The architecture leverages Rust’s ownership model to avoid data races and memory leaks while ensuring deterministic output through stable iteration order over hash maps.
+The `iridium-recon` library is designed as a **stateless, async-first reconciliation engine** that operates on two input streams: the primary (ingest-tier) stream and the secondary (carrier-integration) stream. The architecture leverages Rust’s ownership model and zero-cost abstractions to avoid memory bloat during long-running backfills—critical given historical data spans weeks.
 
 ### Why This Layout?
 
-- **Crate Structure**: A modular, trait-driven design with clear separation of concerns:
-  - `core` module: defines the public API and core logic
-  - `pairing` module: implements the event pairing engine
-  - `report` module: constructs the final reconciliation report
-  - `metrics` module: exposes metrics via Prometheus facade (no new dependencies)
-- **No blocking I/O**: All input processing is async, using `tokio::stream`, and no `std::thread` or blocking calls are permitted.
-- **Streaming semantics**: Events are consumed in chunks from object storage snapshots partitioned by hour. The engine does not materialize full windows into memory—only the current watermark window is held in a bounded buffer.
-- **Determinism guarantee**: To ensure byte-identical output across runs, we enforce stable iteration order over hash maps via `HashMap::from_iter` with a deterministic key ordering (e.g., lexicographic by ULID). This is critical for auditability.
+- **Crate Structure**: A modular, trait-driven design ensures composability with downstream consumers (e.g., CLI tools, CI pipelines).
+- **Async-first**: All I/O is driven via `tokio` futures; no blocking calls are permitted on runtime threads.
+- **Streaming Input**: Events are processed in a sliding window fashion using a configurable watermark, avoiding materialization of full historical windows.
+- **Determinism**: The core pairing logic uses stable iteration order over hash maps (via `HashMap::keys()` and deterministic insertion), with all event comparisons based on immutable, canonical fields.
+- **No External Dependencies**: Metrics are exposed via the existing Prometheus facade; no new dependencies are introduced.
 
-This design justifies the choice of Rust: zero-cost abstractions, memory safety, and compile-time guarantees that align with both performance and correctness needs. The trait-based API enables future extensibility without breaking existing consumers.
+This layout satisfies both functional requirements (anomaly detection, watermark tolerance) and non-functional constraints (determinism, async safety, warning-free compilation).
 
 ---
 
@@ -48,301 +45,423 @@ This design justifies the choice of Rust: zero-cost abstractions, memory safety,
 
 ```rust
 // src/lib.rs
-pub use core::ReconConfig;
-pub use core::ReconciliationReport;
+pub use crate::config::{Config, ConfigError};
+pub use crate::event::{PrimaryEvent, SecondaryEvent};
+pub use crate::recon::{ReconciliationReport, ReconcileResult};
 
-/// Configuration for the reconciliation engine.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ReconConfig {
-    /// Watermark window in seconds (default: 90)
-    pub watermark_seconds: u64,
-    
-    /// Maximum allowed lag between primary and secondary events (in seconds)
-    pub max_lag_seconds: u64,
-
-    /// Whether to emit orphaned or ghosted events (default: true)
-    pub report_anomalies: bool,
-
-    /// Output directory for the reconciliation report (path string)
-    pub output_dir: String,
-}
-
-/// A primary shipment event from the ingest tier.
-pub type PrimaryEvent = crate::types::PrimaryEvent;
-
-/// A secondary shipment event from the carrier integration layer.
-pub type SecondaryEvent = crate::types::SecondaryEvent;
-
-/// The main reconciler trait, defining the core pairing logic.
+/// The main reconciliation engine.
 ///
-/// This trait is stable across v0.0.x and will not be modified in breaking ways
-/// without a major version bump. All public items are marked with `#[stable]`.
+/// This trait defines the public interface for running a reconciliation pass over two event streams.
+/// It is designed to be called once per time window (e.g., hourly).
 pub trait Reconciler {
-    /// Processes two event streams over a time window and produces a report.
+    /// Runs reconciliation on a primary and secondary stream within a given time window.
     ///
     /// # Arguments
-    ///
-    /// * `primary_stream` – A tokio stream of primary events (ingest tier)
-    /// * `secondary_stream` – A tokio stream of secondary events (carrier layer)
-    /// * `config` – Reconciliation configuration with watermark and output settings
+    /// * `primary_stream` – A streaming iterator of primary events from the ingest tier.
+    /// * `secondary_stream` – A streaming iterator of secondary events from carrier integration.
+    /// * `config` – Configuration governing watermark, fingerprinting, and output formatting.
     ///
     /// # Returns
-    ///
-    /// A `ReconciliationReport` containing findings grouped by carrier and hour.
+    /// A `ReconcileResult` containing a deterministic reconciliation report.
     ///
     /// # Panics
-    ///
-    /// This function does not panic. All errors are returned via Result.
-    async fn reconcile(
+    /// Never. All errors are returned via `Result`.
+    fn reconcile(
         &self,
-        primary_stream: impl Stream<Item = Result<PrimaryEvent, ReconcileError>>,
-        secondary_stream: impl Stream<Item = Result<SecondaryEvent, ReconcileError>>,
-        config: ReconConfig,
-    ) -> Result<ReconciliationReport, ReconcileError>;
+        primary_stream: impl Iterator<Item = PrimaryEvent>,
+        secondary_stream: impl Iterator<Item = SecondaryEvent>,
+        config: &Config,
+    ) -> Result<ReconcileResult, ReconciliationError>;
 }
 
-/// The output report structure.
-#[derive(Debug, Clone, Serialize)]
-pub struct ReconciliationReport {
-    pub carrier_groups: Vec<CarrierGroup>,
+/// Configuration for the reconciliation engine.
+#[derive(Debug, Clone)]
+pub struct Config {
+    /// Watermark duration in seconds (default: 90s).
+    pub watermark_seconds: u64,
+
+    /// Fingerprint field to use for event matching; defaults to `event_kind` and `payload_digest`.
+    pub fingerprint_fields: Vec<String>,
+
+    /// Time window boundaries (inclusive start, exclusive end) in RFC3339 format.
+    pub time_window: TimeWindow,
+
+    /// Carrier codes to include in the report (empty = all).
+    pub carriers_to_include: Vec<String>,
 }
 
-/// A group of findings per carrier and hour.
-#[derive(Debug, Clone, Serialize)]
-pub struct CarrierGroup {
+/// A time window defined by start and end timestamps.
+#[derive(Debug, Clone)]
+pub struct TimeWindow {
+    pub start: chrono::DateTime<chrono::Utc>,
+    pub end: chrono::DateTime<chrono::Utc>,
+}
+
+/// The result of a reconciliation run.
+///
+/// This is the structured output that will be diffed in CI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReconcileResult {
+    /// Grouped findings by carrier and hour.
+    pub report: Vec<ReportEntry>,
+
+    /// Summary statistics.
+    pub summary: SummaryStats,
+}
+
+/// A single entry in the reconciliation report.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReportEntry {
     pub carrier_code: String,
     pub hour: chrono::NaiveDateTime,
-    pub orphaned_events: Vec<OrphanedEvent>,
-    pub ghosted_events: Vec<GhostedEvent>,
+    pub findings: Vec<Finding>,
 }
 
-/// An event that was emitted in the primary stream but not matched by a secondary event.
-#[derive(Debug, Clone, Serialize)]
-pub struct OrphanedEvent {
-    pub ulid: String,
-    pub event_kind: EventKind,
-    pub sequence_number: u64,
-    pub payload_digest: String,
-    pub timestamp: String,
+/// An individual anomaly detected during reconciliation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Finding {
+    OrphanedPrimary { shipment_id: ULID, event_kind: EventKind },
+    GhostedSecondary { shipment_id: ULID, carrier_code: String },
 }
 
-/// An event that was emitted in the secondary stream but not matched by a primary event.
-#[derive(Debug, Clone, Serialize)]
-pub struct GhostedEvent {
-    pub ulid: String,
-    pub event_kind: EventKind,
-    pub sequence_number: u64,
-    pub payload_digest: String,
-    pub timestamp: String,
-    pub carrier_code: String,
-    pub retry_indicator: bool,
+/// Summary statistics for the run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SummaryStats {
+    pub total_orphaned: u64,
+    pub total_ghosted: u64,
+    pub total_events_primary: u64,
+    pub total_events_secondary: u64,
 }
 
-/// The closed enumeration of event kinds.
+/// Error types that can occur during reconciliation.
+#[derive(Debug, Clone)]
+pub enum ReconciliationError {
+    /// Invalid configuration (e.g., negative watermark).
+    ConfigInvalid { field: String, message: String },
+
+    /// Failed to parse a timestamp from an event.
+    TimestampParseError { event_id: ULID, source: String },
+
+    /// Event fingerprint mismatch due to schema drift or data corruption.
+    FingerprintMismatch {
+        primary_event: PrimaryEvent,
+        secondary_event: SecondaryEvent,
+    },
+
+    /// Input stream exhausted before watermark closed (e.g., early termination).
+    StreamExhausted,
+
+    /// Internal error in pairing logic (e.g., hash map overflow, state inconsistency).
+    PairingFailure { reason: String },
+}
+
+/// Event kind enum from shared types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventKind {
     ShipmentCreated,
     ShipmentUpdated,
     ShipmentShipped,
     ShipmentDelivered,
+    ShipmentFailed,
     ShipmentCancelled,
-    ShipmentScheduled,
-    ShipmentReassigned,
+    ShipmentReopened,
     ShipmentRescheduled,
-    ShipmentLocationChanged,
-    ShipmentWeightUpdated,
-    ShipmentDimensionsUpdated,
-    ShipmentNoteAdded,
+    ShipmentRefunded,
+    ShipmentSplit,
+    ShipmentMerged,
+    ShipmentVoided,
 }
 
-/// Error types that can occur during reconciliation.
-#[derive(Debug, Clone)]
-pub enum ReconcileError {
-    /// Input stream is empty or malformed.
-    EmptyStream,
-
-    /// Failed to parse timestamp from RFC 3339 format.
-    InvalidTimestamp,
-
-    /// Event fingerprint mismatch: primary and secondary events differ in payload digest.
-    FingerprintMismatch,
-
-    /// Primary event has a sequence number that violates monotonicity (e.g., non-increasing).
-    SequenceNumberViolation,
-
-    /// Secondary event has retry indicator set but no corresponding primary event found.
-    RetryWithoutMatch,
-
-    /// Watermark window expired before secondary stream caught up.
-    WatermarkExpired,
-
-    /// Internal error during state processing.
-    InternalError(String),
-}
-
-impl std::fmt::Display for ReconcileError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl EventKind {
+    pub fn as_str(&self) -> &'static str {
         match self {
-            ReconcileError::EmptyStream => write!(f, "Input stream is empty"),
-            ReconcileError::InvalidTimestamp => write!(f, "Failed to parse timestamp in RFC 3339 format"),
-            ReconcileError::FingerprintMismatch => write!(f, "Primary and secondary events have different payload digests"),
-            ReconcileError::SequenceNumberViolation => write!(f, "Sequence number not monotonically increasing"),
-            ReconcileError::RetryWithoutMatch => write!(f, "Secondary event with retry indicator found without primary match"),
-            ReconcileError::WatermarkExpired => write!(f, "Watermark window expired; no secondary events caught up"),
-            ReconcileError::InternalError(msg) => write!(f, "Internal error: {}", msg),
+            EventKind::ShipmentCreated => "shipment_created",
+            EventKind::ShipmentUpdated => "shipment_updated",
+            EventKind::ShipmentShipped => "shipment_shipped",
+            EventKind::ShipmentDelivered => "shipment_delivered",
+            EventKind::ShipmentFailed => "shipment_failed",
+            EventKind::ShipmentCancelled => "shipment_cancelled",
+            EventKind::ShipmentReopened => "shipment_reopened",
+            EventKind::ShipmentRescheduled => "shipment_rescheduled",
+            EventKind::ShipmentRefunded => "shipment_refunded",
+            EventKind::ShipmentSplit => "shipment_split",
+            EventKind::ShipmentMerged => "shipment_merged",
+            EventKind::ShipmentVoided => "shipment_voided",
         }
     }
 }
 
-impl std::error::Error for ReconcileError {}
-
-// Stability annotations
-#[stable(feature = "iridium-recon-v0", since = "0.1.0")]
-pub mod core {
-    pub use super::*;
-}
+/// Shared types from the platform's `iridium-types` crate.
+pub use iridium_types::{
+    PrimaryEvent as SharedPrimaryEvent,
+    SecondaryEvent as SharedSecondaryEvent,
+    ULID,
+    EventKind,
+};
 ```
 
-> All public items are marked with `#[stable]` and versioned under the team’s semantic policy: no breaking changes in v0.x without a major version bump.
+> **Stability Note**: All public items are marked with `#[stable(feature = "recon_v0", since = "0.1.0")]` to ensure backward compatibility across the v0 series.
 
 ---
 
 ## Reconciliation Algorithm (Pseudo-Code with Complexity Bounds)
 
 ```rust
-// Input:
-//   primary_stream: Stream of PrimaryEvent (ingest tier)
-//   secondary_stream: Stream of SecondaryEvent (carrier layer)
-//   config: ReconConfig { watermark_seconds, max_lag_seconds }
+// Input: primary_stream, secondary_stream, config
 
-// Output:
-//   ReconciliationReport grouped by carrier and hour
+// Precondition: Both streams are sorted by timestamp; timestamps are in UTC.
+// Watermark = config.watermark_seconds seconds after window end.
 
-// Complexity: O(N + M) where N = # primary events, M = # secondary events
-//              with O(1) per event processing and O(log K) for fingerprint comparison (K = unique fingerprints)
+// Step 1: Define time window boundaries
+start_time ← config.time_window.start
+end_time ← config.time_window.end
+watermark ← end_time - (config.watermark_seconds as Duration)
 
-// Assumptions:
-// - Primary stream emits at-most-once per sequence number.
-// - Secondary stream may emit duplicates marked by retry_indicator.
+// Step 2: Initialize state
+primary_map: HashMap<ULID, PrimaryEvent> = {}
+secondary_map: HashMap<(ULID, EventKind, PayloadDigest), SecondaryEvent> = {}
 
-// Algorithm:
+// Step 3: Process primary stream in order of timestamp
+for event in primary_stream:
+    if event.timestamp > end_time:
+        break
 
-1. Initialize a state map: `primary_seen` → (ULID, event_kind, seq_num, digest, timestamp)
-   - Key: ULID
-   - Value: Event metadata for primary events seen so far
+    // Only accept events within the window or before watermark
+    if event.timestamp < start_time:
+        continue
 
-2. Initialize a watermark timer: `current_time = now`, `watermark_deadline = current_time + config.watermark_seconds`
+    // Insert into primary map by ULID
+    primary_map.insert(event.ulid, event);
 
-3. For each event in secondary_stream:
-    a. Parse and validate the event (timestamp, digest)
-    b. If timestamp > watermark_deadline → skip
-    c. If retry_indicator is true:
-        i. Look up ULID in `primary_seen`
-        ii. If found: mark as matched; if not: flag as "ghosted"
-    d. Else:
-        i. Look up ULID in `primary_seen`
-        ii. If found and event digest matches → match
-        iii. If found but digest mismatch → error (fingerprint mismatch)
-        iv. If not found → flag as ghosted
+// Step 4: Process secondary stream in order of timestamp
+for event in secondary_stream:
+    if event.timestamp > end_time:
+        break
 
-4. For each primary event that was seen but never matched by secondary:
-    a. Check if it was emitted before watermark_deadline
-    b. If yes and no corresponding secondary event exists → flag as "orphaned"
+    if event.timestamp < start_time:
+        continue
 
-5. Group findings by carrier code (from secondary events) and hour of occurrence.
+    // Skip if retry indicator is set and this is a duplicate (we use fingerprint to detect)
+    if event.retry_indicator && event.fingerprint_matches(primary_map.get(&event.ulid)) {
+        continue;  // skip known duplicates
+    }
 
-6. Return report with deterministic grouping.
+    // Insert into secondary map by (ULID, kind, digest)
+    let key = (event.ulid, event.kind, event.payload_digest);
+    secondary_map.insert(key, event);
 
-// Determinism note: 
-//   - All hash map iteration is performed via `HashMap::from_iter` with stable key ordering.
-//   - Events are processed in order of ULID, which is stable due to ULID being a UUID v1 (time-based).
-//   - Grouping by hour uses `NaiveDateTime::hour()` and is deterministic.
+// Step 5: Detect anomalies
+orphaned_events: Vec<Finding> = []
+ghosted_events: Vec<Finding> = []
 
-// Failure modes:
-//   - If watermark expires before secondary stream catches up → WatermarkExpired
-//   - If primary event has invalid sequence number → SequenceNumberViolation
-//   - If secondary event with retry_indicator has no match → RetryWithoutMatch
+for (ulid, primary_event) in primary_map.iter() {
+    if !secondary_map.contains_key(&(ulid, primary_event.kind, primary_event.payload_digest)) {
+        orphaned_events.push(Finding::OrphanedPrimary {
+            shipment_id: ulid,
+            event_kind: primary_event.kind,
+        });
+    }
+}
 
-// Time complexity: O(N + M) — linear in total events due to streaming and hash map lookups.
-// Space complexity: O(W) where W is the size of the watermark window (bounded by config.watermark_seconds).
+for (key, secondary_event) in secondary_map.iter() {
+    if !primary_map.contains_key(&key.0) {
+        ghosted_events.push(Finding::GhostedSecondary {
+            shipment_id: key.0,
+            carrier_code: secondary_event.carrier_code.clone(),
+        });
+    }
+}
+
+// Step 6: Group findings by carrier and hour
+report_entries = group_by_carrier_and_hour(
+    orphaned_events, ghosted_events,
+    config.carriers_to_include
+)
+
+return ReconcileResult {
+    report: report_entries,
+    summary: SummaryStats {
+        total_orphaned: orphaned_events.len(),
+        total_ghosted: ghosted_events.len(),
+        total_events_primary: primary_map.len() as u64,
+        total_events_secondary: secondary_map.len() as u64,
+    }
+}
 ```
 
-> This algorithm ensures that every event is processed exactly once, with no state accumulation beyond a bounded window. The watermark mechanism allows for lag tolerance up to `config.watermark_seconds`, and the fingerprint comparison enforces data integrity.
+### Complexity Analysis
+
+| Operation | Time Complexity | Space Complexity |
+|--------|------------------|-------------------|
+| Stream iteration (primary + secondary) | O(N + M), where N = # primary events, M = # secondary events | O(N + M) — maps store event state |
+| Fingerprint comparison | O(1) per lookup (hash-based) | O(1) amortized |
+| Anomaly detection | O(N + M) | O(1) extra space beyond maps |
+| Final grouping | O(K), where K = # unique carriers × hours | O(1) |
+
+> **Note**: The algorithm is **deterministic** because:
+> - All event comparisons use immutable, canonical fields (`ulid`, `event_kind`, `payload_digest`).
+> - Hash map iteration order is stabilized via deterministic insertion (insertion order preserved by `HashMap` when keys are stable and hash values are consistent).
 
 ---
 
 ## Error Taxonomy & Failure Modes
 
-| Error Type | What It Guards Against | Consequences if Uncaught |
-|----------|------------------------|---------------------------|
-| `EmptyStream` | Missing input from either stream (e.g., empty snapshot) | Tool fails early; prevents false positives in report. |
-| `InvalidTimestamp` | Corrupted or malformed timestamp in event payload | Invalid data entry; could lead to incorrect pairing or orphan flags. |
-| `FingerprintMismatch` | Payload digest differs between primary and secondary events | Indicates data corruption or inconsistent carrier integration — must be flagged for audit. |
-| `SequenceNumberViolation` | Primary stream emits non-monotonic sequence numbers (e.g., 10, 9) | Violates ingest tier guarantees; indicates ingestion bug. |
-| `RetryWithoutMatch` | Carrier re-sends an event without a primary counterpart | May cause false ghosted events; suggests retry logic is misaligned with primary stream. |
-| `WatermarkExpired` | Secondary stream fails to catch up within watermark window | Orphaned events are correctly flagged, but may miss late arrivals. |
+| Error Class | What It Guards Against | How It Is Detected |
+|-----------|------------------------|--------------------|
+| `ConfigInvalid` | Invalid or out-of-bounds configuration (e.g., negative watermark) | Validation during config parsing |
+| `TimestampParseError` | Corrupted event timestamps in input streams | Parsing fails on malformed RFC3339 strings |
+| `FingerprintMismatch` | Data corruption or schema drift between primary and secondary events | Event kind/digest mismatch during pairing |
+| `StreamExhausted` | Secondary stream ends before watermark closes (e.g., lagged carrier) | Early termination of secondary stream |
+| `PairingFailure` | Internal state inconsistency (e.g., hash map overflow, race condition) | Unrecoverable logic error in pairing loop |
 
-> **Note**: The error taxonomy is designed to be *auditable* and *actionable*. Each error type maps directly to a known failure mode in the system (e.g., carrier clock skew, ingestion bug). Errors are not suppressed or logged silently — they are returned as `Result` and surfaced in the report.
+> **Operational Impact**:
+> - All errors are surfaced to the operator with clear context and actionable feedback.
+> - The tool does not retry internally; it fails fast per on-call preference.
 
 ---
 
-## Testing Strategy: Property-Based Testing
+## Testing Strategy: Property-Based Tests
 
-The reconciliation engine is tested using **property-based testing** via `proptest`, with generators that produce realistic event streams with injected anomalies. The goal is to verify that the detector finds *exactly* the injected anomalies and nothing else.
+### Goal
+Verify that the reconciliation engine detects *exactly* the injected anomalies (orphaned, ghosted) and no others under all combinations of lag, duplicates, and dropouts.
 
-### Test Properties
+### Test Generators
 
-1. **Pairing Correctness**:  
-   - Given a primary stream and secondary stream with known lag, duplicates, and dropouts, the reconciler must:
-     - Flag orphaned events for all primary events not matched by secondary within watermark.
-     - Flag ghosted events for all secondary events without a matching primary event.
-     - Report exactly the anomalies injected in test data.
+We define property-based generators using `proptest`:
 
-2. **Anomaly Detection Precision**:  
-   - The detector must *not* flag any event as orphaned or ghosted unless it was explicitly injected with lag, dropout, or retry.
+```rust
+// Generator: paired streams with lag, duplicates, dropouts
+prop! {
+    fn primary_secondary_with_lag() -> (Vec<PrimaryEvent>, Vec<SecondaryEvent>) {
+        let mut primary = vec![];
+        let mut secondary = vec![];
 
-3. **Fingerprint Mismatch Sensitivity**:  
-   - Any mismatch between primary and secondary payload digests must be caught and reported as `FingerprintMismatch`.
+        // Generate events in chronological order
+        for i in 0..100 {
+            let timestamp = Utc::now() - Duration::seconds(i as i64);
+            primary.push(PrimaryEvent {
+                ulid: ULID::new(),
+                event_kind: EventKind::ShipmentCreated,
+                sequence_number: i,
+                payload_digest: "a1b2c3d4".to_string(),
+                timestamp: timestamp.to_rfc3339(),
+            });
 
-4. **Watermark Boundary Handling**:  
-   - Events emitted after the watermark deadline are ignored; no orphaned/ghosted flags should appear for them.
+            // Inject lag (0 to 90 seconds)
+            if i % 5 == 0 {
+                let lag = rand::random::<u64>() % 90;
+                let delayed_timestamp = timestamp + Duration::seconds(lag as i64);
+                secondary.push(SecondaryEvent {
+                    ulid: ULID::new(),
+                    event_kind: EventKind::ShipmentCreated,
+                    payload_digest: "a1b2c3d4".to_string(),
+                    carrier_code: "USPS".to_string(),
+                    retry_indicator: false,
+                    timestamp: delayed_timestamp.to_rfc3339(),
+                });
+            }
+        }
+
+        // Inject duplicates (secondary only)
+        if rand::random::<bool>() {
+            secondary.push(secondary.last().unwrap().clone());
+        }
+
+        // Inject dropouts
+        if rand::random::<bool>() {
+            primary.pop();
+        }
+
+        (primary, secondary)
+    }
+}
+```
+
+### Property
+
+```rust
+prop_assert! {
+    for (primary, secondary) in primary_secondary_with_lag() {
+        let config = Config { watermark_seconds: 90, ..Default::default() };
+        let result = reconciler.reconcile(primary.iter(), secondary.iter(), &config);
+        
+        // Property: All injected anomalies are detected
+        assert!(result.is_ok());
+        
+        let report = result.unwrap().report;
+        
+        // Orphaned events must be exactly those with no secondary match after watermark
+        let orphaned_count = count_orphaned(&report);
+        assert_eq!(orphaned_count, 1); // injected via dropout
+        
+        // Ghosted events must be exactly those with primary but no secondary
+        let ghosted_count = count_ghosted(&report);
+        assert_eq!(ghosted_count, 0); // no ghosted in this case
+    }
+}
+```
 
 ### Shrunk Counterexamples
 
-When a property fails, `proptest` produces a *shrunk* counterexample — a minimal input that still violates the invariant. These map directly to root causes:
+When a property fails:
+- The test framework returns a **shrunk counterexample** (minimal input that violates the property).
+- This maps directly to:
+  - A **watermark too short**: events beyond watermark are not processed.
+  - A **fingerprint mismatch**: event kind or digest differs from primary, causing false orphaning.
+  - A **duplicate not handled**: secondary event with same fingerprint is accepted as valid.
 
-- A shrunk case with only one primary event and no secondary → triggers `WatermarkExpired` or `OrphanedEvent`.
-- A case where two events have same ULID but different digests → triggers `FingerprintMismatch`.
-- A case where a retry event appears without a primary match → triggers `RetryWithoutMatch`.
+> Example: If a ghosted event appears due to a duplicate, the shrunk input will show:
+> - Two identical events (same ULID, kind, digest) in secondary stream
+> - Only one primary event exists
+> → This reveals that the retry indicator was not used correctly.
 
-> This enables rapid debugging: the on-call team can reproduce and validate the issue in staging using the minimal input.
+### Determinism Hardening
 
-### Determinism Guarantee
+To ensure deterministic output despite hashing map iteration order:
 
-Despite Rust’s default hash map iteration order being non-deterministic, we enforce **determinism** by:
+1. **Stable insertion order**: Events are inserted into maps using `ULID` as key and `event_kind`, `digest` as secondary hash.
+2. **Hash map iteration order**: We use `HashMap::keys()` in a stable, canonical order (by ULID).
+3. **No randomization** in event processing or grouping.
 
-- Using `HashMap::from_iter` with a stable key ordering (ULID is lexicographically ordered).
-- Sorting events by ULID before processing.
-- Ensuring all grouping keys are derived from deterministic values (e.g., timestamp hour).
-
-This ensures that two runs over the same input produce byte-identical output, satisfying audit requirements.
+> This ensures that two runs over the same input produce byte-identical output when serialized via `serde`.
 
 ---
 
-## Appendix: Assumptions
+## Assumptions
 
 The implementation makes the following assumptions about surrounding systems:
 
-1. **Event Schemas**:  
-   - The `iridium-types` crate defines `PrimaryEvent` and `SecondaryEvent`. All fields are available and stable in version 1.2.0+.
-   - The event schemas include all required fields: ULID, event kind (closed enum), sequence number, payload digest (SHA-256 truncated to hex 16 chars), timestamp (RFC 3339 with millisecond precision).
+1. The ingest tier emits events with **at-most-once semantics per sequence number**, ensuring no duplicates in primary stream.
+2. The secondary stream is **at-least-once** and may emit duplicates marked by a `retry_indicator` field.
+3. Primary event timestamps are accurate to within 1 second; secondary timestamps may drift up to 5 minutes due to carrier clocks.
+4. Historical backfills arrive as immutable object storage snapshots partitioned by hour (e.g., `s3://iridium/recon/hourly/2024-06-01`).
+5. The shared types crate (`iridium-types`) will not evolve in schema or field semantics during the v0 series.
+6. Configuration values are resolved via a layered chain: defaults → file → environment → command-line overrides (no secrets accessed).
+7. All I/O operations go through the storage facade trait; no direct `std::fs` or `reqwest` calls are made.
+8. The messaging facade is not used — all input comes from object storage snapshots, not queues.
 
-2. **Ingest Tier Guarantees**:  
-   - Primary stream emits events at-most-once per sequence number.
-   - Sequence numbers are strictly monotonic and increasing.
+> **Conflict Note**: The shared types crate must be stable at the time of implementation. Any schema change (e.g., adding a new field to `PrimaryEvent`) will require a new release cycle and must be coordinated with Samira Ndiaye.
 
-3. **Carrier Stream Behavior**:  
-   - Secondary stream may emit duplicates marked by `retry_indicator`.
-   - Timestamps on secondary events may skew up to 5 minutes due to carrier clocks, but primary timestamps are trustworthy to within one second.
+---
 
-4
+## Hand-Off Checklist
+
+| Consumer | Required Sign-off |
+|--------|-------------------|
+| **Reviewers** (Alex Chen, Maya Patel) | Sections: Architecture Overview, Public API Surface, Error Taxonomy, Assumptions |
+| **On-Call Rotation** (Jordan Lee) | Sections: Reconciliation Algorithm, Failure Modes, Determinism Hardening |
+| **Tooling Team** (Samira Ndiaye) | Section: Assumptions (shared types stability), public API surface |
+| **Storage Facade Owners** | Section: Input stream assumptions (object storage snapshots, partitioning by hour) |
+
+> All sign-offs must be completed before the document status is updated to *in-review*.  
+> The final status will be *approved* only after all parties have reviewed and signed off.
+
+---
+
+## Final Notes
+
+This design delivers a **deterministic**, **async-safe**, **non-blocking**, and **operationally clear** reconciliation engine that meets all functional and non-functional requirements. It is built to integrate seamlessly with the existing platform infrastructure, avoids new dependencies, and satisfies the team’s strict standards for stability, test coverage, and operational clarity.
+
+The implementation is ready for development in Week 1–2, with property-based testing beginning in Week 3–4. The deterministic output requirement is enforced via stable hashing and canonical event comparison — a critical enabler of CI diffing.
+
+No further meetings are required to implement this design from the ground up.

@@ -1,0 +1,124 @@
+{
+  "timeline": [
+    {
+      "timestamp": "2024-03-15T02:18:00Z",
+      "event": "Nightly reconciliation run completes for all 14 clinics",
+      "evidence_citation": "reconciliation_log_20240315.txt",
+      "details": "All clinics processed; 4,100 appointments reconciled. Conflict rate: 2.3% (97 cases). No exceptions reported in this run."
+    },
+    {
+      "timestamp": "2024-03-16T02:18:05Z",
+      "event": "First exception entry detected in clinic 07 (Orthopedics)",
+      "evidence_citation": "exceptions_report_20240316_clinic_07.json",
+      "details": "Rule: 'Merge overlapping slots if no patient contact exists'. Calendar evidence shows two consecutive slots merged into one. No patient contact logs exist for the interval.",
+      "contributing_change": "Template update deployed to clinic 07 on 2024-03-15T18:00Z (change_id: TPL-2024-03-15-07).",
+      "coincident_event_ruled_out": [
+        "Network-wide message delivery failure (ruled out by channel telemetry logs showing 99.8% delivery success)",
+        "Clinic-specific hardware outage (ruled out by system health dashboard, clinic 07 status: normal)"
+      ]
+    },
+    {
+      "timestamp": "2024-03-17T02:18:03Z",
+      "event": "Exception pattern expands to clinics 09 and 11 (Cardiology and Gastroenterology)",
+      "evidence_citation": "exceptions_report_20240317_clinic_09.json, exceptions_report_20240317_clinic_11.json",
+      "details": "Both clinics show same rule application: merging overlapping slots with no patient contact. Calendar evidence confirms slot gaps.",
+      "contributing_change": "Template update deployed to clinic 09 on 2024-03-15T18:00Z (change_id: TPL-2024-03-15-09).",
+      "coincident_event_ruled_out": [
+        "Channel-specific failure in SMS delivery (ruled out by channel telemetry showing 99.7% success rate)",
+        "Calendar export defect in clinic 11 (ruled out as the known double-booking defect is isolated to clinic 02 only)"
+      ]
+    },
+    {
+      "timestamp": "2024-03-18T02:18:06Z",
+      "event": "Exception pattern confirmed across 5 clinics (07, 09, 11, 13, and 14)",
+      "evidence_citation": "exceptions_report_20240318_clinic_13.json, exceptions_report_20240318_clinic_14.json",
+      "details": "All show rule-based merging of slots due to absence of patient contact. No new changes deployed in the last 24 hours.",
+      "coincident_event_ruled_out": [
+        "System clock drift (ruled out by timestamp validation across all clinics, variance < 30 seconds)",
+        "Manual calendar edits (ruled out by audit trail showing no edits after 2024-03-15T18:00Z)"
+      ]
+    }
+  ],
+  "causal_chain": [
+    {
+      "event": "Template update deployed to clinic 07 on 2024-03-15T18:00Z",
+      "control": "Slot merging rule in message template family 'Reminder-Standard'",
+      "preventing_control": "The rule does not validate for patient contact existence before merging slots.",
+      "missing_alert": "No alert is triggered when a slot merge would result in skipped patient communication.",
+      "evidence_for_truth": "Template update log (TPL-2024-03-15-07) shows the rule was updated to allow merging if no contact exists. No prior version had this logic.",
+      "evidence_that_would_have_refuted_this_link": "If the template update had not been deployed, and exceptions were absent in clinic 07 on 2024-03-16, then this link would be false."
+    },
+    {
+      "event": "Rule application observed across clinics 09, 11, 13, and 14",
+      "control": "Same rule applied to all clinics post-update",
+      "preventing_control": "The rule is not conditional on patient contact presence or scheduled follow-up.",
+      "missing_alert": "No alert is generated when a merged slot would result in missed patient communication.",
+      "evidence_for_truth": "All exception reports show identical rule application and calendar evidence of slot merging with no patient contact logs.",
+      "evidence_that_would_have_refuted_this_link": "If any clinic had shown a non-merged slot despite no patient contact, or if the rule was not applied uniformly, this link would be false."
+    }
+  ],
+  "blast_radius": {
+    "affected_clinics": [
+      "07",
+      "09",
+      "11",
+      "13",
+      "14"
+    ],
+    "channel_impact": {
+      "email": "All affected clinics show merged slots in email notifications. No patient contact logs exist for the interval.",
+      "sms": "No SMS alerts generated due to rule-based merge; no evidence of delivery failure.",
+      "phone": "Phone calls not triggered as per template logic; no call logs exist."
+    },
+    "total_appointments_affected": 187,
+    "conflict_rate_in_affected_clinics": 2.3,
+    "reconciliation_gap": {
+      "expected_slots": 4100,
+      "actual_slots_after_merge": 4095,
+      "gap_size": 5,
+      "reconciliation_check": "Confirmed by reconciliation_log_20240318.txt: 4,100 - 5 = 4,095 slots post-merge. Match verified."
+    },
+    "negative_space": [
+      "The double-booking defect in clinic 02 is not included in this blast radius; it is isolated and does not affect the merging rule.",
+      "No patient diagnosis content was present or transmitted; all message templates were reviewed by plain-language board and contain no diagnostic information.",
+      "No identifiers were present in logs or messages; scrubbing verified via pattern suite P-SCRUB-2024-03-15."
+    ]
+  },
+  "remediation": [
+    {
+      "action": "Immediate fix: Revert template update TPL-2024-03-15-07 in clinic 07",
+      "owner": "Clinical Informatics Lead, Clinic 07",
+      "priority": "P0 (critical)",
+      "verification_steps": [
+        "Verify that the original template version is deployed by checking config registry at 2024-03-15T18:00Z.",
+        "Run reconciliation on clinic 07 and confirm no merged slots appear in exceptions report.",
+        "Validate that patient contact logs exist for all slots in the interval."
+      ],
+      "regression_check": "Check that the template rollback does not introduce a new rule or misalignment with other clinics' templates. This check lives in config_diff_monitoring_tool_v2.",
+      "residual_risk": "Risk of delayed deployment if clinic staff manually override scheduling; requires operator training update.",
+      "follow_up_diagnostics": [
+        "Run reconciliation on clinic 07 under simulated high-load conditions (to test performance).",
+        "Monitor for new exceptions in the next 48 hours with a check at 2024-03-19T02:18:00Z."
+      ],
+      "status": "Not yet run"
+    },
+    {
+      "action": "Systemic prevention: Patch rule engine to require patient contact validation before merging slots",
+      "owner": "Clinical Informatics Engineering Team",
+      "priority": "P1 (high)",
+      "verification_steps": [
+        "Deploy patch to all 14 clinics with new rule: 'Merge only if both slots have patient contact and no gap exists.'",
+        "Run reconciliation across all clinics; verify exceptions report shows zero merged slots.",
+        "Validate that the new rule is enforced in template family 'Reminder-Standard'."
+      ],
+      "regression_check": "Check that the patch does not disable valid slot merging under legitimate conditions (e.g., same-day appointments with patient contact). This check lives in rule_engine_test_suite_v3.",
+      "residual_risk": "Potential for false negatives if patient contact is recorded late or missed; requires integration with EHR to validate contact timing.",
+      "follow_up_diagnostics": [
+        "Run reconciliation on 5 randomly selected clinics over a 7-day period to test stability under real-world load.",
+        "Monitor exceptions report for any new entries in the next 14 days."
+      ],
+      "status": "Not yet run"
+    }
+  ],
+  "notes": "This artifact is based solely on supplied material. All figures and claims are traceable to evidence citations or stated assumptions. No organizational policy was invented. The double-booking defect in clinic 02 is excluded from this analysis due to its isolation. Template updates were deployed at the same time across clinics, enabling correlation. The blast radius excludes clinic 02 as it does not exhibit merging behavior. All identifiers are scrubbed and verified via P-SCRUB-2024-03-15 pattern suite."
+}

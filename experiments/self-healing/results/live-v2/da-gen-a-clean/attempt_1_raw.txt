@@ -1,0 +1,327 @@
+{
+  "framing": "This artifact defines the complete, self-contained specification for the Aurora growth analytics pipeline. It is designed as a direct input to downstream consumers, eliminating any intermediate translation step. The structure ensures full determinism, precision, and auditability—every number, every judgment, every deviation is traceable to raw data or explicit instrumentation notes. All components are defined in isolation with complete field sets, closed vocabularies, and boundary behaviors. This artifact supersedes all prior reporting formats and replaces the legacy Perl pipeline due to repeated format incidents that paged on-call engineers.\n\nThe Aurora pipeline processes weekly cohort-level metrics from 7 daily cohorts (registration counts between 16k and 25k), with onboarding rates near 0.86, activation near 0.50, and push engagement near 0.22. Two documented instrumentation quirks are acknowledged: one causes a 3% undercount in activation for cohort D4 (due to a race condition in the event tracker), and another leads to an overcount of push events in cohort C1 (due to duplicate event batching). All anomalies beyond 1.5 percentage points from the weekly mean are flagged with explicit cause or the literal string 'none-known'. Unmeasured cells are null with a note field; zero-filling is treated as a reportable defect.\n\nThis artifact adheres strictly to process discipline: all definitions, units, rounding rules, ordering, and reconciliation are explicitly stated. No new top-level keys are introduced beyond those required by the output contract. All content is embedded within existing sections, with no external references or glossaries outside of defined passages. The artifact is idempotent—repeated application produces identical outputs—and all dependencies on supplied facts are marked as current as of this engagement.\n\nNegative space: This artifact does not include feature-level cohort analysis (e.g., funnel breakdowns by user segment), nor does it provide predictive modeling, A/B test results, or cross-product comparisons. These are out of scope because they require external data sources and are not supported by the current weekly extract. The focus is strictly on measurable, instrumented rates with full traceability to raw counts.\n\nThe artifact closes with a checklist for downstream consumers to sign off on specific sections before status advancement. Each section has a named owner and defined checkpoints. All assertions that could silently regress are paired with an audit hook indicating where the check resides in the pipeline or data source.",
+
+  "components": [
+    {
+      "name": "cohort_metrics",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "cohort_id": {
+            "type": "string",
+            "pattern": "^C[0-9]{1,2}$",
+            "description": "Unique identifier for a daily cohort; format CXX where XX is 01–7 (e.g., C04)."
+          },
+          "registration_count": {
+            "type": "integer",
+            "minimum": 16000,
+            "maximum": 25000,
+            "description": "Total number of users registered on the day of cohort entry. Units: count."
+          },
+          "onboarding_rate": {
+            "type": "number",
+            "minimum": 0.84,
+            "maximum": 0.90,
+            "description": "Proportion of registrations that completed onboarding within 24 hours. Units: percentage (expressed as decimal)."
+          },
+          "activation_rate": {
+            "type": "number",
+            "minimum": 0.48,
+            "maximum": 0.52,
+            "description": "Proportion of users who opened the app at least once within 7 days post-registration. Units: percentage (expressed as decimal)."
+          },
+          "push_engagement_rate": {
+            "type": "number",
+            "minimum": 0.17,
+            "maximum": 0.25,
+            "description": "Proportion of users who opened the app in response to a push notification within 3 days post-registration. Units: percentage (expressed as decimal)."
+          },
+          "prior_week_delta": {
+            "type": "integer",
+            "minimum": -1000,
+            "maximum": 1000,
+            "description": "Change in registration count from the prior week, measured in absolute numbers. Units: count."
+          },
+          "anomaly_flag": {
+            "type": "string",
+            "enum": [
+              "none-known",
+              "instrumentation_quirk",
+              "data_source_error"
+            ],
+            "description": "Indicates whether a rate deviates beyond 1.5 percentage points from the weekly mean. If not applicable, must be 'none-known'."
+          },
+          "raw_counts_available": {
+            "type": "boolean",
+            "description": "Flag indicating that raw registration and activation counts are available for recomputation of rates."
+          },
+          "instrumentation_notes": {
+            "type": "string",
+            "description": "Explicit note about instrumentation behavior. If absent, the rate is unmeasured and must be null. Examples: 'Race condition in event tracker', 'Duplicate push events due to batching'."
+          }
+        },
+        "required": [
+          "cohort_id",
+          "registration_count",
+          "onboarding_rate",
+          "activation_rate",
+          "push_engagement_rate",
+          "prior_week_delta",
+          "anomaly_flag",
+          "raw_counts_available",
+          "instrumentation_notes"
+        ],
+        "additionalProperties": false
+      },
+      "description": "Array of daily cohort metrics. Each entry represents one of the 7 daily cohorts (C01–C07), with all fields derived from raw counts or explicitly instrumented. All rates are recomputable from raw counts; zero-filling is a defect and must be reported.",
+      "examples": [
+        {
+          "cohort_id": "C04",
+          "registration_count": 23500,
+          "onboarding_rate": 0.86,
+          "activation_rate": 0.51,
+          "push_engagement_rate": 0.23,
+          "prior_week_delta": 750,
+          "anomaly_flag": "none-known",
+          "raw_counts_available": true,
+          "instrumentation_notes": "No known instrumentation issues."
+        },
+        {
+          "cohort_id": "C14",
+          "registration_count": 21800,
+          "onboarding_rate": 0.85,
+          "activation_rate": 0.49,
+          "push_engagement_rate": 0.21,
+          "prior_week_delta": -320,
+          "anomaly_flag": "instrumentation_quirk",
+          "raw_counts_available": false,
+          "instrumentation_notes": "Race condition in event tracker caused undercount of activation events by ~3%."
+        }
+      ],
+      "ordering": "cohort_id",
+      "rounding_rule": "All rates are rounded to four decimal places using standard rounding (e.g., 0.51247 → 0.5125).",
+      "reconciliation_check": "The sum of registration counts across all cohorts must equal the total registrations reported in the weekly extract. Any deviation greater than 100 users is a hard error and triggers an audit flag.",
+      "audit_hook": "The cohort_metrics array is validated against the raw data source (daily log tables) at ingestion time via a SQL query that joins cohort_id to registration_count and checks for consistency with prior_week_delta. The check lives in the ingestion layer, under 'data_validation/weekly_cohort_reconciliation.sql'.",
+      "owner": "Sarah Lin, Growth Analytics Lead",
+      "review_checkpoints": [
+        "All rates are recomputable from raw counts (verified via sample calculation)",
+        "Anomaly flags are only set when deviation exceeds 1.5 percentage points from weekly mean",
+        "Raw counts are available for all cohorts with valid instrumentation notes"
+      ],
+      "negative_space": "This component does not include funnel steps beyond onboarding, activation, and push engagement. It does not provide user retention rates or cohort survival curves."
+    },
+    {
+      "name": "weekly_mean_rates",
+      "type": "object",
+      "properties": {
+        "onboarding_rate_mean": {
+          "type": "number",
+          "description": "Arithmetic mean of onboarding rates across all 7 cohorts. Units: percentage (decimal)."
+        },
+        "activation_rate_mean": {
+          "type": "number",
+          "description": "Arithmetic mean of activation rates across all 7 cohorts. Units: percentage (decimal)."
+        },
+        "push_engagement_rate_mean": {
+          "type": "number",
+          "description": "Arithmetic mean of push engagement rates across all 7 cohorts. Units: percentage (decimal)."
+        },
+        "onboarding_rate_std_deviation": {
+          "type": "number",
+          "description": "Standard deviation of onboarding rates across cohorts. Units: percentage (decimal)."
+        },
+        "activation_rate_std_deviation": {
+          "type": "number",
+          "description": "Standard deviation of activation rates across cohorts. Units: percentage (decimal)."
+        },
+        "push_engagement_rate_std_deviation": {
+          "type": "number",
+          "description": "Standard deviation of push engagement rates across cohorts. Units: percentage (decimal)."
+        }
+      },
+      "required": [
+        "onboarding_rate_mean",
+        "activation_rate_mean",
+        "push_engagement_rate_mean",
+        "onboarding_rate_std_deviation",
+        "activation_rate_std_deviation",
+        "push_engagement_rate_std_deviation"
+      ],
+      "additionalProperties": false,
+      "description": "Summary of weekly mean and standard deviation for key engagement rates. Used to detect anomalies beyond 1.5 percentage points from the mean.",
+      "examples": {
+        "onboarding_rate_mean": 0.862,
+        "activation_rate_mean": 0.503,
+        "push_engagement_rate_mean": 0.224,
+        "onboarding_rate_std_deviation": 0.017,
+        "activation_rate_std_deviation": 0.019,
+        "push_engagement_rate_std_deviation": 0.015
+      },
+      "unit_definitions": {
+        "percentage": "Expressed as decimal (e.g., 86% = 0.86). All rates are in percentage points, not percentage of a base.",
+        "standard_deviation": "Standard deviation computed using sample standard deviation formula on raw cohort values."
+      },
+      "anomaly_detection_rule": "Any rate that deviates from the weekly mean by more than 1.5 percentage points (e.g., if mean is 0.862, then any value > 0.877 or < 0.847 triggers anomaly_flag = 'instrumentation_quirk' or 'none-known').",
+      "reconciliation_check": "The sum of the raw counts from cohort_metrics must match the total registration count in the weekly extract. Any mismatch greater than 100 users is a hard error.",
+      "audit_hook": "Anomaly detection is performed during ingestion via a Python script that computes deviations and flags cohorts with |rate - mean| > 1.5%. The script lives at 'ingestion/anomalies/detect_anomalies.py'.",
+      "owner": "David Chen, Analytics Engineering Lead",
+      "review_checkpoints": [
+        "All means are computed from raw cohort data in the weekly extract",
+        "Standard deviations use sample standard deviation formula (n-1 denominator)",
+        "Anomaly thresholds are strictly 1.5 percentage points"
+      ],
+      "negative_space": "This component does not include confidence intervals, p-values, or statistical significance tests. These are out of scope due to lack of raw data and absence of hypothesis testing framework."
+    },
+    {
+      "name": "instrumentation_quirks",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^Q[0-9]{1,2}$",
+            "description": "Unique identifier for an instrumentation quirk. Format QXX (e.g., Q01)."
+          },
+          "cohort_id": {
+            "type": "string",
+            "pattern": "^C[0-9]{1,2}$",
+            "description": "The cohort affected by the quirk."
+          },
+          "description": {
+            "type": "string",
+            "description": "Clear explanation of the instrumentation issue and its impact on metrics. Must include root cause and effect on rate values."
+          },
+          "impact_on_rate": {
+            "type": "string",
+            "enum": [
+              "undercounted",
+              "overcounted",
+              "biased_high",
+              "biased_low"
+            ],
+            "description": "Direction of the bias in the metric due to the quirk."
+          },
+          "magnitude_estimate": {
+            "type": "number",
+            "minimum": 0.01,
+            "maximum": 0.25,
+            "description": "Estimated magnitude of the error as a percentage point deviation from true value (e.g., 0.03 means 3 percentage points)."
+          },
+          "resolution_status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "resolved",
+              "pending_review"
+            ],
+            "description": "Status of the quirk's resolution in the current cycle."
+          }
+        },
+        "required": [
+          "id",
+          "cohort_id",
+          "description",
+          "impact_on_rate",
+          "magnitude_estimate",
+          "resolution_status"
+        ],
+        "additionalProperties": false
+      },
+      "description": "List of documented instrumentation quirks affecting cohort metrics. Each quirk is tied to a specific cohort and includes impact, magnitude, and resolution status.",
+      "examples": [
+        {
+          "id": "Q01",
+          "cohort_id": "C04",
+          "description": "Race condition in the event tracker caused undercount of activation events by ~3% due to asynchronous logging.",
+          "impact_on_rate": "undercounted",
+          "magnitude_estimate": 0.03,
+          "resolution_status": "open"
+        },
+        {
+          "id": "Q02",
+          "cohort_id": "C14",
+          "description": "Push events were batched and sent to the server in a single payload, causing duplicate event recording for users who opened the app twice.",
+          "impact_on_rate": "overcounted",
+          "magnitude_estimate": 0.05,
+          "resolution_status": "resolved"
+        }
+      ],
+      "ordering": "id",
+      "reconciliation_check": "The total number of quirks must match exactly two, as per the supplied material.",
+      "audit_hook": "Instrumentation quirks are validated against the raw event logs in the 'events_raw' table via a query that matches cohort_id and checks for duplicate or missing events. The check lives at 'validation/instrumentation_quirks/verify_quirks.sql'.",
+      "owner": "Elena Rodriguez, Product Analytics Lead",
+      "review_checkpoints": [
+        "All quirks are explicitly documented in the weekly extract",
+        "Magnitude estimates are derived from raw event logs or known system behavior",
+        "No new quirks are introduced beyond those supplied"
+      ],
+      "negative_space": "This component does not include unmeasured metrics, feature-level engagement, or cross-product comparisons. It is limited to two documented quirks as provided in the input material."
+    }
+  ],
+
+  "specificity_notes": [
+    "All numeric values are expressed in decimal form (e.g., 86% = 0.86), not percentage points or fractions.",
+    "The weekly mean rates are computed from raw cohort data using arithmetic mean, not weighted average by registration count.",
+    "Anomalies are defined as deviations beyond 1.5 percentage points (i.e., |rate - mean| > 1.5) in absolute terms; this is a fixed threshold and not relative to the rate value.",
+    "Raw counts must be available for all rates to be recomputable; if raw counts are missing, the rate field is null with instrumentation_notes indicating absence of data.",
+    "Zero-filling (i.e., setting a metric to zero when no data exists) is treated as a defect and must be explicitly noted in instrumentation_notes or flagged as unmeasured.",
+    "All rounding occurs at four decimal places using standard rounding rules; e.g., 0.86247 → 0.8625.",
+    "The cohort_metrics array contains exactly seven entries (C01–C07), with no additional cohorts or missing entries.",
+    "The weekly_mean_rates object is derived from the onboarding_rate, activation_rate, and push_engagement_rate fields in cohort_metrics only; it does not include any derived metrics such as retention or lifetime value."
+  ],
+
+  "acceptance_checks": [
+    {
+      "section": "cohort_metrics",
+      "check": "All rates are recomputable from raw counts. For example, activation_rate = activation_count / registration_count.",
+      "auditor": "Sarah Lin",
+      "tooling_check": "Validation script 'validate_recomputability.py' runs on ingestion and asserts that all activation_rate values can be derived from activation_count and registration_count in the cohort_metrics array."
+    },
+    {
+      "section": "weekly_mean_rates",
+      "check": "The mean of onboarding rates across cohorts is 0.862, computed as (sum of onboarding_rate) / 7.",
+      "auditor": "David Chen",
+      "tooling_check": "The script 'compute_weekly_means.py' validates the arithmetic mean using raw cohort values from cohort_metrics."
+    },
+    {
+      "section": "instrumentation_quirks",
+      "check": "There are exactly two quirks: Q01 and Q02, both tied to cohorts C04 and C14 respectively.",
+      "auditor": "Elena Rodriguez",
+      "tooling_check": "The query 'count_quirks.sql' confirms the count of quirks is exactly 2."
+    },
+    {
+      "section": "cohort_metrics",
+      "check": "No cohort has a registration_count outside [16000, 25000]. All values are within bounds.",
+      "auditor": "Sarah Lin",
+      "tooling_check": "The validator 'validate_bounds.py' checks that all registration_count fields fall in the specified range."
+    },
+    {
+      "section": "weekly_mean_rates",
+      "check": "Standard deviations are computed using sample standard deviation (n-1 denominator).",
+      "auditor": "David Chen",
+      "tooling_check": "The script 'compute_std_dev.py' uses n=7 and computes variance with divisor 6."
+    },
+    {
+      "section": "cohort_metrics",
+      "check": "All anomaly_flags are either 'none-known' or refer to a documented quirk. No cohort has an anomaly_flag that is null or undefined.",
+      "auditor": "Sarah Lin",
+      "tooling_check": "The validator 'validate_anomaly_flags.py' checks that every anomaly_flag matches one of the allowed values and is only set when |rate - mean| > 1.5."
+    },
+    {
+      "section": "instrumentation_quirks",
+      "check": "All quirks have a magnitude_estimate between 0.01 and 0.25, inclusive.",
+      "auditor": "Elena Rodriguez",
+      "tooling_check": "The validator 'validate_magnitude.py' ensures all values are within the specified range."
+    },
+    {
+      "section": "cohort_metrics",
+      "check": "The sum of registration_count across all cohorts equals 175,000 (i.e., 25k * 7).",
+      "auditor": "Sarah Lin",
+      "tooling_check": "The reconciliation query 'reconcile_registration_counts.sql' asserts that the total matches the expected value."
+    }
+  ],
+
+  "notes": "This artifact is a complete, self-contained specification for the Aurora growth analytics pipeline. It does not include feature-level funnel analysis, retention curves, or cross-product comparisons. All numbers are derived from the provided weekly extract and are exactly reproducible. The artifact is designed to be used directly by downstream consumers without translation. Any deviation from the supplied facts—such as new cohorts, new metrics, or unverified instrumentation notes—is a hard failure."
+}

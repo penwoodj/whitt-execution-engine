@@ -1,0 +1,404 @@
+{
+  "mapping": {
+    "input_fields": [
+      "clinic_id",
+      "appointment_slot_start",
+      "appointment_slot_end",
+      "slot_status",
+      "message_template_id",
+      "channel_type",
+      "template_version",
+      "original_source",
+      "merged_with_slot_id",
+      "skipped_reason_code",
+      "skip_timestamp",
+      "calendar_conflict_flag",
+      "double_booked_flag"
+    ],
+    "target_shape": {
+      "exception_id": "string",
+      "clinic_id": "string",
+      "slot_start_iso": "datetime",
+      "slot_end_iso": "datetime",
+      "status": "enum['scheduled', 'skipped', 'merged']",
+      "message_template_id": "string",
+      "template_version": "string",
+      "channel_type": "enum['email', 'text', 'phone']",
+      "skip_reason_code": "string",
+      "skip_timestamp_iso": "datetime",
+      "calendar_conflict_flag": "boolean",
+      "double_booked_flag": "boolean",
+      "rule_applied": "string",
+      "evidence_slot_start": "datetime",
+      "evidence_slot_end": "datetime",
+      "evidence_merge_target": "string",
+      "evidence_skip_source": "string",
+      "evidence_conflict_type": "string"
+    },
+    "renames": [
+      {
+        "from": "appointment_slot_start",
+        "to": "slot_start_iso",
+        "condition": "present and not null",
+        "resolution": "parse ISO 8601 string into datetime; if malformed, halt with diagnostic"
+      },
+      {
+        "from": "appointment_slot_end",
+        "to": "slot_end_iso",
+        "condition": "present and not null",
+        "resolution": "parse ISO 8601 string into datetime; if malformed, halt with diagnostic"
+      },
+      {
+        "from": "skipped_reason_code",
+        "to": "skip_reason_code",
+        "condition": "present and not null",
+        "resolution": "retain as-is; if absent or empty, map to 'unknown'"
+      },
+      {
+        "from": "merged_with_slot_id",
+        "to": "evidence_merge_target",
+        "condition": "present and not null",
+        "resolution": "map to string value; if absent, set to null"
+      },
+      {
+        "from": "skip_timestamp",
+        "to": "skip_timestamp_iso",
+        "condition": "present and not null",
+        "resolution": "parse ISO 8601 string into datetime; if malformed, halt with diagnostic"
+      }
+    ],
+    "retypes": [
+      {
+        "from": "slot_status",
+        "to": "status",
+        "mapping_rules": {
+          "scheduled": "scheduled",
+          "skipped": "skipped",
+          "merged": "merged",
+          "unknown": "skipped"
+        },
+        "condition": "present and not null",
+        "resolution": "apply mapping; if absent or invalid, map to 'skipped'"
+      },
+      {
+        "from": "channel_type",
+        "to": "channel_type",
+        "mapping_rules": {
+          "email": "email",
+          "text": "text",
+          "phone": "phone"
+        },
+        "condition": "present and not null",
+        "resolution": "apply mapping; if absent or invalid, map to 'email'"
+      }
+    ],
+    "absences": [
+      {
+        "field": "appointment_slot_start",
+        "action": "halt with diagnostic",
+        "diagnostic_message": "Missing required field: appointment_slot_start"
+      },
+      {
+        "field": "slot_status",
+        "action": "map to 'skipped'",
+        "rationale": "Default status for unclassified slots; ensures output completeness"
+      },
+      {
+        "field": "skip_timestamp",
+        "action": "set to null",
+        "rationale": "No timestamp available; absence is valid and consistent with data provenance"
+      }
+    ],
+    "branch_conditions": [
+      {
+        "trigger": "clinic_id in ['CLINIC_07'] and double_booked_flag == true",
+        "action": "set rule_applied to 'double_booking_defect'",
+        "effect_on_flags": {
+          "double_booked_flag": "true",
+          "rule_applied": "double_booking_defect"
+        }
+      },
+      {
+        "trigger": "calendar_conflict_flag == true and slot_status != 'scheduled'",
+        "action": "set rule_applied to 'calendar_conflict'",
+        "effect_on_flags": {
+          "calendar_conflict_flag": "true",
+          "rule_applied": "calendar_conflict"
+        }
+      },
+      {
+        "trigger": "merged_with_slot_id is not null and slot_status == 'merged'",
+        "action": "set rule_applied to 'slot_merge'",
+        "effect_on_flags": {
+          "status": "merged",
+          "evidence_merge_target": "value of merged_with_slot_id"
+        }
+      },
+      {
+        "trigger": "skip_reason_code is not null and slot_status == 'skipped'",
+        "action": "set rule_applied to 'skip_by_reason'",
+        "effect_on_flags": {
+          "rule_applied": "skip_by_reason",
+          "skip_reason_code": "value of skip_reason_code"
+        }
+      },
+      {
+        "trigger": "all fields absent or null",
+        "action": "halt with diagnostic",
+        "diagnostic_message": "Empty input record; no valid data to process"
+      },
+      {
+        "trigger": "multiple variants match simultaneously",
+        "action": "halt with diagnostic",
+        "diagnostic_message": "Ambiguous input: multiple rule conditions apply; cannot resolve without human review"
+      }
+    ],
+    "edge_cases": [
+      {
+        "input_type": "empty record",
+        "output": "halts with diagnostic",
+        "diagnostic": "Missing required field: appointment_slot_start"
+      },
+      {
+        "input_type": "single-record input",
+        "output": "processed as normal; no aggregation or grouping applied",
+        "rationale": "Each slot is treated independently; no batch-level logic"
+      },
+      {
+        "input_type": "record matching multiple variants",
+        "output": "halts with diagnostic",
+        "diagnostic": "Ambiguous input: multiple rule conditions apply; cannot resolve without human review"
+      },
+      {
+        "input_type": "record matching none of the variants",
+        "output": "maps to 'skipped' status, rule_applied set to 'unknown', all evidence fields null",
+        "rationale": "Default fallback for unclassified inputs; maintains output shape consistency"
+      }
+    ]
+  },
+  "rules": [
+    {
+      "rule_id": "R01",
+      "name": "Slot start parsing",
+      "action": "Parse appointment_slot_start as ISO 8601 string into datetime",
+      "parameters": {
+        "format": "ISO 8601",
+        "fallback": "halt"
+      },
+      "rationale": "Input must be parsable; malformed dates are data defects and must be caught early.",
+      "audit_hook": "Validation step: parse_datetime() returns error on invalid input; test with edge cases including '2024-03-15T09:00:00Z' and 'invalid'",
+      "failure_loudness": "Halt if malformed"
+    },
+    {
+      "rule_id": "R02",
+      "name": "Slot end parsing",
+      "action": "Parse appointment_slot_end as ISO 8601 string into datetime",
+      "parameters": {
+        "format": "ISO 8601",
+        "fallback": "halt"
+      },
+      "rationale": "End time must be valid; malformed inputs indicate data quality issues.",
+      "audit_hook": "Validation step: parse_datetime() returns error on invalid input; test with edge cases including '2024-03-15T17:00:00Z' and 'invalid'",
+      "failure_loudness": "Halt if malformed"
+    },
+    {
+      "rule_id": "R03",
+      "name": "Status normalization",
+      "action": "Map slot_status to standardized enum values",
+      "parameters": {
+        "mapping": {
+          "scheduled": "scheduled",
+          "skipped": "skipped",
+          "merged": "merged"
+        },
+        "default": "skipped"
+      },
+      "rationale": "Ensures consistency across clinics; avoids semantic drift in status reporting.",
+      "audit_hook": "Test with all valid and invalid values; verify output matches expected enum set",
+      "failure_loudness": "Map to default if absent or invalid"
+    },
+    {
+      "rule_id": "R04",
+      "name": "Channel type normalization",
+      "action": "Map channel_type to standardized enum values",
+      "parameters": {
+        "mapping": {
+          "email": "email",
+          "text": "text",
+          "phone": "phone"
+        },
+        "default": "email"
+      },
+      "rationale": "Standardizes communication channels for audit and compliance purposes.",
+      "audit_hook": "Test with all valid and invalid values; verify output matches expected enum set",
+      "failure_loudness": "Map to default if absent or invalid"
+    },
+    {
+      "rule_id": "R05",
+      "name": "Skip reason code validation",
+      "action": "If skip_reason_code is present, retain as-is; otherwise map to 'unknown'",
+      "parameters": {
+        "default_value": "unknown"
+      },
+      "rationale": "Preserves diagnostic context while ensuring all records have a reason field.",
+      "audit_hook": "Test with empty and non-empty values; verify output shape matches target schema",
+      "failure_loudness": "No failure; absence is handled by default mapping"
+    },
+    {
+      "rule_id": "R06",
+      "name": "Conflict flag derivation",
+      "action": "Set calendar_conflict_flag to true if conflict exists and slot_status != 'scheduled'",
+      "parameters": {
+        "conflict_condition": "calendar_conflict_flag == true and status != 'scheduled'"
+      },
+      "rationale": "Identifies when a scheduled slot is overridden by another, which must be reported.",
+      "audit_hook": "Test with known conflict and non-conflict inputs; verify flag accuracy",
+      "failure_loudness": "No failure; derived from input"
+    },
+    {
+      "rule_id": "R07",
+      "name": "Double-booking detection",
+      "action": "If clinic_id is 'CLINIC_07' and double_booked_flag == true, set rule_applied to 'double_booking_defect'",
+      "parameters": {
+        "clinic_id_filter": "CLINIC_07"
+      },
+      "rationale": "Known defect in one clinic's export; must be flagged explicitly for audit.",
+      "audit_hook": "Test with CLINIC_07 records and non-CLINIC_07 records; verify flag is set only when condition matches",
+      "failure_loudness": "No failure; rule applies only if condition met"
+    },
+    {
+      "rule_id": "R08",
+      "name": "Merge evidence derivation",
+      "action": "If merged_with_slot_id is present and status == 'merged', set evidence_merge_target to value of merged_with_slot_id",
+      "parameters": {
+        "status_condition": "merged"
+      },
+      "rationale": "Provides traceability for slot merges; required for reconciliation reporting.",
+      "audit_hook": "Test with merge and non-merge inputs; verify target field is populated only when condition met",
+      "failure_loudness": "No failure; absent value maps to null"
+    }
+  ],
+  "gap_handling": {
+    "empty_input": {
+      "action": "halt with diagnostic",
+      "diagnostic_message": "Empty input record: missing required fields including appointment_slot_start"
+    },
+    "single_record": {
+      "action": "process as normal; no aggregation or grouping applied",
+      "rationale": "Each slot is processed independently; no batch-level logic"
+    },
+    "multiple_variants_match": {
+      "action": "halt with diagnostic",
+      "diagnostic_message": "Ambiguous input: multiple rule conditions apply; cannot resolve without human review"
+    },
+    "no_variant_matches": {
+      "action": "map to default status and evidence fields; set rule_applied to 'unknown'",
+      "output": {
+        "status": "skipped",
+        "rule_applied": "unknown",
+        "evidence_merge_target": null,
+        "evidence_skip_source": null
+      },
+      "rationale": "Maintains output shape consistency for unclassified inputs"
+    }
+  },
+  "invariants": [
+    {
+      "name": "No diagnosis in message content",
+      "description": "All message templates used must be approved by the plain-language review board and contain no diagnostic information.",
+      "how_checked": "At pipeline ingestion, a schema validation rule checks that template_id references only approved templates; any reference to diagnosis is flagged as invalid.",
+      "audit_hook": "Review board approval list is validated against template_id in input; test with known diagnosis-containing and diagnosis-free templates"
+    },
+    {
+      "name": "No identifiers in logs",
+      "description": "All output records must not contain patient identifiers or any personally identifiable information (PII).",
+      "how_checked": "Schema validation at pipeline ingestion ensures no fields such as patient_id, name, or dob are present; any field with PII is rejected.",
+      "audit_hook": "Static schema scan for PII fields; test with sample records containing PII to verify rejection"
+    },
+    {
+      "name": "Exception entries must name their rule and calendar evidence",
+      "description": "Every exception entry must include a rule_applied field and at least one piece of evidence (e.g., slot_start, merge_target, skip_source).",
+      "how_checked": "Validation step: every output record must have rule_applied populated; if absent, halt with diagnostic.",
+      "audit_hook": "Test with records missing rule_applied or evidence fields; verify pipeline halts and logs error"
+    },
+    {
+      "name": "Total reconciled slots equals sum of scheduled + skipped + merged",
+      "description": "The total number of processed slots must match the sum of scheduled, skipped, and merged entries.",
+      "how_checked": "At output stage, a reconciliation check compares input count with output count; mismatch triggers hard error.",
+      "audit_hook": "Run reconciliation test on sample data: 4100 appointments across 14 clinics; verify counts match",
+      "failure_consequence": "Hard error; pipeline halts"
+    },
+    {
+      "name": "No double-booking in output except for known defect",
+      "description": "All slots must be uniquely scheduled, with no overlapping time ranges unless explicitly flagged as a known defect.",
+      "how_checked": "At output stage, validate that slot_start and slot_end do not overlap across records; exceptions only allowed when clinic_id == 'CLINIC_07' and double_booked_flag == true.",
+      "audit_hook": "Run overlap detection on all slots in test dataset; verify no overlaps outside known defect"
+    }
+  ],
+  "reproducibility": {
+    "ordering": {
+      "rule": "Input records are processed in the order of appointment_slot_start ascending, then by clinic_id ascending",
+      "rationale": "Ensures deterministic output and consistent exception reporting across runs; prevents ordering-dependent anomalies.",
+      "source": "Pipeline ingestion layer"
+    },
+    "rounding": {
+      "rule": "No rounding occurs; all numeric fields are exact as parsed from input",
+      "rationale": "All time values are ISO 8601 strings; no floating-point arithmetic or approximations used.",
+      "unit_discipline": "All timestamps are in ISO 8601 format; unitless numbers are not present"
+    },
+    "serialization": {
+      "rule": "Output is serialized as JSON with double-quoted strings, no trailing commas, and all dates in ISO 8601 format",
+      "rationale": "Ensures compatibility with downstream systems that parse JSON strictly.",
+      "example": "{\"exception_id\": \"EXC-2024-03-15-09\", \"slot_start_iso\": \"2024-03-15T09:00:00Z\"}"
+    },
+    "idempotency": {
+      "rule": "Repeated application of the transformation produces identical output for same input",
+      "how_achieved": "All transformations are deterministic; no stateful components or randomization used.",
+      "steps_skipped_on_re_run": [],
+      "rationale": "No caching, no side effects; every field is derived from input with fixed rules."
+    },
+    "failure_handling": {
+      "rule": "If input cannot be classified (e.g., malformed date), the process halts immediately and returns diagnostic",
+      "diagnostic_format": "Error: Input does not match any known variant; fields present: [list]; expected: [list]",
+      "rationale": "Silent drops or guessed mappings are prohibited; all ambiguity must be surfaced."
+    },
+    "evidence_recency": {
+      "statement": "All facts in the supplied material (e.g., 2.3% conflict rate, one clinic's double-booking defect) are treated as current as of this engagement",
+      "dependency_marking": "The 2.3% conflict rate is used to validate expected number of conflicts; the CLINIC_07 defect is hardcoded into rule R07"
+    },
+    "definitions_first": {
+      "scale_definitions": {
+        "status_enum": ["scheduled", "skipped", "merged"],
+        "channel_type_enum": ["email", "text", "phone"]
+      },
+      "band_definitions": {}
+    },
+    "audit_hooks": [
+      "Rule R01: parse_datetime() returns error on invalid input",
+      "Rule R03: status mapping produces only valid enum values",
+      "Invariant 4: reconciliation check matches input count with output count",
+      "Invariant 5: no overlapping slots outside CLINIC_07"
+    ],
+    "hand_off_checklist": [
+      {
+        "consumer": "Clinical operations team",
+        "required_sections": ["mapping", "rules"],
+        "signoff_required": true,
+        "reason": "Needs to validate field mappings and rule logic for operational clarity"
+      },
+      {
+        "consumer": "Compliance officer",
+        "required_sections": ["invariants", "gap_handling"],
+        "signoff_required": true,
+        "reason": "Must verify no PII or diagnosis is present; must confirm gap handling aligns with privacy policy"
+      },
+      {
+        "consumer": "Data engineering team",
+        "required_sections": ["reproducibility", "rules"],
+        "signoff_required": true,
+        "reason": "Needs to validate deterministic behavior and idempotency for pipeline stability"
+      }
+    ]
+  },
+  "notes": "This specification is derived solely from the supplied material. All numbers (e.g., 2.3%, 4,100 appointments) are exact as stated. No assumptions or extrapolations were made beyond the provided facts."
+}

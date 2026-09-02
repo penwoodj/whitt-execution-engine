@@ -1,1 +1,629 @@
-Hello! How can I help you today? 😊
+```json
+{
+  "architecture_overview": "
+# Architecture Overview
+
+## Core Design Principles
+The `iridium-recon` crate is designed as an **async-first**, **streaming** reconciliation engine built on Tokio to handle high-volume shipment event pairs between a primary (Rust ingest tier) and secondary (carrier integration) stream. The architecture prioritizes:
+- **Deterministic output**: Hash-based iteration order stability via deterministic hashing of event fingerprints.
+- **Streaming efficiency**: Memory-efficient processing with configurable watermark windows to handle lag up to 90 seconds.
+- **Fault tolerance**: Clear error boundaries for orphaned/ghosted events and retry-safe secondary stream handling.
+
+## Crate Layout
+The library is structured as a **single public crate** (`iridium-recon`) with:
+1. A **core pairing engine** (`PairingEngine`) implementing the reconciliation algorithm.
+2. An **async facade** (`ReconciliationService`) for integration with Prometheus metrics and storage facades.
+3. **Private utilities** (`utils::event_utils`, `utils::metrics`) handling validation, fingerprinting, and logging.
+
+## Key Tradeoffs
+- **Watermark vs. Lag**: Configurable window size balances false positives (orphaned events) against missed ghosted events.
+- **Duplicate Handling**: Retry indicators in secondary events enforce at-least-once semantics without requiring deduplication logic.
+- **Determinism**: SHA-256 fingerprinting + event kind ensures consistent iteration order despite timestamp skew.
+
+---
+
+## Public API Surface
+The crate exposes a single public trait with stable stability annotations:
+```rust
+use iridium_recon::{
+    ReconciliationConfig,
+    PairingEngine,
+    EventPairResult,
+    CarrierReport,
+};
+
+pub async fn reconcile(
+    config: &ReconciliationConfig,
+    primary_stream: impl AsyncStream<Item = PrimaryEvent>,
+    secondary_stream: impl AsyncStream<Item = SecondaryEvent>
+) -> Result<CarrierReport, ReconciliationError> {
+    // ...
+}
+```
+
+### Trait Definitions
+```rust
+/// Configurable parameters for reconciliation.
+#[derive(Debug, Clone)]
+pub struct ReconciliationConfig {
+    /// Watermark window in seconds (0-90).
+    pub watermark_seconds: u32,
+    /// Carrier-specific deduplication threshold (if needed).
+    pub carrier_dedupe_threshold: u64,
+}
+
+/// Primary event from the ingest tier.
+#[derive(Debug, Clone)]
+pub struct PrimaryEvent {
+    ulid: ULID,
+    kind: EventKind,
+    sequence: u64,
+    fingerprint: [u8; 16],
+    timestamp: DateTime<Utc>,
+}
+
+/// Secondary event with carrier metadata.
+#[derive(Debug, Clone)]
+pub struct SecondaryEvent {
+    ulid: ULID,
+    kind: EventKind,
+    sequence: u64,
+    fingerprint: [u8; 16],
+    timestamp: DateTime<Utc>,
+    carrier_code: CarrierCode,
+    is_retry: bool,
+}
+
+/// Pairing result classification.
+#[derive(Debug, Clone)]
+pub enum EventPairResult {
+    Matched,
+    Orphaned { ulid: ULID },
+    Ghosted { ulid: ULID, carrier: CarrierCode },
+    Duplicate { fingerprint: [u8; 16] },
+}
+```
+
+---
+
+## Algorithm Walkthrough
+### Pseudocode with Complexity Bounds
+```rust
+async fn pairing_engine(
+    config: &ReconciliationConfig,
+    primary_stream: AsyncStream<PrimaryEvent>,
+    secondary_stream: AsyncStream<SecondaryEvent>
+) -> CarrierReport {
+    let mut primary_buffer = Vec::with_capacity(config.watermark_seconds * 10); // ~90s buffer
+    let mut ghosted_events = HashMap::new();
+    let mut orphaned_events = Vec::new();
+
+    for event in primary_stream {
+        let PrimaryEvent { ulid, kind, sequence, fingerprint, timestamp } = event;
+        primary_buffer.push((ulid, sequence, timestamp));
+
+        // Watermark check: drop events older than watermark.
+        if timestamp < Utc::now() - chrono::Duration::from_secs(config.watermark_seconds) {
+            continue;
+        }
+
+        // Check for duplicates in secondary stream (via fingerprint).
+        let is_duplicate = ghosted_events.contains_key(&fingerprint);
+        if is_duplicate {
+            orphaned_events.push(Orphaned { ulid });
+        } else {
+            ghosted_events.insert(fingerprint, Orphaned { ulid });
+        }
+    }
+
+    // Process secondary stream with retry handling.
+    for event in secondary_stream {
+        let SecondaryEvent { ulid, kind, sequence, fingerprint, timestamp, carrier_code, is_retry } = event;
+
+        if is_retry && ghosted_events.contains_key(&fingerprint) {
+            continue; // Skip retries (handled by at-least-once semantics).
+        }
+
+        // Check for orphaned primary events.
+        let orphaned = match ghosted_events.remove(&fingerprint) {
+            Some(Orphaned { ulid: expected_ulid }) => {
+                if ulid != expected_ulid {
+                    continue; // Ignore mismatched retries (assumed carrier error).
+                }
+                None
+            },
+            None => Some(Ghosted { ulid, carrier: carrier_code }),
+        };
+
+        if let Some(orphaned) = orphaned {
+            orphaned_events.push(orphaned);
+        } else {
+            // Matched event.
+            primary_buffer.retain(|&(ulid, seq, _)| seq >= sequence); // Prune stale entries.
+        }
+    }
+
+    // Generate deterministic report.
+    let mut report = CarrierReport::new();
+    for (carrier, events) in orphaned_events.group_by(|e| e.carrier_code) {
+        report.add_carrier(carrier, events);
+    }
+
+    return report;
+}
+```
+
+### Complexity Analysis
+- **Time**: O(N log N) for watermark pruning + O(M) for ghosted event lookup (HashMap).
+- **Space**: O(W * K) where W = watermark window, K = avg. sequence range per event.
+- **Determinism**: Fingerprint + kind hash ensures stable iteration order via `std::collections::hash_map::DefaultHasher` with fixed seed.
+
+---
+
+## Error Taxonomy
+### Failure Modes and Guard Clauses
+| Error Class               | Description                                                                                     | Mitigation Strategy                          |
+|---------------------------|-------------------------------------------------------------------------------------------------|----------------------------------------------|
+| **WatermarkViolation**     | Primary event timestamp outside configured window.                                               | Reject events; log for audit.                 |
+| **DuplicateFingerprint**   | Secondary stream emits duplicate fingerprint without retry.                                       | Mark as orphaned; skip processing.           |
+| **GhostDetectionFailure** | Carrier event lacks matching primary counterpart after watermark closes.                         | Flag as ghosted; no retry logic.              |
+| **RetryConflict**         | Retry indicator conflicts with existing ghosted event (wrong ULID).                             | Ignore retry; log warning.                   |
+| **SchemaMismatch**        | Inconsistent event kind or sequence number between streams.                                      | Reject pair; log for review.                 |
+
+### Error Implementation
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum ReconciliationError {
+    #[error("Watermark violation: timestamp {0} outside window")]
+    WatermarkViolation(DateTime<Utc>),
+
+    #[error("Duplicate fingerprint detected: {0:x*2}")]
+    DuplicateFingerprint([u8; 16]),
+
+    #[error("Ghosted event detection failed for ULID {0}")]
+    GhostDetectionFailed(ULID),
+
+    // ... other variants.
+}
+```
+
+---
+
+## Testing Strategy
+### Property-Based Tests
+The team will use `proptest` to generate paired streams with:
+- **Lag injection**: Random delays between 0–90 seconds.
+- **Duplicates**: Secondary stream emits same fingerprint twice (non-retry).
+- **Dropouts**: Primary event missing after watermark closes.
+
+**Example Generator**:
+```rust
+#[derive(Debug, Clone)]
+struct TestStream {
+    primary: Vec<PrimaryEvent>,
+    secondary: Vec<SecondaryEvent>,
+}
+
+impl TestStream {
+    fn generate_with_lag(
+        &self,
+        max_lag: u32,
+        duplicate_prob: f64,
+        dropout_prob: f62
+    ) -> Self {
+        // ...
+    }
+}
+```
+
+### Shrunk Counterexamples
+- **Watermark Bug**: Shrunk test reveals a primary event timestamp just outside the watermark window.
+- **Fingerprint Bug**: Shrunk test shows two events with identical fingerprints but mismatched ULIDs.
+
+**Determinism Hardening**:
+To ensure deterministic output despite unstable hashing iteration order, we:
+1. Sort events by `(fingerprint, kind)` before processing.
+2. Use a fixed seed for `DefaultHasher` in HashMap lookups.
+
+---
+
+## Assumptions
+### System-Specific
+1. **Primary Stream**: At-most-once emission per sequence number (no duplicates).
+2. **Secondary Stream**: At-least-once with retry indicator for retries.
+3. **Timestamps**:
+   - Primary: Trustworthy ±1s.
+   - Secondary: Skew up to 5 minutes; carrier timestamps are not audited.
+4. **Historical Data**: Immutable object storage snapshots partitioned by hour.
+
+### Implementation-Specific
+1. **Storage Facade**: Must support async `get_snapshot` for historical backfills.
+2. **Metrics**: Prometheus-compatible facade with `ReconciliationGauge` metrics.
+3. **Stability**: Public API stable across v0.x series; no breaking changes allowed.
+
+---
+## Week-Band Plan
+| Week  | Deliverable                                                                 |
+|-------|-----------------------------------------------------------------------------|
+| 1–2   | Crate skeleton + trait surface (public_api).                                |
+| 3–4   | Pairing engine implementation + property tests.                             |
+| 5–6   | Metrics integration + deterministic-output hardening.                         |
+
+## Review Checklist
+**Approved by**:
+- [ ] Platform Team: Architecture overview and error taxonomy.
+- [ ] On-Call Rotation: Operational clarity in testing strategy.
+- [ ] Tooling Team: Shared types crate compatibility.
+- [ ] Storage Facade Owners: Object storage interface validation.
+
+---
+## Metadata Header
+```json
+{
+  "team": "Iridium Logistics Orchestration",
+  "review_roster": ["jdoe", "smith", "alice"],
+  "target_release_train": "2023-11-SixWeekCycle-5",
+  "document_status": "draft"
+}
+```",
+  "algorithm_walkthrough": "
+### Algorithm Walkthrough (Expanded)
+
+#### Core Logic Flow
+The reconciliation engine operates in **three phases**:
+1. **Primary Stream Processing**: Buffers events within a configurable watermark window.
+2. **Ghost Detection**: Flags secondary events without primary counterparts after the watermark closes.
+3. **Orphan Detection**: Flags primary events with no secondary counterpart within the watermark.
+
+#### Pseudocode Annotations
+```rust
+// Phase 1: Primary Stream Buffering
+for event in primary_stream {
+    if timestamp > Utc::now() - config.watermark_seconds {
+        // Add to buffer.
+    } else {
+        // Drop out-of-window events (watermark violation).
+    }
+}
+
+// Phase 2: Ghost Detection
+for event in secondary_stream {
+    if !ghosted_events.contains_key(&fingerprint) {
+        // Matched event.
+    } else {
+        // Mark as ghosted (no primary counterpart).
+    }
+}
+
+// Phase 3: Orphan Detection
+for orphaned_ulid in orphaned_events {
+    if !primary_buffer.contains(orphaned_ulid) {
+        // Flag as orphaned (no secondary counterpart).
+    }
+}
+```
+
+#### Complexity Bounds Revisited
+- **Watermark Pruning**: O(N log N) due to sorting by timestamp.
+- **Ghost Detection**: O(M) for HashMap lookups, where M = number of secondary events.
+- **Orphan Check**: O(K) per orphaned event (linear scan of primary buffer).
+
+#### Deterministic Output Guarantees
+To ensure deterministic output despite unstable hashing iteration order:
+1. **Fingerprint + Kind Sorting**:
+   ```rust
+   let mut sorted_events = events.iter()
+       .map(|e| (e.fingerprint, e.kind))
+       .collect::<Vec<_>>();
+   sorted_events.sort_by_key(|&(f, k)| (f.to_be_bytes(), k));
+   ```
+2. **Fixed Hash Seed**:
+   ```rust
+   let mut hasher = DefaultHasher::with_seed(42);
+   ```
+
+#### Edge Cases Handled
+- **Retries**: Retry indicators in secondary events are ignored for ghosted events.
+- **Timestamp Skew**: Primary timestamps (±1s) dominate; carrier timestamps (±5m) are treated as noise.
+- **Duplicate Retries**: If a retry matches an orphaned event, it is silently dropped (assumed carrier error).
+
+---
+## Appendix: Assumptions Clarification
+### System-Specific
+| Assumption                          | Justification                                                                 |
+|-------------------------------------|-------------------------------------------------------------------------------|
+| Primary Stream: At-most-once         | Ingest tier guarantees no duplicate sequence numbers.                           |
+| Secondary Stream: At-least-once      | Retry indicator ensures carrier won’t lose events.                             |
+| Timestamp Trustworthiness            | Primary timestamps are audited; carrier timestamps are not.                   |
+
+### Implementation-Specific
+1. **No External Deduplication**: The library does not deduplicate events; relies on retry indicators.
+2. **Prometheus Metrics**: All metrics are exposed via the team’s facade trait.
+3. **Stability Guarantee**: Public API is stable across v0.x series (no breaking changes).
+
+---
+## Operational Notes
+- **Fail-Fast Behavior**: The library will fail immediately if any event violates schema or watermark constraints.
+- **Deterministic Output**: Hashing iteration order is stabilized via fixed seed and sorted fingerprints.
+- **Memory Efficiency**: Uses streaming buffers with configurable capacity to avoid OOM risks for historical backfills.
+
+---
+## Reviewer-Specific Notes
+For reviewers:
+- The **watermark window** balances false positives (orphaned events) vs. missed ghosted events.
+- The **property-based tests** will exercise all edge cases, including shrunk counterexamples.
+- The **deterministic output** requirement is met via explicit sorting and fixed hashing seeds.",
+
+  "error_taxonomy": "
+### Error Taxonomy
+
+#### Failure Modes and Guard Clauses
+The reconciliation engine defines **five primary error classes**, each with a distinct failure mode and mitigation strategy:
+
+| Error Class               | Description                                                                                     | Mitigation Strategy                          |
+|---------------------------|-------------------------------------------------------------------------------------------------|----------------------------------------------|
+| **WatermarkViolation**     | Primary event timestamp outside configured watermark window.                                     | Reject event; log for audit trail.            |
+| **DuplicateFingerprint**   | Secondary stream emits duplicate fingerprint without retry indicator.                            | Mark as orphaned; skip processing.           |
+| **GhostDetectionFailure** | Carrier event lacks matching primary counterpart after watermark closes.                          | Flag as ghosted; no retry logic.              |
+| **RetryConflict**         | Retry indicator conflicts with existing orphaned event (wrong ULID).                              | Ignore retry; log warning.                   |
+| **SchemaMismatch**        | Inconsistent event kind or sequence number between streams.                                      | Reject pair; log for review.                 |
+
+#### Error Implementation
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum ReconciliationError {
+    #[error("Watermark violation: timestamp {0} outside window")]
+    WatermarkViolation(DateTime<Utc>),
+
+    #[error("Duplicate fingerprint detected: {0:x*2}")]
+    DuplicateFingerprint([u8; 16]),
+
+    #[error("Ghosted event detection failed for ULID {0}")]
+    GhostDetectionFailed(ULID),
+
+    #[error("Retry conflict: retry indicator conflicts with orphaned event")]
+    RetryConflict,
+
+    #[error("Schema mismatch in event pair")]
+    SchemaMismatch,
+}
+```
+
+#### Error Handling Strategy
+- **Non-Fatal Errors**: Watermark violations, schema mismatches (logged but continue processing).
+- **Critical Failures**:
+  - Duplicate fingerprints → orphaned events.
+  - Ghost detection failures → ghosted events.
+  - Retry conflicts → ignored retries.
+
+#### Failure Mode Examples
+1. **Orphaned Event Detection**:
+   ```rust
+   if !primary_buffer.contains(&event.ulid) {
+       return Err(ReconciliationError::GhostDetectionFailed(event.ulid));
+   }
+   ```
+2. **Duplicate Fingerprint Handling**:
+   ```rust
+   if ghosted_events.contains_key(&event.fingerprint) {
+       orphaned_events.push(Orphaned { ulid: event.ulid });
+   }
+   ```
+
+#### Metrics Integration
+All error classes expose metrics via the team’s Prometheus facade:
+- `reconciliation_errors_total`: Counter for all error types.
+- `orphaned_events_total`: Gauge for detected orphaned events.
+- `ghosted_events_total`: Gauge for detected ghosted events.
+
+---
+## Appendix: Error Taxonomy Assumptions
+1. **Retry Indicators**: Secondary stream uses retry indicators to distinguish retries from duplicates.
+2. **Timestamp Skew**: Primary timestamps (±1s) are trusted; carrier timestamps (±5m) are treated as noise.
+3. **Schema Stability**: Event schemas are stable across runs (no schema drift).
+
+---
+## Reviewer-Specific Notes
+- The error taxonomy ensures **fail-fast behavior** with clear error boundaries.
+- All errors are **logged for audit trails** and exposed via metrics.
+- The library does not retry failed events; relies on downstream systems to handle retries.",
+
+  "testing_strategy": "
+### Testing Strategy
+
+#### Property-Based Test Design
+The team will use `proptest` to generate paired streams with:
+1. **Lag Injection**: Random delays between 0–90 seconds.
+2. **Duplicate Events**: Secondary stream emits same fingerprint twice (non-retry).
+3. **Dropouts**: Primary event missing after watermark closes.
+
+**Example Generator**:
+```rust
+#[derive(Debug, Clone)]
+struct TestStream {
+    primary: Vec<PrimaryEvent>,
+    secondary: Vec<SecondaryEvent>,
+}
+
+impl TestStream {
+    fn generate_with_lag(
+        &self,
+        max_lag: u32,
+        duplicate_prob: f64,
+        dropout_prob: f62
+    ) -> Self {
+        // Generate lagged events.
+        let mut primary = self.primary.clone();
+        for event in &mut primary {
+            if rand::random::<f64>() < dropout_prob {
+                event.timestamp = Utc::now() - chrono::Duration::from_secs(rand::random::<u32>());
+            } else {
+                event.timestamp += chrono::Duration::from_secs(rand::random::<u32>() % max_lag);
+            }
+        }
+
+        // Generate secondary events with duplicates.
+        let mut secondary = self.secondary.clone();
+        for event in &mut secondary {
+            if rand::random::<f64>() < duplicate_prob {
+                // Duplicate fingerprint (non-retry).
+                event.fingerprint = [0; 16];
+            }
+        }
+
+        return TestStream { primary, secondary };
+    }
+}
+```
+
+#### Shrunk Counterexamples
+- **Watermark Bug**: Shrunk test reveals a primary event timestamp just outside the watermark window.
+  ```rust
+  // Example: Watermark violation in shrunk test.
+  let event = PrimaryEvent {
+      ulid: ULID::new(),
+      kind: EventKind::ShipmentCreated,
+      sequence: 100,
+      fingerprint: [0; 16],
+      timestamp: Utc::now() - chrono::Duration::from_secs(95), // Just outside window.
+  };
+  ```
+- **Fingerprint Bug**: Shrunk test shows two events with identical fingerprints but mismatched ULIDs.
+  ```rust
+  // Example: Duplicate fingerprint in shrunk test.
+  let event1 = PrimaryEvent { ... };
+  let event2 = SecondaryEvent {
+      ulid: ULID::new(),
+      kind: EventKind::ShipmentCreated,
+      sequence: 0,
+      fingerprint: [0; 16],
+      timestamp: Utc::now(),
+      carrier_code: CarrierCode::AMZN,
+      is_retry: false,
+  };
+  ```
+
+#### Deterministic Output Guarantees
+To ensure deterministic output despite unstable hashing iteration order:
+1. **Fingerprint + Kind Sorting**:
+   ```rust
+   let mut sorted_events = events.iter()
+       .map(|e| (e.fingerprint, e.kind))
+       .collect::<Vec<_>>();
+   sorted_events.sort_by_key(|&(f, k)| (f.to_be_bytes(), k));
+   ```
+2. **Fixed Hash Seed**:
+   ```rust
+   let mut hasher = DefaultHasher::with_seed(42);
+   ```
+
+#### Testing Workflow
+1. **Unit Tests**: Validate core logic with edge cases.
+2. **Property Tests**: Generate paired streams with injected anomalies.
+3. **Integration Tests**: Simulate streaming inputs from queues.
+
+---
+## Appendix: Testing Strategy Assumptions
+1. **Streaming Inputs**: All tests use async streams to simulate real-world behavior.
+2. **Watermark Window**: Tests cover the full range (0–90 seconds).
+3. **Deterministic Output**: Hashing iteration order is stabilized via fixed seed and sorted fingerprints.
+
+---
+## Reviewer-Specific Notes
+- Property-based tests will exercise all edge cases, including shrunk counterexamples.
+- The deterministic output requirement is met via explicit sorting and fixed hashing seeds.",
+
+  "assumptions": "
+### Assumptions Appendix
+
+#### System-Specific Assumptions
+1. **Primary Stream**:
+   - Emits events with at-most-once semantics (no duplicates per sequence number).
+   - Timestamp precision: ±1 second.
+
+2. **Secondary Stream**:
+   - Emits events with at-least-once semantics.
+   - Retry indicator is accurate for distinguishing retries from duplicates.
+   - Timestamp skew: ±5 minutes relative to primary stream.
+
+3. **Object Storage**:
+   - Historical backfills are immutable and partitioned by hour.
+   - Snapshots are available via the storage facade trait.
+
+4. **Event Schemas**:
+   - Primary/secondary event schemas are stable across runs (no schema drift).
+   - Event kinds are closed enumeration (12 total).
+
+#### Implementation-Specific Assumptions
+1. **Storage Facade**:
+   - Implements `AsyncGetSnapshot` for historical backfills.
+   - Supports async operations without blocking.
+
+2. **Metrics Facade**:
+   - Exposes Prometheus-compatible metrics via a trait.
+   - All metrics are gauge/counter types.
+
+3. **Stability Policy**:
+   - Public API is stable across v0.x series (no breaking changes).
+   - No external dependencies on non-team crates.
+
+4. **Deterministic Output**:
+   - SHA-256 fingerprinting + event kind ensures consistent iteration order.
+   - HashMap lookups use fixed seed (`DefaultHasher::with_seed(42)`).
+
+#### Operational Assumptions
+1. **On-Call Behavior**:
+   - Fail-fast behavior is preferred over retry loops.
+   - Clear error output is required for debugging.
+
+2. **Watermark Window**:
+   - Configurable between 0–90 seconds (team-defined defaults).
+   - False positives (orphaned events) are acceptable if ghosted events are missed.
+
+3. **Duplicate Handling**:
+   - Retry indicators in secondary events enforce at-least-once semantics.
+   - No external deduplication logic is required.
+
+---
+## Appendix: Assumptions Validation
+| Assumption                          | Validated By                                                                 |
+|-------------------------------------|-------------------------------------------------------------------------------|
+| Primary Stream: At-most-Once         | Ingest tier guarantees no duplicate sequence numbers.                           |
+| Secondary Stream: At-least-Once      | Retry indicator ensures carrier won’t lose events.                             |
+| Timestamp Trustworthiness            | Primary timestamps are audited; carrier timestamps are not.                   |
+
+---
+## Reviewer-Specific Notes
+- All assumptions align with the platform’s existing system constraints.
+- The library does not introduce new dependencies or breaking changes.",
+
+  "metadata": {
+    "team": "Iridium Logistics Orchestration",
+    "review_roster": ["jdoe", "smith", "alice"],
+    "target_release_train": "2023-11-SixWeekCycle-5",
+    "document_status": "draft",
+    "hand_off_checklist": [
+      {
+        "consumer": "Reviewers (Platform Team)",
+        "sections_to_sign_off": ["architecture_overview", "public_api", "error_taxonomy"],
+        "notes": "Ensure clarity on watermark window tradeoffs and error boundaries."
+      },
+      {
+        "consumer": "On-Call Rotation",
+        "sections_to_sign_off": ["testing_strategy", "assumptions"],
+        "notes": "Confirm fail-fast behavior and deterministic output requirements."
+      },
+      {
+        "consumer": "Tooling Team (Shared Types)",
+        "sections_to_sign_off": ["public_api"],
+        "notes": "Validate crate consumes shared types crate without redefinition."
+      },
+      {
+        "consumer": "Storage Facade Owners",
+        "sections_to_sign_off": ["assumptions", "testing_strategy"],
+        "notes": "Confirm object storage snapshot partitioning aligns with assumptions."
+      }
+    ]
+  }
+}
+```
