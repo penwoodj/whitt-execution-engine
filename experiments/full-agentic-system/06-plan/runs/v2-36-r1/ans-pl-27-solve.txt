@@ -1,0 +1,78 @@
+The task requires a strict adherence to the provided rules for tonight's events (LOW1, LOW2, HIGH) without importing any data from the "orientation" example story. The orientation story describes a different set of numbers and is explicitly forbidden from influencing the calculation ("nothing carries over", "numbers are not tonight's numbers").
+
+**Tonight's Events & Rules Application:**
+1.  **Start:** Minute 0.
+2.  **Event 1 (Minute 0):** `LOW1` starts. Duration: 5 mins.
+    *   State: Core busy with LOW1. Time elapsed for LOW1: 0 -> 1.
+3.  **Event 2 (Minute 1):** `LOW1` continues. Time elapsed: 1 -> 2.
+4.  **Event 3 (Minute 2):** `LOW1` reaches 2 minutes. Rule: "LOW jobs checkpoint every 2 completed minutes". A checkpoint is banked at minute 2.
+    *   State: Core busy with LOW1. Time elapsed for LOW1: 2 -> 3.
+5.  **Event 4 (Minute 3):** `HIGH` arrives at Minute 2 and runs to completion. Rule: "instantly preempting whatever LOW job is running".
+    *   Preemption happens exactly when the minute boundary hits. Since LOW1 banked a checkpoint at Minute 2, any work done in Minute 2 is saved. Work done in Minute 3 (if any) would be wasted, but HIGH takes over immediately upon arrival. The rule states "a bank landing on the exact minute HIGH arrives still counts and nothing is wasted".
+    *   State: Core busy with HIGH. LOW1 is preempted.
+6.  **Event 5 (Minute 4):** `HIGH` continues running. Duration of HIGH is 9 minutes. It runs from Minute 2 to Minute 11.
+    *   State: Core busy with HIGH.
+7.  **Event 6 (Minute 11):** `HIGH` finishes.
+    *   Rule: "while HIGH runs nothing else runs". Now the core becomes free.
+    *   Waiting Queue: `LOW2` started at Minute 2, but was waiting because the core was busy with LOW1/HIGH. `LOW1` is also waiting (preempted).
+    *   Rule for Resumption Order: "LOW jobs take the core in order of their start minutes".
+        *   `LOW1` Start: Minute 0.
+        *   `LOW2` Start: Minute 2.
+        *   Order: `LOW1` goes first, then `LOW2`.
+    *   Rule for Resumed Work: "on preemption the work past the last checkpoint is wasted and redone after resume".
+        *   `LOW1` had a checkpoint at Minute 2. It ran into Minute 3 before preemption? No, HIGH arrives at Minute 2 and runs instantly. The text says "a bank landing on the exact minute HIGH arrives still counts". This implies the work done in the interval ending at Minute 2 is saved. The work done in the interval starting at Minute 3 (which would be part of LOW1's 5 mins) was not completed because HIGH took over immediately.
+        *   Wait, let's re-read carefully: "LOW1 runs 5 minutes... HIGH arrives at minute 2".
+        *   Timeline:
+            *   M0-M1: LOW1 (1 min done).
+            *   M1-M2: LOW1 (2 mins done). Checkpoint banked at M2.
+            *   M2: HIGH arrives. "Instantly preempting".
+            *   Does LOW1 get to run the 3rd minute? No, HIGH takes over immediately.
+            *   So LOW1 has completed exactly 2 minutes (M0-M1 and M1-M2). The checkpoint at M2 covers this work.
+            *   Work remaining for LOW1: Total 5 - Completed 2 = 3 minutes.
+    *   State: Core starts `LOW1` again. It needs to run 3 minutes.
+8.  **Event 7 (Minute 12):** `LOW1` resumes. Runs M12-M13 (1 min). Total done: 3. Checkpoint? No, checkpoints are every 2 mins of running time. Current running session is minute 1 of the resume.
+9.  **Event 8 (Minute 13):** `LOW1` runs M13-M14 (2nd min of resume). Total done: 4. Checkpoint banked at M14? No, checkpoint is every 2 completed minutes *of running time*. The job resumes with 0 "running time" in the current session.
+    *   Session 1 Resume:
+        *   M12-M13: Running time 1 min.
+        *   M13-M14: Running time 2 mins. Checkpoint banked at M14 (relative to start of resume? Or absolute?). Rule: "LOW jobs checkpoint every 2 completed minutes of running time". This usually means cumulative running time since the last checkpoint or start. Since it resumed, we count from the resume point.
+        *   So at end of M13-M14, LOW1 has accumulated 2 mins of running time in this session. Checkpoint banked.
+    *   Wait, let's re-evaluate the "wasted" logic.
+    *   LOW1 Total: 5 mins.
+    *   Completed before HIGH: 2 mins (M0-M1, M1-M2). Checkpoint at M2.
+    *   Preemption happens at M2. Work past checkpoint is wasted. Since the checkpoint was exactly at M2, and work in M3 would be "past", but LOW1 didn't run M3 because HIGH took over instantly. So 0 minutes were wasted? Or did it try to run M3?
+    *   Text: "HIGH arrives at minute 2... instantly preempting". This implies the switch happens at the boundary of Minute 2 and Minute 3. The work done in Minute 2 (M1-M2) is saved by the checkpoint at M2. The work for Minute 3 (M2-M3) has not started yet when HIGH arrives. So LOW1 resumes with exactly 5 - 2 = 3 minutes left to go.
+    *   Resume Start: Minute 12? No, HIGH finishes at Minute 11 (runs M2 to M10? Or M2 to M11?).
+        *   "HIGH arrives at minute 2 and runs 9 minutes".
+        *   Arrival time = T=2. Duration = 9. Finish time = T + 9 = 11.
+        *   So HIGH occupies the core during intervals: [2,3), [3,4)...[10,11).
+        *   Core becomes free at T=11.
+    *   Resume `LOW1` (Start Minute 0 < Start Minute 2 of LOW2).
+    *   `LOW1` needs to run 3 minutes.
+    *   Intervals: [11,12), [12,13), [13,14).
+    *   At T=14, `LOW1` finishes. Total running time in session = 3 mins. Checkpoints? Every 2 mins of running time.
+        *   After [11,12): 1 min run.
+        *   After [12,13): 2 mins run. Checkpoint banked at T=14 (absolute).
+    *   `LOW1` finishes at T=14. Wasted minutes = 0.
+10. **Event 9 (Minute 14):** Core free. Next job: `LOW2`.
+    *   `LOW2` started at Minute 2, duration 7 mins. It has not run yet.
+    *   State: `LOW2` starts fresh. Needs to run 7 minutes.
+    *   Intervals: [14,15)...[20,21).
+    *   Finishes at T=21.
+    *   Wasted for LOW2 = 0 (never ran before).
+
+**Totals:**
+*   **Makespan:** Time from first start (T=0) to last finish (T=21). Makespan = 21 minutes.
+*   **Wasted Minutes:** 0. (LOW1 checkpointed exactly at the moment of preemption, so no work was lost. LOW2 never ran).
+*   **Order:** `LOW1` finished at T=14. `LOW2` finished at T=21. Order: ["LOW1", "LOW2"].
+
+**Verification against Orientation Story Logic (Shape Check):**
+The orientation story had HIGH arrive while a job was running, causing waste because the checkpoint hadn't been hit yet in that specific minute. Here, the checkpoint *was* hit exactly when HIGH arrived ("bank landing on the exact minute HIGH arrives still counts"). Thus, no waste occurs, unlike the example where 1 minute was wasted. The shape of the logic (apply rule to event) holds: check if condition met before applying consequence. Condition met -> No waste.
+
+**Final JSON Construction:**
+*   `makespan_min`: 21
+*   `wasted_min`: 0
+*   `order`: ["LOW1", "LOW2"]
+
+```json
+{"makespan_min": 21, "wasted_min": 0, "order": ["LOW1", "LOW2"]}
+```

@@ -1,0 +1,78 @@
+Based on the source material provided, here is the step-by-step derivation of the makespan, wasted minutes, and completion order for the jobs LOW1, LOW2, and HIGH.
+
+### **Event Timeline Analysis**
+
+*   **Minute 0:**
+    *   `LOW1` starts (needs 4 mins). Checkpoint banked at M=2.
+    *   `LOW2` starts (needs 3 mins). Checkpoint banked at M=2.
+    *   Core is busy with `LOW1`.
+
+*   **Minute 1:**
+    *   `LOW1` continues (running time = 1/4).
+    *   `LOW2` continues (running time = 1/3).
+    *   Core remains busy with `LOW1`.
+
+*   **Minute 2:**
+    *   `HIGH` arrives. It requires 6 minutes to complete.
+    *   Preemption occurs: `LOW1` is preempted immediately.
+    *   **Wasted Calculation for LOW1:** `LOW1` had a checkpoint banked at M=2 (absolute minute). Since the preemption happens exactly when the bank lands, no work is wasted. The job resumes later with 4 minutes left.
+    *   `HIGH` starts running. Core busy with `HIGH`.
+
+*   **Minutes 3 to 7:**
+    *   `HIGH` runs continuously (5 more minutes needed).
+    *   `LOW1` waits in queue.
+    *   `LOW2` finishes its required 3 minutes of work at the end of Minute 2? No, let's re-evaluate `LOW2`.
+        *   `LOW2` started at M=0. Needs 3 mins total.
+        *   At M=1, it has run for 1 min.
+        *   At M=2 (start), it runs for the duration of Minute 2? No, the core is preempted by HIGH at M=2. `LOW2` was waiting in queue because `LOW1` held the core.
+        *   Wait, the rule says: "core never idles while a LOW job is waiting". At M=0 and M=1, `LOW1` holds the core. At M=2, `HIGH` arrives and takes the core. Does `LOW2` get to run?
+        *   Let's check the queue logic again. "LOW jobs take core in order of their start minutes... LOW whose start minute arrives while core is busy simply waits."
+        *   At M=0: Core -> `LOW1`. Queue -> `LOW2`.
+        *   At M=1: Core -> `LOW1`. Queue -> `LOW2`.
+        *   At M=2: `HIGH` arrives. Preemption happens instantly. The core is now occupied by `HIGH`.
+        *   Does `LOW2` run during Minute 2? No, because the preemption happens "instantly" at minute 2 start. The core switches to HIGH immediately. So `LOW2` does not get any runtime in Minute 2.
+        *   Therefore, `LOW2` has only completed 1 minute of work (during M=0 and M=1? No, it runs for the duration of the minute).
+            *   Let's clarify "runs X minutes". Usually implies continuous execution.
+            *   M=0: Core busy with LOW1. LOW2 waits.
+            *   M=1: Core busy with LOW1. LOW2 waits.
+            *   M=2: HIGH arrives instantly. Core busy with HIGH. LOW2 waits.
+        *   Wait, this interpretation suggests `LOW2` never runs? That contradicts the "core never idles" rule if there are waiting jobs. But here, a higher priority job (`HIGH`) is running. The rule says "while HIGH runs nothing else runs". So `LOW2` cannot run while `HIGH` is active.
+        *   So when does `LOW2` run? It must have run before M=2 or after M=7.
+        *   Let's re-read carefully: "LOW1 runs 4 minutes starting at minute 0, LOW2 runs 3 minutes starting at minute 0." This implies they are both submitted to the queue.
+        *   If `LOW1` holds the core for M=0 and M=1 (assuming it takes the whole minute), then `LOW2` waits.
+        *   At M=2, `HIGH` arrives. Preemption happens. Core -> HIGH.
+        *   So `LOW2` has effectively waited since submission? That seems wrong. Usually "runs X minutes" means they are active jobs competing for the core. If `LOW1` is running, it occupies the core. `LOW2` waits.
+        *   Is there a scenario where `LOW1` finishes early? No, it needs 4 mins.
+        *   Maybe the preemption allows `LOW2` to run if `HIGH` wasn't there? But `HIGH` is there.
+        *   Let's reconsider the "instantly preempting" phrasing. Does it mean `LOW1` stops and `HIGH` starts, or does it mean `LOW1` stops and the core becomes free for the next waiting job? No, "while HIGH runs nothing else runs". So `HIGH` takes precedence over all LOWs.
+        *   This implies `LOW2` cannot run while `HIGH` is running (M=2 to M=7).
+        *   Can `LOW2` run before M=2? Only if the core was free. But `LOW1` started at M=0 and needs 4 mins. It occupies the core for M=0, M=1, M=2(start), etc.
+        *   Unless... "runs 3 minutes starting at minute 0" means it is scheduled to run, but if blocked, it waits.
+        *   If `LOW1` blocks the core for M=0 and M=1 (full minutes), then `LOW2` has waited 2 minutes.
+        *   At M=2, `HIGH` arrives. Core -> HIGH.
+        *   So `LOW2` has not run at all yet? That seems to be the case if `LOW1` is strictly blocking.
+        *   However, let's look at the checkpoint rule: "job with 5 total minutes and 2 banked resumes with 3 minutes left". This implies partial completion is tracked.
+        *   Let's assume standard scheduling where a job running for $t$ minutes occupies the core for that duration. If `LOW1` runs for M=0 (duration 1), it finishes 1 min of work. It needs 4 mins total. So at end of M=0, it has 3 left.
+        *   At start of M=1, `LOW1` resumes. Core busy with `LOW1`.
+        *   At start of M=2, `HIGH` arrives. Preemption. `LOW1` stops. Work done: 2 mins (M=0 and M=1). Checkpoint banked at M=2? Yes ("banks a checkpoint at minute s+2"). So no waste for `LOW1`.
+        *   Now, what about `LOW2`? It was waiting in the queue during M=0 and M=1. At M=2, `HIGH` arrives. Core -> HIGH.
+        *   Does `LOW2` get to run after `HIGH` finishes? Yes.
+        *   So `LOW2` runs from M=8 onwards (after HIGH finishes at end of M=7).
+        *   Wait, does `LOW2` need to wait for `LOW1` to finish first? No, they are in a queue. But `HIGH` is running. Once `HIGH` finishes, the core is free. The next job in queue is `LOW2`.
+        *   So `LOW2` runs from M=8 to M=10 (3 minutes).
+        *   What about `LOW1`? It resumes at M=8 (after HIGH finishes). It needs 4 minutes. Runs M=8, M=9, M=10, M=11.
+        *   Wait, queue order: "take core in order of their start minutes". Both started at M=0. Tie-breaker? "resumed LOW outranks a fresh one". `LOW2` is waiting (fresh). `LOW1` was preempted (resumed). So if both are waiting after HIGH finishes, `LOW1` (resumed) should go before `LOW2` (fresh)?
+        *   Let's re-read: "a resumed LOW outranks a fresh one at any tie".
+        *   Scenario A: After HIGH finishes, queue has `LOW1` (preempted/resumed) and `LOW2` (waiting/fresh). Since `LOW1` is resumed, it goes first.
+        *   Scenario B: Did `LOW2` ever get a chance to run? No, because `HIGH` blocked the core for M=2-7, and `LOW1` held the core for M=0-1. So `LOW2` has never run. It is "fresh" (0 mins done).
+        *   So after HIGH finishes at end of M=7:
+            *   Queue: `LOW1` (needs 4), `LOW2` (needs 3).
+            *   Priority: `LOW1` (resumed) > `LOW2` (fresh).
+            *   M=8: Core -> `LOW1`. Runs.
+            *   M=9: Core -> `LOW1`. Runs.
+            *   M=10: Core -> `LOW1`. Runs.
+            *   M=11: Core -> `LOW1`. Runs. `LOW1` finishes.
+            *   Now queue has only `LOW2`.
+            *   M=12: Core -> `LOW2`. Runs.
+            *   M=13: Core -> `LOW2`. Runs.
+            *   M=14: Core -> `LOW2`. Runs. `LOW2`

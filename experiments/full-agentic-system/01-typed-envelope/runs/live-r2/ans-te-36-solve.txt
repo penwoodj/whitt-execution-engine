@@ -1,0 +1,97 @@
+### Phase 1 RULE SCAN
+*List of rules that change state during tonight's events:*
+
+1. **Arrival Rule**: When a job arrives, it enters a queue if the core is busy or starts immediately if free; HIGH arrivals preempt any running LOW job instantly.
+2. **Execution Rule**: LOW jobs consume 4 minutes of runtime; HIGH jobs consume their specified duration (3 min) and block all other execution while running.
+3. **Checkpoint Rule**: LOW jobs checkpoint every 2 completed minutes of actual running time on the core.
+4. **Preemption Loss Rule**: Upon preemption by a HIGH job, any work done after the last checkpoint is wasted and must be redone upon resume; the wasted amount is `current_running_time - last_checkpoint_time`.
+5. **Completion Order Tracking**: The system tracks the finish order of LOW jobs (resumed or fresh) relative to each other.
+
+**Triggers:**
+- Event 0: Arrival LOW1 (Starts immediately).
+- Event 3: Arrival LOW2 (Queues behind LOW1).
+- Event 5: Arrival HIGH (Preempts running LOW job; triggers loss calculation if past checkpoint).
+- Event 9: Completion of HIGH (Core becomes free for queued/resumed LOW jobs).
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events in strict arrival order:*
+
+**State Initialization:**
+- Core Status: Free.
+- Queued Jobs: [].
+- Running Job: None.
+- Completed LOWs: [].
+
+**Event 1: Minute 0 - Arrival LOW1 (Duration 4m)**
+- Rule Applied: Arrival Rule + Execution Rule.
+- Action: Core is free. LOW1 starts immediately at $t=0$.
+- State Update: `Running_Job = LOW1`, `StartTime_LOW1 = 0`.
+
+**Event 2: Minute 3 - Arrival LOW2 (Duration 3m)**
+- Rule Applied: Arrival Rule + Queue Management.
+- Action: Core is busy (LOW1 running until $t=4$). LOW2 enters queue.
+- State Update: `Queued_Jobs = [LOW2]`.
+
+**Event 3: Minute 5 - Arrival HIGH (Duration 3m)**
+- Rule Applied: Arrival Rule + Preemption Loss Rule.
+- Action: HIGH arrives at $t=5$. Core is running LOW1.
+  - Checkpoint Status for LOW1: Started at 0. Checkpoints at $t=2, t=4$.
+  - Current Time: $t=5$. Last Checkpoint: $t=4$.
+  - Work done since last checkpoint: $5 - 4 = 1$ minute.
+  - Action: Preempt LOW1. Wasted work = 1 min.
+- State Update: `Running_Job = HIGH`, `Wasted_Min += 1`. `Queued_Jobs` remains `[LOW2]`, `Pending_RESUME_LOW1`.
+
+**Event 4: Minute 8 (Implicit Event - Completion of HIGH)**
+- Rule Applied: Execution Rule + Completion.
+- Action: HIGH runs for 3 minutes ($5 \to 8$). Core frees at $t=8$.
+- State Update: `Core_Status = Free`, `Running_Job = None`.
+
+**Event 5: Minute 8 (Implicit Event - Resume Logic)**
+- Rule Applied: Queue Management + Execution Order.
+- Action: Determine next job to run.
+  - Candidates: LOW2 (Fresh, arrived $t=3$), LOW1 (Resumed, arrived $t=0$, preempted).
+  - Tie-breaker Rule: "A resumed LOW outranks a fresh one at any tie." Also, "LOW jobs take the core in order of their start minutes". Since LOW1 started at 0 and is resumed, it takes precedence over LOW2 which started at 3.
+- Action: Resume LOW1. It needs to complete its original 4-minute task. Work lost was 1 min, so it needs $4 - (5-4) = 3$ more minutes? Or simply run for remaining duration?
+  - Clarification on "redone": "work past the last checkpoint is wasted and redone".
+  - LOW1 needs to reach $t=4$ (checkpoint) first, then finish. It currently has effectively 0 valid progress since preemption wiped out post-checkpoint work. So it must run from effective time 0 to 4 again? Or just resume execution clock?
+  - Standard interpretation: The job instance LOW1 is still the same entity. To complete its *original* scope (4 mins total runtime), and given the rule "redone", it effectively restarts its accumulation of valid runtime relative to the last checkpoint. It must accumulate 2 more minutes of valid runtime to reach the next checkpoint ($t=6$ equivalent in job time) then finish at $t=8$ equivalent?
+  - Let's trace "Runtime Accumulation":
+    - LOW1 needs 4 mins total runtime.
+    - At $t=5$, it had accumulated 2 mins valid runtime (0-2 checkpoint, 2-4 checkpoint). Wait, checkpoints are *completed*.
+    - Checkpoint 1: Reached at job-time 2 ($t=2$).
+    - Checkpoint 2: Reached at job-time 4 ($t=4$).
+    - At $t=5$, it ran for 1 min (job-time 4 to 5). This is wasted.
+    - To finish the job, it must reach total job-time 4 again? No, checkpoints are milestones. If you cross a checkpoint, that milestone is saved.
+    - Did LOW1 cross $t=2$? Yes. Did it cross $t=4$? Yes (at actual time 5).
+    - The rule says: "on preemption the work past the last checkpoint is wasted and redone".
+    - Work between CP2 ($t=4$) and Preemption ($t=5$) was 1 minute. This is wasted.
+    - To finish, LOW1 must re-run that 1 minute *and* any subsequent time? The job ends when it completes its scheduled duration (4 mins).
+    - So LOW1 must effectively run for another $4 - (\text{saved progress})$? No, saved progress includes reaching the checkpoints. Reaching CP2 ($t=4$) is a state change. The work *after* that is lost.
+    - Therefore, to complete the job, it must re-do the 1 minute of wasted work PLUS whatever remains after the original completion point?
+    - Actually, usually in these problems: You have to re-accumulate the specific duration lost + finish the rest. But here, checkpoints define validity.
+    - Let's assume the simplest "Redo" model: The job must run until it has accumulated 4 minutes of *valid* runtime again? No, that would mean infinite loops if you keep hitting checkpoints?
+    - Correct interpretation for scheduling problems with checkpoints: You save state at checkpoints. If preempted before finishing, you resume from the last checkpoint. The work done since then is lost.
+    - So LOW1 resumes from Checkpoint 2 (Job-Time 4). It needs to run until Job-Time 8? No, job length is 4 mins total.
+    - Ah, "LOW jobs take the core in order of their start minutes". This implies the *instance* identity matters for ordering, but the *duration* is fixed at 4 minutes.
+    - If I have to redo work, do I run a new 4-minute block? Or just finish the remaining?
+    - "Work past the last checkpoint is wasted and redone after resume."
+    - This implies: Resume execution clock from where it was interrupted? No, that would include the wasted part.
+    - It means: Reset progress to the last checkpoint. The job needs to run until it finishes its *total* duration of 4 minutes.
+    - Wait, if checkpoints are at 2 and 4 (minutes), and total is 4... then reaching CP2 is halfway. Reaching CP3? No, only 4 mins defined.
+    - Checkpoints: "every 2 completed minutes".
+      - Minute 0-2: Complete 2m. Checkpoint #1 reached.
+      - Minute 2-4: Complete 2m. Total 4m. Job Finished?
+      - If the job is 4 minutes long, it finishes exactly at the second checkpoint.
+    - Let's re-read: "LOW1 runs 4 minutes". "Checkpoint every 2 completed minutes".
+    - Timeline for LOW1 without preemption: $t=0$ start. $t=2$ CP1. $t=4$ Finish (CP2).
+    - At $t=5$, HIGH arrives. LOW1 has run 5 minutes? But job is only 4 mins long!
+    - **CRITICAL REALIZATION**: If the job runs for 4 minutes, it finishes at $t=4$. It cannot exist until $t=5$ with accumulated work beyond its duration unless we are talking about a continuous stream where "runs 4 minutes" defines the *task size*, and preemption happens before completion.
+    - But here: Start $t=0$, End $t=4$. Preemption at $t=5$. This is impossible if it finishes at $t=4$.
+    - **Re-evaluating "runs 4 minutes"**: Does it mean duration = 4? Yes. So it finishes at $t=4$.
+    - If it finishes at $t=4$, why does HIGH arrive at $t=5$ and preempt it?
+    - Maybe the job doesn't finish until the *end of its scheduled slot* even if logic says done? No, "completion" means done.
+    - Is it possible the prompt implies LOW1 runs indefinitely or has a long duration, but we only care about 4 minutes? No, "LOW1 runs 4 minutes".
+    - **Alternative Interpretation**: Perhaps the job *is* preempted at $t=5$ because the system thinks it's still running? Or maybe my timeline is wrong.
+    - Let's re-read carefully

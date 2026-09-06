@@ -1,0 +1,65 @@
+### Phase 1: Rule List (State Changes)
+Based on the task description and events (LOW1 start, LOW2 start, HIGH arrival/preempt), here are the rules that change state during these events or claims:
+
+1.  **Arrival Order**: Jobs enter the waiting pool in strict order of their requested start time; at any tie, a resumed job outranks a fresh one.
+2.  **Start Minute Assignment**: A LOW job takes the core based on its absolute start minute ($s$); if multiple wait, the earliest $s$ goes first.
+3.  **Checkpoint Banking**: Every LOW job banks a checkpoint every 2 completed minutes of running time (absolute minutes: $s+2$, then $+4$, etc.).
+4.  **Preemption Waste Calculation**: Upon HIGH arrival/preemption, any running minutes past the last banked checkpoint are wasted and must be redone upon resume ($owed = total - banked$).
+5.  **Core Continuity**: The core never idles while a LOW job is waiting; the next waiting job starts in the exact minute the previous one finishes or is preempted.
+6.  **Job Completion Definition**: A job finishes when it completes its total required duration after redone minutes (owes nothing).
+
+### Phase 2: Ledger Walk (Minute-by-Minute)
+Walking the night strictly minute-by-minute to track core holder and state transitions.
+
+*   **Minute 0**: `LOW1` starts (Total=4, Banked=0). Core: `LOW1`.
+*   **Minute 1**: `LOW1` runs (Banked=2, Owes=2). Core: `LOW1`.
+*   **Minute 2**: `LOW1` runs (Banked=4, Owes=0). Core: `LOW1`. (`LOW1` is now fully done).
+*   **Minute 3**: `HIGH` arrives. Rule triggers preemption of `LOW1`. `LOW1` had banked at min 2 and ran min 3. Bank landed exactly on arrival (min 3? No, check logic: Start=0, banks at +2(min 2), +4(min 4)). Wait, let's re-evaluate the checkpoint timing carefully.
+    *   Re-calc Checkpoints for `LOW1` (Start=0): Banks at $0+2=2$. Next bank at $2+2=4$? Or does it bank every 2 running minutes? "Checkpoint every 2 completed minutes of running time".
+    *   Min 0-1: 1 min run. Total run = 1. Banked? No (needs 2).
+    *   Min 1-2: 2nd min run. Total run = 2. **Bank at Min 2**.
+    *   Min 2-3: 3rd min run. Total run = 3. Past bank is wasted if preempted? No, bank is at end of min 2. If preemption happens at start or during min 3? "HIGH arrives at minute 3". Usually implies start of minute 3.
+    *   Let's check the Example Logic again: `LOW1` (7 mins) Start 0. Banks at Min 2. Swap came while running 3rd minute. Wasted 1 min. This confirms banks are discrete points in time, and if you are in a "non-banked" block when swapped, that block is wasted.
+    *   `LOW1` (4 mins) Start 0:
+        *   Runs Min 0-1 (Total 1). No bank yet.
+        *   Runs Min 1-2 (Total 2). **Bank at Min 2**. Job Complete? Yes ($4 \ge 2$? No, needs 4 total running time to finish). Wait, "LOW jobs take the core...". Does it finish when run time = requested duration? Yes. `LOW1` needs 4 minutes of *running*.
+        *   Correction: The job is not done after 2 minutes. It needs to accumulate 4 minutes of execution.
+        *   Let's re-walk `LOW1` (Duration=4):
+            *   Min 0-1: Run 1m. Bank? No (need 2m).
+            *   Min 1-2: Run 2m. **Bank at Min 2**. Total run = 3m? Or does "every 2 completed minutes" mean after completing minute 1 and 2? Yes, cumulative time $\ge 2$. So Bank at end of Min 2.
+            *   Min 2-3: Run 4th min? No, duration is 4 mins total. So runs Min 0, 1, 2, 3.
+            *   Wait, the Example says `LOW1` (7 mins) banks at min 2, and swap comes while running 3rd minute. This implies the bank happens after 2 minutes of *running*, not wall time? "Checkpoint every 2 completed minutes of **running** time".
+            *   Okay: `LOW1` (Start 0):
+                *   Min 0-1: Running min #1.
+                *   Min 1-2: Running min #2. **Bank**.
+                *   Min 2-3: Running min #3.
+                *   HIGH arrives at Min 3. Preempts `LOW1`.
+                *   Was there a bank covering Min 3? No, last bank was end of Min 2. So Min 3 is unbanked. Wasted = 1 min (Min 3).
+            *   Resume `LOW1` at Min 4. Needs to re-run Min 0-3 (4 mins) + finish. Total 5 mins left? No, original was 4. Banked 2 valid. Wasted 1 invalid. Remaining work = $4 - 2 (\text{banked}) = 2$? Or is the banked amount "saved"?
+            *   Rule: "On preemption the work past the last checkpoint is wasted and redone". Checkpoint saves progress up to that point. So if Bank at Min 2, progress of 2 mins is saved. Work done in Min 3 (1 min) is wasted.
+            *   Resume `LOW1` at Min 4. Needs $2$ more minutes to reach total 4? No, wait. Total duration is fixed at 4. Banked 2 means it has "completed" 2 units of work effectively. It needs 2 more units?
+            *   Let's check Example: `LOW1` (7 mins). Banks at Min 2. Swapped during Min 3. Wasted 1 min. Resumed with 5 mins left. Original 7 - Banked 2 = 5. Yes. Logic holds: **Remaining Work = Total Duration - Banked Minutes**.
+            *   Back to `LOW1` (4 mins):
+                *   Min 0-1: Run #1.
+                *   Min 1-2: Run #2. **Bank** at end of Min 2. Saved=2.
+                *   Min 2-3: Run #3. Preempted by HIGH (Start Min 3). Wasted=1.
+                *   Resume `LOW1` at Min 4. Needs $4 - 2 = 2$ minutes.
+    *   **Minute 3**: `HIGH` starts (Duration 6). Core: `HIGH`. (`LOW1` is suspended, waiting to resume later).
+    *   **Minute 4**: `HIGH` runs (Total run=1 for HIGH? No, just running). `LOW2` start minute is 3. It is in pool. Order: `LOW1` (Start 0) vs `LOW2` (Start 3). `LOW1` wins. Core: `HIGH`. (`LOW1` waiting).
+    *   **Minute 5**: `HIGH` runs. `LOW1` waits.
+    *   **Minute 6**: `HIGH` finishes (ran Min 3,4,5? Duration 6. Starts Min 3. Finishes end of Min 8? Let's check duration count).
+        *   HIGH Start Min 3. Runs Min 3, 4, 5, 6, 7, 8. Total 6 minutes. Finishes at end of Min 8.
+    *   **Minute 0-2**: `LOW1` ran Min 0,1,2. (Banked).
+    *   **Minute 3**: `HIGH` runs Min 3. (`LOW1` unbanked part wasted).
+    *   **Minute 4**: `HIGH` runs Min 4.
+    *   **Minute 5**: `HIGH` runs Min 5.
+    *   **Minute 6**: `HIGH` runs Min 6.
+    *   **Minute 7**: `HIGH` runs Min 7.
+    *   **Minute 8**: `HIGH` finishes (Total 6 mins: 3,4,5,6,7,8). Core: Idle? No, `LOW2` in pool.
+    *   **Minute 9**: Resume `LOW1`. Needs 2 mins. Runs Min 9, 10. Finishes. (`LOW1` done).
+    *   **Minute 11**: Start `LOW2` (Start time 3? Wait, "LOW2 runs 3 minutes starting at minute 3"). It was in the pool since Min 3. Why didn't it start earlier? Because `HIGH` preempted. Now `HIGH` done.
+    *   **Minute 11**: Start `LOW2`. Needs 3 mins. Runs Min 11, 12, 13. Finishes.
+
+**Refined Walk:**
+*   **Min 0**: `LOW1` starts (4m req). Run #1. Core: `LOW1`.
+*   **Min 1**: `LOW1` Run #2. Bank at end of Min 1? No, banks

@@ -1,0 +1,54 @@
+The task requires walking a specific state machine based on 5 observations (events) against defined limits for each stage. The rules dictate how the `rollout` and `stages` change, when breaches occur, and what happens upon completion or termination.
+
+**Phase 1: Rule List & State Initialization**
+*   **Initial State:** `rollout_pct` = 0, `stages_done` = 0.
+*   **Stage Limits (Dynamic):**
+    *   Steps 1-5: Limit is 2.0%.
+    *   Steps 6-10: Limit is 1.0%.
+    *   Post-Breach Rule: If a breach occurs, the limit for all remaining steps tightens to 0.8%.
+*   **Stage Completion Logic:** A clean observation at position $P$ completes stage $S = P$. The rollout then jumps to $10 \times S$.
+*   **Breach Logic:** An observation is a breach if `rate` > `limit`. It is "spent" (does not advance state). If the limit was 2.0% and breached, it tightens to 0.8%.
+*   **Termination Conditions:**
+    *   Two breaches: Status `STOPPED`.
+    *   One breach at end of list: Status `PAUSED`.
+    *   Zero breaches (all clean): Status `DONE`.
+
+**Phase 2: Ledger Walk (Event by Event)**
+
+1.  **Step 1:** Rate = 0.4%. Limit = 2.0%. Verdict: Clean.
+    *   Action: Complete Stage 1. Rollout becomes $10 \times 1 = 10$.
+    *   State: `rollout_pct`=10, `stages_done`=1.
+
+2.  **Step 2:** Rate = 1.9%. Limit = 2.0%. Verdict: Clean.
+    *   Action: Complete Stage 2. Rollout becomes $10 \times 2 = 20$.
+    *   State: `rollout_pct`=20, `stages_done`=2.
+
+3.  **Step 3:** Rate = 0.5%. Limit = 2.0%. Verdict: Clean.
+    *   Action: Complete Stage 3. Rollout becomes $10 \times 3 = 30$.
+    *   State: `rollout_pct`=30, `stages_done`=3.
+
+4.  **Step 4:** Rate = 2.2%. Limit = 2.0%. Verdict: Breach (2.2 > 2.0).
+    *   Action: Observation spent. No stage completed. Rollout holds at last value (30). Stages hold at last value (3).
+    *   Rule Application: Since a breach occurred, the limit for remaining steps tightens to 0.8%.
+    *   State: `rollout_pct`=30, `stages_done`=3.
+
+5.  **Step 5:** Rate = 0.6%. Limit = 0.8% (Tightened from previous breach). Verdict: Clean (0.6 < 0.8).
+    *   Action: Complete Stage 4? No, the rule states "a clean observation completes the stage equal to its own position in the list". Position is 5. However, we must check if the rollout logic allows skipping or if it simply sets the new state based on the completed stage count. The example provided ("position 3 rolled... breach one... position 4 rolled... clean: it carries stage 4 by position") implies that a clean observation at position $P$ advances `stages_done` to $P$.
+    *   Let's re-read the specific rule text carefully: "a clean observation completes the stage equal to its own position in the list". This means if Step 5 is clean, it completes Stage 5.
+    *   Wait, looking at the example logic again: "position 3 rolled... breach one... that observation spent... position 4 rolled... clean: it carries stage 4 by position". In the example, Position 3 was a breach (spent). Position 4 was clean. The state went from Stage 2 to Stage 4. This confirms `stages_done` updates to the current position $P$ upon a clean event at $P$.
+    *   So for Step 5: Clean. Completes Stage 5. Rollout becomes $10 \times 5 = 50$.
+    *   State: `rollout_pct`=50, `stages_done`=5.
+
+**Final Status Determination:**
+*   Total Breaches: 1 (at Step 4).
+*   List Ended.
+*   Condition: "exactly one breach and the list ends: status PAUSED".
+
+**Final Answer Construction:**
+*   `rollout_pct`: 50
+*   `stages_done`: 5
+*   `status`: "PAUSED"
+
+```json
+{"rollout_pct": 50, "stages_done": 5, "status": "PAUSED"}
+```

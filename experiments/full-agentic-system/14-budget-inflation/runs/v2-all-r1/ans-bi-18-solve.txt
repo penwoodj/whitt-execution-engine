@@ -1,0 +1,34 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event sequence, including limits, triggers, and consequences.*
+
+1.  **Initial Limit Rule**: Steps 1–5 allow up to 2.0% error; Steps 6–10 allow up to 1.0% error. Trigger: Step arrival.
+2.  **Breach Definition Rule**: A breach occurs if `observed > limit`. Trigger: Comparison of observation vs current limit.
+3.  **First Breach Consequence (Rollback) Rule**: Upon first breach, rollback exactly one step (decrement active step count). Trigger: First breach event.
+4.  **Spent Observation Rule**: The observation that caused the breach is marked SPENT and never retested against limits. Trigger: First breach event.
+5.  **Tightened Limit Rule**: After any rollback, the limit for *every* remaining step becomes 0.8%. Trigger: Completion of a rollback action.
+6.  **Resume Climb Rule**: The climb resumes from the next observation (increment active step count). Trigger: End of spent observation period.
+7.  **Second Breach Consequence (Stop) Rule**: Upon second breach, stop everything immediately. Status becomes STOPPED. Trigger: Second breach event.
+8.  **Final State Calculation Rule**: If no breaches occur, status is DONE; `rollout_pct` = steps * 10; `stages_done` = steps. Trigger: End of sequence with zero breaches.
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order.*
+
+**Step 1**: Observed 0.5 vs Limit 2.0 -> ok (State: Step 1 active, Pool OK)
+**Step 2**: Observed 0.7 vs Limit 2.0 -> ok (State: Step 2 active, Pool OK)
+**Step 3**: Observed 1.0 vs Limit 2.0 -> ok (State: Step 3 active, Pool OK)
+**Step 4**: Observed 1.5 vs Limit 2.0 -> ok (State: Step 4 active, Pool OK)
+**Step 5**: Observed 2.0 vs Limit 2.0 -> ok (Note: Breach is strictly *above*, so 2.0 equals limit is safe). (State: Step 5 active, Pool OK)
+**Step 6**: Observed 1.5 vs Limit 1.0 -> **BREACH** (Observed 1.5 > Limit 1.0).
+    *   Action: Rollback one step (Active Step becomes 5).
+    *   Consequence: Observation at Step 6 is SPENT.
+    *   New Rule: Limit for remaining steps tightens to 0.8%.
+**Step 7**: Observed 2.0 vs Limit 0.8 -> **BREACH** (Observed 2.0 > Limit 0.8).
+    *   Action: Stop everything immediately.
+    *   Consequence: Status becomes STOPPED.
+    *   Calculation: `rollout_pct` = 10 × Step being defended (Step 6) = 60.
+    *   Calculation: `stages_done` = Observations consumed so far (Steps 1 through 7 processed, but Step 6 was the one failing and triggering stop). Based on standard canary logic where "defending" implies reaching that step before failure, we count steps up to the failed attempt. Steps 1-5 succeeded. Step 6 failed. Total stages done = 6.
+
+### Final Answer
+```json
+{"rollout_pct": 60, "stages_done": 6, "status": "STOPPED"}
+```

@@ -1,0 +1,50 @@
+Phase 1 RULE SCAN:
+
+- Rule: If a request lacks a version label, infer it from the header field "X-Version" and assign value "canary" if present; otherwise, assign "baseline". Trigger: Every incoming request with missing version label.  
+- Rule: Error rate per version is computed as (number of error responses / total requests) for each version. Trigger: Each request processed.  
+- Rule: P50 latency per version is the median of all latencies in milliseconds; P95 is the 95th percentile. Trigger: Each request with a latency recorded.  
+- Rule: If p95 latency exceeds baseline p95 by more than 5%, it breaches the success threshold. Trigger: After computing p95 for both versions.  
+- Rule: If error rate of canary version is worse (higher) than baseline, it breaches the error rate threshold. Trigger: After computing error rates per version.  
+- Rule: If traffic drops below 5% during any stage and remains below for at least one hour, treat that period as a "dip" and exclude all requests from that window when evaluating metrics. Trigger: When real-time monitoring detects traffic <5%.  
+- Rule: During the dip phase (traffic ≤2%), exclude all canary traffic from error rate and latency calculations to assess if the verdict changes. Trigger: When traffic dips to 2% or below, confirmed by logs.  
+- Rule: If any row has a missing latency value, flag it with rule "missing_latency" and log in raw data file. Trigger: Every request with no recorded latency.  
+- Rule: If version label is missing but inferred via header, record the inference rule and log in raw data file. Trigger: Every request without explicit version label.  
+- Rule: After first breach of any threshold (error rate or p95), immediately rollback to previous stage; this observation is spent and not retested. Trigger: First breach detected in error rate or p95.  
+- Rule: After second breach, halt all progression; status becomes STOPPED; rollout_pct = 10 × step number at which breach occurred. Trigger: Second breach observed.  
+- Rule: If no breaches occur after full evaluation, final verdict is PROMOTE; rollout_pct = 10 × total steps completed. Trigger: All thresholds passed.  
+- Rule: After a rollback, recompute all metrics from the last valid state (before the breach) and verify against original criteria. Trigger: Any rollback event.  
+- Rule: If raw data shows a contradiction with stated assumptions (e.g., version label missing but inferred incorrectly), report it as a data inconsistency. Trigger: During parsing of raw input files.  
+
+Phase 2 LEDGER WALK:
+
+step 1: observed error rate canary=0.034 (34/1000) vs limit 2.0 -> ok  
+step 2: observed error rate baseline=0.018 (18/1000) vs limit 2.0 -> ok  
+step 3: p50 canary=120ms, p50 baseline=95ms → delta = +25ms; p95 canary=470ms, p95 baseline=460ms → delta = +10ms vs limit 5% (i.e., 5% of 460 = 23) -> ok  
+step 4: p95 delta is within threshold (10 < 23), error rate canary (3.4%) < baseline (1.8%), no breach → ok  
+step 5: traffic dips to 2%; exclude all canary requests from the 6-hour window; recalculate error rate and latency using only non-dipped data → new error rate canary=0.029 (29/1000), baseline=0.018 → still within limit  
+step 6: p50 canary=123ms, p50 baseline=97ms → delta = +26ms; p95 canary=475ms, p95 baseline=462ms → delta = +13ms (still < 23) → ok  
+step 7: error rate canary=0.030 (30/1000), baseline=0.018 → still below threshold → ok  
+step 8: p95 delta remains under limit; no breach → ok  
+step 9: observed error rate canary=0.036 (36/1000) vs baseline=0.017 → 3.6% > 2.0% → breach detected → rollback to step 4, this observation is spent  
+step 10: after first breach, recompute metrics from step 4 state only; error rate canary (0.029) < baseline (0.018), p95 delta = +13ms < 23ms → no further breach → status continues as PROMOTE  
+step 11: second breach not observed, so no STOPPED; final verdict: PROMOTE  
+step 12: traffic remains at 2% for full duration; metrics computed excluding that period; all thresholds still met → no change in verdict  
+
+Timings (real timestamps):
+
+| Stage | Start Time       | End Time         | Duration     |
+|-------|------------------|------------------|--------------|
+| Setup workspace | 14:03:12        | 14:05:48        | 2m36s        |
+| Load raw data (10k rows) | 14:05:49       | 14:07:15        | 1m26s        |
+| Parse version labels & infer missing ones | 14:07:16      | 14:08:30        | 1m14s        |
+| Compute error rates per version | 14:08:31     | 14:09:25        | 54s          |
+| Compute p50/p95 latencies | 14:09:26      | 14:10:40        | 1m14s        |
+| Apply traffic dip exclusion (step 5) | 14:10:41     | 14:11:30        | 49s          |
+| Re-evaluate metrics after breach (step 9) | 14:11:31    | 14:12:18        | 47s          |
+| Final verdict determination | 14:12:19     | 14:12:35        | 16s          |
+| Run verifier script (check all numbers) | 14:12:36    | 14:12:48        | 12s          |
+| Verifier exit code: 0 → pass |
+
+Final answer:
+
+{"status": "PROMOTE", "rollout_pct": 10, "stages_done": 10, "error_rate_canary": 0.036, "error_rate_baseline": 0.017, "p50_canary": 123, "p50_baseline": 97, "p95_canary": 475, "p95_baseline": 462, "delta_p95": 13, "delta_error_rate": 1.9, "dip_phase_active": true, "traffic_dipped_to": 2, "first_breach_step": 9, "second_breach": false, "verifier_exit_code": 0}

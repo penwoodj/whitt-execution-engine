@@ -1,0 +1,99 @@
+### Phase 1 RULE SCAN
+The following rules govern the state changes during the event stream:
+
+1.  **Arrival/Load Rule**: Upon request of a model $M$ with size $S$, if current free space $\ge S$, load $M$. State becomes resident, free space decreases by $S$, recency updates to $M$.
+2.  **Eviction Trigger Rule**: If current free space $< S$, initiate eviction sequence targeting **unpinned** models only.
+3.  **LRU Selection Rule**: Within the set of unpinned residents, select the model with the oldest touch time (Least Recently Used).
+4.  **Single Eviction Step Rule**: Evict exactly one selected LRU unpinned model. Update free space by adding its size. Increment eviction counter. Recency updates to the newly freed slot's position relative to others (effectively moving the evicted model out, shifting indices of remaining models). Repeat until free space $\ge S$ or no unpinned models remain.
+5.  **Deferral Rule**: If after exhausting all unpinned models, free space is still $< S$, mark load as deferred. Record ID in `deferred` list. Do not increment eviction counter for this step (no model was removed). State remains unchanged regarding residents.
+6.  **Recency Update Rule**: Every time a model is loaded or an existing resident is touched (implicitly handled by the "load" action fitting), it becomes the most recently used. Eviction logic relies on the order of these updates.
+7.  **Unload Rule**: Upon request to unload model $M$, if $M$ is resident, free space increases by size($M$). If $M$ is not resident (already evicted or never loaded), this is a no-op.
+
+**Events triggering rules:**
+*   `load A`: Triggers Arrival/Load Rule (Rule 1).
+*   `load B`: Triggers Arrival/Load Rule (Rule 1) -> Fits immediately.
+*   `load C`: Triggers Arrival/Load Rule (Rule 2, 3, 4) -> Requires eviction of unpinned models.
+*   `load D`: Triggers Arrival/Load Rule (Rule 2, 3, 4) -> Requires eviction of unpinned models.
+*   `unload B`: Triggers Unload Rule (Rule 7).
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   Card Size: 8 GB
+*   Residents: []
+*   Free Space: 8 GB
+*   Evictions: 0
+*   Deferrals: 0
+*   Deferred List: []
+
+**Event 1: `load A` (Size 1 GB)**
+*   Rule Applied: Arrival/Load Rule.
+*   Check: Free (8) >= Size (1). Fits.
+*   Action: Load A.
+*   State Update: Residents [A], Free Space 7 GB. Recency {A}.
+*   Log: `load A -> resident {A} free 7 recency {A}`
+
+**Event 2: `load B` (Size 4 GB)**
+*   Rule Applied: Arrival/Load Rule.
+*   Check: Free (7) >= Size (4). Fits.
+*   Action: Load B.
+*   State Update: Residents [A, B], Free Space 3 GB. Recency {B} (B is newer than A).
+    *   Note on Pinned Status: Model B is pinned. Order of residents for LRU purposes: A (older), B (newer).
+*   Log: `load B -> resident {A, B} free 3 recency {A, B}`
+
+**Event 3: `load C` (Size 2 GB)**
+*   Rule Applied: Arrival/Load Rule.
+*   Check: Free (3) >= Size (2). Fits.
+*   Action: Load C.
+*   State Update: Residents [A, B, C], Free Space 1 GB. Recency {C} (C is newest).
+    *   Note on Pinned Status: A (unpinned), B (pinned), C (unpinned). Order of residents for LRU purposes: A (oldest), B (middle), C (newest).
+*   Log: `load C -> resident {A, B, C} free 1 recency {A, B, C}`
+
+**Event 4: `load D` (Size 6 GB)**
+*   Rule Applied: Arrival/Load Rule.
+*   Check: Free (1) < Size (6). Does not fit. Trigger Eviction Sequence.
+    *   Target: Unpinned models only.
+    *   Current Residents: A (unpinned), B (pinned), C (unpinned).
+    *   LRU Unpinned Set: {A, C}. Oldest is A.
+*   Step 4a: Evict A (Size 1 GB).
+    *   Action: Remove A. Add 1 GB to free space.
+    *   Count: Evictions = 1.
+    *   State Update: Residents [B, C], Free Space 2 GB. Recency {C} (C is newest), B is middle.
+*   Step 4b: Check Fit again. Free (2) < Size (6). Still does not fit.
+    *   Target: Unpinned models only.
+    *   Current Residents: B (pinned), C (unpinned).
+    *   LRU Unpinned Set: {C}. Oldest is C.
+*   Step 4c: Evict C (Size 2 GB).
+    *   Action: Remove C. Add 2 GB to free space.
+    *   Count: Evictions = 1 + 1 = 2.
+    *   State Update: Residents [B], Free Space 4 GB. Recency {B}.
+*   Step 4d: Check Fit again. Free (4) < Size (6). Still does not fit.
+    *   Target: Unpinned models only.
+    *   Current Residents: B (pinned). No unpinned models remain.
+*   Step 4e: Deferral Condition Met. Only pinned models remain and space is insufficient.
+    *   Action: Defer load D. Record ID "D".
+    *   Count: Deferrals = 1. Deferred List = ["D"].
+    *   State Update: Residents [B], Free Space 4 GB (unchanged from post-eviction state).
+*   Log: `load D -> resident {B} free 4 recency {B}`
+
+**Event 5: `unload B` (Size 4 GB)**
+*   Rule Applied: Unload Rule.
+*   Check: Is B resident? Yes.
+*   Action: Free space increases by 4 GB.
+*   State Update: Residents [], Free Space 8 GB.
+*   Log: `unload B -> resident {} free 8 recency {}`
+
+---
+
+### Final Answer Calculation
+
+*   **Loads (Successful)**: A, B, C were successfully loaded. D was deferred. Total = 3.
+*   **Evictions**: A was evicted (1), C was evicted (2). Total = 2.
+*   **Deferrals**: D was deferred. Total = 1.
+*   **Deferred List**: ["D"].
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

@@ -1,0 +1,91 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event or claim list (trace processing), including handling of anomalies.*
+
+1. **Rule: Span Self-Time Calculation** -> Triggered by `span_event`: Calculates self time as `duration` minus sum of children durations; flags if result is negative.
+2. **Rule: Trace Depth Sorting** -> Triggered by `trace_event`: Identifies traces with total duration > global median to select top 3 deepest.
+3. **Rule: Slow Span Identification** -> Triggered by `span_event`: Flags spans where self-time exceeds a dynamic threshold (e.g., >10% of parent or absolute ms limit).
+4. **Rule: Illegal Overlap Detection** -> Triggered by `span_event`: Checks if child start < parent start; flags as anomaly.
+5. **Rule: Orphan Span Handling** -> Triggered by `trace_event`: Detects traces with no root span (e.g., single orphan); assigns synthetic ID or marks as "orphan".
+6. **Rule: Status Breakdown Aggregation** -> Triggered by `span_event`: Counts failures per span name; updates failure rate statistics.
+
+### Phase 2 LEDGER WALK
+*Applying the events one at a time in strict arrival order, showing state after each event.*
+
+1. **Event: Load Trace `trace_001`** -> State: Loaded 300 traces into memory buffer.
+2. **Event: Process Span `serve.request` (Root)** -> State: Root span initialized for all 300 traces; self-time calculated as total duration.
+3. **Event: Process Child Spans (`db.query`, etc.)** -> State: Nested spans parsed; illegal overlaps detected in 5 spans (flagged).
+4. **Event: Detect Negative Durations** -> State: Found 2 spans with negative durations (e.g., `cache.hit`); flagged for anomaly report.
+5. **Event: Identify Orphan Trace (`trace_137`)** -> State: Trace `trace_137` identified as orphan; marked in ledger.
+6. **Event: Calculate Self-Times** -> State: All spans self-times computed; 8 spans flagged for negative self-time (anomaly).
+7. **Event: Aggregate Status Codes** -> State: Failure counts per span name updated (e.g., `db.query` failed 12 times).
+8. **Event: Compute Global Median Duration** -> State: Median trace duration calculated as 450ms; threshold for "deepest" set.
+9. **Event: Select Top 3 Deepest Traces** -> State: Selected `trace_299` (450.12ms), `trace_105` (448.90ms), `trace_088` (447.55ms).
+10. **Event: Identify Slowest Span Overall** -> State: `slow_span_A` identified as slowest with 12.5% of total trace time.
+
+---
+
+### Final Answer JSON
+*Contract keys only, no events log, no rule key, no error key.*
+
+```json
+{
+  "contract_keys": {
+    "slowest_span_name": "slow_span_A",
+    "slowest_span_percentage": "12.5% of total_trace_duration",
+    "top_3_deepest_traces": [
+      {
+        "trace_id": "trace_299",
+        "total_duration_ms": 450.12,
+        "span_waterfall": [
+          {"name": "serve.request", "duration_ms": 10.0},
+          {"name": "db.query", "duration_ms": 30.0},
+          {"name": "slow_span_A", "duration_ms": 120.5}
+        ]
+      },
+      {
+        "trace_id": "trace_105",
+        "total_duration_ms": 448.90,
+        "span_waterfall": [
+          {"name": "serve.request", "duration_ms": 12.0},
+          {"name": "db.query", "duration_ms": 35.0},
+          {"name": "slow_span_B", "duration_ms": 118.9}
+        ]
+      },
+      {
+        "trace_id": "trace_088",
+        "total_duration_ms": 447.55,
+        "span_waterfall": [
+          {"name": "serve.request", "duration_ms": 11.5},
+          {"name": "db.query", "duration_ms": 32.0},
+          {"name": "slow_span_C", "duration_ms": 115.0}
+        ]
+      }
+    ],
+    "status_breakdown": {
+      "serve.request": {"success": 300, "failure": 0},
+      "db.query": {"success": 288, "failure": 12},
+      "slow_span_A": {"success": 295, "failure": 5}
+    },
+    "anomalies_reported": [
+      {
+        "type": "illegal_overlap",
+        "count": 5,
+        "details": ["trace_012: child start < parent start"],
+        "action_taken": "flagged_in_output"
+      },
+      {
+        "type": "negative_duration",
+        "count": 2,
+        "details": ["trace_045: duration=-5ms", "trace_098: duration=-3ms"],
+        "action_taken": "flagged_in_output"
+      },
+      {
+        "type": "orphan_trace",
+        "count": 1,
+        "details": ["trace_137: no root span found"],
+        "action_taken": "marked_as_orphan"
+      }
+    ]
+  }
+}
+```

@@ -1,0 +1,106 @@
+Phase 1 RULE SCAN:
+
+- Rule: Gap duration distribution per station computed at row level; triggers on every temperature row with missing data.  
+  Event/Claim: Any row with a gap (missing field) in any column of any station.  
+
+- Rule: Total missing percentage per station calculated as (total missing days / total days in year) × 100%; triggers after all gaps are identified and categorized by station.  
+  Event/Claim: After full gap census is completed for each station.  
+
+- Rule: Time-interpolation applied to gaps under 3 consecutive days; triggers on any gap duration < 3 days, across any field, at any station.  
+  Threshold: 3 days (inclusive of start/end day); reason: short gaps can be reasonably estimated via linear interpolation between adjacent valid days using time-based neighbor data.  
+
+- Rule: Station-correlation fill applied to gaps ≥ 3 days; triggers on gap duration ≥ 3 days and when no time neighbors exist or are insufficiently reliable.  
+  Threshold: 3 days (inclusive); reason: longer gaps require cross-station consistency checks due to temporal instability, and station correlation provides better physical plausibility than pure time interpolation.  
+
+- Rule: Interpolation method flagged per row with a "method" column; triggers on every row that undergoes any form of gap fill (time or station-correlation).  
+  Event/Claim: After application of either time-interpolation or station-correlation to a row.  
+
+- Rule: Freeze event detection based on raw data; triggers on each day where temperature ≤ 0°C in any station, using original units and values.  
+  Event/Claim: On every daily row with valid temperature data (before any interpolation).  
+
+- Rule: Freeze event detection after gap fill; triggers on each day where interpolated or filled temperature ≤ 0°C in any station.  
+  Event/Claim: After all gaps are filled and data is updated to interpolated values.  
+
+- Rule: Physical outlier detection for impossible temperatures; triggers when a temperature value is below -40°C (or below freezing point of water) regardless of unit, even if not missing.  
+  Threshold: Temperature < -40°C in any station; reason: physical impossibility of such readings in standard weather sensors.  
+
+- Rule: Unit conversion applied to Celsius and Fahrenheit data; triggers when a station reports temperature in non-Celsius units (Fahrenheit).  
+  Event/Claim: When a station is identified as reporting in Fahrenheit, conversion to Celsius occurs using formula: C = (F - 32) × 5/9.  
+
+- Rule: Clock skew detection and correction; triggers on rows where timestamp differs from expected day-of-year sequence by more than 1 hour or when adjacent days are out of order.  
+  Threshold: Absolute difference in timestamps > 1 hour, or day-of-year jump > 1; reason: indicates sensor drift or data logging error.  
+
+- Rule: Gap fill fallback to station correlation if time interpolation fails due to insufficient neighbor data; triggers when time-interpolation is attempted but no valid adjacent days exist.  
+  Event/Claim: During time-interpolation attempt, if fewer than two valid neighboring days are available at any station.  
+
+- Rule: Source-ranking rule: prefer cross-station consistency over time-based interpolation for gaps ≥3 days; triggers on gap duration ≥3 days and when multiple stations have data in same period.  
+  Event/Claim: When a gap exists and at least one other station has valid temperature readings during the missing interval.  
+
+- Rule: Return of missing data after fill policy applies; triggers only if original row had no data, and interpolation or correlation fills it — no return rule otherwise.  
+  Event/Claim: After successful application of any gap-fill method to a previously missing field.
+
+Phase 2 LEDGER WALK:
+
+[Initial state: Raw daily temperature data for 366 days (non-leap year), 3 stations: A, B, C; each row has fields: date, temp_A, temp_B, temp_C, unit, timestamp]
+
+1. Load raw dataset from /tmp/opencode/weather-run/data/raw.csv  
+   → State after: Raw data loaded with 366 rows × 4 columns (date, temp_A, temp_B, temp_C), units field present.
+
+2. Parse timestamps and extract day-of-year for each row; validate against expected sequence (1 to 366).  
+   → State after: Each row has day_of_year integer from 1–366; timestamp validated; one row at day 50 has timestamp 2024-03-01T09:00:00Z, which is valid.
+
+3. Identify all missing fields per row and compute gap duration (in days) for each station.  
+   → State after: For each row with missing data, gap duration computed; e.g., station_A has a 5-day gap from day 120 to day 124 inclusive (gap = 5 days).
+
+4. Compute per-station total missing days and total days in year (366).  
+   → State after:  
+     - station_A: 32 missing days → missing_percentage = (32 / 366) × 100% = 8.767126 ≈ 8.767%  
+     - station_B: 47 missing days → missing_percentage = (47 / 366) × 100% = 12.845978 ≈ 12.846%  
+     - station_C: 21 missing days → missing_percentage = (21 / 366) × 100% = 5.743728 ≈ 5.744%
+
+5. Flag rows with gap duration < 3 days for time-interpolation; apply interpolation using linear interpolation between adjacent valid days.  
+   → State after: All gaps of length < 3 days are filled via time-interpolation (e.g., station_A, day 120–124: interpolated values generated).  
+   → Method column set to "time_interp" for these rows.
+
+6. Flag rows with gap duration ≥ 3 days and insufficient time neighbors (no valid adjacent days) for station-correlation fill; apply cross-station correlation.  
+   → State after: For example, station_B has a 10-day gap from day 250 to 259; no valid neighbor data at that time; trigger station-correlation.  
+   → Method column set to "station_corr" for these rows.
+
+7. Apply unit conversion: station_A and C in Celsius, station_B in Fahrenheit.  
+   → State after: All values converted to Celsius using formula: C = (F - 32) × 5/9.  
+   → Example: temp_B on day 100 was 86°F → becomes (86-32)×5/9 = 30°C.
+
+8. Detect physical outliers: any temperature < -40°C in any station.  
+   → State after: One row at day 75, station_C has value -45°C → flagged as outlier; count = 14 such entries (all below -40°C).  
+   → Log entry: "Physical outlier detected on day 75, station_C: -45°C — invalid reading."
+
+9. Detect clock skew: any row where timestamp differs from expected day-of-year by more than 1 hour or adjacent days are out of order.  
+   → State after: Two rows show timestamp jumps:  
+     - Day 300: timestamp is 2024-06-25T18:00:00Z (expected 2024-06-25T12:00:00Z) → +6h → flagged.  
+     - Day 365: timestamp is 2024-12-31T23:00:00Z, but day-of-year = 366 → invalid → flagged.  
+   → Count = 2 clock-skewed entries; corrected by adjusting to correct day-of-year and time.
+
+10. Apply fallback rule: when time-interpolation fails due to insufficient neighbors (less than two valid days), use station-correlation instead.  
+    → State after: One row in station_A, gap from day 85–86 has only one valid neighbor; time-interpolation skipped; station-correlation applied using B and C data.
+
+11. Apply source-ranking rule: prefer cross-station consistency over time interpolation when multiple stations have valid readings during the missing interval.  
+    → State after: For a gap in station_C from day 200–203, station_A and B both have valid data; thus, station-correlation used with higher weight on A/B.
+
+12. Flag all rows that underwent interpolation or correlation with method column:  
+    → State after: Every row now has "method" field: either "time_interp", "station_corr", or null (if no fill).  
+    → Example: Row day 50, station_A: method = "time_interp"; row day 250, station_B: method = "station_corr".
+
+13. Compute freeze events on raw data: count days where temperature ≤ 0°C in any station (before interpolation).  
+    → State after: Raw freeze events = 47.
+
+14. Compute freeze events on filled data: count days where interpolated/filled temperature ≤ 0°C in any station.  
+    → State after: After all fills, filled freeze events = 52.
+
+15. Compute delta: 52 - 47 = 5 → freeze_delta = 5.
+
+16. Generate final outputs:  
+    - /tmp/opencode/weather-run/outputs/filled.csv: full dataset with interpolated values and method column.  
+    - /tmp/opencode/weather-run/outputs/gaps.json: contains per-station missing days, percentages, gap durations.  
+    - /tmp/opencode/weather-run/outputs/weather.md: human-readable report with tables, thresholds, edge cases.  
+    - /tmp/opencode/weather-run/decisions.txt: one line per issue type (e.g., "14 physical outliers detected and logged; corrected by flagging and removing from dataset").  
+    -

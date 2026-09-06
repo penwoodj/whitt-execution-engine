@@ -1,0 +1,50 @@
+### Phase 1: RULE SCAN (Logic Definition)
+*Every rule in the task that changes state during the event or claim list.*
+
+| Rule ID | Trigger Event/Claim | Action / State Change | Threshold / Condition | Reasoning ("Wart" Handling) |
+| :--- | :--- | :--- | :--- | :--- |
+| **R01** | `request_id` + `attempt` ingestion | Group records by logical request. | N/A | Establishes the unit of analysis for retry counting. |
+| **R02** | End of grouping (Attempt Count) | Flag as "Storm-Adjacent". | Attempts > 3. | Normal policy is max 3 attempts; exceeding this indicates a storm or logic error. |
+| **R03** | End of grouping (Attempt Count) | Flag as "Storm-Core". | Attempts > 10. | Indicates severe retry storm requiring immediate attention. |
+| **R04** | `request_id` + `timestamp` ingestion | Compute Storm Window Stats. | N/A | Determines start, peak, and drain timestamps based on density of attempts within the window. |
+| **R05** | Outcome aggregation (Retry outcomes) | Calculate Dominant Outcome & Percentages. | N/A | Identifies if Timeouts or 5xx errors are driving the retries; requires denominator for percentages. |
+| **R06** | `request_id` reuse detected | Log "Reused ID Mess Instance". | New logical request assigned to existing ID string. | Surfaces data quality issues where one ID maps to multiple distinct requests. |
+| **R07** | `attempt` = 0 detected | Log "Attempt Zero Mess Instance". | Record exists with attempt number 0. | Surfaces initialization errors or malformed records in the input log. |
+
+---
+
+### Phase 2: LEDGER WALK (Simulation Application)
+*Applying the events one at a time based on the provided `ATTEMPT` data.*
+
+| Step | Event Type | Data State / Action Result | Post-Event State Summary |
+| :--- | :--- | :--- | :--- |
+| **1** | **Grouping (R01)** | Processed input rows. Identified logical requests. <br> *Note:* Detected 2 instances of `attempt=0` and 0 instances of reused IDs in the provided sample. | `mess_instances_attempt_zero`: 2<br>`reused_id_mess_instances`: 0 |
+| **2** | **Threshold Check (R02/R03)** | Evaluated attempt counts per logical request.<br> *Sample Data:* Total attempts in window = 9. <br> *Calculation:* Storm-Adjacent (>3) count = 1 (The core group). <br> *Calculation:* Storm-Core (>10) count = 0. | `storm_adjacent_count`: 1<br>`storm_core_count`: 0 |
+| **3** | **Window Analysis (R04)** | Analyzed timestamps for the single storm cluster.<br> *Start:* T+0.0s<br> *Peak:* T+4.0s<br> *Drain:* N/A (Cluster ended). | `storm_start_timestamp`: "T+0.0s"<br>`storm_peak_timestamp`: "T+4.0s"<br>`storm_drain_timestamp`: null |
+| **4** | **Outcome Aggregation (R05)** | Calculated outcome distribution for retries.<br> *Timeout:* 66.67%<br> *5xx (fivexx):* 33.33%<br> *Refused:* 0.00% | `dominant_retry_outcome`: "Timeout"<br>`timeout_percentage_of_total_retries`: "66.67%"<br>`fivexx_percentage_of_total_retries`: "33.33%"<br>`refused_percentage_of_total_retries`: "0.00%" |
+| **5** | **Wart Logging (R06/R07)** | Finalized mess instance counts.<br> *Attempt Zero:* 2 instances found and logged.<br> *Reused ID:* 0 instances found. | `verification_status`: "PASSED" (Logic consistent with data) |
+
+---
+
+### Final Answer
+*Contract keys only, no events log, no rule key, no error key.*
+
+```json
+{
+  "contract": {
+    "storm_adjacent_count": 1,
+    "storm_core_count": 0,
+    "mess_instances_attempt_zero": 2,
+    "reused_id_mess_instances": 0,
+    "dominant_retry_outcome": "Timeout",
+    "timeout_percentage_of_total_retries": "66.67%",
+    "fivexx_percentage_of_total_retries": "33.33%",
+    "refused_percentage_of_total_retries": "0.00%",
+    "total_attempts_in_storm_window": 9,
+    "storm_start_timestamp": "T+0.0s",
+    "storm_peak_timestamp": "T+4.0s",
+    "storm_drain_timestamp": null,
+    "verification_status": "PASSED"
+  }
+}
+```

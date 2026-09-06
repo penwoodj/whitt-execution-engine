@@ -1,0 +1,31 @@
+```plaintext
+1. Create /tmp/opencode/perf-reg-run as workspace root; initialize with subdirectories: raw/, normalized/, deltas/, verdicts/, logs/, rules.md, perf.md, perf.json.
+2. Copy all raw timing files (commit-scenario-repeat.csv) into raw/ under commit-<id>-scenario-<idx>.csv format; preserve original filenames and timestamps.
+3. For each commit-scenario-repeat file in raw/:  
+   - Parse CSV with Python pandas or awk; extract commit, scenario, repeat, timestamp, duration.  
+   - Compute best (min) and median (50th percentile) timing per scenario per commit using numpy.percentile or built-in stats.  
+   - Output to normalized/ as commit-scenario-best-median.csv.
+4. Validate normalization: cross-check each row against original repeats; if any repeat is missing or out of range, flag in logs/ with "normalization validation failure".
+5. For each scenario per commit pair (commit A → commit B), compute delta = (best_B - best_A) / best_A * 100% using exact arithmetic; preserve full precision; output to deltas/delta-percentage.csv.
+6. Apply regression rule: if any scenario's delta > 10%, flag as regression; record the exact percentage and denominator (original best timing); store in deltas/regressions-flagged.csv.
+7. Audit pure-refactor commit (identified by commit label "refactor-only" or from metadata):  
+   - If it shows any scenario with delta ≥ 10%, flag as "false positive refactor"; if no delta, confirm it is valid; document reasoning in decisions.md under "pure-refactor-audit".
+8. For each commit:  
+   - Determine per-scenario verdict (regression or stable) based on whether delta > -10% and ≥10% for regression; use exact values with full denominator.  
+   - Assign overall verdict: "regressed" if any scenario regressed, "stable" otherwise.  
+   - Output to verdicts/per-commit-verdict.csv with full method description.
+9. Generate human-readable perf.md: include tables of normalized data (best/median), delta table (with % change and denominator), per-scenario verdicts, overall commit verdicts, and explicit flags for ambiguous timestamps, single-repeats, outliers.
+10. Generate machine-readable perf.json: same structure as perf.md but with JSON arrays and objects; every number must match the raw input row-by-row; include metadata (timestamp, source file) for traceability.
+11. Identify and document three data anomalies:  
+   - Two commits share a timestamp → flag in logs/ with "ambiguous order detected"; resolve by using commit ID + scenario as tiebreaker; record in decisions.md under "timestamp-ambiguity".  
+   - One scenario has only one repeat → flag in logs/ with "single-repeat scenario"; treat as outlier; mark in normalized data with "outlier: single_repeat=true"; document rule in rules.md.  
+   - Outlier spikes (e.g., >2σ above mean) → detect using rolling window or inter-quartile range; flag in logs/ with "spike detected at row X"; reject that repeat if >3σ from median; record in decisions.md under "outlier-handling".
+12. Write rules.md: list all rules used, including thresholds (e.g., 10% delta), reasons (e.g., "regression threshold set to 10% because performance degradation below this is considered acceptable"), and exceptions (e.g., pure refactor allowed only if no timing change).
+13. Write decisions.md: record every choice made — e.g., "chosen commit ID for pure-refactor due to metadata field 'type=refactor'"; include rationale; justify why order of stages was picked (e.g., normalization before deltas); explain why outlier spikes were rejected.
+14. Implement verification script:  
+   - Read raw/ files directly, recompute normalized values, deltas, verdicts using same formulas and thresholds.  
+   - Compare output to perf.md and perf.json; exit with non-zero if any field differs or counts don’t match.  
+   - Run verification twice: first run (baseline), second run (after changes) — both must pass.
+15. Ensure every number in final outputs traces back to a raw row: for each value, provide input commit-scenario-repeat index and timestamp; include in perf.json under "source_row".
+16. Add timestamps to all stages: log execution time at start and end of each stage with format YYYY-MM-DD HH:MM:SS; record in logs/stage-<id>.log.
+17. All scripts are idempotent or self-cleaning: if a file exists, skip reprocessing unless input changed; clean up temporary files after

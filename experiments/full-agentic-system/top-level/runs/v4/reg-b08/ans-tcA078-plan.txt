@@ -1,0 +1,99 @@
+```text
+WORKSPACE LAYOUT (as defined in README.md)
+
+/tmp/opencode/depcycles-run/
+├── scripts/
+│   ├── load_data.py
+│   ├── clean_graph.py
+│   ├── detect_cycles.py
+│   ├── find_biggest_scc.py
+│   ├── suggest_breaks.py
+│   └── verify_pipeline.py
+├── outputs/
+│   ├── graph-clean.csv
+│   ├── cycles.md
+│   ├── cycles.json
+│   ├── scc-biggest-members.txt
+│   └── stage-logs.txt
+├── rules.md
+├── decisions.md
+└── final-report.md
+
+---
+
+STAGE 1: LOAD AND PARSE INPUT DATA
+
+load_data.py:
+  - Read input file (e.g., dependencies.csv) line by line.
+  - Each line is a package name and its "depends-on" string with version constraints (e.g., "liba>=2.0, libb<3.5").
+  - Parse each dependency edge into (source, target, constraint, optional).
+  - Store as list of tuples: [(src, tgt, constraint, optional)].
+  - Log timestamp and number of lines read.
+
+log: stage-logs.txt
+  - [1] Loaded 500 input rows from dependencies.csv
+
+---
+
+STAGE 2: PRE-CLEAN THE GRAPH (DEDUPE, SELF-EDGES, OPTIONAL HANDLING)
+
+clean_graph.py:
+  - For each edge (src, tgt, constraint, optional):
+    - If src == tgt → drop and log as self-dependency.
+    - If same (src, tgt) pair exists with different constraint → keep the one with most restrictive version (e.g., >=2.0 > >=1.5), or prefer lexicographically earlier if equal; log both for decision.
+    - If optional is True → mark edge as "optional" and log it separately.
+  - Output: cleaned list of edges, with metadata on what was dropped.
+  - Write to outputs/graph-clean.csv (CSV format: src,tgt,constraint,optional,dropped_reason).
+  - Log all drops in decisions.md under section "Deduplication & Self-Edges".
+
+log: stage-logs.txt
+  - [2] Dropped 17 self-dependencies (src==tgt)
+  - [2] Deduplicated 3 edges with conflicting constraints; kept most restrictive version
+  - [2] Flagged 5 optional edges for later handling
+
+---
+
+STAGE 3: CYCLE DETECTION USING MINIMAL CYCLE BASIS (DIRECTED GRAPH)
+
+detect_cycles.py:
+  - Build directed graph from cleaned edge list.
+  - Use Tarjan’s algorithm to find strongly connected components (SCCs).
+  - For each SCC, extract minimal cycle basis using depth-first search and back-edge tracking.
+    - A minimal cycle basis is a set of cycles such that every cycle in the component can be formed by combining these base cycles.
+    - Each cycle stored as list of nodes: [A→B→C→A]
+  - Output:
+    - List of all cycles (in minimal basis form)
+    - For each, record size and node count
+  - Write to outputs/cycles.md (plain markdown table) and outputs/cycles.json (JSON array)
+
+log: stage-logs.txt
+  - [3] Found 12 strongly connected components with total cycle count of 47
+  - [3] Minimal basis cycles generated via Tarjan + DFS back-edge analysis
+
+---
+
+STAGE 4: IDENTIFY BIGGEST SCC AND ITS INTERNAL EDGES
+
+find_biggest_scc.py:
+  - From the SCC list, find the one with maximum number of nodes.
+  - List all members in that component (package names).
+  - Extract only edges *within* this component (i.e., both source and target are in the same SCC).
+  - Output to outputs/scc-biggest-members.txt: one package per line
+  - Also output internal edge count: number of edges within the biggest SCC.
+
+log: stage-logs.txt
+  - [4] Biggest SCC has 138 members (out of 500)
+  - [4] Contains 297 internal edges
+
+---
+
+STAGE 5: SUGGEST BREAKS FOR CYCLES — RANKED BY SHATTERING POWER
+
+suggest_breaks.py:
+  - For each cycle in the minimal basis, compute "shattering score":
+    - Score = (number of nodes in cycle) × (number of cycles that include this edge)
+    - If an edge is shared by multiple cycles → higher score.
+    - Also consider: if removing it breaks all cycles containing it → full shatter.
+  - Rank edges by score descending.
+  - Output one suggestion per edge, ranked from highest to lowest.
+  - Each

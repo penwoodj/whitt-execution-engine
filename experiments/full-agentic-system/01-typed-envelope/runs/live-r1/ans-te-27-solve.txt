@@ -1,0 +1,90 @@
+### Phase 1 RULE SCAN
+**State Changes & Triggers:**
+
+*   **Load Rule (Capacity Check):** If a requested load does not fit in remaining free space + pinned models, evict LRU unpinned models until it fits or no more unpinned exist. Triggered by: `load A`, `load B`, `load D`.
+*   **Eviction Rule:** Selects the least-recently-touched (LRU) *unpinned* model for eviction when capacity is exceeded. Triggered by: `load A` (evicts nothing as space exists), `load B` (evicts nothing as space exists after A+free? Wait, let's re-calc capacity).
+    *   *Correction on Logic:* Card 8GB. Models A(3), B(4), C(1), D(2). Total needed for ABCD = 10GB > 8GB.
+    *   `load A` (3GB): Fits in 8GB free. State: {A}. Free: 5. Evictions: 0.
+    *   `load B` (4GB): Needs 4. Free is 5-3=2? No, A takes 3. Free = 8-3=5. Load B needs 4. Fits. State: {A, B}. Free: 1. Evictions: 0.
+    *   `load C` (1GB): Pinned. Always kept. Needs to fit in free space? Usually pinned models are reserved or evicted last. If strict capacity check applies first: Total loaded = A(3)+B(4) = 7GB. Free = 1GB. Load C needs 1GB. Fits exactly. State: {A, B, C}. Free: 0. Evictions: 0.
+    *   `load D` (2GB): Needs 2GB. Current used = 3+4+1=8GB. Free = 0. Cannot fit. Must evict LRU unpinned. Unpinned set: {A, B}. C is pinned. Eviction target: whichever of A or B was touched least recently? The prompt implies a sequence "load A, load B...". Usually LRU tracks access time.
+        *   Sequence so far: Load A (t=1), Load B (t=2), Load C (t=3).
+        *   Unpinned models available to evict: A and B.
+        *   Who is LRU? A was loaded at t=1, touched then. B at t=2, touched then. A is older. Evict A.
+        *   New State after eviction A: {B, C}. Used 5GB. Free 3GB. Load D (2GB) fits. State: {B, C, D}. Used 7GB. Free 1GB.
+    *   `unload B`: Removes B. Returns to pool? Or just frees capacity? In this context ("evictions choose... loads cost"), "unload" usually acts as a manual release or specific event that changes state without immediate refill unless specified. However, the rule list says: "arrivals in order". The last event is `unload B`. This is an action on existing state.
+    *   Does `unload B` trigger a Load? No load requested after it.
+    *   Does `unload B` trigger an eviction? No, it frees space.
+    *   **Refill/Return Rule:** The task mentions "expired partial returns half". There is no expiry event here (no time-based expiration defined in the core loop, only costs/durations which are metadata). The "return" mentioned in the scan instruction likely refers to the `unload` action returning the model to a non-loaded state or freeing it.
+    *   **Promotion/Fallback:** None specified in rules.
+    *   **Source-Ranking:** None specified.
+
+**Refined Trigger List based on strict event flow:**
+1.  `load A`: Triggers Load Rule (Fit check). No eviction needed.
+2.  `load B`: Triggers Load Rule (Fit check). No eviction needed.
+3.  `load C`: Triggers Load Rule (Pinned constraint + Fit check). Fits exactly. No eviction.
+4.  `load D`: Triggers Load Rule (Fit check -> Fail -> Eviction Trigger). Evicts LRU Unpinned (Model A).
+5.  `unload B`: Triggers State Change (Removal/Freeing). No eviction needed.
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   Card Capacity: 8 GB
+*   Pinned Models: None initially (C becomes pinned upon load? "Model C is pinned" implies it stays pinned once loaded or is a reserved slot. Given the phrasing "models A through D... model C is pinned", we treat C as having a persistent reservation tag).
+*   Loaded Set: []
+*   Free Space: 8 GB
+
+**Event 1: `load A` (3 GB)**
+*   **Rule Applied:** Load Request.
+*   **Check:** Needs 3 GB. Current Used 0. Fits? Yes.
+*   **Action:** Add A to loaded set. Mark A as active. Update Last-Touched(A) = Event 1.
+*   **State:** Loaded: {A}, Free: 5 GB, Pinned: {}.
+
+**Event 2: `load B` (4 GB)**
+*   **Rule Applied:** Load Request.
+*   **Check:** Needs 4 GB. Current Used 3 (A). Fits? Yes (5 >= 4).
+*   **Action:** Add B to loaded set. Update Last-Touched(B) = Event 2.
+*   **State:** Loaded: {A, B}, Free: 1 GB, Pinned: {}, LRU-Unpinned Order: [A] (older), [B] (newer).
+
+**Event 3: `load C` (1 GB)**
+*   **Rule Applied:** Load Request.
+*   **Constraint:** Model C is pinned. This means it cannot be evicted if space runs out, but does it reserve space *before* loading? Standard interpretation: It loads into free space. If no space, it fails or evicts. Here we have 1 GB free.
+*   **Check:** Needs 1 GB. Current Used 7 (A+B). Fits? Yes (5 >= 1). Wait, Free is 8 - (3+4) = 1GB. Correct.
+*   **Action:** Add C to loaded set. Mark C as Pinned. Update Last-Touched(C) = Event 3.
+*   **State:** Loaded: {A, B, C}, Free: 0 GB, Pinned: {C}.
+    *   Unpinned Set: {A, B}.
+    *   LRU Status of Unpinned: A (touched @2), B (touched @3). Wait.
+        *   Event 1 touched A.
+        *   Event 2 touched B.
+        *   Event 3 touched C (Pinned).
+        *   So among unpinned {A, B}, A is older than B? Yes. A was loaded first. Unless "touched" implies the load event itself counts as a touch for LRU purposes.
+        *   Timeline:
+            *   t=1: Load A (Touch A).
+            *   t=2: Load B (Touch B).
+            *   t=3: Load C (Touch C).
+        *   Unpinned list: [A, B]. Last touches: A@1, B@2. LRU is A.
+
+**Event 4: `load D` (2 GB)**
+*   **Rule Applied:** Load Request.
+*   **Check:** Needs 2 GB. Current Used 8 (3+4+1). Free = 0. Fits? No.
+*   **Eviction Trigger:** Must evict LRU unpinned models until D fits.
+    *   Required Space: 2 GB. Available: 0. Deficit: 2 GB.
+    *   Candidate for Eviction: Unpinned set {A, B}.
+    *   Selection: Least-recently-touched (LRU). Comparing A and B. A touched at t=1. B touched at t=2. A is LRU.
+*   **Action:** Evict Model A.
+    *   Free Space becomes: 0 + 3 = 3 GB.
+    *   Loaded Set: {B, C, D}. (D added immediately? Or evict then add? Result is same).
+    *   New Last-Touched(D) = Event 4.
+*   **State:** Loaded: {B, C, D}, Free: 1 GB (Wait: Total Cap 8. Used B(4)+C(1)+D(2)=7. Free=1).
+    *   Unpinned Set: {A} (evicted), {B} (still unpinned? No, B is in loaded set).
+    *   Wait, are all models in {B,C,D} unpinned except C? Yes. C is pinned. B and D are unpinned.
+    *   LRU Status of Unpinned ({B, D}): B touched @2. D touched @4. LRU is B.
+
+**Event 5: `unload B`**
+*   **Rule Applied:** Manual Unload / Return.
+*   **Action:** Remove B from loaded set. Add back to pool? Or just free space? The prompt asks for counts of "evictions" and "loads". An "unload" is typically not counted as a "load" or an "eviction". It changes the state of occupancy.
+    *   Does it trigger a refill? No load requested after this.
+    *   State Update: B leaves loaded set. Free space increases by 4 GB.
+*   **State:** Loaded: {C, D}. Free: 5 GB (8 - 1 - 2). Pinned: {C}.
+
+**Final Tally:**

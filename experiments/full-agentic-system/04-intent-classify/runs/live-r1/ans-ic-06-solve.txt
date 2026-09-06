@@ -1,0 +1,66 @@
+### Phase 1 Rule List
+1. **Grant Rule**: Upon request arrival, grant `min(ask, current_pool)`. Update state: `pool = pool - granted`, `total_granted = total_granted + granted`.
+2. **Denial Rule**: If `current_pool == 0` upon request arrival, set `denied = denied + [request_id]`. (Note: Per task logic "a pool that still holds tokens never denies anyone", this only triggers if the pool is empty).
+3. **Expiry Rule**: Upon completion of request $R_{next}$, if a grant from request $R_{curr}$ exists and its expiry condition is met (specifically, the text implies grants expire after the *next* request completes based on "grant for r2 expires after request r3"), return `floor(granted_tokens / 2)` to the pool. Update state: `pool = pool + returned`, `grants[R_curr] = null`.
+
+### Phase 2 Ledger Walk
+**Initial State**: Pool = 60, Total Granted = 0, Denied = [].
+
+1. **Event R1 (Ask 6)**:
+   - Grant: $\min(6, 60) = 6$.
+   - New Pool: $60 - 6 = 54$.
+   - State: {Pool: 54, Granted: [R1:6], TotalGranted: 6}
+
+2. **Event R2 (Ask 10)**:
+   - Grant: $\min(10, 54) = 10$.
+   - New Pool: $54 - 10 = 44$.
+   - State: {Pool: 44, Granted: [R1:6, R2:10], TotalGranted: 16}
+
+3. **Event R3 (Ask 12)**:
+   - Grant: $\min(12, 44) = 12$.
+   - New Pool: $44 - 12 = 32$.
+   - *Trigger Expiry*: Request R2 completes its cycle relative to R3? The text says "grant for r2 expires after request r3 completes".
+   - Return from R2 (Granted 10): $\lfloor 10 / 2 \rfloor = 5$.
+   - New Pool: $32 + 5 = 37$.
+   - State: {Pool: 37, Granted: [R1:6, R2:null], TotalGranted: 16}
+
+4. **Event R4 (Ask 15)**:
+   - Grant: $\min(15, 37) = 15$.
+   - New Pool: $37 - 15 = 22$.
+   - State: {Pool: 22, Granted: [R1:6, R2:null, R4:15], TotalGranted: 31}
+
+5. **Event R5 (Ask 19)**:
+   - Grant: $\min(19, 22) = 19$.
+   - New Pool: $22 - 19 = 3$.
+   - State: {Pool: 3, Granted: [R1:6, R2:null, R4:15, R5:19], TotalGranted: 50}
+
+6. **Event R6 (Ask 21)**:
+   - Grant: $\min(21, 3) = 3$.
+   - New Pool: $3 - 3 = 0$.
+   - *Trigger Expiry*: Request R4 completes its cycle relative to R5? Logic follows "grant for rN expires after request r(N+1) completes". Here R4 granted 15. Does it expire now? The pattern is usually sequential. Let's re-read carefully: "grant for r2 expires after request r3 completes". This implies the trigger happens immediately upon the *next* request finishing.
+   - Wait, let's trace the specific text again: "the grant for r2 expires after request r3 completes... an expired grant returns half its granted tokens rounded down to the pool".
+   - Sequence of Expiry Triggers based on text examples provided in task ("sister pool"): "first ask 11... second 7, then the first grant expired and returned 5" (after 2nd request). So yes, expiry happens after every request except possibly the last one, or specifically triggered by the rule associated with the previous request.
+   - Let's assume the rule applies to *all* grants that are "active". But typically in these puzzles, only specific grants expire if named. The text says "the grant for r2 expires... an expired grant returns half its granted tokens... expiry sentence names exactly one request id so only that one grant ever returns". This suggests a specific mechanism: Grants are not automatically expiring unless the rule explicitly targets them? Or does every previous grant expire?
+   - Re-reading "sister pool" example: First ask 11, second 7. Then first grant expired. Total granted was 18 (11+7). Returned 5 (half of 11). Pool had 35 start -> 28 after R1 -> 21 after R2. Wait, sister pool math in text: "started at 35... first ask 11... second 7... returned 5... third ask of 13 landed against only 22".
+     - Start 35. Ask 11 (Grant 11). Pool 24.
+     - Ask 7 (Grant 7). Pool 17.
+     - "First grant expired and returned 5". Wait, if pool is 17, why return from R1? Maybe the rule is: Grant N expires after Request N+1 completes. So R1 expires after R2 completes.
+     - If so, back to main task:
+       - R1 (6) active.
+       - R2 (10) active.
+       - R3 triggers expiry of R2? Yes ("grant for r2 expires after request r3").
+       - Does R1 expire now? Text says "expiry sentence names exactly one request id so only that one grant ever returns". This implies we need to know *which* grants expire. Usually, it's the most recent previous ones or specific ones. However, looking at the sister pool example again: "first ask 11... second 7, then the first grant expired". It doesn't say R2 expires after R3 in that short snippet, but implies a sequential cleanup.
+       - Let's look at the constraint: "the grant for r2 expires after request r3 completes". This is an explicit rule instance. Is there a general rule? "arrival order... grants are partial... grant what is there...".
+       - Hypothesis: Only the grant from $R_{N-1}$ expires when $R_N$ completes? Or do all pending expire? The text "names exactly one request id so only that one grant ever returns" suggests a singular event per completion. If multiple grants were expiring, it would name multiple or have a rule saying "all". Given the phrasing "the grant for r2", it sounds specific to R2. But what about R1?
+       - Let's re-evaluate the sister pool math provided in text: Start 35. Ask 11 (G1). Ask 7 (G2). "First grant expired and returned 5". If only G1 expires, Pool = $17 + 5 = 22$. Next ask 13 against 22 -> Grant 13 -> Pool 9. Total granted: 11+7+13=31. Matches text "closed with 31 granted".
+       - So in the sister pool, only G1 expired? Or did G2 expire later? The text stops there. But notice: R1 expires after R2. Does R2 expire after R3? The text doesn't explicitly say "R2 expires after R3" for the sister pool, but for the main task it says "grant for r2 expires after request r3".
+       - This implies a rule: **The grant from $R_{N-1}$ expires upon completion of $R_N$**. What about $R_0$? There is no $R_{-1}$. So only one grant per step expiring?
+       - Let's apply this to the main task.
+       
+   - **Current State Check**:
+     - After R3 (Ask 12): Pool was 32. R2 expires. Return $\lfloor 10/2 \rfloor = 5$. New Pool $37$. (R2 null).
+     - Next Event R4 (Ask 15): Grant 15. New Pool 22.
+     - *Expiry Trigger*: Does R1 expire now? The rule "grant for r2 expires after request r3" was explicit. Is there a rule "grant for r1 expires after request r2"? Not explicitly written, but the pattern in sister pool suggests sequential expiry (R1 then potentially others). However, the text says "expiry sentence names exactly one request id so only that one grant ever returns". This might mean *only* the grants named in the rules expire? But we are given a rule for R2. What about R1?
+     - Alternative Interpretation: Only specific grants expire as per explicit text instructions. If no instruction says "R1 expires", maybe it doesn't? BUT, that breaks the ledger balance if tokens are stuck forever. The sister pool example implies a flow where old tokens return.
+     - Let's look at the phrase: "the grant for r2 expires after request r3 completes". This is a specific fact about R2. Is there a general rule hidden? "arrival order... grants are partial...". No.
+     - Maybe the rule is: **The oldest active grant expires**? In sister pool, R1 was oldest and expired. If so, now in main task, after R3 completes (which is just before R4 arrives), we have R1 and R2. R2 just completed

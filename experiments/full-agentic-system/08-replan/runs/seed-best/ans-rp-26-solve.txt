@@ -1,0 +1,86 @@
+### Fact Bullets (Tonight's Numbers Only)
+*   **LOW1**: Duration 5 minutes, Start Minute 0.
+*   **LOW2**: Duration 3 minutes, Start Minute 1.
+*   **HIGH**: Arrival Minute 4, Duration 4 minutes.
+
+### Per-Minute Walk Table
+| Minute | Core Status | Event Details |
+| :--- | :--- | :--- |
+| 0 | LOW1 (Start) | LOW1 starts at min 0. Bank checkpoint @ min 2. |
+| 1 | LOW1 (Run) | LOW1 runs. Bank checkpoint @ min 4. |
+| 2 | LOW1 (Run) | LOW1 runs. **Bank checkpoint @ min 2** (Absolute). Wait for next job? No, core busy. |
+| 3 | LOW1 (Run) | LOW1 runs. Core busy until finish. |
+| 4 | HIGH (Preempt) | HIGH arrives at min 4. Preempts LOW1 immediately. **Wasted**: Min 3 was unbanked (Total 5, Banked 2). LOW1 resumes later with 3 mins owed. HIGH runs min 4-7. |
+| 5 | HIGH (Run) | HIGH continues. Core busy. |
+| 6 | HIGH (Run) | HIGH continues. Core busy. |
+| 7 | HIGH (Finish) | HIGH finishes at min 8 (Start 4 + Dur 4). Core becomes free at min 8. |
+| 8 | LOW1 (Resume) | Next waiting job is LOW1 (Start 0) vs LOW2 (Start 1). LOW1 wins tie-break. Resumes with 3 mins owed. Bank checkpoint @ min 8+2=10? No, resumes at 8, runs 3 mins: occupies 8,9,10. Banks at start+2 (min 10) and every 2 running mins. |
+| 9 | LOW1 (Run) | LOW1 runs (minute 2 of resume). Bank checkpoint @ min 10? No, absolute time. Runs min 9. |
+| 10 | LOW1 (Finish) | LOW1 finishes at min 11 (Start 8 + Dur 3). **Wait**: Checkpoint logic re-eval. Resume at 8. Runs 8,9,10. Finishes at 11. Banked? Start+2 is 10. Running mins: 1st (min 8-9), 2nd (min 9-10). Banks at absolute min 10 and absolute min 12? No, "every 2 running minutes after". Resume bank @ 10. Next bank @ 12. But job finishes at 11. So no waste on resume. |
+| *Correction on Bank Logic* | | Let's re-verify the bank logic strictly: "banks a checkpoint at minute s+2 and again every 2 running minutes after". <br>Resume at min 8 (s=8). Bank @ min 10 immediately? Yes, absolute time. <br>Running mins count from resume start. <br>Min 8-9: Run 1. <br>Min 9-10: Run 2. <br>Bank triggers: Absolute min 10 (Start+2). Then every 2 running minutes. So after Run 2 (at end of min 10), bank triggers? Or does "every 2 running minutes" mean cumulative time? Usually implies checkpoints at T=2, T=4 relative to start. <br>Let's assume standard checkpoint: Absolute Min 10 is a bank. Relative Run 2 completes at end of min 10. Is there another bank? If banks are at absolute 10 and then every 2 running mins (relative), that would be abs 12, 14... <br>Job finishes at end of min 10? No, duration is 3 minutes starting at resume minute 8. Occupies 8, 9, 10. Finishes at 11. <br>If banks are at Abs 10 and Rel 2 (which ends at Abs 10), then the job has a bank before finishing. No waste. |
+| 11 | LOW1 (Finish) | LOW1 finishes at min 11. Core free. |
+| 12 | LOW2 (Start) | Next waiting: LOW2 (Start 1). Starts at min 12. Bank @ min 14. Runs 3 mins: 12, 13, 14. Finishes at 15. |
+
+*Re-evaluating the "Resume" logic for LOW1:*
+LOW1 was preempted at minute 4. It had run minutes 0, 1, 2, 3 (Total 4 mins).
+Checkpoints: Start+2 = Min 2. Every 2 running mins after.
+Running mins relative to start:
+Min 0-1: Run 1.
+Min 1-2: Run 2 -> Bank at Abs Min 2.
+Min 2-3: Run 3.
+Min 3-4: Run 4.
+Bank triggers: Abs Min 2, then every 2 running mins (Abs Min 4, Abs Min 6...).
+So LOW1 had banks at Abs Min 2 and Abs Min 4?
+If it had a bank at Abs Min 4, then preemption at minute 4 (end of min 3/start of min 4) might not waste anything if the bank landed exactly on arrival.
+Rule: "a bank landing on the exact minute HIGH arrives still counts".
+HIGH arrives at minute 4. LOW1 has a bank at absolute minute 4?
+Start=0. Banks at 2, then every 2 running mins (relative). Relative run 2 ends at abs 2. Relative run 4 ends at abs 4.
+So yes, there is a bank at Abs Min 4.
+Therefore, **Wasted = 0**. The work done in minute 3 was saved because the checkpoint landed exactly when HIGH arrived.
+
+*Re-evaluating LOW1 Resume:*
+LOW1 resumes at minute 8 (when HIGH finishes).
+It needs to run its remaining duration. Total 5 mins. Banked 2 mins? Or did it bank 4 mins?
+If banks are at Abs 2 and Abs 4, then it has completed 4 minutes of work safely. Remaining = 1 minute.
+Resume at min 8. Runs 1 minute (min 8). Finishes at min 9.
+Wait, let's re-read "every 2 running minutes after". Does this mean relative to start or resume? Usually relative to the job lifecycle.
+If banks are at Abs 2 and Abs 4, then yes, 4 mins banked. Remaining = 1 min.
+Resume at 8. Runs minute 8. Finishes at 9.
+Checkpoints during resume: Start+2 (relative) -> Abs 10? No, relative to start of job is confusing if we track absolute. The rule says "absolute minutes". So banks are fixed points in time: Min 2, Min 4, Min 6...
+So LOW1 has a bank at Min 4. Preemption happens at transition 3->4. Bank lands on arrival. No waste.
+Remaining work = Total (5) - Banked (4) = 1 minute.
+Resume at min 8. Runs minute 8. Finishes at min 9.
+
+*Re-evaluating LOW2:*
+Starts at min 12 (after LOW1 finishes at 9).
+Duration 3 mins. Occupies 12, 13, 14. Finishes at 15.
+Banks: Start+2 = Min 14. Every 2 running mins after.
+Running mins relative to start of job? Or absolute? "absolute minutes". So banks are fixed points based on the rule logic applied to the specific job instance.
+If LOW2 starts at 12. Banks at 14, then every 2 running mins (relative). Relative run 2 ends at abs 14. Next bank relative run 4 -> abs 16?
+Job finishes at 15. So it has a bank at 14. No waste.
+
+*Final Calculation:*
+LOW1: Starts 0, Finishes 9. (Duration 5).
+HIGH: Arrives 4, Runs 4-7.
+LOW2: Starts 12, Finishes 15. (Duration 3).
+Makespan = Max Finish = 15.
+Wasted = 0 (Bank landed exactly on HIGH arrival at min 4).
+Order = ["LOW1", "LOW2"].
+
+Let's double check the "every 2 running minutes after" interpretation.
+If it means relative to start: Banks at T=2, T=4, T=6...
+Job runs 0-5. Banks at 2, 4. Preempt at 4. Bank lands on arrival. No waste. Resume with 1 min left (5-4).
+Resume at 8. Runs 8-9. Finishes 9.
+LOW2 starts 12. Runs 12-14. Banks at 14. Finishes 15.
+This seems consistent.
+
+**Fact Bullets Check:**
+LOW1 (5 min, start 0). LOW2 (3 min, start 1). HIGH (arr 4, dur 4).
+Orientation story had different numbers (7, 3, arr 3) -> Do not use.
+
+**Table Walk Verification:**
+Min 0: LOW1 starts.
+Min 1: LOW1 runs.
+Min 2: LOW1 runs. Bank @ 2.
+Min 3: LOW1 runs.
+Min 4: HIGH arrives. Preempts LOW1. Bank @ 4 exists (Start+2, then every 2 running mins -> 0-2, 2-4). No waste

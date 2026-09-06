@@ -1,0 +1,119 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event or claim list, including triggers.*
+
+1. **Grant Rule**: Triggered by `r1` (ask 5) -> Pool drops from 40 to 35; State: Granted +5.
+2. **Grant Rule**: Triggered by `r2` (ask 8) -> Pool drops from 35 to 27; State: Granted +8.
+3. **Expiry/Return Rule**: Triggered by completion of `r2` -> Grant for `r1` expires, returns floor(5/2)=2 to pool; State: Pool becomes 29.
+4. **Grant Rule**: Triggered by `r3` (ask 12) -> Pool drops from 29 to 17; State: Granted +12.
+5. **Grant Rule**: Triggered by `r4` (ask 14) -> Pool drops from 17 to 3; State: Granted +14.
+6. **Denial Rule**: Triggered by `r5` (ask 17) against empty pool -> Request denied, no change to pool or grants; State: Denied list adds "r5".
+7. **Grant Rule**: Triggered by `r6` (ask 21) against empty pool -> Request denied, no change to pool or grants; State: Denied list adds "r6".
+
+*(Note: The orientation story regarding the sister pool is explicitly excluded per instructions.)*
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order.*
+
+**Initial State**: Pool = 40, Granted = 0, Denied = []
+
+1. **Event `r1` (Ask: 5)**
+   - Rule Applied: Grant Rule.
+   - Action: Grant min(5, 40) = 5.
+   - New Pool: 40 - 5 = 35.
+   - State: {Pool: 35, Granted: [r1=5], Denied: []}
+
+2. **Event `r2` (Ask: 8)**
+   - Rule Applied: Grant Rule.
+   - Action: Grant min(8, 35) = 8.
+   - New Pool: 35 - 8 = 27.
+   - State: {Pool: 27, Granted: [r1=5, r2=8], Denied: []}
+
+3. **Event `r2` Completion (Trigger for Expiry)**
+   - Rule Applied: Expiry/Return Rule.
+   - Action: Grant `r1` expires. Return = floor(5 / 2) = 2.
+   - New Pool: 27 + 2 = 29.
+   - State: {Pool: 29, Granted: [r2=8], Denied: []}
+
+4. **Event `r3` (Ask: 12)**
+   - Rule Applied: Grant Rule.
+   - Action: Grant min(12, 29) = 12.
+   - New Pool: 29 - 12 = 17.
+   - State: {Pool: 17, Granted: [r2=8, r3=12], Denied: []}
+
+5. **Event `r4` (Ask: 14)**
+   - Rule Applied: Grant Rule.
+   - Action: Grant min(14, 17) = 14.
+   - New Pool: 17 - 14 = 3.
+   - State: {Pool: 3, Granted: [r2=8, r3=12, r4=14], Denied: []}
+
+6. **Event `r5` (Ask: 17)**
+   - Rule Applied: Denial Rule (Pool < Ask).
+   - Action: Grant min(17, 3) = 0? No, rule says "denied and listed by id" when pool cannot cover full ask AND implies exhaustion logic or explicit denial. Re-reading strict text: "a request arriving at an empty pool is denied". Wait, pool has 3. Ask is 17. Can it grant partial?
+   - *Correction on Rule Interpretation*: The prompt says "grants are partial when the pool cannot cover the full ask". It does NOT say "only if empty". However, later it says "a request arriving at an empty pool is denied". This implies if Pool > 0 but < Ask, a partial grant occurs. If Pool == 0, denial occurs.
+   - Let's re-evaluate `r5`: Pool = 3. Ask = 17. Partial grant allowed? Yes ("grants are partial when the pool cannot cover the full ask").
+   - Action: Grant min(17, 3) = 3.
+   - New Pool: 3 - 3 = 0.
+   - State: {Pool: 0, Granted: [..., r5=3], Denied: []}
+
+   *Self-Correction Check*: Let's re-read the "Denial" clause carefully. "a request arriving at an empty pool is denied and listed by id". This implies non-empty partials are allowed.
+   
+   *Wait, let me look at the orientation story again to confirm the logic.*
+   Orientation: Pool 30. Ask 11 -> Grant 11 (Pool 19). Ask 7 -> Grant 7 (Pool 12). Expiry returns 5 (Pool 17). Ask 13 -> Partial grant? "landed against only 17... so it took a partial and drained it".
+   Okay, the logic holds: Partial grants happen when Pool > 0. Denial ONLY happens when Pool == 0.
+
+   *Re-walking `r5`*:
+   Current Pool = 3. Ask = 17.
+   Action: Grant 3. Pool becomes 0.
+   
+   *Re-walking `r6`*:
+   Event `r6` (Ask: 21).
+   Current Pool = 0.
+   Rule Applied: Denial Rule ("request arriving at an empty pool is denied").
+   Action: Denied. No grant.
+   State: {Pool: 0, Granted: [..., r5=3], Denied: ["r6"]}
+
+   *Wait, did I miss a rule about `r1` expiry timing?*
+   "the grant for r1 expires after request r2 completes".
+   My walk:
+   - r1 arrives (Grant 5).
+   - r2 arrives (Grant 8).
+   - r2 completes -> r1 expires.
+   This matches my previous walk steps 1-3.
+
+   *Let's re-calculate the totals based on this corrected partial-grant logic for `r5`.*
+   
+   **Re-Walk Verification**:
+   Start: 40.
+   1. `r1` (Ask 5): Grant 5. Pool -> 35. Total Granted: 5.
+   2. `r2` (Ask 8): Grant 8. Pool -> 27. Total Granted: 13.
+   3. `r2` Completes: `r1` Expires. Return floor(5/2) = 2. Pool -> 29. Total Granted stays 13 (returned to pool).
+   4. `r3` (Ask 12): Grant 12. Pool -> 17. Total Granted: 25.
+   5. `r4` (Ask 14): Grant 14. Pool -> 3. Total Granted: 39.
+   6. `r5` (Ask 17): Pool is 3 (not empty). Partial grant allowed? "grants are partial when the pool cannot cover the full ask". Yes. Grant 3. Pool -> 0. Total Granted: 42.
+   7. `r6` (Ask 21): Pool is 0. Denial. Denied list: ["r6"].
+
+   *Hold on, let me re-read the "Denial" condition one more time.*
+   "a request arriving at an empty pool is denied and listed by id".
+   Does "grants are partial when the pool cannot cover the full ask" apply to `r5`? Yes.
+   So `r5` gets 3 units. `r6` gets 0 units (denied).
+
+   *Wait, is there a hidden rule about `r1` expiry returning tokens BEFORE `r2` completes?*
+   "the grant for r1 expires after request r2 completes". No, it happens after. My order was correct.
+
+   *Let's check the orientation story numbers again to ensure I'm not misinterpreting "partial".*
+   Orientation: Start 30. Ask 11 -> Grant 11 (Rem 19). Ask 7 -> Grant 7 (Rem 12). Expiry returns 5 (Rem 17). Ask 13 -> Partial? "took a partial and drained it". Yes, partials are standard unless pool is empty.
+
+   *Final check on `r5`*:
+   Pool entering `r5` is 3. Ask is 17.
+   Is there any rule saying "if ask > X then deny"? No.
+   Is there any rule saying "grants only full or zero"? No, explicitly says "partial".
+   So `r5` grants 3.
+
+   *Wait, let me look at the phrase: "a request arriving at an empty pool is denied and listed by id"*.
+   This implies if it's NOT empty, it is NOT denied (even if partial).
+   
+   Okay, calculation seems solid now.
+   Total Granted = 5 + 8 + 12 + 14 + 3 = 42?
+   Wait, `r1` was granted 5. Then returned 2

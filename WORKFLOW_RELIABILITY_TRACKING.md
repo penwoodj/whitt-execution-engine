@@ -692,3 +692,176 @@ ALL existing deliverables (P05-P15, P20) were generated with TWO critical bugs:
 **Impact:** Comprehensive re-run (PID 508075) will produce ACTUAL multi-step quality.
 Each step will produce ~8K chars of real output. Synthesis will have ALL intermediate
 results to incorporate. Expected deliverable quality: substantially better than single-shot.
+
+---
+
+## Engine Fix 2026-08-24: missing --workflow file silent discovery fallback (Issue A)
+
+**Severity:** silent-wrong-behavior (highest).
+**Evidence:** experiments/reasoning-enhancer-plus/docs/07-TRACKING.md:331-332,684 — "missing --workflow file silently falls back to discovery benchmark (flan-t5 loaded by accident) — should hard-error." Bit v14c + overcontext run.
+**Root cause:** runner.rs `load_workflow_config()` swallowed `fs::read_to_string` errors as `warn!` + `Ok(None)` → run continued into model discovery. CLI layer also lacked an existence check, and preflight (Docker/network) ran before config load.
+**Fix:** runner.rs read-error → hard `Err` naming file; whitt.rs Benchmark arm bails on nonexistent `--workflow` path before preflight. No script workarounds existed to retire.
+**Tests:** `given_missing_workflow_file_when_config_loaded_then_hard_error` (unit, RED→GREEN) + `tests/cli_workflow_file.rs` binary-spawn integration (RED→GREEN, no server needed via early bail). Full suite 0 failures; clippy 0 new warnings; LSP clean.
+**Inventory:** full prioritized inventory now lives at docs/qa/engine-bugs/QA-FINDINGS.md.
+
+---
+
+## Engine Fix 2026-08-24: GWT eval errors quiet-false — "treating as false" WARN (Issues B + L)
+
+**Severity:** silent-wrong-behavior (hid generator bug two versions; broke route_to).
+**Evidence:** experiments/reasoning-enhancer/REVIEW-CYCLES.md:143 (OC-1: "engine GWT lexer error → 'treating as false' WARN"); results/SUMMARY-overcontext.md:81-82 (Python .format() collapsed {{...}} → single braces → lexer error → false, unnoticed), :92-94 (signal too quiet, "invisible for two versions"); experiments/correction-atom/workflows/correction-atom-v4.yml:121 (m0477: "GWT route unreliable").
+**Root cause (two layers):** (1) src/workflow/hooks/actions.rs `evaluate_gwt_condition()` converted `gwt::evaluate` Err → warn! + false. (2) src/workflow/hooks/gwt.rs `Parser::parse()` had no trailing-token check — "invalid condition syntax" parsed first word as IdentPath, ignored rest → Ok(false) without even the WARN.
+**Fix:** actions.rs — eval errors now return `HookResult::Fail` quoting expression, error!-logged, `after_gwt_evaluates` decision="error", template hint when `{{`/`}}` survive resolution. gwt.rs — Parser errors on trailing tokens. Missing-field quiet-false semantics unchanged (data-driven conditions still Continue).
+**Tests:** `given_gwt_invalid_condition_when_execute_then_fails_loudly` + `given_gwt_unresolved_brace_template_when_executed_then_fails_with_template_hint` (both RED→GREEN); matching/not-matching guards stayed green; gwt module 63/63. Full suite 0 failures; clippy 0 new; LSP clean.
+**Impact on Issue L:** m0477 "route_to sometimes doesn't fire" = eval errors previously quiet-false; now loud Fail — diagnosable instead of silent mis-route. correction-atom v4 always-runs workaround no longer needed for correctness (left in place, historical).
+**Inventory:** docs/qa/engine-bugs/QA-FINDINGS.md.
+
+---
+
+## Engine Fix 2026-08-24: /tmp hardcoded in preflight space checks — TMPDIR ignored (Issue C)
+
+**Severity:** silent-wrong-behavior (preflight abort with roomier TMPDIR available).
+**Evidence:** experiments/reasoning-enhancer/results/SUMMARY-overcontext.md:88-91 — "/tmp path hardcoded — should honor TMPDIR (TDD'd test drafted, reverted: worktree cargo cannot build llama-cpp-sys ...)"; workaround df PATH-shim faking `df -B1 /tmp` + run-overcontext.py injection.
+**Root cause:** three Path::new("/tmp") hardcodes in runner.rs (preflight_check ~362, deprecated check_system_health ~426, deprecated log_resource_state ~461). Foreign whisper_stream fds saturated /tmp tmpfs; unlink freed nothing.
+**Fix:** BenchmarkRunner::tmp_root() — TMPDIR (non-empty) wins else /tmp; all three sites use it; messages report actual path. Shim annotated OBSOLETE (kept for reproducibility).
+**Tests:** given_tmpdir_env_when_tmp_root_resolved_then_env_wins_over_hardcoded_tmp (RED→GREEN: set/empty/unset TMPDIR branches). Full suite 569 lib + integration 0 failures; clippy 0 new (13 pre-existing baseline); LSP clean.
+**Inventory:** docs/qa/engine-bugs/QA-FINDINGS.md.
+
+## Engine Fix 2026-08-24: loop-cap exhaustion silent exit 0 (Issue E)
+
+- Evidence: experiments/reasoning-enhancer/results/SUMMARY-benchmark.md:69-71 — "workflow loop hard cap: 100 iterations (silent exit 0 after)".
+- Root cause: runner.rs workflow-loop exit warned only (`warn!("workflow loop exceeded N iterations, stopping")`); run() then completed Ok → exit 0 with steps unexecuted.
+- Fix: `BenchmarkRunner::premature_cap_error()` — Some(msg) iff cap hit AND steps unexecuted; wired as error! + bail (non-zero exit). Boundary (completed exactly at cap) stays success.
+- Tests: given_cap_exhausted_with_steps_unexecuted_when_cap_error_computed_then_some; given_workflow_completed_at_cap_when_cap_error_computed_then_none (RED→GREEN; full suite 571 lib 0 fail; clippy 0 new; LSP clean).
+- Inventory: docs/qa/engine-bugs/QA-FINDINGS.md (Issue E).
+
+## Engine Fix 2026-08-24: YAML timing overrides applied post-preflight (Issue D)
+
+- Evidence: experiments/reasoning-enhancer-plus/docs/07-TRACKING.md:284-286 — "YAML timing.min_tmp_space_mb did NOT reach preflight [config built pre-parse]".
+- Root cause: run() called preflight_check() (disk gate reads config.min_tmp_space_mb) BEFORE load_workflow_config() + YAML override block.
+- Fix: extracted apply_workflow_timing_overrides(); run() now loads workflow + applies timing overrides BEFORE preflight. Side benefit: YAML output_root now applies before ensure_output_dirs/hook wiring.
+- Test: given_workflow_yaml_min_tmp_space_when_timing_overrides_applied_then_config_updated (RED→GREEN; full suite 775 passed 0 fail; clippy 13 baseline 0 new; LSP clean).
+- Inventory: docs/qa/engine-bugs/QA-FINDINGS.md (Issue D).
+
+## Engine Fix 2026-08-24: relative --out-dir broke shell hooks (Issue G)
+
+- Evidence: experiments/reasoning-enhancer-plus/docs/07-TRACKING.md:109.
+- Root cause: relative config.output_dir reached WHITT_OUTPUT_DIR env / save_to base / hook path joins, resolving against hook-process CWD.
+- Fix: BenchmarkRunner::normalized_output_dir() absolutizes at run() start (after YAML overrides); test given_relative_output_dir_when_normalized_then_absolute_against_cwd (RED→GREEN; suite 776 passed 0 fail; clippy 13 baseline; LSP clean).
+- Inventory: docs/qa/engine-bugs/QA-FINDINGS.md (Issue G).
+
+## Engine Fix 2026-08-24: literal ${OUTPUT_DIR} placeholder dir (Issue H)
+
+- Evidence: experiments/atomic-reasoning/scripts/run-atom.sh:149-152 post-run mv of literal ${OUTPUT_DIR} dir.
+- Root cause: no ${...} path substitution in engine; save_to/append_to created parent dirs on literal placeholder names silently.
+- Fix: unresolved_placeholder_error() guard before save_to/append_to/bookmark file writes → HookResult::Fail quoting path.
+- Tests: given_save_to_with_unresolved_placeholder_..., given_append_to_with_unresolved_placeholder_... (RED→GREEN; suite 778 passed 0 fail; clippy 13 baseline; LSP clean).
+- Inventory: docs/qa/engine-bugs/QA-FINDINGS.md (Issue H).
+
+## Engine Fix 2026-08-24: duplicate step log lines 2x (Issue O)
+
+- Evidence: experiments/correction-atom/results/SUMMARY-v7.md:14 — "Every log line written 2x | Deleted duplicate info! at main-loop call site (kept inner log, runner.rs:1975) | Live-verified: 1 line/step"; same doc records source later "restored byte-exact" — fix never landed in src.
+- Root cause: two emissions of "[benchmark] executing step {} with model {}" in runner.rs — run() call site + execute_workflow_step inner log.
+- Fix: deleted call-site emission (kept executor's, matching experiment's live-verified choice); guard comment left at call site.
+- Test: given_workflow_step_execution_when_emission_sites_counted_then_exactly_one (source-count regression via include_str! + concat!-split needle; RED at count=2 → GREEN at 1; suite 779 passed 0 fail; clippy 13 baseline 0 new; LSP clean).
+- Inventory: docs/qa/engine-bugs/QA-FINDINGS.md (Issue O).
+
+## Engine Fix 2026-08-24: VRAM 8192.0 GB misreport + lost WHITT_MAX_CONCURRENT_INFERENCES override (Issue I)
+
+- Evidence: experiments/atomic-reasoning/SAFETY.md:5-9,88 — "8192.0 GB VRAM available" on 8GB RX 580 → auto-detect 4 concurrent → OOM/reboot; workaround env var (run-atom.sh:81) only worked in an uncommitted build.
+- Root cause: (1) read_sysfs_vram_amd reads amdgfx mem_info_vram_total in BYTES; detect_vram_gb divided as KB (8589934592/1024/1024 = 8192.0). (2) WHITT_MAX_CONCURRENT_INFERENCES never existed in committed src (git log -S confirms).
+- Fix: vram_bytes_to_gb (÷1024³) wired into detect_vram_gb; env_concurrency_override honored first in detect_max_concurrent_inferences with experiment-format log line.
+- Tests: given_rx580_vram_bytes_when_converted_then_reports_8gb_not_8192; given_env_concurrency_override_when_parsed_then_valid_wins_and_invalid_ignored (RED E0599/E0425 → GREEN; full suite 578 lib + integration 0 fail; clippy 13 baseline 0 new; LSP clean).
+- Scope note: 8GB card still auto-detects 4 by the 2GB-per-inference heuristic (design choice); env=1 knob now actually works as mitigation.
+- Inventory: docs/qa/engine-bugs/QA-FINDINGS.md (Issue I).
+
+## Engine Fix 2026-08-24: benchmark_report.json lies under early exit (Issue J)
+
+- **Evidence:** correction-atom/results/SUMMARY-v7.md:15-16 — "metrics.json lied under early exit ('3/5 angles')"; all report entries carried identical model_id, zero step attribution.
+- **Root cause:** ModelBenchmarkResult had no step_id; BenchmarkSuiteResult had no planned_steps count → consumers mis-derived executed-vs-planned counts under early exit (route_to/skip_remaining).
+- **Fix:** `step_id: Option<String>` on ModelBenchmarkResult (set at all workflow-path constructions; None on model-discovery paths) + `planned_steps: Option<usize>` on BenchmarkSuiteResult; suite assembly extracted to `BenchmarkRunner::suite_result_from()`. Serde `skip_serializing_if` keeps model-mode JSON byte-identical.
+- **Tests (TDD, RED→GREEN):** given_hook_skipped_step_when_executed_then_result_attributed_to_step; given_results_and_planned_steps_when_suite_assembled_then_counts_honest.
+- **Verification:** cargo test --all-features 580 lib + all integration 0 failures; clippy 13 pre-existing baseline 0 new; LSP 0 errors (mod.rs, runner.rs, detail_generator.rs).
+- **Full inventory:** docs/qa/engine-bugs/QA-FINDINGS.md (Issue J).
+
+## Engine Fix 2026-08-24: engine-managed swap "Model not found" (Issue K)
+
+- **Evidence:** atomic-reasoning/benchmarks/SUMMARY.md:125 "Engine-managed swap → Model not found"; 07-TRACKING.md:61-63 case/dot-dash filename drift.
+- **Root cause:** resolve_model_file matched only raw case-sensitive substring + base-name fallback → YAML names with case or '.'/'-' drift vs filenames failed resolution → model_resolution_failure_result "Model not found". (unload_unused flag separately confirmed dead config — zero readers; unload-others already unconditional in run_model_inference.)
+- **Fix:** layered matcher — exact id → normalized equality (case-insensitive, separators unified, .gguf stripped) → legacy substring → legacy base-name. Resolved filename flows to server APIs unchanged.
+- **Tests (TDD, RED→GREEN):** given_dot_dash_spelling_drift_when_model_resolved_then_normalized_match; given_case_mismatch_when_model_resolved_then_case_insensitive_match; given_exact_name_and_variant_when_model_resolved_then_exact_wins.
+- **Verification:** cargo test --all-features 786 pass 0 fail; clippy 13 pre-existing 0 new; LSP 0 errors.
+- **Full inventory:** docs/qa/engine-bugs/QA-FINDINGS.md (Issue K; Issue N → PARTIAL).
+
+## Engine Fix 2026-08-24: fire-and-forget load/unload ACKs trusted by backend (Issues P + M backend half)
+
+- **Evidence:** 07-TRACKING.md:23-25 (load ACK ~13ms is not confirmation); atom-v1.yml:55,94 (sleep 3/15 around raw curls).
+- **Root cause:** LlamaCppVulkanBackend::load_model/unload_model returned Ok on HTTP 200 — the router-mode POSTs are fire-and-forget ACKs. Benchmark client path (LlamaHttpClient) already polled; agent-tools backend path did not.
+- **Fix:** wait_until_model_status() polls GET /v1/models (250ms interval, 240s cap): loaded requires status=loaded; unloaded accepts status=unloaded OR list absence. Both success arms verify; timeout → LlmError::Timeout.
+- **Tests (TDD, RED→GREEN, mock server on std::thread):** given_loading_status_when_load_ack_received_then_waits_until_loaded; given_still_listed_when_unload_ack_received_then_waits_until_gone.
+- **Verification:** cargo test --all-features 788 pass 0 fail; clippy 13 pre-existing 0 new; LSP 0 errors.
+- **Full inventory:** docs/qa/engine-bugs/QA-FINDINGS.md (Issues P, M).
+
+## Engine Fix 2026-08-24: plain cargo build skipped whitt bin — stale-binary trap (Issue Q)
+
+- **Evidence:** experiments/reasoning-enhancer-plus/docs/07-TRACKING.md:253-254.
+- **Root cause:** `default = []` + `required-features = ["client"]` on all `[[bin]]` targets → plain `cargo build --release` exits 0 without building binaries; stale `target/release/whitt` keeps running old code.
+- **Fix:** `Cargo.toml` `[features] default = ["client"]` (one line + provenance comment). RED/GREEN demonstrated via touch-source + plain-build mtime comparison (binary stale before, fresh after). Opt-out `--no-default-features` verified.
+- **Verification:** full suite 788 passed 0 fail (`--all-features`); clippy 13 pre-existing baseline, 0 new; LSP clean.
+- **Full inventory + per-issue fix log:** docs/qa/engine-bugs/QA-FINDINGS.md.
+
+## Engine Fix 2026-08-24: discovery fallback via workflow shape errors (Issue T)
+
+- **Root cause:** load_workflow_steps had 5 silent None doors (read err, parse err, missing agentic_workflow, non-array/object steps, empty steps) — all fell through to discovery benchmark loading a random model. Same accident class as Issue A (07-TRACKING.md:331-332).
+- **Fix:** all doors → hard Err "refusing to fall back to discovery benchmark"; signature Result<Option<Vec<_>>>; run() propagates. 5 new red→green tests (empty/scalar/unreadable/missing-section/invalid-YAML).
+- **Verification:** 793 tests 0 fail (--all-features); clippy 13 baseline 0 new; LSP clean.
+- **Full inventory + fix log:** docs/qa/engine-bugs/QA-FINDINGS.md (second-wave section).
+
+## Engine Fix 2026-08-24: map-format first-step pick was alphabetical (Issue AE)
+
+- **Root cause:** serde_json Map = BTreeMap (sorted keys) without preserve_order; `values().next()` picked alphabetically-first step, not YAML-first — CLI-default temperature/max_tokens sampled from wrong step.
+- **Fix:** `serde_json` feature `preserve_order` (Cargo.toml, one line + comment). RED/GREEN: given_map_format_steps_when_first_step_sampled_then_yaml_order_wins (0.9→0.2). Full suite 794 pass 0 fail, clippy baseline 13, LSP clean.
+- **Full inventory + fix log:** docs/qa/engine-bugs/QA-FINDINGS.md.
+
+## Engine Fix 2026-08-24: requires[].condition silently dropped (Issue Z)
+
+- **Root cause:** extract_dependency_names kept only `step`; conditions never stored or evaluated.
+- **Fix:** require_conditions map + eval_require_condition (GWT evaluator, JSON result context, non-JSON fallback) + run() dep-check wiring (unsatisfied → skip path; malformed → loud bail).
+- **Tests:** 2 (parse capture + evaluation semantics), watched red first.
+- **Verification:** 796 pass 0 fail; clippy baseline; LSP clean. Full detail: docs/qa/engine-bugs/QA-FINDINGS.md.
+
+## Engine Fix 2026-08-24: per-step retry.max_attempts ignored (Issue AC)
+
+- **Root cause:** benchmark runner never parsed step-level `retry:`; global attempts always applied.
+- **Fix:** retry_max_attempts parse + effective_max_attempts helper + run_model_inference wiring (workflow path only).
+- **Tests:** 2, watched red first. **Verification:** 798 pass 0 fail; clippy baseline; LSP clean.
+- **Scope note:** backoff/delay/jitter fields of StepRetryConfig remain global/unimplemented (documented limitation).
+- Full detail: docs/qa/engine-bugs/QA-FINDINGS.md.
+
+## Engine Fix 2026-08-24: hook-trigger errors swallowed on 2 triggers (Issue F2)
+
+- **Root cause:** `let _ =` on on_requires_failed + after_loop_iteration_fails hook dispatch.
+- **Fix:** match + error! (contract parity with other 5 triggers). Source-count regression test guards all 7 trigger sites.
+- **Verification:** 799 pass 0 fail; clippy baseline; LSP clean. Detail: docs/qa/engine-bugs/QA-FINDINGS.md.
+
+## Engine Fix 2026-08-24: after_step_succeeds Fail verdict discarded (Issue AD)
+
+- **Root cause:** Fail arm only warned; model_result.error stayed None — verifier hooks could not fail a step.
+- **Fix:** Fail arm records "after_step_succeeds hook failed: <reason>" in model_result.error. Mock-server regression test (load/completions/models endpoints).
+- **Verification:** 800 pass 0 fail; clippy baseline; LSP clean. Detail: docs/qa/engine-bugs/QA-FINDINGS.md.
+
+## Engine Fix 2026-08-24: GWT then:{route_to} verbose form failed serde (Issue R, user-approved both-sides)
+
+- **Fix:** RouteToAction custom Deserialize (string/array/{route_to:...} → Single/Multiple, loud errors otherwise); Serialize unchanged untagged; schema doc NOTE added.
+- **Tests:** 2 verbose-form deserialization tests (watched RED with original error text), hooks_integration 65/65.
+- **Detail:** docs/qa/engine-bugs/QA-FINDINGS.md.
+
+## Engine Fix 2026-08-24 (batch 2): R + LOW trio + N/S residuals + Y checkpoint/resume + X proposal
+
+- **R:** RouteToAction custom Deserialize accepts verbose `{route_to: X}` form alongside shorthand (schema doc examples now valid); schema note added. Tests: 2 (hooks_integration).
+- **LOW trio:** topo-cycle → hard bail; keyless array step → hard Err naming index; set_state → warn!-logged. 3 tests.
+- **N residual:** fuzzy model resolution warns w/ name-drift hint (raw API calls need exact filename). 1 test.
+- **S residual:** zombie preflight excludes own server port + router parent. 2 tests.
+- **Y (user-approved minimal):** checkpoint.jsonl append at all 8 completion sites + `--resume` restores/skips (snapshot semantics). 2 tests + --help verified.
+- **X:** design proposal only (CLI --max-wall-time first; YAML key gated on schema approval). No impl.
+- Full detail: docs/qa/engine-bugs/QA-FINDINGS.md.

@@ -1,0 +1,58 @@
+### Phase 1 RULE SCAN
+This phase lists every rule from the task that changes state during the event stream (Load A, Load C, Load D, Unload D), identifying the trigger and the specific action taken by that rule.
+
+1.  **Rule: Load Request** -> Trigger: `load A` -> Action: Attempt to allocate 1 GB for Model A.
+2.  **Rule: Fit Check (No Eviction)** -> Trigger: `load C` -> Action: Since 3 GB fits in remaining space, load Model C directly without evictions.
+3.  **Rule: Load Request** -> Trigger: `load D` -> Action: Attempt to allocate 4 GB for Model D.
+4.  **Rule: Eviction (LRU Unpinned)** -> Trigger: `load D` -> Action: Since 4 GB does not fit, evict least-recently-touched unpinned model(s) one at a time until space is available or only pinned models remain.
+5.  **Rule: Load Success** -> Trigger: Post-eviction state of `load D` -> Action: Allocate 4 GB for Model D into the newly freed space.
+6.  **Rule: Unload Request** -> Trigger: `unload D` -> Action: Free 4 GB associated with Model D.
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at a time in strict arrival order, showing the state after each event.
+
+1.  **Event: load A (1 GB)**
+    *   Current Pool: 8 GB. Used: 0 GB. Free: 8 GB.
+    *   Action: Model A (1 GB) fits. Load successful.
+    *   State: Resident {A, C} (C is pinned/pre-loaded conceptually or just resident), Free 7 GB. Recency: [A].
+    *   *Correction based on strict "arrival order" and initial state:* The prompt implies we start with an empty pool for the specific night's events ("one 8GB card tonight"). Model C is "pinned", meaning it cannot be evicted, but does it exist initially? Usually, pinned models are resident. Let's assume standard residency rules apply to the *requested* stream against the *capacity*.
+    *   *Re-evaluating Initial State:* If we start with 0 used:
+        *   `load A`: Fits. Resident {A}. Free 7 GB. Touches A (Most Recent).
+2.  **Event: load C (3 GB)**
+    *   Current Pool: Used 1 GB (A). Free 7 GB.
+    *   Action: Model C (3 GB) fits in 7 GB. Load successful. No evictions needed.
+    *   State: Resident {A, C}. Free 4 GB. Touches C (Most Recent). Recency Order: [C, A] (C is newer than A).
+3.  **Event: load D (4 GB)**
+    *   Current Pool: Used 1+3=4 GB (A+C). Free 4 GB.
+    *   Action: Model D (4 GB) requires 4 GB. Fits exactly in remaining 4 GB. Load successful. No evictions needed.
+    *   State: Resident {A, C, D}. Free 0 GB. Touches D (Most Recent). Recency Order: [D, C, A].
+4.  **Event: unload D (4 GB)**
+    *   Current Pool: Used 8 GB. Free 0 GB.
+    *   Action: Model D is resident. Unload successful. Frees 4 GB.
+    *   State: Resident {A, C}. Free 4 GB. Touches A (Most Recent, since D was removed). Recency Order: [C, A] (Wait, if D was touched last, removing it doesn't change the order of remaining? No, usually LRU updates on access. On removal, the slot is gone. The next most recent among {A, C} depends on when they were accessed. Last access was D. Before that C. So C is older than A? Let's trace:
+        *   Start: Empty.
+        *   Load A: Access A. Order: [A].
+        *   Load C: Access C. Order: [C, A]. (C is newer).
+        *   Load D: Access D. Order: [D, C, A]. (D is newest).
+        *   Unload D: Remove D. Remaining {A, C}. The "oldest" is the one at the end of the list? Or beginning? Standard LRU queue: Head=Newest, Tail=Oldest.
+            *   Queue before unload: [D (Head), C, A (Tail)].
+            *   Remove D. Queue becomes [C, A].
+            *   New Head: C. New Tail: A.
+            *   So Recency Order (Oldest to Newest): [A, C]? No, if C is the new head, it's the most recent. If A is the tail, it's the oldest.
+            *   Wait, let's re-verify the "Load" logic. When you load something that fits, do you update recency? Yes, every touch moves to MRU.
+            *   Sequence:
+                1. Load A (fits). Queue: [A].
+                2. Load C (fits). Queue: [C, A].
+                3. Load D (fits). Queue: [D, C, A].
+                4. Unload D. Remove D. Queue: [C, A]. (C is MRU, A is LRU).
+    *   State Check: Resident {A, C}. Free 4 GB.
+
+**Final Counts:**
+*   Loads: 3 (A, C, D)
+*   Evictions: 0
+*   Deferrals: 0
+*   Deferred List: []
+
+```json
+{"loads": 3, "evictions": 0, "deferrals": 0, "deferred": []}
+```

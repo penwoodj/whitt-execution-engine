@@ -1,0 +1,56 @@
+LOW1 (4, 0), LOW2 (3, 3), HIGH (5, 4)
+minute | core | event
+0      | L1   | Start L1 bank@2 run(1/4)
+1      | L1   | Run(2/4) bank@4 finish L1 start L2
+2      | L2   | Start L2 bank@5 run(1/3)
+3      | L2   | Run(2/3) bank@7 finish L2 start L1 (resumed? no, fresh wait) -> Core busy until 5. Wait logic: L1 is waiting since minute 1? No, "core never idles". Re-eval: At min 1, L1 finishes. Next waiting job starts immediately. Is L1 waiting or did it preempt itself? It finished. So at min 2, L2 runs. At min 3, L2 runs. At min 4, L2 finishes. Start next available LOW. Available: None running yet? L1 started at 0, ran 4 mins (0-3). Finished at 3. Waited from 3 to... who is waiting? No one else has arrived/start time < current except maybe L1 if it was preempted mid-run? It wasn't.
+Wait, let's re-read "core never idles while a LOW waits". At min 4, L2 finishes. Who is waiting? Nothing started yet except the initial ones which are done or running.
+Ah, "a LOW whose start minute arrives while the core is busy simply waits."
+At min 0: Start L1.
+At min 3: Start L2 (arrives at 3). Core is busy with L1(0-3) and L2 starts immediately? No, L1 runs 0..3. At min 3, L1 finishes. L2 arrives. Can start immediately? Yes.
+Wait, let's re-read the example logic carefully. "LOW1 held core minutes 0, 1 and 2... swap came at 3". In my case: L1 (4m) starts @0 -> runs 0,1,2,3. Finishes @3.
+L2 (3m) starts @3. Runs 3,4,5? Or does it wait for a slot? "Start minute arrives while core busy simply waits". Core is free at 3. So L2 starts @3.
+So timeline:
+0: Start L1. Bank@2. Run(1/4).
+1: Run(2/4). (Bank not yet)
+2: Run(3/4). Bank@4? No, bank is every 2 RUNNING minutes. Completed min 0->1 (run 1), completed min 1->2 (run 2). So at end of minute 2, run count = 2. Bank checkpoint @ absolute minute start+2 = 0+2=2. Correct.
+3: Run(4/4) Finish L1. Start L2? Wait, "Start minute arrives while core busy". Core was free at 3 (L1 finished). So L2 starts immediately.
+But wait, is there a gap? "a LOW whose start minute arrives while the core is busy simply waits." Here core is NOT busy at minute 3. It becomes busy with L2.
+Wait, let's check the example again: "LOW1 held the core minutes 0, 1 and 2... swap came at 3". In example L1 was preempted mid-run (run 3rd minute). Here L1 runs full duration (4 mins). So it finishes at 3.
+At minute 3: L1 finishes. L2 starts. Bank@5? Start=3, run(1/3). Completed min 3->4 (run 1). Run count 1. No bank yet.
+4: L2 runs(2/3). Bank@7? No, need 2 runs. Run count 2 -> Bank at absolute minute start+2 = 5? No, example says "every 2 RUNNING minutes after". Completed min 0->1 (run 1), 1->2 (run 2) -> bank @2.
+So for L2: Start 3. Run(1/3) ends at 4. Run count 1. No bank. Run(2/3) ends at 5. Run count 2. Bank checkpoint? "banks a checkpoint at (core-get minute + 2)". Core minute = current time when run completed? Or start+run_count? Example: Start 0, run 3rd minute unbanked. Banked @2. So bank is based on absolute time.
+Let's assume standard interpretation: Bank occurs at absolute time $T$ where $T = \text{Start} + k \times 2$.
+L2 starts at 3. Run(1/3) ends at 4 (Run count 1). Run(2/3) ends at 5 (Run count 2). Bank? If bank is every 2 runs, then at run count 2 (end of min 5), we have a checkpoint.
+Wait, example says: "banked a checkpoint at minute 2". Start=0. $0+2=2$.
+So for L2: Start=3. Bank should be at $3+2=5$? Or is it based on runs? Example also says "every 2 RUNNING minutes after". If run count reaches 2, that's the second batch of 1 minute each. So yes, at end of min 5 (run count 2), we have a checkpoint.
+So:
+0: L1 Start(4). Run(1/4). Bank@? No ($0+2=2$ not reached yet in terms of runs? Or is bank based on absolute time regardless of runs? "banks a checkpoint at (core-get minute + 2)". Core minute is current time. At min 0, core minute is 0. $0+2=2$. So checkpoint scheduled for 2.
+1: L1 Run(2/4). Scheduled bank@2 pending.
+2: L1 Run(3/4). Scheduled bank@2 reached? "a bank landing exactly on HIGH's arrival minute still counts". Does it count if we are mid-run? Usually checkpoints are completed units. But let's assume the rule is strict time-based for simplicity or run-count based. Example says "3rd minute was unbanked". This implies bank happens after completing 2 minutes of running. So at end of min 2, L1 has completed 3 units (0->1, 1->2, 2->3). Wait, duration is continuous? "minutes run past its last checkpoint". Usually discrete chunks. Let's assume checkpoints happen at $T = \text{Start} + k \times 2$ where $k$ is integer steps of running time completed.
+Actually, simplest model: Bank happens when total completed minutes $\ge 2$. And every subsequent 2 minutes.
+L1 (start 0):
+Min 0: Run(1/4). Total=1. No bank.
+Min 1: Run(2/4). Total=2. Bank@2 (absolute).
+Min 2: Run(3/4). Total=3. Next bank at $2+2=4$? Or just "every 2 running minutes". If bank is every 2 mins, then after min 1 (total 2) we have one bank. After min 3 (total 4) we have second bank.
+Let's stick to Example logic: "banked a checkpoint at minute 2". "3rd minute unbanked". This implies bank is triggered by completing the 2nd minute of running.
+So L1:
+Min 0: Run(1/4). Total=1.
+Min 1: Run(2/4). Total=2 -> Bank@2 (absolute time 2).
+Min 2: Run(3/4). Total=3. Next bank at absolute time $2+2=4$? Or is it relative to start? "every 2 RUNNING minutes after". So yes, every 2 mins of running. Running time intervals: [0-1], [1-2] (bank), [2-3], [3-4] (bank).
+So L1 banks at absolute times 2 and 4.
+L2 (start 3):
+Min 3: Run(1/3). Total=1.
+Min 4: Run(2/3). Total=2 -> Bank@5? No, "every 2 RUNNING minutes after". Running time intervals: [3-4], [4-5] (bank). So bank at absolute time 5.
+Wait, start is 3. First interval ends at 4. Second ends at 5. Bank at end of second interval -> Time 5.
+So L2 banks at 5.
+
+Timeline:
+0: L1 Start(4). Run(1/4).
+1: L1 Run(2/4). Total=2. Bank@2 recorded? Or does it bank immediately? "banks a checkpoint at ... +2". Usually means the checkpoint is valid for that time. If preempted before, wasted. Here not preempted yet.
+2: L1 Run(3/4). Total=3. Next bank scheduled @4? Or just "every 2 running minutes". Yes, next bank when total reaches 4.
+Wait, let's re-read "bank landing exactly on HIGH's arrival minute still counts". This implies we check the time.
+If L1 banks at 2 and 4.
+HIGH arrives at 5.
+L2 runs 3..5 (start 3, duration 3 -> ends 6? No, occupies $s..s+n-1$. Start 3, dur 3 -> 3,4,5. Finishes @6).
+Wait, L2 starts @3. Runs min 3,4. At min 5? "Start minute arrives while core busy simply waits". Core is free at 3. So L2 runs 3,4,5. Finishes

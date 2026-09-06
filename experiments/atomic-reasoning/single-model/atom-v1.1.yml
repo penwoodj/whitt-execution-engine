@@ -1,0 +1,173 @@
+# ══════════════════════════════════════════════════════════════════
+# ATOM OF REASONING — SINGLE-MODEL v1.1
+# Pattern: GENERATE → CRITIQUE → REFINE → VERIFY (loop max 2x)
+# State = files (no inline bookmarks needed). Verify = shell, no model.
+# ══════════════════════════════════════════════════════════════════
+workflow_id: atom_single_v1_1
+name: "Atom of Reasoning — Single-Model v1.1"
+description: "Iterative narrow-scope refinement loop using one model. State files avoid bookmark complexity."
+version: "1.1.0"
+author: "Whitt Execution Engine"
+tags: [atom, single-model, refinement, scope-loop]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  "worker":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+    load_params:
+      context_size: 4096
+      gpu_layers: 99
+      flash_attn: true
+      no_cache_prompt: true
+      cache_type_k: "q8_0"
+      cache_type_v: "q8_0"
+    sampling:
+      temperature: 0.3
+      max_tokens: 600
+
+workflow_execution_strategy:
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "${OUTPUT_DIR}/last-run.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+
+    # ── STEP 0: BOOTSTRAP — read input, init state files ──────
+    step_00_bootstrap:
+      generative_entity: "${models.worker}"
+      prompt: "READY."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ${INPUT_FILE}"
+              working_dir: "${REPO_ROOT}"
+              fail_on_error: true
+          - shell:
+              command: "echo 0 > ${OUTPUT_DIR}/.iteration"
+              working_dir: "${REPO_ROOT}"
+
+    # ── STEP 1: GENERATE ───────────────────────────────────────
+    step_01_generate:
+      depends_on: [step_00_bootstrap]
+      generative_entity: "${models.worker}"
+      prompt: |
+        TASK:
+        {{bookmarks.shell_output.stdout}}
+
+        Produce the answer directly. Output ONLY the result.
+      model_overrides: { temperature: 0.4, max_tokens: 500 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              variable: draft
+              file_path: "${OUTPUT_DIR}/draft.txt"
+          - log:
+              to_file_path: "${OUTPUT_DIR}/step-01.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+
+    # ── STEP 2: CRITIQUE — narrow lens, single focus ──────────
+    step_02_critique:
+      depends_on: [step_01_generate]
+      generative_entity: "${models.worker}"
+      prompt: |
+        You did NOT write this. Review cold.
+
+        DRAFT:
+        {{bookmarks.draft}}
+
+        List the SINGLE most important problem (correctness, completeness, or format).
+        One sentence. Start with "PROBLEM:".
+      model_overrides: { temperature: 0.2, max_tokens: 80 }
+      when:
+        after_step_succeeds: [{ save_to: { variable: critique } }]
+
+    # ── STEP 3: REFINE ─────────────────────────────────────────
+    step_03_refine:
+      depends_on: [step_02_critique]
+      generative_entity: "${models.worker}"
+      prompt: |
+        Fix the stated problem.
+
+        DRAFT:
+        {{bookmarks.draft}}
+
+        PROBLEM:
+        {{bookmarks.critique}}
+
+        Output complete fixed version. No commentary.
+      model_overrides: { temperature: 0.3, max_tokens: 500 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              variable: draft
+              file_path: "${OUTPUT_DIR}/refined.txt"
+          - shell:
+              command: "n=$(cat ${OUTPUT_DIR}/.iteration 2>/dev/null || echo 0); echo $((n+1)) > ${OUTPUT_DIR}/.iteration; cat ${OUTPUT_DIR}/.iteration"
+              working_dir: "${REPO_ROOT}"
+
+    # ── STEP 4: VERIFY — deterministic, no model ──────────────
+    step_04_verify:
+      depends_on: [step_03_refine]
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 ${REPO_ROOT}/experiments/atomic-reasoning/scripts/verify.py '{{bookmarks.draft}}'"
+              working_dir: "${REPO_ROOT}"
+              fail_on_error: false
+        after_step_succeeds:
+          - log:
+              to_file_path: "${OUTPUT_DIR}/verify.log"
+              event_fields: [step_name, shell_output_exit_code, shell_output_stdout]
+              level: info
+
+    # ── STEP 5: ROUTE ──────────────────────────────────────────
+    step_05_route:
+      depends_on: [step_04_verify]
+      generative_entity: "${models.worker}"
+      prompt: "ROUTE."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        after_step_succeeds:
+          - gwt:
+              - given: "shell_output.exit_code == 0"
+                then: step_06_emit
+              - given: "shell_output.exit_code != 0 AND bookmarks.iteration_output.stdout < \"2\""
+                then: step_02_critique
+              - given: "shell_output.exit_code != 0 AND bookmarks.iteration_output.stdout >= \"2\""
+                then: step_06_emit
+
+    # ── STEP 6: EMIT ───────────────────────────────────────────
+    step_06_emit:
+      depends_on: [step_05_route]
+      generative_entity: "${models.worker}"
+      prompt: "DONE."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              variable: final_output
+              file_path: "${OUTPUT_DIR}/final.txt"
+              source: draft
+          - log:
+              to_file_path: "${OUTPUT_DIR}/summary.log"
+              event_fields: [workflow_id, iterations_used]
+              level: info

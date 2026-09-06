@@ -1,0 +1,76 @@
+### Phase 1 RULE SCAN
+
+Based on the task description, here are the rules that change state during the event or claim list:
+
+1.  **Arrival Rule**: Requests land in strict arrival order; each asks for a fixed number of tokens.
+2.  **Grant Rule (Full)**: If the pool covers the full ask, grant the full amount and subtract from the pool.
+3.  **Grant Rule (Partial)**: If the pool cannot cover the full ask but has tokens, grant what is there (partial), subtract that amount from the pool, and mark as granted (never denied).
+4.  **Denial Rule**: A request arriving at an empty pool (pool == 0) is denied and listed by id; a pool with tokens never denies anyone.
+5.  **Expiry Trigger Rule**: The grant for `r1` expires after request `r2` completes.
+6.  **Return Rule**: An expired grant returns half its granted tokens rounded down to the pool immediately before the trigger event's processing concludes (effectively adding back to the pool available for subsequent events).
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:** Pool = 40, Granted = 0, Denied = [].
+
+*   **Event r1 arrives (Ask: 5)**
+    *   Rule Applied: Grant Rule (Full)
+    *   Action: Grant min(5, 40) = 5.
+    *   State Change: Pool becomes 35. Granted sum becomes 5.
+    *   Ledger Line: `r1 granted 5`
+
+*   **Event r2 arrives (Ask: 8)**
+    *   Rule Applied: Grant Rule (Full)
+    *   Action: Grant min(8, 35) = 8.
+    *   State Change: Pool becomes 27. Granted sum becomes 13.
+    *   Ledger Line: `r2 granted 8`
+
+*   **Event r3 arrives (Ask: 12)**
+    *   Rule Applied: Grant Rule (Full)
+    *   Action: Grant min(12, 27) = 12.
+    *   State Change: Pool becomes 15. Granted sum becomes 25.
+    *   Ledger Line: `r3 granted 12`
+
+*   **Event r4 arrives (Ask: 14)**
+    *   Rule Applied: Grant Rule (Full)
+    *   Action: Grant min(14, 15) = 14.
+    *   State Change: Pool becomes 1. Granted sum becomes 39.
+    *   Ledger Line: `r4 granted 14`
+
+*   **Event r5 arrives (Ask: 17)**
+    *   Rule Applied: Grant Rule (Partial) -> Note: The task states "a pool that still holds tokens never denies anyone... a request granted partially because the pool could not cover its full ask is still a granted request".
+    *   Action: Grant min(17, 1) = 1.
+    *   State Change: Pool becomes 0. Granted sum becomes 40.
+    *   Ledger Line: `r5 granted 1`
+
+*   **Event r6 arrives (Ask: 21)**
+    *   Rule Applied: Denial Rule -> The pool is exactly zero before this request arrives.
+    *   Action: Request denied.
+    *   State Change: Pool remains 0. Granted sum remains 40. Denied list adds "r6".
+    *   Ledger Line: `r6 denied`
+
+*   **Expiry Event (Triggered by r2 completion)**
+    *   Rule Applied: Expiry Trigger & Return Rule.
+    *   Target: Grant from `r1`.
+    *   Calculation: Half of granted tokens for r1 = floor(5 / 2) = 2.
+    *   Timing: Returns to pool before the next request (which is already processed in the walk above, but logically this return happens after r2 completes). The prompt says "The return lands right before the request the trigger names". Since the trigger is `r2`, and `r2` has completed, the return happens now.
+    *   Action: Add 2 to pool.
+    *   State Change: Pool becomes 2. Granted sum remains 40 (tokens returned are not re-granted as new units, they replenish the pool).
+    *   Ledger Line: `r1 expiry returns 2`
+
+*   **Final Reconciliation Check**
+    *   Start: 40
+    *   Grants: 5 + 8 + 12 + 14 + 1 = 40.
+    *   Returns: 2.
+    *   Net Pool: 40 - 40 + 2 = 2.
+    *   Denied: ["r6"].
+
+---
+
+### Final Answer
+
+```json
+{"granted_units": 40, "denied": ["r6"], "pool_left": 2}
+```

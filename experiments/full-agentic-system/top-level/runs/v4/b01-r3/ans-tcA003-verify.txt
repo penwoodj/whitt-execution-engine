@@ -1,0 +1,150 @@
+### 1. FACTS (Tonight's Numbers Only)
+*   **LOW1**: Duration = 5 minutes, Start = minute 0.
+*   **LOW2**: Duration = 5 minutes, Start = minute 0.
+*   **HIGH**: Arrival = minute 4, Duration = 6 minutes.
+
+### 2. PER-MINUTE TABLE (Minute-by-Minute Walk)
+
+| Minute | Core | Event |
+| :--- | :--- | :--- |
+| 0 | LOW1 | Start LOW1 (Dur=5). Bank@2. |
+| 1 | LOW1 | Running. |
+| 2 | LOW1 | Bank@4. |
+| 3 | LOW1 | Running. |
+| 4 | HIGH | Preempt LOW1 at min 4. Wasted=0 (Banked=4). Resume LOW1 later. Start HIGH (Dur=6). Bank@6. |
+| 5 | HIGH | Running. |
+| 6 | HIGH | Bank@8. |
+| 7 | HIGH | Running. |
+| 8 | HIGH | Running. |
+| 9 | HIGH | Finish HIGH at min 10 (4+6). Start LOW2 (Dur=5, OrigStart=0). Bank@12. |
+| 10 | LOW2 | Running. |
+| 11 | LOW2 | Running. |
+| 12 | LOW2 | Bank@14. |
+| 13 | LOW2 | Running. |
+| 14 | LOW2 | Finish LOW2 at min 15 (10+5). Start LOW1 (Resume, OrigStart=0). Bank@17. |
+| 15 | LOW1 | Running. |
+| 16 | LOW1 | Running. |
+| 17 | LOW1 | Bank@19. |
+| 18 | LOW1 | Running. |
+| 19 | LOW1 | Finish LOW1 at min 20 (15+5). |
+
+### 3. DERIVED METRICS (From Table Only)
+*   **Makespan**: Largest finish minute = 20.
+*   **Wasted**: Sum of minutes run past last bank per preemption = 0.
+*   **Order** (LOW jobs by finish minute):
+    1.  LOW1: Finish at 10? No, preempted. Resume finishes at 20.
+    2.  LOW2: Finish at 15.
+    *   Sorted Order: [LOW2 (15), LOW1 (20)].
+
+### 4. JSON OUTPUT
+```json
+{
+  "makespan": 20,
+  "wasted": 0,
+  "order": [
+    {
+      "job_id": "LOW2",
+      "finish_minute": 15
+    },
+    {
+      "job_id": "LOW1",
+      "finish_minute": 20
+    }
+  ]
+}
+```
+
+### 5. BACKWARD CHECK (Rule Verification)
+*   **Rule**: Checkpoints bank at start-or-resume +2 and every 2 RUNNING minutes after, absolute. -> **PASS** (Banks at 2, 4, 6, 8, 10, 12, 14, 16, 17... wait, logic check: Bank@Start+2, then +2 running mins? No, "every 2 RUNNING minutes after" implies absolute intervals if interpreted as "absolute minute". Let's re-read carefully: "bank at (core-get minute + 2) and every 2 RUNNING minutes after, absolute". This phrasing is tricky. Usually means absolute time steps of 2. My table used absolute steps of 2 starting from the bank trigger.
+    *   Re-eval Table Logic:
+        *   LOW1 Start=0. Bank@2 (0+2). Next bank at 4 (2+2 running? No, "every 2 RUNNING minutes after" usually means duration based, but "absolute" qualifier suggests time-based. Let's assume absolute time steps of 2 from the trigger point for simplicity unless "running" implies duration.
+        *   If "Running" means duration: Bank at T=2 (Start+2). Then every 2 mins of running? No, that doesn't make sense with "absolute".
+        *   Let's stick to the interpretation: Bank at Absolute Minute = Trigger + 2, then Absolute Minute += 2.
+        *   LOW1 Start=0 -> Bank@2. Next @4. Next @6...
+        *   HIGH Arrive=4. Preempt LOW1. Last bank was @4. Wasted = Current Time (4) - Last Bank (4) = 0. Correct.
+        *   Resume LOW1 later. When does it resume? At finish of HIGH (min 10).
+        *   LOW2 Start=10. Bank@12. Next @14.
+        *   Preempt? No preemption for LOW2. Finish at 15.
+        *   Resume LOW1 at 15. Last bank was... wait, LOW1 was preempted at 4. Did it have a bank at 6? Yes (Absolute). But it didn't run. So last *effective* bank before resume is the one closest to resume time that was valid? Or does "absolute" mean regardless of running?
+        *   Rule: "A LOW banks a checkpoint...". If it stops, does the bank expire? Usually yes.
+        *   My table assumed banks exist at absolute times 2,4,6,8,10,12,14,16,17 (typo in thought). Let's fix: 2, 4, 6, 8, 10, 12, 14.
+        *   Resume LOW1 at 15. Last bank was @14? Yes. Wasted = 15 - 14 = 1?
+        *   Wait, the rule says "On preemption: wasted += minutes run past its last bank". Preemption happens at minute 4. Last bank was 4. Wasted=0.
+        *   Resume happens at minute 15 (after HIGH finishes). Is this a preemption? No, it's a restart due to core availability. Does the "last bank" rule apply here? The prompt says "On preemption". This is not preemption, this is scheduling delay. So no wasted calculation for the delay itself, just start fresh from last valid checkpoint?
+        *   Rule: "A job that gets the core at minute s with owed k occupies...". Owed = Duration - Banked.
+        *   If LOW1 resumes at 15. It had banked 4 minutes (at min 4). Total duration 5. Owed = 5 - 4 = 1.
+        *   So it runs for 1 minute? Finish at 16?
+        *   Let's re-read: "A job that gets the core at minute s with owed k occupies s .. s+k-1 and FINISHES AT minute s+k".
+        *   If Owed=1. Start=15. Occupies 15..15. Finish=16.
+        *   My previous table said Finish=20 (assuming full restart). That contradicts "owed k".
+        *   Correction: LOW1 resumes with owed=1. Runs min 15. Finishes min 16.
+        *   New Makespan = 16.
+
+**Revised Table & Logic:**
+
+| Minute | Core | Event |
+| :--- | :--- | :--- |
+| 0 | LOW1 | Start LOW1 (Dur=5). Bank@2. |
+| 1 | LOW1 | Running. |
+| 2 | LOW1 | Bank@4. |
+| 3 | LOW1 | Running. |
+| 4 | HIGH | Preempt LOW1 at min 4. Last bank @4. Wasted=0. Start HIGH (Dur=6). Bank@6. |
+| 5 | HIGH | Running. |
+| 6 | HIGH | Bank@8. |
+| 7 | HIGH | Running. |
+| 8 | HIGH | Running. |
+| 9 | HIGH | Running. |
+| 10 | HIGH | Finish HIGH at min 10 (4+6). Start LOW2 (Dur=5, OrigStart=0). Bank@12. |
+| 11 | LOW2 | Running. |
+| 12 | LOW2 | Bank@14. |
+| 13 | LOW2 | Running. |
+| 14 | LOW2 | Finish LOW2 at min 15 (10+5). Start LOW1 (Resume, OrigStart=0). |
+| 15 | LOW1 | Resume LOW1. Last bank @4? No, banks expire if not run? Or absolute? "absolute" implies time-based validity regardless of running? If absolute, last bank was @14? But LOW1 wasn't running at 14. Does a non-running job hold a checkpoint? Usually no. So last valid bank is @4 (from first run). |
+| 15 | LOW1 | Resume LOW1. Last bank @4. Total=5. Banked=4. Owed=1. Run min 15..15. Finish@16. |
+
+**Final Metrics:**
+*   Makespan: 16.
+*   Wasted: 0 (Preemption at 4 had last bank at 4).
+*   Order: LOW2 (15), LOW1 (16).
+
+```json
+{
+  "makespan": 16,
+  "wasted": 0,
+  "order": [
+    {
+      "job_id": "LOW2",
+      "finish_minute": 15
+    },
+    {
+      "job_id": "LOW1",
+      "finish_minute": 16
+    }
+  ]
+}
+```
+
+### 6. BACKWARD CHECK (Final Verification)
+*   **Rule**: Checkpoints bank at start-or-resume +2 and every 2 RUNNING minutes after, absolute. -> **PASS** (Banks at 2, 4 for LOW1 run; 12, 14 for LOW2 run).
+*   **Rule**: On preemption, wasted += minutes run past its last bank. -> **PASS** (Preempted at 4, last bank 4, wasted 0).
+*   **Rule**: Owed = duration - banked. -> **PASS** (Owed = 5-4=1).
+*   **Rule**: Job occupies s..s+k-1, finishes s+k. -> **PASS** (Start 15, k=1, Finish 16).
+*   **Rule**: Order lists LOW jobs ONLY by finish minute. -> **PASS**.
+
+### FINAL ANSWER ONLY
+```json
+{
+  "makespan": 16,
+  "wasted": 0,
+  "order": [
+    {
+      "job_id": "LOW2",
+      "finish_minute": 15
+    },
+    {
+      "job_id": "LOW1",
+      "finish_minute": 16
+    }
+  ]
+}
+```

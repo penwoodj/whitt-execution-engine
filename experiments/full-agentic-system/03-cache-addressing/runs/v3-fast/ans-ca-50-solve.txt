@@ -1,0 +1,56 @@
+The morning report reads JSON. One core tonight, three jobs. LOW1 runs 5 minutes starting at minute 0. LOW2 runs 2 minutes starting at minute 1. HIGH arrives at minute 4 and runs 4 minutes to completion.
+
+**Event List & State Walk:**
+*   **Minute 0:** LOW1 starts (Duration: 5). Core busy with LOW1.
+    *   `LOW1` state: Running, Time elapsed: 0/5. Checkpoint banked at M+2 = Minute 2? Yes (bank lands on exact minute HIGH hasn't arrived yet).
+*   **Minute 1:** LOW2 starts (Duration: 2). Core busy with LOW1. LOW2 waits.
+    *   `LOW2` state: Waiting, Start min: 1.
+*   **Minute 2:** LOW1 continues (Time elapsed: 2/5). Checkpoint banked at M+4 = Minute 4? Yes.
+*   **Minute 3:** LOW1 continues (Time elapsed: 3/5). Core busy with LOW1.
+*   **Minute 4:** HIGH arrives.
+    *   Rule: "HIGH ... instantly preempting whatever LOW job is running".
+    *   Event: Preemption of `LOW1`.
+    *   State Check for Wasted Work: `LOW1` had run 3 minutes (M0, M1, M2). It has checkpoints at M+2 (Minute 4) and M+4 (Minute 6). Wait, let's re-read the checkpoint rule carefully. "a job that starts or resumes at minute s banks a checkpoint at minute s+2".
+    *   `LOW1` started at S=0. Banked at S+2 = Minute 2? Or does it bank every 2 minutes of running time? "LOW jobs checkpoint every 2 completed minutes of running time... a job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after".
+    *   Let's trace the "running time" vs "absolute minute" logic from the example.
+        *   Example: LOW1 (S=0) ran M0, M1, M2. Banked at M2. Its 3rd minute was unbanked when swap came. So checkpoint is absolute minute S+2? Or running time?
+        *   Text says: "LOW jobs checkpoint every 2 completed minutes of running time... a job that starts or resumes at minute s banks a checkpoint at minute s+2". This implies the first checkpoint is always at Absolute Minute (S + 2).
+        *   Let's re-evaluate `LOW1` at Minute 4. It started at S=0. First checkpoint banked at S+2 = Minute 2? Or does it mean "at minute s+2" relative to start? The example says: "LOW1 held the core minutes 0, 1 and 2... banked a checkpoint at minute 2". This confirms the first checkpoint is at Absolute Minute `S + 2`.
+        *   Wait, if it banks at M2, then running for 3 minutes (M0, M1, M2) means it completed 3 minutes. The checkpoint was at M2. So there are 3 completed minutes: M0, M1, M2? No, usually "completed minutes" implies the duration passed.
+        *   Let's look at the example logic again strictly: "LOW1 held the core minutes 0, 1 and 2... banked a checkpoint at minute 2". This means after running for 3 minutes (indices 0, 1, 2), it has a checkpoint at M2.
+        *   Wait, if it banks at M2, then when HIGH arrives at M4 (after M3 is done? No, HIGH arrives at M4). The text says "HIGH arrived at minute 4". Does this mean the event happens at the start of Minute 4 or end? "arrives at minute 4 and runs... to completion".
+        *   Let's assume standard discrete time steps.
+            *   Start M0: LOW1 begins. (Time elapsed = 0).
+            *   End M0 / Start M1: 1 min done.
+            *   End M1 / Start M2: 2 mins done. Checkpoint banked? Example says "banked a checkpoint at minute 2". So yes, after 2 minutes of runtime (end of M1/start of M2), checkpoint is secure.
+            *   End M2 / Start M3: 3 mins done.
+            *   End M3 / Start M4: 4 mins done.
+        *   Re-reading the example carefully: "LOW1 held the core minutes 0, 1 and 2... banked a checkpoint at minute 2". This implies the checkpoint is taken *after* minute 2 runs? Or *at* minute 2? The text says "its 3rd minute was unbanked when the swap came".
+            *   If it ran M0, M1, M2 (3 minutes), and the checkpoint was at M2. Then the 3rd minute (M2) is protected? No, "unbanked" implies not protected.
+            *   Let's parse: "banks a checkpoint at minute s+2". If S=0, bank at M2. This likely means after completing 2 minutes of runtime.
+            *   Runtime sequence for LOW1 (S=0):
+                *   Minute 0 runs (1st min).
+                *   Minute 1 runs (2nd min). -> Checkpoint Banked? Yes, if bank is at "minute s+2" which corresponds to the end of the 2nd minute.
+                *   Minute 2 runs (3rd min).
+            *   So at M4 arrival: LOW1 has completed M0, M1, M2 (3 minutes). Checkpoint was banked after M1 (at M2 absolute time? No, "minute s+2" usually refers to the clock minute label. If S=0, bank at M2. Does this mean after 2 minutes or at the start of M2? The example says "LOW1 held... minutes 0, 1 and 2... banked a checkpoint at minute 2". This implies the checkpoint covers up to minute 2? Or is taken *at* minute 2?
+            *   Crucial phrase: "its 3rd minute was unbanked when the swap came". If it ran M0, M1, M2. The 3rd minute is M2. If the checkpoint was at M2 (end of M1?), then M2 is unbanked?
+            *   Let's try a different interpretation consistent with "checkpoint every 2 completed minutes":
+                *   Run 1 min -> No CP.
+                *   Run 2 mins -> CP Banked (covers M0, M1).
+                *   Run 3 mins -> Unbanked part is M2.
+            *   So if LOW1 runs M0, M1, M2 (3 minutes total), and HIGH arrives at M4 (meaning after M3 finishes? Or does it preempt immediately upon arrival?). The text says "HIGH arrives at minute 4". If discrete:
+                *   M0 done.
+                *   M1 done. CP Banked.
+                *   M2 done. Unbanked part starts here? No, "every 2 completed minutes". So after M2 is done (3 mins total), a new checkpoint would be banked at S+4 = M4. But HIGH arrives at M4. Does it arrive before or after the end of M3?
+                *   Scenario A: HIGH arrives at start of M4. LOW1 has finished M0, M1, M2 (3 mins). The last checkpoint was at M2 (end of 2nd min). So M2 and M3 are unbanked? No, if it arrived at M4, it hasn't run M3 yet.
+                *   Scenario B: HIGH arrives at end of M3 (start of M4)?
+            *   Let's look at the example numbers to calibrate. Example: LOW1 runs 7 mins. HIGH arrives M3. Wasted = 1 min.
+                *   LOW1 S=0. Runs M0, M1, M2 (3 mins). CP at M2? (End of 2nd min).
+                *   Runs M3 (4th min). Unbanked.
+                *   HIGH arrives M3. If it arrives at start of M3: LOW1 has done M0, M1 (2 mins). CP is safe. Wasted = 0? But example says 1 wasted.
+                *   Therefore, "arrives at minute X" likely means the preemption happens after the work for that minute is attempted or completed, OR the checkpoint logic is different.
+                *   Alternative interpretation: Checkpoint banked *at* absolute minute `S + 2`. If S=0, bank at M2. This might mean "after running through minute 2"? No, "minutes 0, 1 and 2" are held. Banked at minute 2. Maybe it means the checkpoint is valid for minutes up to `minute - 1`?
+                *   Let's try: Checkpoint banked after completing `k` minutes where `k` reaches an integer multiple of 2? No, "checkpoint every 2 completed minutes". So after 2 mins, check. After 4 mins, check.
+                *   Example Re-calculation with "After 2 mins":
+                    *   LOW1 (7m). M0 done (1), M1 done (2) -> CP Banked. M2 done (3). HIGH arrives M3. Preemption happens. Work done: M0, M1, M2? If it arrived at start of M3, work is M0, M1 (2 mins). Wasted = 0.
+                    *   If it arrived after M3 finished? Then work is M0..M3 (4 mins). CP would

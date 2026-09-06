@@ -1,0 +1,79 @@
+### Phase 1 RULE SCAN
+The following rules govern the state changes during the event list. Each line lists the rule and the specific event or claim that triggers it.
+
+1.  **Limit Assignment Rule**: Assigns a limit of `2.0` to observations at positions 1–5, and `1.0` to positions 6–10. Triggered by: Arrival of observation (Step 1).
+2.  **Clean Observation Completion Rule**: If observed rate $\le$ limit, the stage completed equals the position number ($N$), and rollout becomes $10 \times N$. Triggered by: Clean observation at Step 1.
+3.  **Breach Observation Spend Rule**: If observed rate $>$ limit, the observation is spent (no state change). Triggered by: Breach observation at Step 2.
+4.  **Rollback Limit Tightening Rule**: After a breach, the limit for all *remaining* steps becomes `0.8`. Triggered by: Breach observation at Step 2.
+5.  **Single Breach Pause Rule**: If exactly one breach occurs and the list ends, status is `PAUSED`, holding last completed state. Triggered by: End of list after Step 5 (given only one breach).
+
+### Phase 2 LEDGER WALK
+Applying events in strict arrival order to the initial state (`rollout_pct`: 0, `stages_done`: 0, `limit`: 2.0).
+
+1.  **Step 1**: Observed 0.4 vs Limit 2.0 -> Clean. Stage completed: 1. Rollout becomes 10.
+    *   State: `rollout_pct`=10, `stages_done`=1.
+2.  **Step 2**: Observed 1.9 vs Limit 2.0 -> Clean. Stage completed: 2. Rollout becomes 20.
+    *   State: `rollout_pct`=20, `stages_done`=2.
+3.  **Step 3**: Observed 0.5 vs Limit 2.0 -> Clean. Stage completed: 3. Rollout becomes 30.
+    *   State: `rollout_pct`=30, `stages_done`=3.
+4.  **Step 4**: Observed 2.2 vs Limit 2.0 -> Breach (2.2 > 2.0). Observation spent. Rollback triggered. New limit for remaining steps set to 0.8. State holds last completed values (Stage 3, Rollout 30).
+    *   State: `rollout_pct`=30, `stages_done`=3.
+5.  **Step 5**: Observed 0.6 vs Limit 0.8 -> Clean (0.6 $\le$ 0.8). Stage completed: 4 (position number). Rollout becomes $10 \times 4 = 40$.
+    *   State: `rollout_pct`=40, `stages_done`=4.
+
+**End of List Analysis**: The list contains exactly one breach (at Step 4) and then ends. According to the "Single Breach Pause Rule", the status is `PAUSED` with the values from the last completed stage (which was Stage 3? No, wait).
+*Correction on State Logic*:
+Let's re-read the specific rule text: "a clean observation completes the stage equal to its own position in the list... a breaching observation completes nothing and is spent; the rollback leaves the rollout and stages at the last completed stage's values."
+
+*   **Step 1 (Pos 1)**: Clean. Completes Stage 1. Rollout = 10.
+*   **Step 2 (Pos 2)**: Clean. Completes Stage 2. Rollout = 20.
+*   **Step 3 (Pos 3)**: Clean. Completes Stage 3. Rollout = 30.
+*   **Step 4 (Pos 4)**: Breach. Spent. State holds last completed stage values -> Stage 3, Rollout 30. Limit tightens to 0.8.
+*   **Step 5 (Pos 5)**: Clean against new limit (0.6 <= 0.8). Completes Stage equal to position = 4? Or does it complete Stage 5?
+    *   Rule text: "a clean observation completes the stage equal to its own position in the list". Position is 5. So it should complete Stage 5?
+    *   Let's check the orientation example logic again carefully.
+    *   Orientation Example Step 4 (Pos 4): Clean. "it carries stage 4 by position, so the rollout jumps to 40 and stages to 4". Here Pos=4 -> Stage=4.
+    *   My current trace: Step 5 is Pos 5. If clean, it should complete Stage 5?
+    *   Wait, let's re-read the orientation example text provided in the prompt: "position 4 rolled 0.5... so the rollout jumps to 40 and stages to 4". This implies `Stage = Position`.
+    *   So for Step 5 (Pos 5), if clean, it completes Stage 5?
+    *   BUT, look at the orientation example result: "the close was PAUSED, 40, 4." The breach was at Pos 3. The last *completed* stage before the breach was Pos 2 (Stage 2). Wait, in the example:
+        *   Pos 1: Clean -> Stage 1.
+        *   Pos 2: Clean -> Stage 2.
+        *   Pos 3: Breach -> Spent. State holds last completed (Stage 2).
+        *   Pos 4: Clean -> Completes Stage 4? The text says "carries stage 4 by position". Yes. Rollout becomes 40. Stages become 4.
+        *   Result: PAUSED, 40, 4.
+    *   Okay, so the state updates immediately upon a clean observation, even if it's after a breach. The "rollback" only prevents the *breach* from updating anything. It does not prevent subsequent cleans from updating based on their position.
+
+    *Re-evaluating my trace with this confirmed logic:*
+    1.  **Step 1 (Pos 1)**: Clean. Stage=1, Rollout=10.
+    2.  **Step 2 (Pos 2)**: Clean. Stage=2, Rollout=20.
+    3.  **Step 3 (Pos 3)**: Clean. Stage=3, Rollout=30.
+    4.  **Step 4 (Pos 4)**: Breach (2.2 > 2.0). Spent. State holds last completed (Stage 3, Rollout 30). Limit -> 0.8.
+    5.  **Step 5 (Pos 5)**: Clean (0.6 <= 0.8). Completes Stage equal to position = 5? Or does the "rollback" imply we are still in the context of the previous stage?
+        *   Text: "a clean observation completes the stage equal to its own position in the list". Position is 5. So Stage=5. Rollout = $10 \times 5 = 50$.
+        *   Let's check the orientation example again. Pos 4 -> Stage 4. Yes.
+        *   So Step 5 -> Stage 5?
+        *   Wait, is there a constraint that stages must be sequential? "stage numbering is fixed by position in the list and never renumbers". This suggests `Stage = Position`.
+        *   However, let's look at the orientation example result again: "PAUSED, 40, 4". The breach was at Pos 3. The clean at Pos 4 resulted in Stage 4.
+        *   So if Step 5 is clean, it results in Stage 5?
+        *   Let's re-read the specific rule about rollback: "the rollback leaves the rollout and stages at the last completed stage's values." This applies to the *breach*. The next event (Step 5) is a new arrival. It sees its own position (5). It cleans. It completes Stage 5.
+        *   So final state should be Rollout 50, Stages 5?
+
+    *Wait, let's look closer at the prompt's orientation example numbers vs my trace.*
+    Orientation Example:
+    - Pos 1: Clean -> S1, R10.
+    - Pos 2: Clean -> S2, R20.
+    - Pos 3: Breach (2.5 > 2.0). Spent. Hold S2, R20. Limit 0.8.
+    - Pos 4: Clean (0.5 <= 0.8). "carries stage 4 by position". So S4, R40.
+    - End of list. One breach. Status PAUSED. Values: 40, 4.
+
+    My Trace:
+    - Pos 1: Clean -> S1, R10.
+    - Pos 2: Clean -> S2, R20.
+    - Pos 3: Clean -> S3, R30. (Rate 0.5 <= 2.0).
+    - Pos 4: Breach (2.2 > 2.0). Spent. Hold S3, R30. Limit 0.8.
+    - Pos 5: Clean (0.6 <= 0.8). "completes the stage equal to its own position". Position is 5. So S5? Rollout = 50?
+
+    *Is there a rule I missed?* "a clean observation completes the stage equal to its own position in the list... even if earlier positions were spent on breaches."
+    This confirms `Stage = Position`.
+    So Step 5 -> Stage 5. Roll

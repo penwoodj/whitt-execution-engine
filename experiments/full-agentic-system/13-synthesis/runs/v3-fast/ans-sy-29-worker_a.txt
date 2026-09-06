@@ -1,0 +1,79 @@
+### Phase 1 Rule Scan (First Half Only)
+*Rules governing the core scheduling, checkpointing, and preemption logic for LOW jobs.*
+
+1.  **Arrival Order:** LOW jobs are queued in order of their start minutes; a resumed job outranks a fresh one at any tie.
+2.  **Core Utilization:** The core never idles while a LOW job is waiting; the next waiting LOW starts immediately upon preemption or completion of the current job within the same minute.
+3.  **Checkpoint Banking:** A job banks a checkpoint every 2 completed minutes of running time (absolute minutes $s, s+2, s+4...$).
+4.  **Preemption Waste:** On preemption by HIGH, work past the last banked checkpoint is wasted and must be redone upon resume.
+5.  **Resume Logic:** A resumed job owes the total duration minus the time already banked; it runs from its current minute until completion.
+
+### Phase 2 Ledger Walk (First Half Only)
+*Applying events in strict arrival order to track state.*
+
+**Minute 0:** LOW1 starts (Duration 7). Core busy with LOW1. Bank at Min 2.
+**Minute 1:** LOW1 continues. Core busy with LOW1.
+**Minute 2:** LOW1 completes Minute 3 of its run. **Banked.** Core busy with LOW1.
+**Minute 3:** HIGH arrives (Duration 6). Preempts LOW1 immediately. LOW1 owes $7 - 3 = 4$ minutes. LOW2 starts at Min 3 but must wait for core.
+**Minute 4:** Core busy with HIGH. LOW1 resumes next available slot. LOW2 still waiting.
+**Minute 5:** Core finishes HIGH (Duration 6 complete). HIGH departs. Core becomes free.
+    *   **Decision:** Resume LOW1 vs Start LOW2? Rule: Resumed outranks fresh. LOW1 resumes.
+    *   State: Core busy with LOW1 (resuming its owed 4 minutes). LOW2 still waiting.
+**Minute 6:** LOW1 continues. Bank at Min $3+2=5$ (already banked from previous run? No, banking resets or accumulates based on "completed minutes of running time").
+    *   *Correction on Banking:* The rule says "bank a checkpoint every 2 completed minutes". Does this reset on resume? The text implies tracking banks in absolute minutes relative to the job's lifecycle. However, standard interpretation for such problems usually treats the bank as valid if reached before preemption. Let's re-read: "on preemption the work past the last checkpoint is wasted and redone after resume." This implies the *bank* itself remains valid (the state of having checked).
+    *   LOW1 has completed 3 minutes before preemption. It banks at Min 2 ($0+2$) and Min 4 ($2+2$)? No, it runs continuously $0 \to 3$. Banks at $0+2=2$, then $2+2=4$.
+    *   Wait, LOW1 ran $0, 1, 2$. At end of Minute 2 (start of Min 3), it has completed 3 minutes? No.
+        *   Start Min 0: Run completes at end of Min 0 (Total 1).
+        *   Start Min 1: Run completes at end of Min 1 (Total 2). **Bank.**
+        *   Start Min 2: Run completes at end of Min 2 (Total 3). **Bank?** No, banks every 2. So Bank at Total=2. Next bank at Total=4.
+    *   Preemption happens at start of Minute 3. LOW1 has completed exactly 2 minutes? Or is it running the 3rd minute?
+        *   "LOW1 runs 7 minutes starting at minute 0".
+        *   Min 0: Run #1 (Total 1).
+        *   Min 1: Run #2 (Total 2). **Bank.**
+        *   Min 2: Run #3 (Total 3).
+        *   Preemption occurs "at minute 3" (start of the interval). LOW1 has completed exactly 2 minutes. It is currently in its 3rd minute of execution.
+    *   Work wasted: The work done in Minute 2 (the 3rd minute) was not banked. Is it wasted? Yes, "work past the last checkpoint". Last checkpoint was at Total=2. So the entire 3rd minute is wasted.
+    *   Resume: LOW1 owes $7 - 2 = 5$ minutes.
+
+**Minute 6 (Re-eval):** Core busy with LOW1 (resumed). LOW1 runs Minute 4 of its life (Total 4). **Bank.**
+**Minute 7:** LOW1 runs Minute 5 of its life (Total 5).
+**Minute 8:** LOW1 runs Minute 6 of its life (Total 6).
+**Minute 9:** LOW1 runs Minute 7 of its life (Total 7). **Completed.**
+
+*Wait, let's re-verify the "waiting" logic.*
+At Min 3: HIGH preempts. LOW2 starts at Min 3 but waits.
+Core busy with HIGH ($Min 3 \to 4$? No, duration 6 starting Min 3 means $3,4,5,6,7,8$).
+So Core busy High: Min 3, 4, 5, 6, 7, 8.
+At Min 9, HIGH finishes.
+Core free at start of Min 9? No, if it runs *during* minutes 3-8, it finishes at end of Min 8. Free at start of Min 9.
+Let's trace carefully:
+Start Min 0: LOW1 starts.
+Min 0 (End): LOW1 done 1 min.
+Min 1 (End): LOW1 done 2 mins. **Bank.**
+Min 2 (End): LOW1 done 3 mins.
+**Event:** HIGH arrives at Minute 3 (Start of interval). Preempts LOW1 immediately.
+LOW1 status: Completed 2 mins. Banked at Min 2. Wasted: The work in progress for the 3rd minute? Or just the time elapsed since last bank? "Work past the last checkpoint". If checkpoint is at $T=2$, and we are at start of $T=3$ (which is effectively $T=2$ completed), then no work *past* the checkpoint has been done yet in the current run. The 3rd minute hasn't started or just started?
+"HIGH arrives at minute 3... instantly preempting". Usually, this means the job that was running ($0 \to 2$) is stopped before it can do the $3^{rd}$ unit of work.
+If LOW1 stops exactly after completing 2 minutes:
+Wasted = 0? Or does "arrives at minute 3" imply we are entering the 3rd minute?
+Let's look at the orientation example for clarity on this specific mechanic.
+Orientation: LOW1 runs 7 mins starting 0. HIGH arrives Min 3.
+Text says: "LOW1 held core minutes 0, 1 and 2... its 3rd minute was unbanked when the swap came".
+This implies at Minute 3 (start), it has completed Minutes 0, 1, 2? No, that would be 3 minutes.
+"Minutes 0, 1 and 2" usually refers to the intervals $[0,1], [1,2], [2,3]$. If it held them, it finished Minute 2 at end of Min 2. Then at start of Min 3 (the "3rd minute"), it is running.
+The text says: "its 3rd minute was unbanked when the swap came". This implies the swap happened *during* or *at the start of* the 3rd minute, and that specific minute's work wasn't banked.
+In our task: LOW1 runs 7 mins starting Min 0. Banks every 2 completed minutes.
+Min 0 (End): Total 1.
+Min 1 (End): Total 2. **Bank.**
+Min 2 (End): Total 3.
+HIGH arrives at Minute 3. Does this mean start of interval $[3,4]$? Yes.
+At start of Min 3, LOW1 has completed exactly 2 minutes. It is about to run the 3rd minute.
+Is the 3rd minute "unbanked"? Yes, because the bank was at Total=2. The next bank is at Total=4.
+So if HIGH preempts *at* Minute 3 (start), has LOW1 done any work in the 3rd minute? No. It's preempting immediately upon arrival.
+However, the orientation text says "its 3rd minute was unbanked". This suggests that even if it hasn't finished the minute, the fact that it is *in* that minute makes it unbanked relative to the checkpoint at Min 2.
+But wait, if it preempts immediately, work wasted = 0?
+Let's re-read the orientation explanation: "LOW1 held core minutes 0, 1 and 2... its 3rd minute was unbanked when the swap came". This phrasing is tricky. If it held minutes 0, 1, and 2, it completed them. Then at Minute 3 (the start of the 4th interval? No, counting starts: Min 0 is 1st, Min 1 is 2nd, Min 2 is 3rd).
+If LOW1 runs $0 \to 7$.
+Interval 1: Min 0.
+Interval 2: Min 1. (Bank at end of Min 1? Or start of Min 2?) "bank a checkpoint every 2 completed minutes". So after finishing Min 0 and Min 1, it banks. That is at the start of Min 2.
+So at Start of Min 2, Banked.
+Interval 

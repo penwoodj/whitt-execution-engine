@@ -1,0 +1,105 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event sequence, including triggers.*
+
+1. **Rule: Attempt Execution** – Triggered by each failed attempt; increments `attempts` count and deducts cost (2 tokens) from `budget`.
+2. **Rule: Wait Interval Enforcement** – Triggered after a failed attempt before the next retry; adds duration to `wait_s` total based on current wait value (starts at 2s, doubles each time).
+3. **Rule: Budget Depletion Check** – Triggered after every cost deduction; if remaining budget < required for next step, triggers suppression logic.
+4. **Rule: Suppression Logic** – Triggered when spend exceeds budget; job is suppressed immediately upon exceeding limit (no doubling of budget occurs mid-stream unless specified as a separate event, which it is not here).
+5. **Rule: Success Condition** – Implicitly triggered on the 4th attempt (after 3 failures); if reached without suppression, `suppressed` remains false.
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order.*
+
+**Initial State:**
+- `attempts`: 0
+- `wait_s`: 0
+- `budget_after`: 36 (initial budget)
+- `suppressed`: false
+
+**Event 1: First Failed Attempt**
+- Action: Run attempt #1. Cost = 2 tokens. Wait before next = 2s.
+- Calculation: `attempts` becomes 1. `wait_s` adds 2 → 2. `budget_after` subtracts 2 → 34.
+- State Check: Budget (34) >= Cost for next attempt? Yes. No suppression.
+- **State After Event 1:** `{"attempts": 1, "wait_s": 2, "budget_after": 34, "suppressed": false}`
+
+**Event 2: Second Failed Attempt**
+- Action: Run attempt #2. Cost = 2 tokens. Wait before next = 4s (doubled from previous).
+- Calculation: `attempts` becomes 2. `wait_s` adds 4 → 6. `budget_after` subtracts 2 → 32.
+- State Check: Budget (32) >= Cost for next attempt? Yes. No suppression.
+- **State After Event 2:** `{"attempts": 2, "wait_s": 6, "budget_after": 32, "suppressed": false}`
+
+**Event 3: Third Failed Attempt**
+- Action: Run attempt #3. Cost = 2 tokens. Wait before next = 8s (doubled from previous).
+- Calculation: `attempts` becomes 3. `wait_s` adds 8 → 14. `budget_after` subtracts 2 → 30.
+- State Check: Budget (30) >= Cost for next attempt? Yes. No suppression.
+- **State After Event 3:** `{"attempts": 3, "wait_s": 14, "budget_after": 30, "suppressed": false}`
+
+**Event 4: Fourth Attempt (Success)**
+- Action: Run attempt #4. This is the success condition ("job needs 3 failed attempts before the 4th succeeds").
+- Cost Calculation: The prompt states "every attempt costs 2". Even though it succeeded, the cost of *running* the attempt applies to the budget unless specified otherwise (usually successful runs still consume resources). However, let's re-read carefully: "the job needs 3 failed attempts before the 4th succeeds." It does not explicitly say the successful attempt is free. Standard interpretation: every execution costs.
+- Cost = 2 tokens.
+- Calculation: `attempts` becomes 4. `wait_s` adds nothing (no wait after success, or wait only applies "after each failed attempt"). The rule says "after each failed attempt the retry waits". So no wait added here. `budget_after` subtracts 2 → 28.
+- State Check: Budget is now 28. Job succeeded. Suppression logic only triggers if spend *exceeds* budget preventing completion or if checked mid-stream. Since we completed the event, and the job succeeded, suppression is false.
+- **State After Event 4:** `{"attempts": 4, "wait_s": 14, "budget_after": 28, "suppressed": false}`
+
+*Self-Correction/Refinement on Budget Logic:*
+Let's re-evaluate the "spend exceeds budget" rule.
+Total Cost incurred:
+Attempt 1: 2 (Budget 36 -> 34)
+Wait 1: 2s * 1 token/sec = 2? **CRITICAL RE-READ**: "every wait second costs 1".
+Ah, the cost model includes time!
+Let's re-walk with Time Cost included.
+
+**Re-Walk with Time Costs:**
+
+*Initial:* `attempts`=0, `wait_s`=0, `budget_after`=36.
+
+**Event 1: Failed Attempt #1**
+- Action: Execute attempt. Cost = 2 tokens.
+- Wait Triggered: 2 seconds. Cost of wait = 2s * 1 token/s = 2 tokens.
+- Total Deduction: 2 (attempt) + 2 (wait) = 4 tokens.
+- New Budget: 36 - 4 = 32.
+- State: `{"attempts": 1, "wait_s": 2, "budget_after": 32, "suppressed": false}`
+
+**Event 2: Failed Attempt #2**
+- Action: Execute attempt. Cost = 2 tokens.
+- Wait Triggered: 4 seconds (doubled). Cost of wait = 4s * 1 token/s = 4 tokens.
+- Total Deduction: 2 + 4 = 6 tokens.
+- New Budget: 32 - 6 = 26.
+- State: `{"attempts": 2, "wait_s": 2+4=6, "budget_after": 26, "suppressed": false}`
+
+**Event 3: Failed Attempt #3**
+- Action: Execute attempt. Cost = 2 tokens.
+- Wait Triggered: 8 seconds (doubled). Cost of wait = 8s * 1 token/s = 8 tokens.
+- Total Deduction: 2 + 8 = 10 tokens.
+- New Budget: 26 - 10 = 16.
+- State: `{"attempts": 3, "wait_s": 6+8=14, "budget_after": 16, "suppressed": false}`
+
+**Event 4: Successful Attempt #4**
+- Action: Execute attempt. Cost = 2 tokens.
+- Wait Triggered? No ("after each *failed* attempt the retry waits"). Success ends the job.
+- Total Deduction: 2 tokens.
+- New Budget: 16 - 2 = 14.
+- State: `{"attempts": 4, "wait_s": 14, "budget_after": 14, "suppressed": false}`
+
+*Check for Suppression:*
+Did spend exceed budget at any point?
+Start: 36.
+After Ev1: 32 (OK).
+After Ev2: 26 (OK).
+After Ev3: 16 (OK).
+After Ev4: 14 (OK).
+The job completed successfully. Suppression is false.
+
+Final State Verification:
+- `attempts`: 4 (1st, 2nd, 3rd failed, 4th succeeded).
+- `wait_s`: 2 + 4 + 8 = 14 seconds total waited.
+- `budget_after`: 36 - (2+2) - (2+4) - (2+8) - (2) = 36 - 4 - 6 - 10 - 2 = 14.
+- `suppressed`: false.
+
+### Final Answer Construction
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 14, "suppressed": false}
+```

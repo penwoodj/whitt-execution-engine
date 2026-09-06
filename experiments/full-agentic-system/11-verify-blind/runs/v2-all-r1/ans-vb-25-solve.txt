@@ -1,0 +1,97 @@
+The task description contains a significant contradiction between its "EXPIRY DISCIPLINE" section and its core logic requirements for the specific scenario provided.
+
+1.  **Core Scenario Logic:** The problem defines a scheduling environment with `LOW` jobs (Low Priority) and a `HIGH` job that preempts them. It explicitly details rules for:
+    *   Job arrival order based on start minutes.
+    *   Checkpointing every 2 minutes of running time.
+    *   Wasting work done past the last checkpoint upon preemption.
+    *   Resuming jobs and redone work.
+    *   Calculating `makespan` (total duration from first start to last finish).
+    *   Determining the `order` in which `LOW` jobs complete.
+
+2.  **EXPIRY DISCIPLINE Section:** This section describes a mechanism for handling "expired grants" where a return value is calculated as half of what was granted, rounded down, and placed before the next request. It mentions a "pool_left" formula involving `start`, `sum(granted)`, and `sum(expiry returns)`.
+
+3.  **The Contradiction:** The core scenario provided (`LOW1` runs 5 mins starting at 0, `LOW2` runs 7 mins starting at 2, `HIGH` arrives at 3) does not involve any "grants," "pools," or "expiry returns" in the sense described by the EXPIRY DISCIPLINE section. The scenario is purely about CPU scheduling, preemption, and checkpointing. There are no resources being granted that can expire; there is only a single core being scheduled. Applying an expiry rule to this scenario would require inventing non-existent variables (like a "pool" or "granted amount") which violates the instruction to read every rule twice before touching anything.
+
+4.  **Conclusion:** The EXPIRY DISCIPLINE section appears to be a template or a distractor inserted into the prompt that does not apply to the specific scheduling logic requested in the main body of the task. The main body provides all necessary rules (arrival, checkpointing, preemption, resumption) and asks for specific outputs (`makespan_min`, `wasted_min`, `order`) based on those rules.
+
+Therefore, I will solve the problem using **only** the scheduling logic provided in the main scenario description, ignoring the EXPIRY DISCIPLINE section as it is irrelevant to the defined events (job arrivals and preemptions).
+
+### Step-by-Step Execution of Scheduling Logic
+
+**Initial State:**
+*   Core: Idle.
+*   Queue: `LOW1` (Start=0), `LOW2` (Start=2).
+*   Time: 0.
+
+**Event Timeline:**
+
+*   **Time 0:** `LOW1` arrives. Start minute = 0.
+    *   Action: Core starts running `LOW1`.
+    *   State: Running `LOW1`. Checkpoint banked at $T=2$.
+
+*   **Time 1:** `LOW1` continues.
+    *   State: Running `LOW1`. Checkpoint banked at $T=4$ (relative to start, but absolute time is $0+2=2$, then every 2 mins). Wait, the rule says "checkpoint every 2 completed minutes". So checkpoints are at absolute times $T_{start} + 2k$.
+    *   Checkpoints for `LOW1`: $0+2=2$, $0+4=4$, etc.
+
+*   **Time 2:** `HIGH` arrives (Start minute = 3? No, "arrives at minute 3").
+    *   Wait, the prompt says: "`HIGH` arrives at minute 3".
+    *   Let's re-read carefully: "`LOW1` runs 5 minutes starting at minute 0", "`LOW2` runs 7 minutes starting at minute 2", "`HIGH` arrives at minute 3".
+    *   Current Time = 2. `LOW1` has run for 2 minutes (Time 0 to 2).
+    *   Checkpoint Status: At $T=2$, `LOW1` hits its first checkpoint ($0+2$). Work is safe.
+
+*   **Time 3:** `HIGH` arrives.
+    *   Action: Preemption occurs. `HIGH` takes the core.
+    *   `LOW1` was running from $T=0$ to $T=3$. Total run time = 3 minutes.
+    *   Checkpoints hit by `LOW1`: $T=2$.
+    *   Work done: Minutes 0-1 (safe), Minute 2 (safe, checkpoint at end of minute 2).
+    *   Wait, does the checkpoint happen *during* the minute or at the *end*? "Checkpoint every 2 completed minutes". Usually implies after completing the duration.
+    *   If `LOW1` runs for 3 minutes:
+        *   Minute 0-1 (Completed): Checkpoint not yet hit (needs 2 mins).
+        *   Minute 1-2 (Completed): Checkpoint hit at $T=2$.
+        *   Minute 2-3 (Completed): `LOW1` runs into the 3rd minute. No checkpoint at $T=4$ yet.
+    *   So, work done in minutes 0 and 1 is safe. Work done in minute 2 (the partial minute leading up to preemption) depends on when the checkpoint lands.
+    *   Rule: "a job that starts or resumes at minute s banks a checkpoint at minute s+2".
+    *   `LOW1` started at $T=0$. Banks at $T=2$, then $T=4$.
+    *   At $T=3$ (preemption), the last bank was at $T=2$. The job has run for 3 minutes. It is currently in its 3rd minute of execution (between $T=2$ and $T=3$).
+    *   Work done since last checkpoint ($T=2$): From $T=2$ to $T=3$ = 1 minute.
+    *   **Wasted:** 1 minute.
+
+*   **Time 3 to Time 5 (Duration of HIGH):**
+    *   `HIGH` runs for 8 minutes? Prompt says: "`HIGH` arrives at minute 3 and runs 8 minutes to completion".
+    *   So `HIGH` occupies the core from $T=3$ to $T=11$.
+
+*   **Time 5:** (Prompt mentions "Both LOWs were then waiting" in the example, but let's stick to tonight's numbers).
+    *   Tonight's numbers: `LOW2` starts at minute 2. It has been waiting since $T=2$ because the core was busy with `LOW1`.
+    *   At $T=3$, `HIGH` preempts `LOW1`.
+    *   Queue status at $T=3$: `LOW2` (Start=2) is waiting. `LOW1` (Start=0) is preempted and waiting to resume.
+    *   Rule: "LOW jobs take the core in order of their start minutes".
+        *   `LOW1` Start = 0.
+        *   `LOW2` Start = 2.
+        *   Order: `LOW1` > `LOW2`.
+    *   So, when `HIGH` finishes at $T=11$, the core goes to `LOW1` first.
+
+*   **Time 11:** `HIGH` completes. Core becomes free.
+    *   Resume `LOW1`:
+        *   Needs to redo wasted work: 1 minute (from $T=2$ to $T=3$).
+        *   Original remaining time for `LOW1`: Total 5 mins - 3 mins run = 2 mins left.
+        *   New total work needed: 1 (redo) + 2 (remaining) = 3 minutes.
+        *   Start resuming at $T=11$.
+        *   Checkpoints for `LOW1` resume: Starts effectively at a new "virtual" start? Or does it keep the old checkpoint logic?
+        *   Rule: "after resume a job redoes every minute past its last bank". Last bank was $T=2$. It resumes at $T=11$.
+        *   Does it re-bank checkpoints from scratch or continue? "a job that starts or resumes... banks a checkpoint at s+2". This implies the banking resets relative to the resume start time for the purpose of tracking future banks, OR it continues the absolute timeline.
+        *   Let's look at the example logic: "LOW1 had 7 total minutes with 2 banked, so it resumed owing 5... ran them minutes 5 to 10". In the example, `LOW1` resumed and finished first. The checkpoint logic seems to reset or simply track remaining work.
+        *   Let's assume standard behavior: Resume at $T=11$. Run for 3 minutes. Finishes at $T=14$.
+        *   Checkpoints during resume run: Starts at $T=11$. Banks at $T=13$, then $T=15$.
+        *   Since it runs only 3 mins ($T=11$ to $T=14$), it hits checkpoint at $T=13$. Work is safe.
+
+*   **Time 14:** `LOW1` finishes.
+    *   Queue: `LOW2` (Start=2). Waiting since $T=2$.
+    *   Action: Core goes to `LOW2`.
+    *   `LOW2` Total duration: 7 minutes.
+    *   Start time: $T=14$.
+    *   Runs from $T=14$ to $T=21$.
+
+*   **Final State:**
+    *   `LOW1` finishes at $T=14$.
+    *   `LOW2` finishes at $T=21$.
+    *   Makespan: From first start ($T=0$) to

@@ -1,0 +1,51 @@
+### Phase 1 RULE SCAN
+This phase lists every rule that changes state during the event sequence (Arrivals), including expiry, return, revocation, refill, promotion, fallback, or source-ranking rules, triggered by specific events.
+
+1.  **Budget Consumption Rule**: Triggered by `Attempt` arrival; deducts cost per attempt ($2) and cost per wait second ($1) from the current budget.
+2.  **Suppression Threshold Rule**: Triggered when Budget < Spend (after consumption); initiates a single "budget doubling" event to re-evaluate suppression status.
+3.  **Double-Budget Re-Check Rule**: Triggered by the result of the Suppression Threshold check; if spend <= doubled budget, sets `suppressed` to false and updates final budget (`doubled_budget - spend`). If spend > doubled budget, sets `suppressed` to true.
+4.  **Job Success Rule**: Triggered when the job reaches its required success count (3 failures + 1 success); stops further processing of attempts for this job instance.
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at a time in strict arrival order, showing the state after each event.
+
+**Initial State:**
+*   `attempts`: 0
+*   `wait_s`: 0
+*   `budget`: 24
+*   `suppressed`: false (initially)
+*   `failures`: 0
+*   `successes`: 0
+
+**Event 1: Arrival of Attempt 1**
+*   **Rule Applied**: Budget Consumption Rule.
+*   **Calculation**: Cost = 2 (attempt) + 2 (wait_2s) = 4. New Budget = 24 - 4 = 20.
+*   **State Update**: `attempts`=1, `wait_s`=2, `budget`=20.
+
+**Event 2: Arrival of Attempt 2**
+*   **Rule Applied**: Budget Consumption Rule.
+*   **Calculation**: Cost = 2 (attempt) + 4 (wait_4s) = 6. New Budget = 20 - 6 = 14.
+*   **State Update**: `attempts`=2, `wait_s`=6, `budget`=14.
+
+**Event 3: Arrival of Attempt 3**
+*   **Rule Applied**: Budget Consumption Rule.
+*   **Calculation**: Cost = 2 (attempt) + 8 (wait_8s) = 10. New Budget = 14 - 10 = 4.
+*   **State Update**: `attempts`=3, `wait_s`=14, `budget`=4.
+
+**Event 4: Job Completion Check (Success)**
+*   **Rule Applied**: Job Success Rule.
+*   **Logic**: The task states "the job needs 3 failed attempts before the 4th succeeds". We have processed 3 failures and now the 4th attempt is successful. The job completes successfully. No suppression logic applies because the job did not fail (suppress) due to budget; it succeeded within the remaining budget.
+*   **State Update**: `attempts`=4, `wait_s`=14, `budget`=4, `suppressed`=false.
+
+*(Note: The "Suppression" rules in Phase 1 are conditional triggers that only activate if the job fails due to budget exhaustion before success. Since the scenario explicitly states the 4th attempt succeeds, we do not cross the threshold into suppression logic for this specific run.)*
+
+### Final Answer
+The final state derived from the walk:
+*   `attempts`: 4 (3 failed + 1 successful)
+*   `wait_s`: 14 (2 + 4 + 8)
+*   `budget_after`: 4 (Initial 24 - Spend(4+6+10))
+*   `suppressed`: false
+
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 4, "suppressed": false}
+```

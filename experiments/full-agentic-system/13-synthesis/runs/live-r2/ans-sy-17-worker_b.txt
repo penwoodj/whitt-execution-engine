@@ -1,0 +1,106 @@
+### Phase 1: Rule Scan (Part B - Residency)
+
+**Rules Identified for Part B:**
+1.  **Capacity & Eviction Policy**: A single 8GB card with models A(2), B(1), C(4), D(3). Model B is pinned and never evicted. Evictions target the Least-Recently-Touched (LRU) unpinned model.
+2.  **Timing Costs**: Loads cost 30s, Unloads cost 10s.
+3.  **Load Execution Logic**: A load executes if capacity allows. If a requested item cannot fit, it evicts LRU unpinned models until room is made or only pinned models remain (defer).
+4.  **Counting Definitions**:
+    *   `loads`: Counts every load command actually executed in the stream.
+    *   `evictions`: Counts every eviction actually performed during a load attempt.
+    *   `deferrals`: Counts loads that could not fit even after evicting all unpinned models (deferred).
+5.  **Deferred ID**: The ID of a deferred load is its own command identifier.
+
+### Phase 2: Ledger Walk (Part B - Residency)
+
+**Initial State:**
+*   Total Capacity: 8 GB
+*   Residents: A(2), B(1), C(4), D(3). Sum = 10 GB.
+*   *Correction*: The prompt implies these are the "resident sizes" currently on the card, but they sum to 10GB which exceeds the 8GB limit. However, standard interpretation of such problems assumes the initial state is valid or we start with an empty card and load sequentially? Re-reading: "one 8GB card tonight... resident sizes: A2 B1 C4 D3 GB respectively." This implies these are the items *currently* residing. But 2+1+4+3 = 10 > 8.
+    *   *Alternative Interpretation*: Perhaps the list describes the *pool of available models* and their sizes, not necessarily that all are currently loaded? "models A through D... resident sizes". Usually, this means these are the items in memory. If they don't fit, maybe the initial state is invalid?
+    *   *Let's look at the stream*: Load A (2), Load C (4), Load D (3), Unload D (3).
+    *   If we assume the card starts empty (standard for "tonight" tasks unless specified otherwise as a continuation of a previous state with valid data):
+        *   Start: Empty (0/8 GB used).
+
+**Event 1: `load A` (2 GB)**
+*   Requested size: 2 GB.
+*   Current usage: 0 GB. Available: 8 GB.
+*   Fits? Yes.
+*   Action: Load A into memory.
+*   State: Residents {A(2)}. Usage: 2/8.
+*   Counts: `loads` = 1, `evictions` = 0.
+
+**Event 2: `load C` (4 GB)**
+*   Requested size: 4 GB.
+*   Current usage: 2 GB (A). Available: 6 GB.
+*   Fits? Yes (4 <= 6).
+*   Action: Load C into memory.
+*   State: Residents {A(2), C(4)}. Usage: 6/8.
+*   Counts: `loads` = 1, `evictions` = 0.
+
+**Event 3: `load D` (3 GB)**
+*   Requested size: 3 GB.
+*   Current usage: 6 GB (A, C). Available: 2 GB.
+*   Fits? No (3 > 2).
+*   Eviction Logic: Must evict unpinned models to make room for 3 GB. Need at least 1 GB free space currently (to reach total 8), plus the new item size? No, need `Current + New <= 8`. Currently 6. Target 9. Impossible on 8GB card unless we evict.
+    *   We need to reduce current usage from 6 to at most 5 GB (so 6+3=9 > 8 still fails). Wait.
+    *   Math: `Current_Usage + New_Size <= Total_Capacity`.
+    *   $6 + 3 = 9$. Max capacity is 8. We need to evict at least 1 GB of data.
+    *   Unpinned models available for eviction: A (2 GB), C (4 GB). (B is pinned).
+    *   Eviction Strategy: Evict LRU unpinned. Let's assume arrival order determines recency (A arrived first, then C). So A is LRU.
+    *   Evict A (2 GB)? New usage would be $6 - 2 + 3 = 7$. Fits ($7 \le 8$).
+    *   Action: Evict A. Load D.
+*   State: Residents {C(4), D(3)}. Usage: 7/8.
+*   Counts: `loads` = 1, `evictions` = 1.
+
+**Event 4: `unload D` (3 GB)**
+*   Requested action: Remove D.
+*   Current Residents: {C(4), D(3)}.
+*   Action: Unload D.
+*   State: Residents {C(4)}. Usage: 4/8.
+*   Counts: `loads` = 1, `evictions` = 1. (Unloads do not increment load counts or evictions).
+
+**Final Totals for Part B:**
+*   `loads`: 2 (Load A executed, Load C executed, Load D executed? Wait. Did Load D execute? Yes, after eviction. So Load A, Load C, Load D are all executed commands.)
+    *   Let's re-verify the definition: "loads counts every load command in tonight's stream that was actually executed".
+    *   Command 1: `load A`. Executed. (Count = 1)
+    *   Command 2: `load C`. Executed. (Count = 2)
+    *   Command 3: `load D`. Executed (after eviction). (Count = 3)
+    *   Command 4: `unload D`. Not a load command.
+*   `evictions`: 1 (Only during Load D).
+*   `deferrals`: 0 (No load was deferred).
+*   `deferred`: [] (Empty list).
+
+**Wait, let's re-read the "resident sizes" constraint.**
+"one 8GB card tonight... resident sizes: A2 B1 C4 D3 GB respectively."
+If this implies these are *already* on the card at the start of the night:
+Start State: {A(2), B(1), C(4), D(3)}. Total = 10 GB. Card = 8 GB.
+This is physically impossible unless "resident sizes" refers to the *pool definitions* and not current occupancy, OR the card size in the prompt text "one 8GB card" overrides the sum of residents (implying some are swapped out or it's a trick).
+However, looking at the stream: `load A`, `load C`, `load D`. If they were already there, why load them?
+Standard interpretation for these specific "night desk" logic puzzles: The list of sizes defines the *models available* and their footprint. The card starts empty unless explicitly stated "continuing from previous state with...". Given the instruction "one 8GB card tonight", it implies a fresh context for this specific task block.
+Furthermore, if we assume the start state was {A,B,C,D} (10GB), then `load A` would require evicting B? No, B is pinned. Evict C(4)? $10-4+2 = 8$. Fits. Then `load C`... this gets messy and contradicts the "fresh" nature of such tasks usually.
+Let's stick to the **Empty Start** hypothesis which aligns with the sequential loading logic provided in the example (where items are loaded one by one).
+
+Recalculating with Empty Start:
+1.  `load A` (2): Fits. State {A}. Loads=1, Evictions=0.
+2.  `load C` (4): Fits ($2+4=6 \le 8$). State {A,C}. Loads=2, Evictions=0.
+3.  `load D` (3): Needs $6+3=9$. Over by 1. Evict LRU unpinned. A is LRU (arrived step 1 vs C step 2). Evict A(2). New State {C,D} ($4+3=7 \le 8$). Loads=3, Evictions=1.
+4.  `unload D` (3): Removes D. State {C}.
+
+Final Counts:
+*   loads: 3
+*   evictions: 1
+*   deferrals: 0
+*   deferred: []
+
+**Double Check the "Load A" command in stream vs resident list.**
+Stream: `load A`, `load C`, `load D`.
+Resident List: A, B, C, D.
+If the card started with {A,B,C,D} (10GB), it's invalid.
+If the card started with just {B} (since others are "models" and maybe only pinned ones stay? No, that's reading too much).
+Most likely: The text "resident sizes: A2 B1 C4 D3" describes the *attributes* of the models in the system, not necessarily that all 4 are currently loaded. The phrase "one 8GB card tonight" suggests a fresh instance.
+
+Let's assume the standard interpretation: Start Empty.
+Events:
+1. Load A (2). Fits.
+2. Load C (4). Fits.
+3. Load D (3). Overflows. Evict A. Fits.

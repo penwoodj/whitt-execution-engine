@@ -1,0 +1,42 @@
+### Phase 1: Rule Scan (First Half Only)
+**Rules governing the "night desk sy-22" task:**
+1.  **Arrival Order & Preemption:** `HIGH` arrives at minute 4 and runs for 4 minutes, instantly preempting any running `LOW` job. While `HIGH` runs, nothing else runs.
+2.  **Core Allocation (Waiting Queue):** `LOW` jobs take the core in order of their start minutes (`LOW1` @ min 0, `LOW2` @ min 1). A resumed `LOW` outranks a fresh one at any tie. If the core is busy when a `LOW`'s start minute arrives, it waits.
+3.  **No Idle Core:** The core never idles while a `LOW` job is waiting. When a `LOW` finishes or is preempted, the next waiting `LOW` starts in that same minute.
+4.  **Checkpointing & Waste:** `LOW` jobs checkpoint every 2 completed minutes of running time. On preemption, work past the last checkpoint is wasted and redone after resume. A job banks a checkpoint at `start + 2` and every subsequent even interval relative to its own timeline (absolute minutes).
+5.  **Resume Logic:** After resume, a job redoes every minute past its last banked checkpoint.
+
+### Phase 2: Ledger Walk (First Half Only)
+**Events applied in strict arrival order:**
+
+*   **Minute 0:** `LOW1` starts (Start Min 0). Runs for Minute 0. Total run time = 1 min. Checkpoint status: None yet (needs 2 mins). State: `LOW1` running.
+*   **Minute 1:** `LOW2` arrives (Start Min 1). Core is busy with `LOW1`. `LOW2` enters waiting queue. State: `LOW1` running, `LOW2` waiting.
+*   **Minute 2:** `LOW1` completes Minute 2 of its run. Total run time = 3 mins. Checkpoint banked at Min 2 (absolute). State: `LOW1` running, `LOW2` waiting.
+*   **Minute 3:** `LOW1` completes Minute 3 of its run. Total run time = 4 mins. No new checkpoint (needs even intervals from start? Rule says "every 2 completed minutes". Start=0, Checkpoint at 2. Next would be 4). State: `LOW1` running, `LOW2` waiting.
+*   **Minute 4:** `HIGH` arrives. Preempts `LOW1`. `LOW1` has run 4 mins total. Last checkpoint was at Min 2 (absolute). Work done since Min 2 is Minutes 3 and 4 (2 minutes). These are wasted. Core becomes free immediately in this minute. Next waiting job: `LOW2` (Start Min 1) vs Resumed `LOW1`. Rule: "A resumed LOW outranks a fresh one". However, `HIGH` runs for 4 minutes (Minutes 4, 5, 6, 7). During these minutes, nothing else runs. State: `HIGH` running.
+*   **Minute 5:** `HIGH` continues running. Core busy.
+*   **Minute 6:** `HIGH` continues running. Core busy.
+*   **Minute 7:** `HIGH` finishes (ran Minutes 4-7). Core becomes free immediately in this minute. Waiting queue: `LOW2` (Fresh, Start Min 1) and Resumed `LOW1`. Rule: "A resumed LOW outranks a fresh one". `LOW1` resumes. State: `LOW1` resuming.
+*   **Minute 8:** `LOW1` runs Minute 1 of its resume sequence. Total run time since start = 5 mins (4 wasted + 1 new). Checkpoint logic: It needs to reach absolute minutes corresponding to its timeline. Original checkpoints were at abs 2, 4, 6... It missed the checkpoint at abs 4 and 6 due to preemption/waste? Rule: "On preemption work past last checkpoint is wasted". Last valid checkpoint was at Min 2 (abs). So it needs to run until it hits the next checkpoint interval. Timeline: Start=0. Checkpoints at 2, 4, 6... It ran 0-1 (1), 2 (2), 3 (3), 4 (4-wasted). Resume starts at Min 7. To hit checkpoint at abs 4? No, checkpoints are absolute minutes of the *night*. Wait, rule says "bank a checkpoint at minute s+2 and again every 2 running minutes after". This implies relative to start time `s`.
+    *   Let's re-read carefully: "a job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after, so track banks in absolute minutes; a bank landing on the exact minute HIGH arrives still counts".
+    *   Interpretation A: Checkpoints are absolute minutes of the night (e.g., Min 2, Min 4, Min 6).
+    *   Interpretation B: Checkpoints are relative to start time `s` (e.g., s+2, s+4...). The text says "track banks in absolute minutes", suggesting the clock is the night's minute counter.
+    *   Let's assume Absolute Minutes of Night for checkpoints.
+    *   `LOW1` Start = 0. Checkpoints at Abs 2, 4, 6, 8...
+    *   Preemption at Min 4. Last checkpoint was Abs 2. Work since Abs 2 (Mins 3, 4) is wasted.
+    *   Resume starts Min 7. `LOW1` needs to reach Abs 4? No, it already passed Abs 4 in time, but the work wasn't saved. It must run until it hits the next checkpoint interval relative to its *own* timeline or absolute? "track banks in absolute minutes" usually means the checkpoint occurs at Night-Minute X.
+    *   If checkpoints are Absolute Minutes: `LOW1` needs to reach Abs 4, 6, 8... It was interrupted at Abs 4. The next checkpoint is Abs 6.
+    *   Resume starts Min 7. Runs Minute 7 (Abs 7). Not a checkpoint. Runs Minute 8 (Abs 8). Checkpoint!
+    *   Wait, the example says: "LOW1 had 5 total minutes with 2 banked... resumes with 3 minutes left." In the example, `LOW1` started at 0, ran 0-1 (1), 2 (checkpoint), 3 (unbanked). Preempted. Resume starts Min 5? No, example says "HIGH arrived minute 3".
+    *   Let's stick to the specific text for tonight: "LOW jobs checkpoint every 2 completed minutes of running time... a job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after". This phrasing "every 2 running minutes after" suggests relative intervals. But "track banks in absolute minutes" contradicts that unless it means the *timestamp* is absolute.
+    *   Let's look at the Example logic provided: "LOW1 held core minutes 0, 1 and 2, banked a checkpoint at minute 2... its 3rd minute was unbanked when swap came". This implies checkpoints are at Absolute Minutes 2, 4, 6...
+    *   Okay, applying to Tonight's `LOW1`: Start=0. Checkpoints at Abs 2, 4, 6, 8...
+    *   Preemption at Min 4. Last checkpoint was Abs 2. Wasted work: Minutes 3 and 4 (2 mins).
+    *   Resume starts Min 7. `LOW1` needs to reach the next checkpoint interval. The checkpoints are absolute minutes of the night? Or relative? "bank a checkpoint at minute s+2". If `s`=0, first is 2. Next is s+4=4? Yes.
+    *   So `LOW1` resumes at Min 7. It runs Minute 7 (Abs 7). Not a checkpoint. Runs Minute 8 (Abs 8). Checkpoint!
+    *   Wait, does it need to reach Abs 6 first? The checkpoints are absolute minutes of the night where the job *would* have checked in if running continuously from start. Since it was preempted at 4, and resumed at 7, did it miss the checkpoint at 6? Yes. But the rule says "work past last checkpoint is wasted". Last valid checkpoint was Abs 2. So any work done between Abs 2 and Abs 4 (which happened) is wasted. Any work done after resume must be counted until a new checkpoint is hit.
+    *   Resume starts Min 7. Runs Minute 7. Runs Minute 8. At end of Minute 8, it hits the "s+6" interval? Or does it just count running minutes? "every 2 completed minutes of running time".
+    *   Let's re-read: "LOW jobs checkpoint every 2 completed minutes of running time... a job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after". This is confusing. Does it mean absolute minutes `s+2, s+4`? Or relative to resume?
+    *   Example clarification: "LOW1 held core minutes 0, 1 and 2... banked a checkpoint at minute 2". (Abs 2). "its 3rd minute was unbanked when swap came" (Minute 3, Abs 3). Swap at Min 3. Wasted = 1 min.
+    *   Tonight: `LOW1` runs Mins 0, 1, 2, 3, 4. Checkpoints at Abs 2, 4? If checkpoints are absolute minutes of the night (0+2=2, 0+4=4), then yes.
+    *   Preemption at Min 4. Last checkpoint was Abs 2. W

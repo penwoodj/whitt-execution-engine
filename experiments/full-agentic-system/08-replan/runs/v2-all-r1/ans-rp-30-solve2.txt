@@ -1,0 +1,63 @@
+### Fact Bullets
+*   **LOW1**: Duration 4 minutes, Start Minute 0.
+*   **LOW2**: Duration 3 minutes, Start Minute 3.
+*   **HIGH**: Arrival Minute 5, Duration 4 minutes.
+
+### Per-Minute Walk Table
+| Minute | Core Status | Event Details |
+| :--- | :--- | :--- |
+| 0 | Running LOW1 (Fresh) | LOW1 starts at min 0. Bank checkpoint @ min 2. |
+| 1 | Running LOW1 | LOW1 continues. |
+| 2 | Running LOW1 | LOW1 completes minute 3 of run. Bank checkpoint @ min 4. |
+| 3 | Running LOW1 | LOW1 completes minute 4 of run. **FINISHES** at min 5. |
+| 5 | Preempted/Idle -> HIGH | HIGH arrives. LOW1 finishes exactly at arrival (min 5), so no work is wasted. Core switches to HIGH. |
+| 6 | Running HIGH | HIGH runs (minute 2). |
+| 7 | Running HIGH | HIGH runs (minute 3). Bank checkpoint @ min 9 for any resumed job. |
+| 8 | Running HIGH | HIGH runs (minute 4). **FINISHES** at min 9. |
+| 10 | Running LOW2 (Fresh) | LOW2 starts at min 10 (fresh start time beats any resume of non-existent others). Bank checkpoint @ min 12. |
+| 11 | Running LOW2 | LOW2 continues. |
+| 12 | Running LOW2 | LOW2 completes minute 3 of run. **FINISHES** at min 13. |
+
+### Analysis
+*   **LOW1**: Starts at 0, runs for 4 minutes (occupies mins 0-3). Finishes at $0+4=5$. Since it finishes exactly when HIGH arrives at minute 5, the banked time covers the entire run. Wasted = 0.
+*   **HIGH**: Arrives at 5, runs for 4 minutes (occupies mins 6-9? No, let's re-read the clock convention).
+    *   *Correction on Clock Convention*: "a job that starts at minute s and runs n minutes occupies minutes s .. s+n−1 and FINISHES AT minute s+n".
+    *   HIGH arrives at 5. It preempts whatever is running. Since LOW1 finishes exactly at 5, the core becomes free at 5. HIGH starts at 5. Runs for 4 minutes. Occupies mins 5, 6, 7, 8. Finishes at $5+4=9$.
+    *   Wait, let's re-evaluate the "occupies" logic vs "finish". If a job occupies s..s+n-1, it finishes at s+n.
+    *   LOW1: Starts 0, runs 4. Occupies 0, 1, 2, 3. Finishes at 5. Correct.
+    *   HIGH: Arrives 5. Since LOW1 finished exactly then, core is free. HIGH starts at 5. Runs 4. Occupies 5, 6, 7, 8. Finishes at 9.
+*   **LOW2**: Starts at 3? The prompt says "LOW2 runs 3 minutes starting at minute 3". However, the core is busy with HIGH from min 5 to 9.
+    *   LOW2 start request comes at min 3. Core is running LOW1 (0-3). At min 3, LOW1 finishes. Core becomes free. But wait, LOW1 occupies 0..3. So at minute 3, the job is still running? No, "occupies s..s+n-1". If n=4, s=0, it occupies 0,1,2,3. It finishes at 5.
+    *   Let's re-read carefully: "LOW1 runs 4 minutes starting at minute 0... LOW2 runs 3 minutes starting at minute 3."
+    *   Timeline check:
+        *   Min 0-3: LOW1 running (occupies 0,1,2,3). Finishes at 5.
+        *   Min 3 request for LOW2 arrives. Core is busy with LOW1 until it finishes at 5? Or does "starting at minute 3" mean the job begins execution at min 3?
+        *   Standard scheduling: If a job starts at T, it occupies [T, T+n).
+        *   LOW1: Starts 0. Occupies [0, 4). Finishes at 4? No, prompt says "FINISHES AT minute s+n". So if s=0, n=4, finishes at 4? Or does "occupies s..s+n-1" imply integer minutes?
+        *   Let's stick to the explicit rule: "occupies minutes s .. s+n−1 and FINISHES AT minute s+n".
+        *   LOW1: s=0, n=4. Occupies 0, 1, 2, 3. Finishes at 5? Wait, $0+4=4$. Why did I think 5 earlier? Ah, the prompt text in "Fact Bullets" section of previous attempts often had confusion. Let's look at the specific rule: "FINISHES AT minute s+n".
+        *   If LOW1 starts 0, runs 4 mins. Occupies 0, 1, 2, 3. Finishes at $0+4=4$? Or does it occupy 0..3 and finish at the end of 3? The rule says "FINISHES AT minute s+n". So if s=0, n=4, Finish = 4.
+        *   Let's re-read the "Clock Convention" in the prompt: "a job that starts at minute s and runs n minutes occupies minutes s .. s+n−1 and FINISHES AT minute s+n".
+        *   Example: Start 0, Run 1. Occupies 0..0 (just min 0). Finishes at 1.
+        *   So LOW1 (Start 0, Run 4): Occupies 0, 1, 2, 3. Finishes at 4.
+        *   HIGH arrives at 5. Since LOW1 finishes at 4, the core is free from min 4 onwards.
+        *   LOW2 starts at 3. Request comes at 3. Core is busy with LOW1 (0..3). So LOW2 waits until min 4? Or does it start immediately if the slot opens? The rule says "LOW whose start minute arrives while core is busy simply waits".
+        *   Timeline:
+            *   Min 0-3: LOW1 running.
+            *   Min 4: LOW1 finishes (at end of min 3, finish time is 4). Core free at 4.
+            *   Request for LOW2 was at 3. It waits until core free? Or does it start at the earliest available minute? "minute one LOW job finishes or is preempted, next waiting LOW starts in that same minute". So if LOW1 finishes at min 4 (meaning end of interval [3,4)), then next job starts at min 4.
+            *   Wait, let's look at the "Fact Bullets" from the prompt's own example logic: "LOW2 runs 3 minutes starting at minute 3". If it starts at 3, and core is busy until 4, does it start at 3 or 4? Usually, if a job is waiting, it starts when the core becomes free.
+            *   Let's assume standard FIFO with preemption logic:
+                *   LOW1 runs [0, 4). Finishes at 4.
+                *   HIGH arrives at 5. Core is idle [4, 5)? "core never idles while LOW job is waiting". Is there a waiting job? Yes, LOW2 requested at 3. So core picks up LOW2 immediately when free (at min 4).
+                *   So LOW2 starts at 4. Runs for 3 mins. Occupies [4, 7). Finishes at $4+3=7$.
+                *   HIGH arrives at 5. Core is running LOW2 (started at 4). HIGH preempts LOW2.
+                *   Preemption happens at min 5.
+                *   Checkpoints: "job that starts or resumes at minute s banks checkpoint at minute s+2".
+                    *   LOW2 started at 4. Bank at $4+2=6$.
+                    *   At preemption (min 5), has it reached bank? No, bank is at 6.
+                    *   Work done: Min 4 to Min 5 (1 minute).
+                    *   Wasted: Minutes past last bank. Last bank was effectively "start" or previous checkpoint? The rule says "bank landing on exact minute HIGH arrives still counts". Here bank is at 6. Preemption at 5. No bank landed yet.
+                    *   Wait, does it have a checkpoint at start? Usually yes, but the rule specifies "banks checkpoint at s+2 and every 2 running minutes after". It implies no checkpoint immediately at start unless specified. But typically "work past last checkpoint is wasted". If no checkpoint exists before min 5, then all work (1 min) is wasted?
+                    *   Let's re-read: "job that starts or resumes at minute s banks checkpoint at minute s+2". This implies the first bank is at s+2. Before that, there is no bank? Or does "start" count as a bank? The text says "work past last checkpoint is wasted". If the first checkpoint is at s+2, then work from s to s+1 (if preempted) is not covered by any checkpoint. So it is wasted.
+                    *   However, let's look at the "Fact Bullets" in the prompt's previous attempts which often clarified: "bank landing on exact

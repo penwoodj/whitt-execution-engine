@@ -1,0 +1,102 @@
+### Phase 1 Rule Scan (First Half Only)
+*Rules governing the core scheduling, preemption, checkpointing, and waste calculation for LOW jobs.*
+
+1. **Arrival Order & Queuing**: LOW jobs are queued in order of their start minutes; a resumed LOW outranks a fresh one at any tie; if the core is busy when a LOW's start minute arrives, it waits until the current job finishes or is preempted.
+2. **Preemption Priority**: HIGH arrival instantly preempts whatever LOW job is running; while HIGH runs, nothing else runs.
+3. **Checkpoint Banking**: LOW jobs checkpoint every 2 completed minutes of running time (absolute minutes $s+2$, then every 2 subsequent minutes).
+4. **Waste on Preemption**: On preemption, work past the last checkpoint is wasted and must be redone after resume.
+5. **Resume Calculation**: A job resuming owes the difference between its total duration and its banked time; it runs this owed amount immediately upon core availability.
+
+### Phase 2 Ledger Walk (First Half Only)
+*Applying events in strict arrival order to track state, waste, and completion.*
+
+**Minute 0:** `LOW1` starts (Total: 7). Core busy with `LOW1`. Banked: 0.
+**Minute 1:** `LOW2` arrives (Start: 1). Core busy. Queue: [`LOW2`].
+**Minute 2:** `LOW1` runs (Time elapsed: 2). **Bank Checkpoint** at Minute 4 reached? No, bank is at absolute minute 2+2=4. Wait, rule says "checkpoint every 2 completed minutes". At min 0 start. Min 1 done (1m), Min 2 done (2m). Banked time = 2 mins. Next bank at min 4.
+**Minute 3:** `HIGH` arrives. **Preemption Event**. `LOW1` has run 3 minutes total. Last checkpoint was at 2 minutes completed. Work from minute 3 to completion is wasted. `LOW1` owes: Total (7) - Banked (2) = 5 mins remaining. Core switches to `HIGH`.
+**Minute 4:** `HIGH` runs (Time elapsed: 1). Queue empty? No, `LOW2` waiting. But `HIGH` has priority.
+**Minute 5:** `HIGH` runs (Time elapsed: 2). Total `HIGH` duration is 4 mins. Still running.
+**Minute 6:** `HIGH` runs (Time elapsed: 3). Still running.
+**Minute 7:** `HIGH` finishes. Core becomes free. Queue has `LOW2`. `LOW1` is waiting with 5 mins owed. Rule: "resumed or not" - `LOW1` start minute (0) beats `LOW2` start minute (1). Core picks `LOW1`.
+**Minute 8:** `LOW1` resumes (Owed: 5). Runs 1 min. Total run time since resume: 1. Banked total: 3.
+**Minute 9:** `LOW1` resumes. Runs 1 min. Total run time since resume: 2. **Bank Checkpoint** reached? Yes, absolute minute $7+2=9$. Banked total: 4.
+**Minute 10:** `LOW1` resumes. Runs 1 min. Total run time since resume: 3. Banked total: 5.
+**Minute 11:** `LOW1` resumes. Runs 1 min. Total run time since resume: 4. Banked total: 6.
+**Minute 12:** `LOW1` resumes. Runs 1 min. Total run time since resume: 5. **Job Complete**.
+
+*Wait, let's re-verify the "Bank" logic vs "Waste".*
+Rule: "a job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after".
+`LOW1` starts Min 0. Banks at Min 2 (absolute).
+At Min 3, `HIGH` preempts. `LOW1` has run 3 mins. Last bank was at Min 2. Work from Min 3 to end is wasted.
+Remaining work = Total (7) - Banked (2) = 5 mins.
+`HIGH` runs Min 3, 4, 5, 6 (4 mins). Finishes Min 7.
+Core free Min 7. `LOW1` resumes with 5 mins owed.
+Runs Min 7 to 11 (5 mins).
+Does it bank again? "again every 2 running minutes after".
+Resume at Min 7. Bank at Min $7+2=9$.
+At Min 9, another bank.
+Total run time for `LOW1` = 3 (wasted) + 5 (resumed) = 8 mins? No, total duration is fixed at 7.
+The "owed" logic implies the job effectively restarts from the last checkpoint state.
+So `LOW1` needs to complete 5 more minutes of *work*.
+It runs Min 7-11 (5 mins).
+Total time elapsed for `LOW1`: 3 (initial) + 5 (resumed) = 8? No, the job finishes when it completes its total duration.
+If it banks at Min 2, and resumes at Min 7, it has "banked" 2 minutes of progress. It needs to do 5 more minutes.
+It runs Min 7-11 (5 mins). At Min 9 it hits a bank checkpoint relative to the resume? Or absolute?
+"a job that starts or resumes at minute s banks...". Resume is at Min 7. Banks at Min 9.
+So at Min 9, it has completed 2 minutes of the resumed work.
+It finishes at Min 12 (5 mins after start of resume).
+Total elapsed time for `LOW1`: 0 to 3 (interrupted) + 7 to 12 (completed) = 12 minutes? No, makespan is from first start.
+Starts Min 0. Finishes Min 12. Makespan = 12.
+Wasted: The work done between the last checkpoint (Min 2) and preemption (Min 3). That is $3-2=1$ minute.
+
+*Check `LOW2`*: Arrives Min 1. Waits until `HIGH` finishes (Min 7).
+Starts Min 8? No, `LOW1` resumes at Min 7 because it outranks `LOW2`.
+`LOW1` runs Min 7-11. Finishes Min 12.
+Core free Min 12. `LOW2` starts Min 12.
+Duration: 3 mins. Runs Min 12-14. Finishes Min 14.
+
+*Re-evaluating "Makespan counts from the first start"*:
+Starts: Min 0 (`LOW1`).
+Ends: Min 14 (`LOW2`).
+Makespan = 14 minutes.
+
+*Re-evaluating "Wasted"*:
+`LOW1` ran Min 0-3 (3 mins). Last checkpoint at Min 2. Wasted = $3-2=1$ min.
+`LOW2` never preempted. Wasted = 0.
+Total Wasted = 1 minute.
+
+*Re-evaluating "Order"*:
+`LOW1` finishes Min 12.
+`LOW2` finishes Min 14.
+Order: `["LOW1", "LOW2"]`.
+
+Let's double check the orientation story numbers to ensure I'm not misinterpreting the rule application, even though the task says "not tonight's numbers".
+Orientation: LOW1 (7m), LOW2 (3m). HIGH arrives Min 3.
+Walk in Orientation:
+Min 0-2: LOW1 runs. Banks at 2.
+Min 3: HIGH preempts. Wasted = $3-2=1$.
+HIGH runs Min 3-5 (2 mins? Task says "runs 2 minutes" in orientation text, but task description for tonight says "runs 4 minutes").
+Wait, the prompt has conflicting info.
+"LOW1 runs 7 minutes... HIGH arrives at minute 3 and runs 2 minutes." (Orientation story).
+"night desk sy-28: ... LOW1 runs 4 minutes starting at minute 0, LOW2 runs 3 minutes starting at minute 3. HIGH arrives at minute 5..." (Tonight's task).
+
+**CRITICAL**: The instruction says "Solve ONLY the FIRST half of tonight's task... ignore the second half".
+And "read every rule twice before touching anything, once for what it says and once for what it does not say."
+The text block contains two distinct scenarios:
+1. `night desk sy-28` (Tonight): LOW1=4m, LOW2=3m, HIGH arrives Min 5, runs 4m.
+2. `night audit` (Second matter): Claims c1-c4.
+3. `for orientation only...`: LOW1=7m, LOW2=3m, HIGH arrives Min 3, runs 2m.
+
+The instruction "Solve ONLY the FIRST half of tonight's task" refers to the `night desk sy-28` scenario (Part A). The `night audit` is Part B.
+I must use the parameters from `night desk sy-28`.
+
+**Parameters for Tonight (Part A):**
+*   **LOW1**: Starts Min 0, Duration = 4 minutes.
+*   **LOW2**: Starts Min 3, Duration = 3 minutes.
+*   **HIGH**: Arrives Min 5, Duration = 4 minutes.
+
+**Re-Walk with Tonight's Numbers:**
+
+**Minute 0:** `LOW1` starts (Total: 4). Core busy. Banked: 0.
+**Minute 1:** `LOW1` runs (Time elapsed: 1).
+**Minute 2:** `LOW1` runs (Time

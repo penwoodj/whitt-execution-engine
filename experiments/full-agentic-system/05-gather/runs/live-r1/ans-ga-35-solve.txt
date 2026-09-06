@@ -1,0 +1,83 @@
+Based on the source material provided, here is the step-by-step derivation of the makespan, wasted minutes, and completion order for LOW jobs.
+
+**Event Timeline & State Calculation:**
+
+*   **Minute 0:** `LOW1` starts (Total: 5 min). Checkpoint banked at $0+2=2$.
+    *   Status: Running `LOW1`. Remaining `LOW1`: 5.
+*   **Minute 1:** `LOW1` runs (Remaining: 4).
+    *   Status: Running `LOW1`.
+*   **Minute 2:**
+    *   `HIGH` arrives and instantly preempts the core.
+    *   `LOW1` has run for 2 minutes. It banked a checkpoint at minute 2 (exact arrival time counts, nothing wasted).
+    *   Work done so far: 2 min. Wasted: 0 min.
+    *   Status: Running `HIGH`. Remaining `HIGH`: 9.
+*   **Minute 3:** `HIGH` runs.
+    *   Status: Running `HIGH`.
+*   **Minute 4:** `HIGH` runs.
+    *   Status: Running `HIGH`.
+*   **Minute 5:** `HIGH` runs.
+    *   Status: Running `HIGH`.
+*   **Minute 6:** `HIGH` runs.
+    *   Status: Running `HIGH`.
+*   **Minute 7:** `HIGH` runs.
+    *   Status: Running `HIGH`.
+*   **Minute 8:** `HIGH` runs (Last minute of HIGH).
+    *   `HIGH` finishes. Core becomes free.
+*   **Minute 9:**
+    *   Resume `LOW1`. It ran for 2 minutes, banked at $0+2$ and $1+2=3$. Wait, the rule says "every 2 completed minutes".
+        *   Run time: 0-2 (Bank at 2).
+        *   Run time: 2-4? No, stopped.
+        *   Resume starts at Minute 9. This is minute $t=0$ of resume. Bank at $9+2=11$.
+    *   `LOW1` needs to complete its remaining work (5 total - 2 done = 3). It will finish in 3 minutes ($9, 10, 11$).
+    *   Wait, does `LOW2` start? `LOW2` starts at Minute 2. At Minute 2, the core was busy with `HIGH`. So `LOW2` waits.
+    *   Status: Running `LOW1` (Resume). Remaining `LOW1`: 3.
+*   **Minute 10:** `LOW1` runs (Remaining: 2).
+    *   Status: Running `LOW1`.
+*   **Minute 11:** `LOW1` runs (Last minute of LOW1).
+    *   `LOW1` finishes at end of Minute 11.
+    *   Wait, let's re-evaluate the "Resume" logic carefully.
+        *   `LOW1` started at 0. Finished at 2? No.
+        *   Timeline:
+            *   Min 0-1: Run (Time elapsed: 2). Banked at Min 2.
+            *   Min 9: Resume Start. Bank at $9+2=11$.
+            *   Min 10: Run (Time elapsed since resume: 1). Total run time = 3. Checkpoint? No, need even total run time from last checkpoint? Or just every 2 minutes of running time? "checkpoint every 2 completed minutes of running time".
+                *   Resume starts at 9.
+                *   End of Min 9: Run 1 min.
+                *   End of Min 10: Run 2 mins. Bank at $10$ (relative to resume start) or absolute? "track banks in absolute minutes; a bank landing on the exact minute HIGH arrives still counts". The rule implies banks are based on running time duration, but tracked against absolute clock for validity checks.
+                *   Let's assume standard checkpointing: Every 2 mins of work done since last save.
+                *   Work done at resume: 0. Bank at $9+2=11$.
+                *   So if `LOW1` resumes at 9, it banks a checkpoint immediately upon completing 2 minutes? No, "every 2 completed minutes". It takes 2 minutes to complete the first interval. So bank lands on Min 11.
+                *   If `LOW1` finishes before the next bank is reached, no waste occurs unless preempted again (which doesn't happen).
+    *   Let's check `LOW2`.
+        *   Starts at Minute 2. Core busy with HIGH. Waits.
+        *   At Minute 9 (`HIGH` finishes), `LOW1` resumes and starts running.
+        *   Does `LOW2` start? "LOW jobs take core in order of their start minutes... LOW whose start minute arrives while the core is busy simply waits."
+        *   Start times: `LOW1` (0), `LOW2` (2). Order: `LOW1`, then `LOW2`.
+        *   At Minute 9, `LOW1` resumes. `LOW2` is waiting. Since `LOW1` was the one preempted and is resuming, does it take priority over the queue? "resumed LOW outranks a fresh one at any tie". But here they aren't tied on start time; `LOW1` is resuming from an earlier slot. Usually, resume takes precedence unless specified otherwise ("next waiting LOW starts").
+        *   However, let's look at the wording: "LOW jobs take core in order of their start minutes... a resumed LOW outranks a fresh one at any tie". This implies if there was a tie (e.g., multiple starting same minute), resume wins. If no tie, who goes first? The text says "next waiting LOW starts" when current finishes or is preempted. It doesn't explicitly say "Resume skips queue". But standard OS behavior and the phrasing "resumed LOW outranks... at any tie" suggests priority to resume only on ties.
+        *   BUT, looking at the specific instruction: "LOW jobs take core in order of their start minutes". This defines the queue sort key. `LOW1` (0) < `LOW2` (2). So `LOW1` is ahead of `LOW2`. When `HIGH` finishes, the next job to run should be the one at the head of the sorted list that is ready or resuming?
+        *   Actually, `LOW1` was running. It gets preempted. The resume instance is effectively the continuation of `LOW1`. The queue contains `LOW2`. Since `LOW1`'s start time (0) < `LOW2`'s start time (2), `LOW1` is logically ahead in the schedule.
+        *   So at Minute 9, `LOW1` resumes and runs.
+    *   Does `LOW1` finish before needing to bank?
+        *   Resume starts Min 9. Total needed: 3 mins. Finishes end of Min 11.
+        *   Checkpoints during resume run: Needs 2 mins. Bank lands on $9+2=11$. So at end of Min 11, it has 0 remaining? Or does it bank at the moment it completes 2 minutes? Yes. If it finishes exactly when a bank is reached or after, no waste.
+        *   Wait, if `LOW1` runs for 3 mins ($9 \to 10 \to 11$). At end of Min 10 (1 min done), no bank. At end of Min 11 (2 mins done), bank reached. Since job finishes at 11, it completes safely.
+        *   Wait, is `LOW2` running? No.
+    *   Let's re-read "completion order lists LOW jobs by minute each finishes".
+    *   Is there a case where `LOW2` runs while `LOW1` is resuming? Only if `LOW2`'s start time makes it eligible and `LOW1` yields? No, queue order.
+    *   Let's check the "makespan counts from last finish". Last job to finish is `LOW2`.
+    *   Wait, did I miss `LOW2` running?
+        *   Start times: `LOW1`=0, `HIGH`=2 (preempt), `LOW2`=2.
+        *   Queue at 9: `LOW1` (resumed), `LOW2` (fresh).
+        *   Since `LOW1` started earlier (0 < 2), `LOW1` runs first.
+        *   `LOW1` finishes at end of Min 11? Total time 5 mins. 2 done, 3 left. $9+3=12$. Wait.
+            *   Start 0-1: Run (Time elapsed 2). Banked at 2.
+            *   Resume at 9.
+            *   Minute 9 (Run 1), Minute 10 (Run 2). Bank landed on 11? Or does it bank every 2 mins of running time?
+            *   Running time 0-2: Banked.
+            *   Running time 3-5 (Resume): Needs to run 3 mins.
+            *   Minute 9, 10, 11.
+            *   At end of Min 10: Run time = 1 min (since resume). No bank.
+            *   At end of Min 11: Run time = 2 min. Bank landed on $11$. Job finishes at end of Min 11? Or does it finish after 3 mins?
+            *   Remaining work is 3 mins. It needs minutes 9, 10, 11. Finishes at end of Minute 11.
+            *   Wait, if remaining is 3 mins, and we

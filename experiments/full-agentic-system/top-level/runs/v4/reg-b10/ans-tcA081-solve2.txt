@@ -1,0 +1,89 @@
+Phase 1 RULE SCAN:
+
+- Rule: Install-without-clean detection triggers when a layer contains apt-get install or similar package installer command with no subsequent remove or cleanup.  
+  Trigger: Any layer with "apt-get install" or equivalent followed by no removal in later layers, AND the layer is not marked as metadata-only.  
+  Reason: This pattern adds bloat that persists; threshold = 10% of cumulative size if repeated across multiple layers.
+
+- Rule: Duplicated data adds detection triggers when a layer contains identical file paths or content hashes (via checksum comparison) to a prior layer, and the later layer does not remove or overwrite.  
+  Trigger: File path or content hash match between two layers with no intervening removal.  
+  Reason: Redundant data increases size without functional benefit; threshold = 5% of cumulative size if repeated.
+
+- Rule: Secrets-in-layer detection triggers when a layer contains any string that matches known secret patterns (e.g., API keys, passwords) in command or file content.  
+  Trigger: Any layer with text matching regex pattern for secrets (e.g., "password=xxx", "token=abc123").  
+  Reason: Security risk; threshold = 100% of layer size if present.
+
+- Rule: Add-then-remove pair detection triggers when a layer adds data (via command or file) and a later layer removes it via rm -rf, delete, or equivalent.  
+  Trigger: A layer with file creation or data addition followed by a later layer removing that same path or content.  
+  Reason: Net-zero weight but high history cost; threshold = any such pair where the added size > 0.
+
+- Rule: Refill rule triggers when a layer is rebuilt from scratch (e.g., new base image) and contains identical commands to a prior layer, indicating redundant work.  
+  Trigger: Layer command matches previous layer exactly in sequence and content.  
+  Reason: Redundant execution; threshold = cumulative size > 10% of total if repeated.
+
+- Rule: Expiry rule triggers when a layer is marked as "expired" or "obsolete" by metadata (e.g., timestamp older than 7 days).  
+  Trigger: Layer has timestamp older than  or no timestamp at all.  
+  Reason: Outdated layers should be pruned; threshold = 10% of cumulative size if expired and unused.
+
+- Rule: Return rule triggers when a layer is marked as "return" in metadata (e.g., rollback, revert).  
+  Trigger: Layer has "return" flag or command like "rollback to layer X".  
+  Reason: Indicates state reversion; threshold = any such layer with size > 0.
+
+- Rule: Fallback rule triggers when a layer contains fallback logic (e.g., "if not found, use default") and the default is not actually used.  
+  Trigger: Layer has conditional command with fallback path but no evidence of actual fallback execution.  
+  Reason: Wasted computation; threshold = 15% of cumulative size if unused.
+
+- Rule: Source-ranking rule triggers when a layer's source (e.g., base image, build step) is ranked lower than previous layers in dependency graph.  
+  Trigger: Layer has source with lower priority or no explicit dependency path.  
+  Reason: May indicate poor optimization; threshold = any such layer where size > cumulative total * 0.1.
+
+- Rule: Promotion rule triggers when a layer is promoted to "production" status via metadata flag.  
+  Trigger: Layer has "promoted=true" in metadata.  
+  Reason: Indicates active use; threshold = only if used by downstream layers.
+
+Phase 2 LEDGER WALK:
+
+[timestamp=2024-04-15T08:30:00Z] Layer table generated with index, command, size, cumulative size:
+- Index 0: "RUN mkdir /tmp", size=1024, cumulative=1024
+- Index 1: "RUN apt-get update && apt-get install curl -y", size=3500, cumulative=4524
+- Index 2: "COPY file.txt /app/", size=1000, cumulative=5524
+- Index 3: "RUN echo 'hello' > /tmp/secret", size=100, cumulative=5624
+- Index 4: "RUN rm -rf /tmp/secret", size=0, cumulative=5624 (no change)
+- Index 5: "COPY app.js /app/", size=8000, cumulative=13624
+- Index 6: "RUN apt-get install python3 -y && rm -rf /var/lib/apt/lists/*", size=7000, cumulative=20624
+- Index 7: "COPY config.json /etc/", size=500, cumulative=21124
+- Index 8: "RUN echo 'debug' > /log/debug.log", size=100, cumulative=21224
+- Index 9: "RUN rm -rf /log/debug.log", size=0, cumulative=21224 (no change)
+- Index 10: "COPY data.csv /data/", size=50000, cumulative=26224
+- Index 11: "RUN apt-get install postgresql-client -y", size=3000, cumulative=29224
+- Index 12: "RUN mkdir /backup && cp /data/data.csv /backup/", size=5000, cumulative=34224
+- Index 13: "RUN rm -rf /data/data.csv", size=0, cumulative=34224 (no change)
+- Index 14: "COPY secret.key /etc/secret.key", size=1024, cumulative=35248
+- Index 15: "RUN echo 'password=abc123' > /tmp/pass.txt", size=100, cumulative=35348 → flagged by secrets-in-layer rule (threshold met)
+- Index 16: "RUN rm -rf /tmp/pass.txt", size=0, cumulative=35348
+- Index 17: "COPY app.py /app/", size=20000, cumulative=55348
+- Index 18: "RUN python3 app.py", size=10000, cumulative=65348
+- Index 19: "RUN apt-get install nginx -y && rm -rf /var/lib/apt/lists/*", size=25000, cumulative=90348
+- Index 20: "COPY index.html /usr/share/nginx/html/", size=10000, cumulative=100348
+- Index 21: "RUN echo 'debug' > /var/log/nginx.log", size=100, cumulative=100448
+- Index 22: "RUN rm -rf /var/log/nginx.log", size=0, cumulative=100448 (no change)
+- Index 23: "COPY .dockerignore /root/", size=500, cumulative=100948
+- Index 24: "RUN mkdir /tmp && touch /tmp/backup.txt", size=100, cumulative=101048
+- Index 25: "RUN rm -rf /tmp/backup.txt", size=0, cumulative=101048 (no change)
+- Index 26: "COPY .gitignore /app/", size=300, cumulative=101348
+- Index 27: "RUN echo 'version=1.0' > /etc/version", size=100, cumulative=101448
+- Index 28: "RUN rm -rf /etc/version", size=0, cumulative=101448 (no change)
+- Index 29: "COPY final.tar.gz /output/", size=500000, cumulative=551448
+- Index 30: "RUN tar -xzf final.tar.gz -C /app", size=500000, cumulative=601448 (no change)
+- Index 31: "RUN rm -rf /output/final.tar.gz", size=0, cumulative=601448
+- Index 32: "COPY .dockerignore /app/", size=500, cumulative=601948 → duplicated data adds (same as index 23); flagged
+- Index 33: "RUN echo 'debug' > /log/debug.log", size=100, cumulative=602048 → fallback rule triggered; no actual fallback used; flagged
+- Index 34: "RUN rm -rf /log/debug.log", size=0, cumulative=602048 (no change)
+- Index 35: "COPY app.js /app/", size=8000, cumulative=610048 → duplicated data adds; flagged
+- Index 36: "RUN apt-get install python3 -y && rm -rf /var/lib/apt/lists/*", size=7000, cumulative=680048 → refill rule triggered (same as index 6); flagged
+- Index 37: "COPY config.json /etc/", size=500, cumulative=680548 → source-ranking rule triggered; source not prioritized; flagged
+- Index 38: "RUN echo 'promoted' > /promote", size=100, cumulative=680648 → promotion rule triggered; used by downstream layers; marked
+- Index 39: "RUN rm -rf /promote", size=0, cumulative=680648 (no change)
+
+Wasteful-pattern detection:
+- Install-without-clean: Layer 1 (apt-get install curl), no removal later → detected.  
+  Size added: 3500; cumulative = 4524; 10% of cumulative? 45

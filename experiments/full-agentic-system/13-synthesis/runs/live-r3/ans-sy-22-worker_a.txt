@@ -1,0 +1,66 @@
+### Phase 1 RULE SCAN (First Half Only)
+The following rules govern the state changes for the LOW/HIGH job scheduling event:
+1. **Preemption Rule**: HIGH arrival instantly preempts any running LOW job; while HIGH runs, nothing else runs.
+2. **Queueing Rule**: LOW jobs take the core in order of their start minutes (earlier start minute = higher priority).
+3. **Resume Priority Rule**: A resumed LOW outranks a fresh one at any tie (not applicable here as starts are distinct).
+4. **Checkpoint Banking Rule**: LOW jobs checkpoint every 2 completed minutes of running time; banks occur at absolute minutes $s+2, s+4, \dots$.
+5. **Waste Rule**: On preemption, work past the last banked checkpoint is wasted and must be redone after resume.
+6. **Idle Avoidance Rule**: The core never idles while a LOW job is waiting; the next waiting LOW starts in the same minute the previous one finishes or is preempted.
+
+### Phase 2 LEDGER WALK (First Half Only)
+**Minute 0**: `LOW1` arrives (duration 5). Core busy with `LOW1`. State: `LOW1` running (time elapsed 0/5).
+**Minute 1**: `LOW2` arrives (duration 2). Queue: [`LOW2`] waiting. Core busy with `LOW1`. State: `LOW1` running (time elapsed 1/5).
+**Minute 2**: `LOW1` runs to completion of minute 2. Checkpoint banked at absolute min 2 (`0+2`). Core busy with `LOW1`. State: `LOW1` running (time elapsed 2/5, Banked=2).
+**Minute 3**: `HIGH` arrives (duration 4). Preempts `LOW1`. Work done by `LOW1` since last bank (min 2) is wasted. Core busy with `HIGH`. State: `HIGH` running (time elapsed 0/4), `LOW1` suspended (wasted=1, remaining=3), Queue: [`LOW2`] waiting.
+**Minute 4**: `HIGH` runs to completion of minute 1. Core busy with `HIGH`. State: `HIGH` running (time elapsed 1/4).
+**Minute 5**: `HIGH` finishes. Core becomes free. `LOW1` resumes (remaining 3) vs `LOW2` waiting (fresh, remaining 2). Rule: Resumed outranks fresh? No, rule says "Resumed LOW outranks a fresh one at any tie". Here start times differ (`LOW1` started min 0, `LOW2` started min 1). Queueing Rule applies: Order of start minutes. `LOW1` (start 0) > `LOW2` (start 1). Core starts `LOW1`. State: `LOW1` running (time elapsed 0/3 remaining), Queue: [`LOW2`] waiting.
+**Minute 6**: `LOW1` runs to completion of minute 1. Checkpoint banked at absolute min 4 (`2+2`). Core busy with `LOW1`. State: `LOW1` running (time elapsed 1/3, Banked=4).
+**Minute 7**: `LOW1` runs to completion of minute 2. Checkpoint banked at absolute min 6 (`4+2`). Core busy with `LOW1`. State: `LOW1` running (time elapsed 2/3, Banked=6).
+**Minute 8**: `LOW1` finishes remaining work (total duration 5, ran 0-2, resumed 6-7, now finishing at end of min 8? Wait. Let's re-calc durations carefully).
+
+*Re-evaluation of Minute Counts:*
+- **Start Min 0**: `LOW1` starts.
+- **Min 0 -> 1**: `LOW1` runs (1st min). Total elapsed: 1.
+- **Min 1 -> 2**: `LOW1` runs (2nd min). Total elapsed: 2. Bank at abs min 2.
+- **Min 2 -> 3**: `HIGH` arrives. Preemption happens *during* minute 3? Or at start of minute 3? "HIGH arrives at minute 4". Ah, text says "HIGH arrives at minute 4". My previous walk assumed arrival at min 3 based on the example story ("LOW1 held core minutes 0, 1 and 2... HIGH arrived at minute 3").
+*Correction*: The prompt text for tonight says: "**HIGH arrives at minute 4**". The example story had HIGH arrive at minute 3. I must follow tonight's numbers.
+
+**Corrected Walk:**
+- **Min 0**: `LOW1` starts (dur 5). Elapsed: 0/5.
+- **Min 1**: `LOW2` arrives (dur 2). Queue: [`LOW2`]. Core: `LOW1`. Elapsed: 1/5.
+- **Min 2**: `LOW1` runs. Bank at abs min 2 (`0+2`). Elapsed: 2/5.
+- **Min 3**: `LOW1` runs. Elapsed: 3/5. (No bank yet, next is +2).
+- **Min 4**: `HIGH` arrives (dur 4). Preempts `LOW1`. Work since last bank (min 2) is wasted. Wasted = $4 - 2 = 2$ minutes? Or does "every 2 completed minutes" mean banks at 2, 4, 6...?
+    - Text: "checkpoint every 2 completed minutes".
+    - Start min 0.
+    - End of Min 1: 1 min done.
+    - End of Min 2: 2 mins done. Bank 1. (Absolute time 2).
+    - End of Min 3: 3 mins done. No bank.
+    - `HIGH` arrives at minute 4. This implies the event happens at the start of minute 4? Or does it interrupt minute 4? "runs 4 minutes to completion". Usually, arrivals happen at integer boundaries. If HIGH arrives at min 4, it takes over for mins 4, 5, 6, 7.
+    - Preemption occurs at start of Min 4. `LOW1` has done 3 minutes (mins 0, 1, 2? No, mins 0-1 is 1st min, 1-2 is 2nd, 2-3 is 3rd). So `LOW1` finished minute 3 just before HIGH arrived.
+    - Last bank was at absolute min 2 (end of minute 2).
+    - Current time: Start of Min 4. `LOW1` has done 3 minutes since start.
+    - Work wasted = Time since last bank = $3 - 2 = 1$ minute? Or is the bank inclusive? "banking a checkpoint at minute s+2". If started at 0, banks at 2, 4...
+    - At start of Min 4, `LOW1` has completed minutes 0, 1, 2. It is about to do minute 3 (which corresponds to time interval 3-4). Wait, standard discrete event: Minute $t$ covers interval $[t, t+1)$.
+    - Start Min 0: Interval [0,1).
+    - Start Min 1: Interval [1,2).
+    - Start Min 2: Interval [2,3).
+    - Start Min 3: Interval [3,4).
+    - `HIGH` arrives at minute 4. This is the boundary between interval [3,4) and [4,5).
+    - So `LOW1` completed intervals [0,1), [1,2), [2,3). Total 3 minutes.
+    - Banks: "checkpoint every 2 completed minutes". Completed at end of Min 1 (1 min)? No, "every 2". So bank at end of Min 2 (2 mins done) and end of Min 4 (4 mins done).
+    - At start of Min 4, `LOW1` has done exactly 3 minutes. Last bank was at 2 minutes.
+    - Wasted work = $3 - 2 = 1$ minute? Or is the checkpoint valid for any time $\le$ last bank? Yes. So work in (2, 3] is wasted. That is 1 minute of work.
+    - `HIGH` runs intervals [4,5), [5,6), [6,7). Finishes at end of Min 7.
+- **Min 5**: `HIGH` running. Queue: [`LOW2`] waiting.
+- **Min 6**: `HIGH` running. Queue: [`LOW2`] waiting.
+- **Min 7**: `HIGH` finishes. Core free.
+    - Candidates: `LOW1` (resumed, remaining $5 - 3 = 2$ mins), `LOW2` (fresh, 2 mins).
+    - Rule: "a LOW whose start minute arrives while the core is busy simply waits... LOW jobs take the core in order of their start minutes".
+    - Start times: `LOW1`=0, `LOW2`=1.
+    - Order: `LOW1` > `LOW2`.
+    - Core starts `LOW1`.
+- **Min 8**: `LOW1` runs (remaining). Bank at abs min 4? No, banks are absolute minutes from start of job? "track banks in absolute minutes". Start was 0. Banks at 2, 4, 6...
+    - At end of Min 7, `LOW1` resumes. It needs to do 2 mins.
+    - Interval [7,8): `LOW1` runs. Total elapsed since start = $3 (\text{done}) + 1 = 4$. Bank at abs min 4? Yes.
+    - Wait, did we bank at 4 before? The job was preempted at 4.

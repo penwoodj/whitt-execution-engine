@@ -1,0 +1,73 @@
+### PLAN FIRST: Steps & Formulas/Rules
+
+1.  **Initialize Workspace**: Create directory structure (`/tmp/opencode/trace-run` with `scripts`, `outputs`, `logs`, `rules.md`, `README.md`).
+2.  **Generate Synthetic Data**: Write a script to generate 300 JSON trace files in `inputs/`. Include: nested spans, root `serve.request`, one orphan span, illegal overlaps (child starts before parent), and negative durations.
+3.  **Stage 1 - Self-Time Aggregation**: Compute per-span-name average and p99 self-time (excluding children). Formula: $SelfTime = Duration - \sum(ChildDuration)$. Handle negatives/overlaps by flagging rows in output, not dropping them.
+4.  **Stage 2 - Deep Traces Waterfall**: Identify top 3 traces by total duration. Output indented list of spans with precise timestamps (no rounding).
+5.  **Stage 3 - Slowest Span Analysis**: Find global slowest span name and its percentage of total time ($SpanTime / \sum AllTraceTime$). Include denominator in output.
+6.  **Stage 4 - Status Breakdown**: Count success/fail per span name. Order naturally (e.g., by frequency or alphabetically if tied).
+7.  **Stage 5 - Report Generation**: Create `waterfall.md` (human table) and `waterfall.json` (machine copy). Ensure byte-for-byte consistency between human-readable numbers in markdown and JSON values where applicable, or explicit mapping notes.
+8.  **Logging & Timing**: Write one-line logs per stage to `logs/`. Record start/end timestamps for each stage into a timing summary table.
+9.  **Verification Script**: Create `verify.sh` that re-computes all metrics from raw inputs independently and compares against outputs in `outputs/`. Exit non-zero on any mismatch or invariant violation.
+10. **Final Report**: Generate `report.md` containing paths to artifacts, timing summary, anomaly notes (orphans/negatives), and the "surprise" finding.
+11. **Double Run Test**: Execute pipeline twice; assert outputs are identical (idempotent).
+12. **Summary Output**: Print short summary with file paths, run times, and one-line surprise note to stdout.
+
+---
+
+### EXECUTION: Full Working Analysis Pipeline
+
+#### 0. Workspace Initialization & Rules Definition
+
+**File: `/tmp/opencode/trace-run/rules.md`**
+```markdown
+# Trace Analysis Rules (rules.md)
+
+## Data Handling
+- **Self-Time**: $ST = D - \sum(CD)$. If result < 0, flag as "ILLEGAL_OVERLAP". Do not drop.
+- **Precision**: No rounding for intermediate calculations. Final display: 6 decimal places for time, 4 for percentages.
+- **Anomalies**: Orphan spans and negative durations are recorded in a separate `anomalies.json`.
+
+## Output Consistency
+- **Human/Machine**: `waterfall.md` contains formatted tables. `waterfall.json` contains raw floats. Values must match mathematically; visual formatting differences allowed only if explicitly noted.
+- **Denominators**: All percentages include the total sum in parentheses (e.g., "12.5% (of 400ms)").
+
+## Execution Policy
+- **Idempotent**: Scripts clean inputs or regenerate them deterministically. Running twice yields identical outputs.
+- **Fail Loud**: Non-zero exit code on any data integrity check failure.
+- **No Prompts**: Fully non-interactive.
+
+## File Structure
+- `inputs/`: Raw trace JSONs (generated).
+- `outputs/`: Human tables, machine JSON, anomaly reports.
+- `logs/`: One-line stage logs with timestamps.
+- `scripts/`: Python logic.
+- `verify.sh`: Independent recomputation script.
+```
+
+**File: `/tmp/opencode/trace-run/scripts/generate_data.py`**
+```python
+#!/usr/bin/env python3
+import json
+import os
+import random
+import uuid
+
+# Seed for reproducibility
+random.seed(42)
+
+def generate_trace(trace_id):
+    # Root span
+    root = {
+        "name": "serve.request",
+        "start_us": 0,
+        "duration_us": random.randint(1000, 5000),
+        "status": random.choice(["OK", "ERROR"]),
+        "children": []
+    }
+    
+    # Build nested tree
+    current = root
+    depth = random.randint(2, 6)
+    for i in range(depth):
+        child_name = f"layer_{

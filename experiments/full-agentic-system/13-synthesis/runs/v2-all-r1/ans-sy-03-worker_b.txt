@@ -1,0 +1,60 @@
+### Phase 1 RULE SCAN (Second Half Only)
+*Rules governing the retry logic for the flaky upstream.*
+
+1.  **Wait Rule**: Initial wait is 2s; each subsequent wait doubles after a failed attempt.
+2.  **Cost Rule**: Every attempt costs 2 tokens; every wait second costs 1 token.
+3.  **Budget Rule**: Attempt budget starts at 36 tokens. If spend exceeds budget, the job is suppressed and the budget doubles exactly once for re-checking.
+4.  **Suppression Rule**: The job is only suppressed if it remains over the *doubled* budget after the re-check; otherwise, it proceeds (implied success on the 4th attempt).
+5.  **Trigger Sequence**: Waits occur strictly between failed attempts and before the next run.
+
+### Phase 2 LEDGER WALK (Second Half Only)
+*Applying events in strict arrival order: Attempt 1 -> Wait 1 -> Attempt 2 -> Wait 2 -> Attempt 3 -> Wait 3 -> Attempt 4.*
+
+**Event 1: Run Attempt 1**
+-   **Cost**: 2 tokens.
+-   **Result**: Failed (Job needs 3 failed attempts before success).
+-   **State**: Spend = 2. Pool = 36 - 2 = 34.
+
+**Event 2: Wait 1s**
+-   **Duration**: 2 seconds.
+-   **Cost**: 2 * 1 = 2 tokens.
+-   **Result**: Wait completes.
+-   **State**: Spend = 2 + 2 = 4. Pool = 34 - 2 = 32.
+
+**Event 3: Run Attempt 2**
+-   **Cost**: 2 tokens.
+-   **Result**: Failed (Needs 3 failed attempts).
+-   **State**: Spend = 4 + 2 = 6. Pool = 32 - 2 = 30.
+
+**Event 4: Wait 2s**
+-   **Duration**: 4 seconds (Doubled from 2s).
+-   **Cost**: 4 * 1 = 4 tokens.
+-   **Result**: Wait completes.
+-   **State**: Spend = 6 + 4 = 10. Pool = 30 - 4 = 26.
+
+**Event 5: Run Attempt 3**
+-   **Cost**: 2 tokens.
+-   **Result**: Failed (This is the 3rd failed attempt; next must succeed).
+-   **State**: Spend = 10 + 2 = 12. Pool = 26 - 2 = 24.
+
+**Event 6: Wait 3s**
+-   **Duration**: 8 seconds (Doubled from 4s).
+-   **Cost**: 8 * 1 = 8 tokens.
+-   **Result**: Wait completes.
+-   **State**: Spend = 12 + 8 = 20. Pool = 24 - 8 = 16.
+
+**Event 7: Run Attempt 4 (Success)**
+-   **Cost**: 2 tokens.
+-   **Result**: Succeeds (Job needs 3 failed attempts before the 4th succeeds).
+-   **State**: Spend = 20 + 2 = 22. Pool = 16 - 2 = 14.
+
+**Final Calculation Check:**
+-   **Total Attempts**: 4 (1, 2, 3, 4).
+-   **Total Wait Seconds**: 2 + 4 + 8 = 14s.
+-   **Total Spend**: 22 tokens.
+-   **Budget After**: 36 - 22 = 14.
+-   **Suppressed**: False (Spend 22 < Budget 36 initially; even if checked against doubled budget, it would pass, but the rule implies suppression only happens if over budget *and* re-check fails. Here, spend never exceeded initial budget).
+
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 14, "suppressed": false}
+```

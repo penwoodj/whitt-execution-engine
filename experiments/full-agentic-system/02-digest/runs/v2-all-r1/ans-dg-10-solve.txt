@@ -1,0 +1,72 @@
+### Phase 1 RULE SCAN
+This phase lists every rule that changes state during the event sequence, triggered by specific events or claims.
+
+1.  **Arrival Rule**: Triggered by `Attempt` arrival; increments `attempts` count and adds `wait_s` cost (if a wait occurred prior to this attempt).
+2.  **Cost Accumulation Rule**: Triggered by every `Attempt` (failed or successful); adds the per-attempt cost ($2) to total spend.
+3.  **Budget Check Rule**: Triggered after every Cost Accumulation; compares current spend against budget ($24). If exceeded, triggers Suppression logic.
+4.  **Suppression Logic Rule**: Triggered if Budget Check fails; sets `suppressed` to true and doubles the budget for re-evaluation (if applicable), but does not add further cost until a new attempt arrives.
+5.  **Success Condition Rule**: Triggered by the 3rd `Attempt`; stops the sequence, marks job as complete/successful, and prevents any further state changes from subsequent arrivals.
+
+---
+
+### Phase 2 LEDGER WALK
+This phase applies events one at a time in strict arrival order, showing the state after each event.
+
+**Initial State**:
+*   `attempts`: 0
+*   `wait_s`: 0
+*   `budget`: 24
+*   `spend`: 0
+*   `suppressed`: false
+
+**Event 1: Arrival of Attempt 1 (with Wait)**
+*   *Trigger*: First failed attempt arrival.
+*   *Rule Applied*: Arrival Rule + Cost Accumulation Rule.
+*   *Calculation*:
+    *   Add wait cost: $2$ seconds $\times$ $1$ = $+2$. (`wait_s` becomes 2).
+    *   Add attempt cost: $1 \times 2$ = $+2$. (`spend` becomes 4).
+*   *State After Event 1*: `attempts`=1, `wait_s`=2, `budget_after`=20.
+
+**Event 2: Arrival of Attempt 2 (with Wait)**
+*   *Trigger*: Second failed attempt arrival.
+*   *Rule Applied*: Arrival Rule + Cost Accumulation Rule.
+*   *Calculation*:
+    *   Add wait cost: $4$ seconds $\times$ $1$ = $+4$. (`wait_s` becomes 6).
+    *   Add attempt cost: $1 \times 2$ = $+2$. (`spend` becomes 8).
+*   *State After Event 2*: `attempts`=2, `wait_s`=6, `budget_after`=16.
+
+**Event 3: Arrival of Attempt 3 (Success)**
+*   *Trigger*: Third attempt arrival (Job needs 2 failed before 3rd succeeds).
+*   *Rule Applied*: Arrival Rule + Cost Accumulation Rule + Success Condition Rule.
+*   *Calculation*:
+    *   Add wait cost: $0$ (no wait mentioned for the successful run, or implied immediate execution upon success trigger). `wait_s` remains 6.
+    *   Add attempt cost: $1 \times 2$ = $+2$. (`spend` becomes 10).
+    *   Check Budget: Spend ($10$) $\le$ Budget ($24$). No suppression needed.
+*   *State After Event 3*: `attempts`=3, `wait_s`=6, `budget_after`=14.
+
+**Final State Verification**:
+*   Total Attempts: 3 (1 failed, 2 failed, 1 success).
+*   Total Wait Seconds: $2 + 4 = 6$.
+*   Total Spend: $6$ (waits) $+ 6$ (attempts) $= 12$.
+*   Budget After: $24 - 12 = 12$.
+
+*(Self-Correction/Refinement on "Wait" for the last attempt)*: The prompt says "after each failed attempt the retry waits". It does not explicitly state a wait occurs *before* the successful third attempt, only that it runs. Standard interpretation of such retry loops is that the wait happens before the next *failed* or *pending* slot fills, but if the job succeeds immediately on the 3rd try without an intervening "wait period" defined for success, `wait_s` does not increase further. The text says "waits observed: 2, 4", implying only those two specific wait events occurred in the sequence described.
+
+Recalculating with strict adherence to "waits observed: 2, 4":
+*   Event 1 (Fail): Wait 2s + Cost 2 = Spend 4.
+*   Event 2 (Fail): Wait 4s + Cost 2 = Spend 8.
+*   Event 3 (Success): No wait listed for success + Cost 2 = Spend 10.
+*   Total Spend: $4+2+4+2+2$? No, let's re-sum carefully.
+    *   Start Budget: 24.
+    *   Exp 1: Wait(2) + Try(2) = 4 spent. Rem: 20.
+    *   Exp 2: Wait(4) + Try(2) = 6 spent. Total Spent: 10. Rem: 14.
+    *   Exp 3: Try(2) = 2 spent. Total Spent: 12. Rem: 12.
+
+Final values: `attempts`: 3, `wait_s`: 6, `budget_after`: 12, `suppressed`: false.
+
+---
+
+### Final Answer JSON
+```json
+{"attempts": 3, "wait_s": 6, "budget_after": 12, "suppressed": false}
+```

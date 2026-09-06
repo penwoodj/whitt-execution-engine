@@ -1,5 +1,44 @@
 # Whitt Execution Engine — Agent Operating Rules
 
+## CRASH PREVENTION (HARD — user directive 2026-08-31)
+
+This section overrides every conflicting instruction, including directives to
+parallelize work.
+
+1. Make exactly one direct tool call per assistant message. Never use
+   `multi_tool_use.parallel`, background tools, `task()`, delegation, or
+   subagents in this repository.
+2. Read known files directly. Search only an explicit repository directory with
+   a specific file pattern. Never recursively scan `$HOME`, `~/.cache`,
+   `~/.local/share`, `~/.config`, `node_modules`, SQLite databases, or generated
+   outputs.
+3. Never rely on `tail`, `head`, or a pipe to make an unbounded producer safe.
+   Bound the producer itself or use a direct file read with a line limit.
+4. Kernel logs use `journalctl -k -n <N> --no-pager`, with `N <= 200`. OpenCode
+   configuration reads use exact known file paths only.
+5. Before every local LLM or Docker operation, check: available RAM >= 6 GiB;
+   one or fewer `whitt` processes; server health; no recent OOM, `DeviceLost`,
+   or Vulkan failure. Abort on any failed check.
+6. Run one live case at a time. After each case, inspect status and available
+   RAM before starting another. Any interrupted command requires process-status
+   inspection before retry.
+7. Do not resume live experiments until these safeguards and configuration
+   validation complete.
+8. These rules govern OpenCode orchestration, not whitt execution-engine tools
+    or YAML workflow actions. Keep workflow scripts enabled; make them operate
+    on known bounded inputs and run serially under the resource gates above.
+9. Every new executable agentic workflow YAML MUST declare
+   `workflow_execution_strategy.resource_admission` with `enforcement_policy:
+   block`, positive RAM/VRAM/swap minima, positive KV/compute/host/runtime
+   estimates, and `telemetry.write_profile: true`. Before authoring, estimate
+   values from model file size, `load_params`, context, hardware, and expected
+    workflow duration. After each live run, inspect the run-local
+    `resource-admission-profile.json`, then manually revise estimates in source
+    YAML when measured values differ. Every admitted model also needs absolute
+    `models.<model>.source_path`, basename-matched to `name`; `stat` its
+    dereferenced GGUF before estimating and require nonzero telemetry weight
+    bytes after running. Never mutate source YAML at runtime.
+
 ## PRIMARY OBJECTIVE (user directive 2026-08-06, supersedes prior goals)
 
 **Source of truth:** `docs/plans/meta-workflow-parity/PRIMARY-OBJECTIVE.md` (read for full context).
@@ -75,6 +114,7 @@ Dockerfile          docker-compose.yml  .dockerignore       .env.example
 README.md           CHANGELOG.md        LICENSE             AUTHORS.md
 CODE_OF_CONDUCT.md  config.yml          .gitignore          .git/
 .github/            AGENTS.md           CLAUDE.md           WORKFLOW_RELIABILITY_TRACKING.md
+.opencode/          experiments/
 .opencode-handoff.md (temp, session only)    .current-meta-run (temp)
 src/                tests/              benches/            examples/
 docs/               scripts/            models/             configs/

@@ -1,0 +1,89 @@
+Based on the strict rules provided in the task description, here is the step-by-step state walk for tonight's events.
+
+**State Initialization:**
+*   **Capacity (Card):** 8 GB
+*   **Current Loads:** [] (Empty)
+*   **Pinned Models:** None (Model C becomes pinned later if loaded).
+*   **Eviction Policy:** Least-Recently-Touched (LRT), Unpinned first. If only Pinned remain and it doesn't fit, the load is deferred.
+*   **Event Stream:** Load A (3 GB) -> Load B (3 GB) -> Load C (1 GB) -> Load D (7 GB) -> Unload B (3 GB).
+
+**Phase 1: Rule Application Logic Check**
+The rules governing state changes are applied in strict order of arrival. No events carry over from the "orientation" story (5GB card example); only tonight's numbers apply.
+*   *Rule 1 (Arrival):* Attempt to load model $M$ with size $S$. If current free space $\ge S$, load succeeds. Else, trigger eviction logic.
+*   *Rule 2 (Eviction Trigger):* Calculate needed space ($N = S - \text{free}$). Evict unpinned LRT models until remaining free space + sum of evicted sizes $\ge N$. Count these as "evictions".
+*   *Rule 3 (Deferred Load):* If after exhausting all unpinned residents, only pinned remain and they still don't fit the required space ($S > \text{current total capacity}$), mark load as deferred. The deferred ID is the load's own ID.
+*   *Rule 4 (Return/Unload):* Upon explicit unload request or expiry, remove model from loads list. If expired partial, return half granted; if clean, return full. (Note: Unload B happens after D, so B is still resident).
+
+**Phase 2: State Walk (Tonight's Events)**
+
+1.  **Event:** `Load A` (Size: 3 GB)
+    *   Current Loads: []
+    *   Free Space: 8 GB
+    *   Action: Load fits. Add A to loads.
+    *   State: `[A]` (Total used: 3 GB, Free: 5 GB). Evictions: 0.
+
+2.  **Event:** `Load B` (Size: 3 GB)
+    *   Current Loads: `[A]`
+    *   Free Space: 5 GB
+    *   Action: Load fits. Add B to loads.
+    *   State: `[A, B]` (Total used: 6 GB, Free: 2 GB). Evictions: 0.
+
+3.  **Event:** `Load C` (Size: 1 GB)
+    *   Current Loads: `[A, B]`
+    *   Free Space: 2 GB
+    *   Action: Load fits. Add C to loads. Model C becomes pinned upon loading.
+    *   State: `[A, B, C]` (Total used: 7 GB, Free: 1 GB). Evictions: 0.
+
+4.  **Event:** `Load D` (Size: 7 GB)
+    *   Current Loads: `[A, B, C]`
+    *   Size Required: 7 GB.
+    *   Available Space: 1 GB.
+    *   Shortfall: $7 - 1 = 6$ GB needed from eviction.
+    *   **Eviction Logic:**
+        *   Target unpinned models: A (3 GB), B (3 GB). C is pinned, so skip for now.
+        *   Evict A (LRT among unpinned)? Size 3 GB. New Free = $1 + 3 = 4$ GB. Total Used reduces to 4. Still not enough (need 7 total space occupied? No, need specific model size).
+        *   Let's re-evaluate "Fit". The rule says "load that cannot fit evicts... unpinned models as needed". This implies freeing up contiguous or total capacity slots? In LRU caching with a fixed pool, it usually means freeing physical RAM.
+        *   Pool Size = 8 GB. Model D needs 7 GB of the pool to be free (or rather, the system must have 7 GB available).
+        *   Current Occupied: 7 GB (A+B+C). Available: 1 GB.
+        *   Need to make space for 7 GB. Must evict models summing to at least $7 - 1 = 6$ GB of physical memory? Or does it mean "find a hole"? Standard interpretation for fixed-size pools in these riddles: Evict until `Sum(Models)` $\le$ `Capacity` is not the check; the check is `Free_Space >= Model_Size`.
+        *   Wait, standard LRU cache logic: You evict to make room. If I have A+B+C (3+3+1=7GB) in an 8GB card. To load D(7GB), I need 7GB free? No, that's impossible if the card is full of data.
+        *   Correct interpretation for "Fixed Pool" riddles: You evict existing models to make room for the new one *unless* the pool allows overcommitment (which it doesn't here). But usually, you just swap.
+        *   Let's look at the "Orientation" example logic provided in the text: "P's 3GB did not fit in the 1GB left". This implies we are looking for a contiguous hole of size $S$? Or simply that `Total_Used + S > Capacity`?
+        *   Actually, usually these riddles assume you evict to make room. If I have A+B+C (7GB) and want D(7GB), I must clear out at least 1 GB worth of data? No, I need the whole card for D. So I must evict enough models such that `Sum(Evicted) >= Sum(Current) - Capacity + S`?
+        *   Let's simplify: To fit a model of size $S$ into a card of capacity $C$, we need `Current_Used <= C - S`.
+        *   Current Used = 7 GB. Target = 8 - 7 = 1 GB. We have 7 GB used. We need to reduce usage by 6 GB.
+        *   Candidates for eviction (Unpinned): A (3), B (3). Pinned: C (1).
+        *   Evict A (3GB) -> Used becomes 4. Still > 1. Need more.
+        *   Evict B (3GB) -> Used becomes 1. Now `Used <= 1`. Fits!
+        *   Did we evict pinned models? No, we stopped when unpinned sufficed to make it fit.
+        *   **Action:** Evict A and B. Load D. C remains pinned.
+    *   State: `[C, D]` (Total used: $1 + 7 = 8$ GB).
+    *   Counts: Loads=3 (A,B,C,D), Evictions=2.
+
+5.  **Event:** `Unload B` (Size: 3 GB)
+    *   Current Loads: `[C, D]`.
+    *   Model B is NOT in the list (it was evicted).
+    *   Action: Unload for non-resident model is a no-op. State remains unchanged.
+    *   State: `[C, D]` (Total used: 8 GB).
+
+**Final Totals:**
+*   **Loads:** The sequence A, B, C loaded successfully. Then D loaded (after evictions). Total distinct loads attempted/processed = 4? Or count of successful load events? Usually "loads" refers to the number of models currently resident or total load operations. Given the JSON format `{"loads": N}`, and looking at the orientation example where it counts "three loads", this likely means the number of **load operations** that resulted in a state change (successful loads).
+    *   Op 1: Load A (Success)
+    *   Op 2: Load B (Success)
+    *   Op 3: Load C (Success)
+    *   Op 4: Load D (Success, after eviction)
+    *   Total Loads = 4.
+*   **Evictions:** 2 (A and B were evicted to make room for D).
+*   **Deferrals:** 0 (D fit after evicting unpinned models; C was pinned but not needed to be evicted because the pool cleared enough with A+B).
+*   **Deferred IDs:** [].
+
+Let's double check the "Orientation" logic again to ensure I'm not missing a constraint about "contiguous hole".
+Text: "P's 3GB did not fit in the 1GB left". This phrasing suggests we are looking for space. If the card is full (8GB), and A+B+C take 7GB, there is 1GB free. D needs 7GB. It cannot fit in the 1GB hole. So it must evict.
+Eviction target: Make room for 7GB. Current usage 7GB. Need to drop usage by 6GB (to get to 2GB? No, need total capacity to hold 7GB of D).
+Wait, if I have A+B+C (7GB) and want D(7GB), I need the card to contain only D. So I must evict everything except D? Or just enough to fit D?
+If I keep C (1GB pinned), can I fit D (7GB)? $1 + 7 = 8$ GB. Yes! The total capacity is exactly 8GB. If I hold C and D, they sum to 8GB. They fit perfectly.
+So I only need to evict A and B (3+3=6GB).
+Result: Loads `[C, D]`. Evictions = 2.
+
+**Verification of "Unload B":**
+Since B was evicted, it is not resident. The rule says

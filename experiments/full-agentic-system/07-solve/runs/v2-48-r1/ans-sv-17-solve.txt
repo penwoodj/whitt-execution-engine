@@ -1,0 +1,137 @@
+The user wants me to process a specific set of rules and events related to a "canary rollout" for a cache change. The input consists of 6 observations with error rates. I need to walk through these events one by one, applying the limits and state changes described in the text, and finally output a JSON object containing `rollout_pct`, `stages_done`, and `status`.
+
+**Rules Extraction (Phase 1):**
+Based on the text provided:
+1.  **Limit Rule:** Steps 1-5 have a limit of 2.0%. Steps 6-10 have a limit of 1.0%.
+    *   *Correction/Refinement:* The text says "after any rollback the limit tightens to 0.8 for every remaining step." This implies if a breach occurs, subsequent steps use 0.8% as the new limit.
+2.  **Clean Observation Rule:** A clean observation (rate <= limit) completes the stage equal to its position in the list. The rollout then shows `10 * stage_number`.
+3.  **Breach Observation Rule:** A breaching observation (rate > limit) is spent. It does not complete a stage. The rollout and stages hold the last completed stage's values.
+4.  **Post-Breach Limit Rule:** After any breach, the limit tightens to 0.8% for every remaining step.
+5.  **Termination Rules:**
+    *   If exactly one breach occurs and the list ends: Status `PAUSED`.
+    *   If a second breach occurs (or implies stopping): Status `STOPPED` (though the text says "a second breach stops everything", let's check if we hit two breaches).
+    *   If no breach at all: Status `DONE`.
+
+**Event Walk (Phase 2):**
+Input Observations:
+1.  Step 1: 0.5%
+2.  Step 2: 0.8%
+3.  Step 3: 2.1%
+4.  Step 4: 0.6%
+5.  Step 5: 0.7%
+6.  Step 6: 0.9%
+
+**Initial State:**
+*   Rollout: 0% (implied start)
+*   Stages Done: 0
+*   Current Limit: Based on step number. Step 1 is in range [1-5], so limit = 2.0%.
+
+**Processing Event 1 (Step 1):**
+*   Rate: 0.5%
+*   Limit: 2.0%
+*   Verdict: Clean (0.5 <= 2.0)
+*   Action: Complete Stage 1. Rollout becomes `10 * 1 = 10`. Stages Done = 1.
+
+**Processing Event 2 (Step 2):**
+*   Rate: 0.8%
+*   Limit: 2.0% (Still in range [1-5], no breach yet)
+*   Verdict: Clean (0.8 <= 2.0)
+*   Action: Complete Stage 2. Rollout becomes `10 * 2 = 20`. Stages Done = 2.
+
+**Processing Event 3 (Step 3):**
+*   Rate: 2.1%
+*   Limit: 2.0%
+*   Verdict: Breach (2.1 > 2.0)
+*   Action: Spend observation. Rollout and Stages hold last completed values (Rollout=20, Stages=2).
+*   State Update: Limit tightens to 0.8% for remaining steps.
+
+**Processing Event 4 (Step 4):**
+*   Rate: 0.6%
+*   Limit: 0.8% (Tightened after breach)
+*   Verdict: Clean (0.6 <= 0.8)
+*   Action: Complete Stage equal to position? The text says "a clean observation completes the stage equal to its own position in the list". Position is 4. So complete Stage 4. Rollout becomes `10 * 4 = 40`. Stages Done = 4.
+
+**Processing Event 5 (Step 5):**
+*   Rate: 0.7%
+*   Limit: 0.8%
+*   Verdict: Clean (0.7 <= 0.8)
+*   Action: Complete Stage equal to position? Position is 5. So complete Stage 5. Rollout becomes `10 * 5 = 50`. Stages Done = 5.
+
+**Processing Event 6 (Step 6):**
+*   Rate: 0.9%
+*   Limit: 0.8%
+*   Verdict: Breach (0.9 > 0.8)
+*   Action: Spend observation. Rollout and Stages hold last completed values (Rollout=50, Stages=5).
+
+**Final State Check:**
+*   Total Breaches: 2 (Event 3 and Event 6).
+*   Text Rule for Termination: "a second breach stops everything with status STOPPED".
+    *   Let's re-read carefully: "exactly one breach and the list ends: status PAUSED... a second breach stops everything with status STOPPED".
+    *   We have encountered two breaches. Therefore, the status should be `STOPPED`.
+
+Wait, let me double check the "second breach" logic vs the example provided in the text.
+Example in text: "position 3 rolled 2.5... breach one... position 4 rolled 0.5... clean... the list ended there, one breach only, so the close was PAUSED".
+The example had exactly one breach and resulted in PAUSED.
+My trace has two breaches (Step 3 and Step 6).
+Rule: "a second breach stops everything with status STOPPED".
+
+So final values:
+Rollout_pct: 50
+Stages_done: 5
+Status: STOPPED
+
+Let's re-verify the limit logic for Event 4.
+Event 3 was a breach. Limit tightens to 0.8%.
+Event 4 is Step 4. Rate 0.6%. Limit 0.8%. Clean.
+Text: "a clean observation completes the stage equal to its own position". Position 4 -> Stage 4. Rollout = 40.
+Event 5 is Step 5. Rate 0.7%. Limit 0.8%. Clean.
+Position 5 -> Stage 5. Rollout = 50.
+Event 6 is Step 6. Rate 0.9%. Limit 0.8%. Breach.
+
+Is there any rule that says "after a breach, the rollout cannot advance"?
+"a breaching observation completes nothing and is spent; the rollback leaves the rollout and stages at the last completed stage's values." -> This confirms we stay at previous state (50, 5) after Event 6.
+But what determines the status?
+"exactly one breach... PAUSED".
+"a second breach stops everything with status STOPPED".
+
+We have two breaches. So Status is STOPPED.
+
+Let's check if I missed a rule about "steps 6 through 10 only 1.0 percent".
+The text says: "limits: steps 1 through 5 may show up to 2.0 percent, steps 6 through 10 only 1.0 percent."
+This is the *initial* limit definition.
+Then it says: "after any rollback [breach] the limit tightens to 0.8 for every remaining step."
+So for Step 6, the initial limit would be 1.0%, but since a breach occurred earlier (Step 3), the effective limit is 0.8%.
+Rate 0.9% > 0.8% -> Breach. Correct.
+
+Final Calculation:
+Rollout: 50
+Stages: 5
+Status: STOPPED
+
+One detail: "a second breach stops everything". Does it stop immediately? Yes.
+So the final state is captured after the second breach processing (which spends the event but keeps the previous rollout/stage).
+
+Final JSON:
+{"rollout_pct": 50, "stages_done": 5, "status": "STOPPED"}
+
+Wait, let me re-read the example logic again to ensure I'm not misinterpreting "second breach".
+Example: "position 3 rolled 2.5... breach one... position 4 rolled 0.5... clean... the list ended there, one breach only, so the close was PAUSED".
+The example had exactly one breach.
+My case has two breaches (Step 3 and Step 6).
+Therefore, it falls into the "second breach" category -> STOPPED.
+
+Is it possible that after the first breach, the limit becomes 0.8%, and for step 6 (which is in range 6-10), the base limit was 1.0%. But the rule says "tightens to 0.8". So 0.9 > 0.8 is a breach.
+Yes.
+
+Let's do a sanity check on the numbers.
+Step 1: 0.5 <= 2.0 (Clean). Stage 1, Rollout 10.
+Step 2: 0.8 <= 2.0 (Clean). Stage 2, Rollout 20.
+Step 3: 2.1 > 2.0 (Breach). Spend. Limit -> 0.8. State holds (20, 2).
+Step 4: 0.6 <= 0.8 (Clean). Position 4. Stage 4. Rollout 40.
+Step 5: 0.7 <= 0.8 (Clean). Position 5. Stage 5. Rollout 50.
+Step 6: 0.9 > 0.8 (Breach). Spend. State holds (50, 5).
+
+Total breaches = 2.
+Status = STOPPED.
+
+Final Answer seems solid

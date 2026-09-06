@@ -460,6 +460,49 @@ fn given_gwt_json_when_deserialized_then_produces_gwt() {
     }
 }
 
+// Regression (Issue R): the schema doc examples show the verbose GWT form
+// `then: { route_to: X }` (unified-workflow-schema.yml:358-402), but the
+// untagged RouteToAction enum only accepted a bare string/array — copying
+// the documented example failed serde (07-TRACKING.md:226-228). Both forms
+// must deserialize.
+#[test]
+fn given_gwt_verbose_then_object_json_when_deserialized_then_produces_single() {
+    let json = serde_json::json!({
+        "gwt": [{
+            "given": "quality_score >= 0.9",
+            "then": { "route_to": "next_step" }
+        }]
+    });
+    let action: HookAction = serde_json::from_value(json).expect("verbose then form must deserialize");
+    if let HookAction::Gwt(clauses) = action {
+        assert!(matches!(clauses[0].r#then, RouteToAction::Single(_)));
+        if let RouteToAction::Single(target) = &clauses[0].r#then {
+            assert_eq!(target, "next_step");
+        }
+    } else {
+        panic!("expected Gwt action");
+    }
+}
+
+#[test]
+fn given_gwt_verbose_then_object_multiple_json_when_deserialized_then_produces_multiple() {
+    let json = serde_json::json!({
+        "gwt": [{
+            "given": "true",
+            "then": { "route_to": ["step_success", "generate_report"] }
+        }]
+    });
+    let action: HookAction = serde_json::from_value(json).expect("verbose then list form must deserialize");
+    if let HookAction::Gwt(clauses) = action {
+        assert!(matches!(clauses[0].r#then, RouteToAction::Multiple(_)));
+        if let RouteToAction::Multiple(targets) = &clauses[0].r#then {
+            assert_eq!(targets, &vec!["step_success".to_string(), "generate_report".to_string()]);
+        }
+    } else {
+        panic!("expected Gwt action");
+    }
+}
+
 #[test]
 fn given_iterate_values_json_when_deserialized_then_produces_iterate() {
     let mut map = std::collections::HashMap::new();

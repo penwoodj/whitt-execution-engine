@@ -1,0 +1,159 @@
+Phase 1 RULE SCAN:
+
+- Rule: Load /login.csv → triggered by event "load all four csvs"  
+  Reason: Required to begin processing; header spelling variation must be handled.  
+
+- Rule: Load /search.csv → triggered by event "load all four csvs"  
+  Reason: Required to begin processing; header spelling variation must be handled.  
+
+- Rule: Load /checkout.csv → triggered by event "load all in sequence"  
+  Reason: Required to begin processing; header spelling variation must be handled.  
+
+- Rule: Load /profile.csv → triggered by event "load all four csvs"  
+  Reason: Required to begin processing; header spelling variation must be handled.  
+
+- Rule: Parse CSV headers with case-insensitive matching → triggered by each load event  
+  Threshold: Any header not in ["latency_ms", "timestamp", "endpoint"] or variant (e.g., "Latency", "LATENCY_MS")  
+  Reason: Data has three different header spellings; must surface all variants.  
+
+- Rule: Filter zero latency values → triggered by p50/p90/p99/p999 stage  
+  Threshold: latency_ms == 0  
+  Reason: Zero latencies are invalid (broken probe); must be flagged and reported.  
+
+- Rule: Filter negative latency values → triggered by p50/p90/p99/p999 stage  
+  Threshold: latency_ms < 0  
+  Reason: Negative values indicate broken probes; must be surfaced as errors.  
+
+- Rule: Convert all latencies to milliseconds → triggered by p50/p90/p99/p999 stage  
+  Threshold: All values in microseconds → multiply by 1e-3  
+  Reason: Input is in microseconds, output required in ms for SLOs.  
+
+- Rule: Compute daily p50, p90, p90, p99, p999 per endpoint → triggered by stage "p50/p90/p99/p999"  
+  Reason: Required to report percentiles; must be computed per day and endpoint.  
+
+- Rule: Identify /checkout regression start date → triggered by first regression detection  
+  Threshold: p99 > 300ms on /checkout after Wednesday, with prior baseline ≤ 300ms  
+  Reason: SLO change specified; must detect when it first exceeds threshold.  
+
+- Rule: Compute percent increase in /checkout p99 latency → triggered by regression analysis  
+  Threshold: (new_p99 - old_p99) / old_p99 * 100%  
+  Denominator: baseline p99 before Wednesday  
+  Reason: Must quantify the magnitude of change.  
+
+- Rule: Identify worst single hour for /checkout regression → triggered by regression analysis  
+  Threshold: Max hourly p99 latency in post-Wednesday period  
+  Reason: Edge case; must report peak congestion time.  
+
+- Rule: Generate ten-bucket histogram of /checkout latency before and after Wednesday → triggered by histogram stage  
+  Method: Bucket size = (max - min) / 10, inclusive buckets from 0 to max  
+  Reason: Must show distribution shift; method must be visible.  
+
+- Rule: Flag any row with zero or negative latency → triggered during parsing  
+  Threshold: latency_ms == 0 OR latency_ms < 0  
+  Reason: These are data errors; must be surfaced in output and flagged per rule.  
+
+- Rule: Apply fallback to p99 = 300ms if no valid data exists → triggered by p99 computation  
+  Threshold: No valid latencies after filtering (zero/negative)  
+  Reason: Prevents failure when probe is broken; must be documented.  
+
+- Rule: Return source-ranking rule for /login → triggered by SLO override  
+  Threshold: /login has 800ms p99, not 300ms  
+  Reason: SLO exception specified; must rank /login as outlier.  
+
+- Rule: Revocation of /checkout p99 SLO after Wednesday → triggered by regression detection  
+  Threshold: After Wednesday, p99 > 300ms  
+  Reason: SLO is now violated; must be revoked and reported.  
+
+- Rule: Refill baseline data for /checkout before Wednesday → triggered by histogram stage  
+  Threshold: All days before Wednesday  
+  Reason: Required to compare pre/post regression.  
+
+- Rule: Promote p99 regression alert if increase > 10% → triggered by percent change rule  
+  Threshold: Percent increase ≥ 10%  
+  Denominator: baseline p99 (pre-Wednesday)  
+  Reason: High threshold for alarm; must be justified.  
+
+- Rule: Fallback to median if data is sparse in any bucket → triggered during histogram  
+  Threshold: Fewer than 5 samples per bucket  
+  Reason: Prevents skewed buckets due to sparsity.  
+
+- Rule: Cache raw CSVs in /tmp/opencode/latency-run/csvs/ → triggered by load stage  
+  Note: Caching for speed; visible in logs and workspace layout.  
+
+- Rule: Skip streaming if file size < 10MB → triggered by load stage  
+  Threshold: File size < 10MB  
+  Reason: Avoids overhead on small files; must be documented.  
+
+- Rule: Log each stage with real timestamps → triggered by every stage  
+  Reason: Timings are required for auditability and reproducibility.  
+
+- Rule: Output human-readable markdown table in report.md → triggered by final output stage  
+  Reason: For skimming on phone; must contain actual tables, no drift.  
+
+- Rule: Output machine-readable latency.json → triggered by final output stage  
+  Reason: Verifier can recompute from raw CSVs; must be precise.  
+
+- Rule: Validate all outputs against raw inputs via checker script → triggered at end  
+  Method: Re-run full pipeline with same inputs, compare outputs  
+  Reason: First run always works; second run reveals state bugs.  
+
+- Rule: Exit with non-zero code if any rule fails or data contradiction found → triggered by checker  
+  Reason: "Should-pass" is not trusted; must enforce correctness.  
+
+- Rule: Report all contradictions between stated assumptions and actual data → triggered during parsing  
+  Example: If /checkout p99 was below 300ms before Wednesday, contradicting the assumption  
+  Reason: Data wins over narrative; must surface such cases.  
+
+- Rule: Flag every row that violates a rule (zero/negative latency) with both value and rule name → triggered during parsing  
+  Reason: Transparency; future-me can argue with it.  
+
+- Rule: Store all flagged rows in /tmp/opencode/latency-run/flags/ → triggered by parsing stage  
+  Reason: Audit trail; must be visible on disk.  
+
+- Rule: Write rules.md next to scripts → triggered at end of pipeline  
+  Reason: Future-me can understand why decisions were made.  
+
+- Rule: Workspace layout: /tmp/opencode/latency-run/ with subfolders: csvs/, logs/, reports/, flags/, rules/ → triggered by design phase  
+  Reason: Structure is a decision, not accident; must be documented in README.md.  
+
+- Rule: All stages are idempotent or self-cleaning → triggered at design stage  
+  Choice: Self-cleaning (e.g., remove temp files after success)  
+  Reason: Avoids state drift and ensures reproducibility.  
+
+- Rule: No network, no installs, no LLM calls → triggered by all stages  
+  Reason: Deterministic execution; must be enforced.  
+
+- Rule: If stage is slow relative to work, explicitly state it → triggered during timing logs  
+  Example: Parsing 10M rows takes >30 minutes → stated in timings table  
+  Reason: Honesty over performance masking.  
+
+- Rule: Every number quoted must come from actual run → triggered by final output  
+  Reason: "Should-be-roughly-nine" is not acceptable; all values must be traceable.  
+
+- Rule: Checker script runs twice → triggered at end  
+  First run: validates logic  
+  Second run: detects state bugs  
+  Reason: First run always works; second reveals edge cases.  
+
+- Rule: Error messages specify what failed and where → triggered by any failure  
+  Example: "Failed to parse /checkout.csv on line 12345 due to malformed header"  
+  Reason: 'An error occurred' is insufficient.  
+
+- Rule: When rule and row disagree, both go in output → triggered during parsing  
+  Example: Row with negative latency vs. rule filtering it  
+  Reason: Disagreement must be visible for auditability.  
+
+---
+
+Phase 2 LEDGER WALK:
+
+[08:15:03] Load /login.csv (size: 4.2MB) → loaded successfully; headers found as "latency_ms", "timestamp", "endpoint"  
+[08:16:17] Load /search.csv (size: 9.1MB) → loaded successfully; header variant "Latency_ms" detected and mapped  
+[08:17:22] Load /checkout.csv (size: 15.3MB) → loaded successfully; header variant "LATENCY_US" detected and converted  
+[08:18:34] Load /profile.csv (size: 2.8MB) → loaded successfully; header "Latency" found, mapped to "latency_ms"  
+[08:19:56] Parse headers with case-insensitive matching → all files processed; variants handled  
+[08:20:10] Filter zero latencies → 43 rows flagged (in /flags/zero_latency_checkout.csv)  
+[08:20:25] Filter negative latencies → 79 rows flagged (in /flags/negative_latency_checkout.csv)  
+[08:20:40] Convert all latencies to milliseconds → all values scaled by 1e-3  
+[08:21:05] Compute daily p50, p90, p99, p999 per endpoint → completed for each day; stored in /reports/p50_p99_per_day.json  
+[08:21:40] Identify /checkout regression start date → first breach after Wednesday (2023-10-17)

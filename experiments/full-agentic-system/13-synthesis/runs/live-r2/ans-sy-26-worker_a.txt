@@ -1,0 +1,59 @@
+### Phase 1 Rule Scan (First Half Only)
+
+Based on the "night desk sy-26" task description for the first crew, here are the rules governing state changes during the event list:
+
+1.  **Arrival Order & Preemption:** `HIGH` arrives at minute 3 and instantly preempts any running `LOW` job; while `HIGH` runs, nothing else runs.
+2.  **Core Allocation (Tie-Breaking):** `LOW` jobs take the core in order of their start minutes; a resumed `LOW` outranks a fresh one at any tie.
+3.  **Waiting Logic:** A `LOW` whose start minute arrives while the core is busy simply waits until the current job finishes or is preempted.
+4.  **Checkpoint Banking:** `LOW` jobs checkpoint every 2 completed minutes of running time; on preemption, work past the last checkpoint is wasted and redone after resume.
+5.  **Banking Schedule:** A job starting/resuming at minute $s$ banks a checkpoint at minute $s+2$ and again every 2 running minutes thereafter (tracked in absolute minutes).
+6.  **Resume Cost:** After resume, a job redoes every minute past its last bank; e.g., a job with 5 total minutes and 2 banked resumes with 3 minutes left.
+
+### Phase 2 Ledger Walk (First Half Only)
+
+**Event List & State Application:**
+
+*   **Minute 0:** `LOW1` starts (Duration: 4 min). Core busy with `LOW1`.
+    *   *State:* `LOW1` running (Time elapsed: 0/4).
+*   **Minute 1:** `LOW2` arrives (Start time: 3, but rule says "take core in order of start minutes"? Wait, re-reading specific text: "LOW jobs take the core in order of their start minutes... LOW2 runs 3 minutes starting at minute 3". The prompt implies `LOW2` is scheduled to *start* at minute 3. Let's re-parse carefully: "LOW1 runs 4 minutes starting at minute 0, LOW2 runs 3 minutes starting at minute 3."
+    *   *Correction:* `LOW2` does not arrive until minute 3. It waits in the queue.
+    *   *State:* `LOW1` running (Time elapsed: 1/4). Queue: [`LOW2`].
+*   **Minute 2:** `HIGH` arrives at minute 3? No, "HIGH arrives at minute 3". So at Minute 2, only `LOW1` runs.
+    *   *State:* `LOW1` running (Time elapsed: 2/4). Checkpoint banked at $0+2=2$.
+*   **Minute 3:** `HIGH` arrives and preempts `LOW1`. `LOW1` has run 2 minutes. Last checkpoint was at minute 2. Work done is saved. Remaining work for `LOW1`: $4 - 2 = 2$ minutes.
+    *   *State:* `HIGH` running (Duration: 6 min). Core busy with `HIGH`. Queue: [`LOW2`, `LOW1(resumed)`]. Note: `LOW2` start time is 3, so it ties with the current minute? No, `LOW2` starts at minute 3. The rule says "resumed LOW outranks a fresh one". `LOW1` is resumed (freshly started but interrupted). Is `LOW2` considered "fresh" or does its start time matter for ordering *against* `HIGH`? `HIGH` has priority while running.
+    *   *Wait, check Queue Order:* At minute 3, `HIGH` takes core. Who waits? `LOW2` (Start: 3) and `LOW1` (Resumed). Rule: "resumed LOW outranks a fresh one". So if they compete for the core later, `LOW1` goes first. But currently `HIGH` is running.
+*   **Minute 4:** `HIGH` continues.
+    *   *State:* `HIGH` running (Time elapsed: 2/6).
+*   **Minute 5:** `HIGH` continues.
+    *   *State:* `HIGH` running (Time elapsed: 3/6).
+*   **Minute 6:** `HIGH` finishes ($3+3=6$? No, duration is 6 minutes starting at minute 3. So it runs minutes 3, 4, 5, 6, 7, 8? Or does "runs 6 minutes to completion" mean it occupies the core for 6 discrete time units?
+    *   Let's assume discrete minutes: Start Minute 3. Runs Minutes 3, 4, 5, 6, 7, 8 (Total 6 mins). Finishes at end of Minute 8.
+    *   *Re-evaluating "runs 6 minutes to completion"* vs "arrives at minute 3". Usually implies duration = 6.
+    *   Let's trace:
+        *   Min 0-2: `LOW1` runs (3 mins total? No, starts min 0, runs 4 mins -> finishes end of min 3).
+        *   Wait, "runs 4 minutes starting at minute 0". If discrete: Min 0, 1, 2, 3. Finishes end of Min 3.
+        *   `HIGH` arrives at Minute 3. Preempts `LOW1`.
+        *   `HIGH` runs 6 minutes. Starts Min 3. Runs Min 3, 4, 5, 6, 7, 8. Finishes end of Min 8.
+    *   Let's re-read the "Orientation" example to calibrate time units: "LOW1 held the core minutes 0, 1 and 2... HIGH ran minutes 3 to 5". This implies discrete integer minutes.
+    *   **Recalibration:**
+        *   `LOW1`: Starts Min 0. Runs 4 mins -> Occupies Min 0, 1, 2, 3. Finishes end of Min 3.
+        *   `HIGH`: Arrives Min 3. Preempts `LOW1` (which was in its 4th minute). `HIGH` runs 6 mins -> Occupies Min 3, 4, 5, 6, 7, 8. Finishes end of Min 8.
+        *   **Queue at Min 3:** `LOW2` (Start time 3) and `LOW1` (Resumed).
+            *   Rule: "resumed LOW outranks a fresh one". `LOW1` is resumed. `LOW2` is fresh (just arrived/started). So `LOW1` goes first in queue.
+        *   **Min 4-8:** `HIGH` runs.
+        *   **Min 9:** `HIGH` finishes. Core free.
+            *   Queue: [`LOW1`, `LOW2`] (Order determined by start times? No, order determined by resume vs fresh).
+            *   Wait, the rule says "LOW jobs take the core in order of their start minutes". This applies when they are waiting.
+            *   At Min 9, both are waiting. `LOW1` started at 0. `LOW2` started at 3. So `LOW1` goes first?
+            *   BUT there is a specific rule: "a resumed LOW outranks a fresh one at any tie". This usually applies when start times are equal or effectively simultaneous in the queue logic. Here start times differ (0 vs 3). Does "order of start minutes" override "resume vs fresh"?
+            *   Let's look at the Orientation Example again: "LOW1 held core... HIGH ran... Both LOWs were then waiting: the core went to LOW1, whose start minute 0 beats LOW2's start minute 1".
+            *   Okay, so **Start Minute** is the primary sort key. Resume/Fresh only breaks ties or applies if start minutes are equal? Or does "resumed outranks fresh" apply generally? The text says "at any tie". So Start Minute is King.
+            *   `LOW1` (Start 0) vs `LOW2` (Start 3). `LOW1` goes first.
+        *   **Min 9:** `LOW1` resumes. Needs to run remaining minutes.
+            *   `LOW1` total: 4 mins. Banked at Min 2 ($0+2$). Next bank would be $2+2=4$.
+            *   At Min 3, it was preempted. It had completed 2 minutes (Min 0, 1, 2? Wait. If discrete: Min 0 is 1st min, Min 1 is 2nd, Min 2 is 3rd, Min 3 is 4th).
+            *   Checkpoint every 2 completed minutes. Completed Min 0 (1), Min 1 (2) -> Bank at end of Min 1? Or "banked a checkpoint at minute 2"? Text: "LOW jobs checkpoint every 2 completed minutes... LOW1 held core minutes 0, 1 and 2, banked a checkpoint at minute 2".
+            *   This implies the bank happens after completing 3 units? No. "Minutes 0, 1, 2" is 3 minutes. Banked at minute 2 (end of min 2)? That's 3 minutes elapsed.
+            *   Let's stick to the explicit text: "LOW1 held core minutes 0, 1 and 2... banked a checkpoint at minute 2". This means after running for 3 minutes (Min 0, 1, 2), it has a checkpoint? Or does it mean the checkpoint is *at* minute 2 (i.e., after 2 minutes)?
+            *   Text: "LOW jobs checkpoint every 2 completed minutes... LOW1 held core minutes 0, 1 and 2, banked a checkpoint at minute 2". This is contradictory if "every 

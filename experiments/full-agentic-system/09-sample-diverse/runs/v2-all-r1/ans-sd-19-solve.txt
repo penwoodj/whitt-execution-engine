@@ -1,0 +1,91 @@
+### Phase 1 RULE SCAN
+
+The following rules govern the state changes during the event stream:
+
+1.  **Arrival/Load Rule**: Upon request of a model $M$ with size $S_M$, if current free space $\ge S_M$, load $M$. If successful, increment `loads`.
+2.  **Eviction Selection Rule**: If current free space $< S_M$, identify the set of unpinned resident models. Sort them by recency (Least Recently Touched first).
+3.  **Eviction Execution Rule**: Evict the LRU unpinned model one at a time, subtracting its size from the required load and adding it to free space, incrementing `evictions` for each eviction performed. Repeat until either the load fits or no unpinned models remain.
+4.  **Deferral Rule**: If after exhausting all unpinned evictions, remaining free space $< S_M$, defer the load. Record the request ID in `deferred`, increment `deferrals`. Do not perform any further evictions (even of pinned models).
+5.  **Recency Update Rule**: Upon a successful load or an eviction, update the recency list: the touched model(s) move to the most-recent position; previously resident unpinned models shift down in order.
+6.  **Unload Rule**: Upon request to unload model $M$, if $M$ is resident, subtract its size from free space and remove it from residents. If $M$ is not resident (already evicted or never loaded), perform a no-op.
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   Pool: 8 GB
+*   Residents: []
+*   Free Space: 8 GB
+*   Recency List: []
+*   Counts: loads=0, evictions=0, deferrals=0, deferred=[]
+
+**Event 1: Load A (2 GB)**
+*   Rule Applied: Arrival/Load Rule.
+*   Check: $8 \ge 2$. Fits.
+*   Action: Load A. Free space becomes $6$. Recency: [A].
+*   State Line: `load A -> resident {A} free 6 recency {A}`
+
+**Event 2: Load B (2 GB)**
+*   Rule Applied: Arrival/Load Rule.
+*   Check: $6 \ge 2$. Fits.
+*   Action: Load B. Free space becomes $4$. Recency: [B, A] (B is most recent). Note: B is pinned.
+*   State Line: `load B -> resident {A, B} free 4 recency {B, A}`
+
+**Event 3: Load C (2 GB)**
+*   Rule Applied: Arrival/Load Rule.
+*   Check: $4 \ge 2$. Fits.
+*   Action: Load C. Free space becomes $2$. Recency: [C, B, A] (C is most recent).
+*   State Line: `load C -> resident {A, B, C} free 2 recency {C, B, A}`
+
+**Event 4: Load D (7 GB)**
+*   Rule Applied: Arrival/Load Rule & Eviction Selection Rule.
+*   Check: $2 < 7$. Does not fit. Need 5 more GB.
+*   Unpinned Residents: {A, C}. (B is pinned).
+*   Recency Order (Oldest to Newest): A, B(pinned), C.
+    *   LRU Unpinned: A.
+*   Action: Evict A (2 GB). `evictions` = 1. Free space becomes $4$. Remaining need: $7 - 2 = 5$.
+*   Check: $4 < 5$. Still does not fit.
+*   Next LRU Unpinned: C.
+*   Action: Evict C (2 GB). `evictions` = 2. Free space becomes $6$. Remaining need: $7 - 2 = 5$.
+*   Check: $6 \ge 5$. Fits now.
+*   Action: Load D. Free space becomes $6 - 7 + 2$ (net change) -> Wait, logic check: Start free 2. Evict A (+2), Evict C (+2). Total free = 6. Load D (-7). Final free = -1? No.
+    *   Let's re-calculate strictly:
+    *   Start Free: 2 GB.
+    *   Evict A (2GB): Free becomes $2+2=4$. Need to fill 5GB gap. Gap remaining: 3GB.
+    *   Evict C (2GB): Free becomes $4+2=6$. Need to fill 5GB gap. Gap remaining: -1GB (i.e., we have enough).
+    *   Load D (7GB): Free becomes $6-7 = -1$? No, free space cannot be negative relative to capacity.
+    *   Correct Logic: Capacity is fixed at 8.
+    *   Start: Occupied {A(2), B(2), C(2)} = 6 GB. Free = 2 GB.
+    *   Evict A: Occupied {B, C} = 4 GB. Free = 4 GB.
+    *   Evict C: Occupied {B} = 2 GB. Free = 6 GB.
+    *   Load D (7GB): Requires 7 GB. Have 6 GB? No. Wait.
+    *   Re-evaluating "Fit": Does the load fit in the *current* free space?
+    *   Current Free after evicting A and C is $8 - 2 (\text{B}) = 6$ GB.
+    *   Request is for 7 GB.
+    *   $6 < 7$. It still does not fit!
+    *   Are there any unpinned models left? No. Only B (pinned) remains.
+    *   Rule Applied: Deferral Rule.
+*   Action: Defer Load D. `deferrals` = 1. `deferred` = [4].
+*   State Line: `load D -> resident {A, B, C} free 2 recency {C, B, A}` (Wait, if deferred, no load happens, so residents don't change? Or do evictions happen but load fails?)
+    *   Rule text: "Every eviction actually performed counts... and a load is only deferred after evicting every unpinned resident still leaves too little room".
+    *   So evictions A and C happened. Residents are now {B}. Free space is 6 GB.
+    *   Load D (7GB) requested. Fits? No ($6 < 7$).
+    *   Result: Defer.
+    *   State Line: `defer D -> resident {B} free 6 recency {B}`
+
+**Event 5: Unload B (2 GB)**
+*   Rule Applied: Unload Rule.
+*   Check: Is B resident? Yes.
+*   Action: Remove B. Free space becomes $6 + 2 = 8$ GB. Residents become [].
+*   State Line: `unload B -> resident {} free 8 recency {}`
+
+**Final Totals:**
+*   Loads (successful): A, B, C. Total = 3.
+*   Evictions: A, C. Total = 2.
+*   Deferrals: D. Total = 1.
+*   Deferred IDs: [4].
+
+### Final Answer
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": [4]}
+```

@@ -1,0 +1,60 @@
+### Phase 1: RULE SCAN
+
+**Rule List & Triggers:**
+1. **Arrival Rule**: Jobs arrive in strict order (HIGH @ t=0, LOW1 @ t=0, LOW2 @ t=2).
+2. **Preemption Rule**: HIGH preempts instantly upon arrival; LOW jobs are suspended immediately if a job is running when HIGH arrives or if they are currently running.
+3. **Completion Order Rule**: The `order` list must strictly follow the finish time of the LOW jobs (earliest finish first).
+4. **Waste Calculation Rule**: For any preempted LOW job, waste = (Current Run Time) - (Last Checkpoint Time). Work done between checkpoints is lost.
+5. **Checkpoint Rule**: LOW jobs checkpoint every 2 completed minutes. State resets to the last checkpoint time upon resumption.
+6. **Resumption Priority Rule**: A resumed LOW job outranks a fresh one at any tie (relevant for scheduling logic, though here only one HIGH exists).
+7. **Makespan Definition Rule**: Makespan = Finish Time of HIGH - Start Time of First Job (LOW1).
+
+---
+
+### Phase 2: LEDGER WALK
+
+**Initial State:**
+- System Time ($t$): 0
+- Running Job: None
+- Pending Queue: [HIGH, LOW1] (Order: HIGH arrives first at t=0 based on "arrivals in order" and standard dispatch discipline where higher priority/earlier arrival wins; Note: The prompt says HIGH preempts instantly. Let's trace the timeline precisely).
+- Job Definitions:
+  - **HIGH**: Duration 8 min. Priority: Highest (Preemptive).
+  - **LOW1**: Duration 5 min. Start $t=0$. Checkpoints every 2 min.
+  - **LOW2**: Duration 7 min. Start $t=2$ (Arrival time). Checkpoints every 2 min.
+
+**Event Log:**
+
+| Time | Event Description | State Change / Calculation |
+| :--- | :--- | :--- |
+| **0.0** | **ARRIVAL: HIGH**, **ARRIVAL: LOW1** | Both arrive at $t=0$. HIGH has higher priority (preemptive). HIGH starts immediately.<br>**Running**: HIGH<br>**Pending**: LOW1 (queued) |
+| **2.0** | **ELAPSE (HIGH runs 2m)** | HIGH has completed 2 mins. LOW1 is waiting in queue.<br>LOW1 Checkpoint logic: It hasn't started, so no checkpoint time set yet ($CP_{time} = -\infty$).<br>**Running**: HIGH<br>**Elapsed(HIGH)**: 2/8<br>**Waste(LOW1)**: 0 |
+| **4.0** | **ELAPSE (HIGH runs 2m total)** | HIGH completes another 2 mins.<br>LOW1 still waiting.<br>**Running**: HIGH<br>**Elapsed(HIGH)**: 4/8 |
+| **6.0** | **ELAPSE (HIGH runs 2m total)** | HIGH completes another 2 mins.<br>LOW1 still waiting.<br>**Running**: HIGH<br>**Elapsed(HIGH)**: 6/8 |
+| **7.0** | **ARRIVAL: LOW2** | LOW2 arrives at $t=2$, but the scheduler is currently running HIGH (Priority > LOW). LOW2 joins queue behind LOW1 or waits for HIGH? Standard preemptive scheduling with a single core implies only one job runs. If HIGH is running, it continues until completion unless preempted by another HIGH. There are no other HIGH jobs.<br>**Queue**: [LOW1, LOW2] (Low1 arrived earlier than Low2).<br>**Running**: HIGH<br>**Elapsed(HIGH)**: 7/8 |
+| **8.0** | **COMPLETION: HIGH** | HIGH finishes at $t=8$. Makespan clock starts effectively relative to this finish?<br>Wait, definition check: "makespan counts from first start to last finish". First start was LOW1 (or HIGH?) at $t=0$? Usually, makespan is Finish(Last) - Start(First). Here, system active at $t=0$. So Makespan = $T_{end} - 0$.<br>**Running**: None<br>**Free Time**: 8 mins passed. |
+| **8.1** | **SCHEDULING: LOW Jobs to Run** | Core is free. Queue order: LOW1 arrived at 0, LOW2 arrived at 2. Order: LOW1 then LOW2.<br>Start **LOW1**. Duration 5 min. Target finish $t=13$.<br>Checkpoint logic for LOW1: It had no prior execution (interrupted by HIGH immediately upon start? No, it was waiting). Wait, did LOW1 execute before HIGH finished?<br>**Re-evaluating Timeline**: Did LOW1 run *before* HIGH at any point? <br>At $t=0$, both arrive. If they are non-preemptive within the arrival batch, who runs first? "HIGH preempts instantly". This usually implies if there's a conflict or if we assume a single core, the highest priority grabs it immediately.<br>Hypothesis A: HIGH grabs core at 0. LOW1 waits until $t=8$. <br>Hypothesis B: They arrive together, but maybe LOW1 starts? No, "HIGH preempts instantly" implies dominance. Let's assume Hypothesis A (Standard Preemptive Scheduling).<br><br>**Correction on Wakeup**: When HIGH finishes at 8, the core is free. We resume/pick from queue.<br>Queue: LOW1 (Arrived $t=0$, Waited $0-8$), LOW2 (Arrived $t=2$, Waited $2-8$).<br>Action: Start **LOW1** at $t=8$. |
+| **13.0** | **COMPLETION: LOW1** | LOW1 runs 5 mins ($8+5=13$). Finishes.<br>Checkpoint status for LOW1: It ran from 8 to 13 (5 mins). <br>Last checkpoint? It had never run before, so it has no checkpoints. Or does "checkpoint every 2 completed minutes" imply checking *during* the run? Yes. But since it started fresh after HIGH finished, its state is clean.<br>**Waste**: 0 (It didn't get preempted during its own run).<br>Wait, did LOW1 have a checkpoint saved while waiting? No, checkpoints happen on "completed minutes" of *work*. |
+| **13.0**+ | **SCHEDULING: Start LOW2** | Queue now has only LOW2.<br>Start **LOW2** at $t=13$. Duration 7 mins. Target finish $t=20$.<br>**Running**: LOW2<br>**Elapsed(HIGH)**: Done. |
+| **20.0** | **COMPLETION: LOW2** | LOW2 runs 7 mins ($13+7=20$). Finishes.<br>Checkpoint status for LOW2: Ran from 13 to 20 (7 mins). <br>Checkpoints reached: At $t=15$ (2m), $t=17$ (4m).<br>Total work done on this run: 7 mins. No prior work existed.<br>**Waste**: 0.<br>Order of completion: LOW1 finished at 13, LOW2 finished at 20. Order: [LOW1, LOW2]. |
+
+**Wait, let me re-read the "Orientation" and specific trap warnings.**
+Trap: "a resumed LOW job outranks a fresh one".
+Trap: "wasted minutes past checkpoints".
+Scenario Check: Did LOW1 actually run *before* HIGH finished?
+If at $t=0$, HIGH arrives. If LOW1 also arrives. Does the system allow them to start simultaneously? No, "one core tonight".
+Does "HIGH preempts instantly" mean it stops whatever is running? At $t=0$ nothing is running. So HIGH starts. LOW1 waits.
+If HIGH runs 8 mins, finishes at 8.
+Then LOW1 starts. Runs 5 mins. Finishes 13.
+Then LOW2 starts. Runs 7 mins. Finishes 20.
+
+**Is there a scenario where LOW1 runs *before* HIGH?**
+"HIGH preempts instantly". This usually applies if they are competing for the resource. If HIGH arrives at $t=0$ and LOW1 arrives at $t=0$, and HIGH has higher priority, HIGH takes the core immediately.
+However, the orientation story says: "a 5-minute LOW starting immediately... a 7-minute HIGH". In that example, the LOW started *immediately* (at t=0) while the 7-min HIGH was presumably arriving or scheduled later? Or maybe they arrived together but LOW went first?
+Text: "HIGH preempts instantly and runs to completion."
+If LOW1 starts at $t=0$ and HIGH arrives at... wait, the task says "HIGH runs 8 minutes", "LOW1... starting at minute 0". It does not explicitly state HIGH arrival time in the *tonight* section's explicit list like it did for LOW2 ("starting at minute 2").
+Re-reading Task: "one core tonight, three jobs. HIGH runs 8 minutes, LOW1 runs 5 minutes starting at minute 0, LOW2 runs 7 minutes starting at minute 2."
+It implies HIGH is the job that dominates. Does it say when HIGH arrives? Usually, in these problems, if not specified, and it's a "rotation" duty, the high priority job often starts or is present. But strictly: "arrivals in order".
+If LOW1 says "starting at minute 0", does it mean it *starts execution* at 0 (implying core free)? If so, HIGH must have arrived earlier? Or HIGH arrives at 0 too?
+"Arrivals in order... HIGH ... LOW1 ... LOW2".
+List:
+1. HIGH (Duration

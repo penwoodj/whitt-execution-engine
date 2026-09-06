@@ -43,6 +43,13 @@ pub struct ModelBenchmarkResult {
     pub error: Option<String>,
     pub gpu_mode: String,
     pub speedup_factor: Option<f64>,
+    /// Workflow step this result belongs to (Issue J: entries in
+    /// benchmark_report.json previously carried only the model FILE
+    /// name — identical across steps — so consumers could not
+    /// attribute results or spot skipped steps under early exit).
+    /// None in model-discovery mode (omitted from JSON).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_id: Option<String>,
 }
 
 /// Aggregate benchmark result across all models.
@@ -53,6 +60,11 @@ pub struct BenchmarkSuiteResult {
     pub total_models: usize,
     pub successful: usize,
     pub failed: usize,
+    /// Steps the workflow planned (Issue J: under early exit,
+    /// total_models alone invited "3/5 ran" miscounts). None in
+    /// model-discovery mode (omitted from JSON).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planned_steps: Option<usize>,
     pub results: Vec<ModelBenchmarkResult>,
 }
 
@@ -217,6 +229,7 @@ mod tests {
             error: None,
             gpu_mode: "gpu".to_string(),
             speedup_factor: Some(2.5),
+            step_id: None,
         };
 
         let suite = BenchmarkSuiteResult {
@@ -225,6 +238,7 @@ mod tests {
             total_models: 1,
             successful: 1,
             failed: 0,
+            planned_steps: None,
             results: vec![result],
         };
 

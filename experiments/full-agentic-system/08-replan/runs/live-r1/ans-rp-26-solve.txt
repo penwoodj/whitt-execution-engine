@@ -1,0 +1,113 @@
+The task requires simulating a scheduling scenario with specific rules for jobs (LOW1, LOW2) and an interrupting job (HIGH), calculating wasted minutes due to checkpoint preemption, determining completion order based on start time priority, and reporting the makespan.
+
+**Step 1: Parse Events and Rules**
+*   **Job Definitions:**
+    *   `LOW1`: Start $t=0$, Duration $7$ min. Checkpoint every $2$ running minutes ($t_{bank} = 0 + 2k$).
+    *   `LOW2`: Start $t=1$, Duration $3$ min. Checkpoint every $2$ running minutes (relative to resume/start).
+*   **Interrupt Event:**
+    *   `HIGH`: Arrives at $t=4$. Duration $4$ min ($t_{end} = 8$). Preempts whatever is running. No other jobs run while HIGH runs.
+*   **Resumption Logic:**
+    *   Core goes to waiting LOWs ordered by Start Time ($t_s$). Lower $t_s$ wins. Tie-breaker: Resumed > Fresh.
+    *   Wasted minutes = Total Duration - Banked Minutes.
+    *   Resume time calculation: Current time + (Wasted minutes).
+
+**Step 2: Simulation Walk**
+
+*   **Time $0 \to 3$: LOW1 runs.**
+    *   `LOW1` starts at $t=0$. Runs continuously.
+    *   Banks checkpoints at $t=2$ and $t=4$ (relative to start).
+    *   At $t=2$, `LOW1` has run for 2 minutes. **Bank 1**. Remaining needed: $7-2=5$.
+    *   At $t=3$: Still running.
+
+*   **Time $4 \to 8$: HIGH runs.**
+    *   Event: `HIGH` arrives at $t=4$. Preempts current task (`LOW1`).
+    *   State of `LOW1`: It has run from $0$ to $4$. Total banked time = $2 + 2 = 4$ minutes?
+        *   Rule check: "a job that starts... banks a checkpoint at minute s+2 and again every 2 running minutes after".
+        *   Start $s=0$. Banks at $0+2=2$, then $2+2=4$.
+        *   So at $t=4$, `LOW1` has banked exactly 4 minutes of work.
+    *   **Wasted Calculation**: Total duration = 7. Banked = 4. Wasted = $7 - 4 = 3$ minutes.
+    *   Wait, let's re-read the example logic provided in the prompt: "LOW1 held the core minutes 0, 1 and 2... its 3rd minute was unbanked when the swap came, so 1 minute wasted."
+        *   Example Start=0. Banks at $t=2$.
+        *   Swap comes at $t=3$.
+        *   Work done: 3 minutes ($0-3$). Banked: 2 minutes. Wasted: $3-2=1$. Correct.
+    *   My Scenario: Start=0, Duration=7. Swap comes at $t=4$.
+        *   Work done: 4 minutes ($0-4$).
+        *   Banks at $t=2$ and $t=4$.
+        *   Banked amount = 4 minutes.
+        *   Wasted amount = Total (7) - Banked (4) = **3 minutes**.
+
+*   **Resuming LOW1:**
+    *   `HIGH` finishes at $t=8$.
+    *   Available jobs: `LOW1` (Fresh/Resumed), `LOW2`.
+    *   Priority: Start Time.
+        *   `LOW1` start = 0.
+        *   `LOW2` start = 1.
+    *   `LOW1` wins. It is a "resumed" job, but since it's the only one with $t_s=0$, it beats any fresh or resumed job with higher $t_s$.
+    *   `LOW1` resumes at $t=8$. It needs to do its 3 wasted minutes plus continue? No, it needs to finish. The "wasted" part is redone. The banked part is kept.
+    *   Remaining work for `LOW1`: Total (7) - Banked (4) = 3 minutes of *new* work required to complete? Or does it just run the remaining time?
+        *   Prompt: "after resume a job redoes every minute past its last bank".
+        *   It needs to execute 3 more minutes of code.
+    *   Timeline for `LOW1`:
+        *   Starts at $t=8$. Runs for 3 minutes ($8, 9, 10$).
+        *   At end of minute 10, it has run 3 new minutes. Total effective time = Banked (4) + New (3) = 7. **DONE**.
+    *   `LOW1` finishes at $t=10$.
+
+*   **Resuming LOW2:**
+    *   Available jobs: `LOW2`.
+    *   `LOW2` status: Arrived at $t=1$? No, "arrivals in order". Does it arrive immediately or wait?
+        *   Prompt: "LOW jobs take the core in order of their start minutes... a LOW whose start minute arrives while the core is busy simply waits."
+        *   `LOW2` start minute is 1. It waited from $t=1$ to $t=8$.
+    *   Does it have checkpoint banks?
+        *   Prompt: "a job that starts or resumes at minute s banks a checkpoint...".
+        *   Since it didn't run, it has 0 banked minutes.
+        *   Wait, the prompt says "LOW jobs take the core in order of their start minutes". It implies they are queued.
+        *   Did `LOW2` arrive? The task list is usually implicit arrival or immediate availability unless specified otherwise (like "HIGH arrives"). However, looking at the previous example: "Both LOWs were then waiting... went to LOW1... Then LOW2". This implies both exist in the queue once `HIGH` leaves.
+        *   So `LOW2` starts fresh at $t=10$.
+    *   Timeline for `LOW2`:
+        *   Starts at $t=10$. Duration 3 minutes.
+        *   Runs $10, 11, 12$.
+        *   Banks at $t=10+2=12$.
+        *   Finishes at $t=12$ (completed all 3).
+    *   `LOW2` finishes at $t=12$.
+
+*   **Completion Order:**
+    *   `LOW1` finished at $t=10$.
+    *   `LOW2` finished at $t=12$.
+    *   Order: `["LOW1", "LOW2"]`.
+
+*   **Wasted Minutes Calculation:**
+    *   `LOW1`: Wasted = 3.
+    *   `LOW2`: Did not run before interruption, so 0 wasted (unless the definition of "wasted" includes waiting time? No, prompt says "minutes wasted past checkpoints").
+    *   Total Wasted = **3**.
+
+*   **Makespan Calculation:**
+    *   Start of first job (`LOW1`) was $t=0$.
+    *   End of last job (`LOW2`) is $t=12$.
+    *   Makespan usually refers to the duration from start to finish. The example says "makespan 13 minutes from the first start" where finish was at 13. So here: $12 - 0 = 12$? Or does it mean absolute time?
+    *   Example text: "makespan counts from the the last finish". This phrasing in the prompt is slightly ambiguous ("from the last finish"? usually means duration). But looking at numbers: Start 0, End 13 -> Makespan 13. So it's $End - Start$.
+    *   My End = 12. Start = 0. Makespan = **12**.
+
+Let's double check the "Bank" logic for `LOW1` again.
+Start=0. Banks at 2, 4.
+At t=4 (preemption), it has completed exactly 4 minutes.
+Checkpoint logic: "a job that starts... banks a checkpoint at minute s+2 and again every 2 running minutes after".
+Sequence of checkpoints for LOW1:
+- Run 0-1 (1 min done). No bank.
+- Run 1-2 (2 mins done). Bank #1 triggered.
+- Run 2-3 (3 mins done). No bank.
+- Run 3-4 (4 mins done). Bank #2 triggered.
+So at t=4, it has completed 4 minutes and hit the checkpoint exactly at that moment.
+Prompt: "a bank landing on the exact minute HIGH arrives still counts and nothing is wasted".
+This confirms my calculation. Work in [0, 4] is saved. Total work needed = 7. Saved = 4. Wasted to redo = 3.
+Resume runs 3 minutes (8-10). Finishes at 10.
+
+`LOW2`: Starts at 10. Needs 3 mins.
+Runs 10, 11, 12.
+Banks at $10+2=12$.
+Finishes at 12.
+
+Total Time: 0 to 12. Makespan = 12. Wasted = 3. Order = LOW1, LOW2.
+
+Wait, check the example again carefully.
+Example: LOW1 (7 min), LOW2 (3 min). HIGH @ 3 min.
+LOW1 runs 0-3.

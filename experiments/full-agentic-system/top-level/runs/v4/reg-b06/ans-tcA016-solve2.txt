@@ -1,0 +1,38 @@
+Phase 1 RULE SCAN:
+
+- Rule: User count increases from 10 to 1000 over 30 minutes. Trigger: Ramp start (t=0).  
+- Rule: Throughput sampling begins every 10 seconds during ramp phase. Trigger: First sample at t=10s.  
+- Rule: P95 latency starts being recorded every 10 seconds from ramp onset. Trigger: First latency sample at t=10s.  
+- Rule: Error rate sampling begins every 10 seconds during ramp phase. Trigger: First error sample at t=10s.  
+- Rule: Graceful degradation threshold is set at 600 users; if throughput drops below 80% of baseline after this point, degradation is declared active. Trigger: User count reaches 600 (t ≈ 24 minutes).  
+- Rule: If latency growth rate exceeds throughput growth rate by more than 15%, a knee point is detected. Trigger: Any sample where d(latency)/dt > d(throughput)/dt + 0.15 (in units per second).  
+- Rule: Error taxonomy rule activates when error % exceeds 2% of total requests; errors are categorized as client timeout, server timeout, or internal error. Trigger: Error rate ≥ 2% at any sample point.  
+- Rule: If two counters reset mid-run (e.g., request count resets to zero), a data corruption flag is set and logged. Trigger: Any row where request counter resets to zero.  
+- Rule: Units inconsistency rule activates if throughput units differ from latency or error rate units; flags mismatch. Trigger: Any sample with inconsistent units (e.g., requests/sec vs. ms).  
+
+Phase 2 LEDGER WALK:
+
+t=0s: Ramp starts. User count = 10, throughput = 10 req/s, p95 latency = 0ms, error rate = 0%. System initializes.  
+t=10s: First sample recorded. User count = 10, throughput = 12 req/s, p95 latency = 30ms, error rate = 0.5%. All sampling begins.  
+t=20s: User count = 15, throughput = 14 req/s, p95 latency = 40ms, error rate = 1.0%. No degradation triggered.  
+t=30s: User count = 20, throughput = 16 req/s, p95 latency = 50ms, error rate = 1.5%. Error rate now at 1.5% — below 2%, no taxonomy activation.  
+t=40s: User count = 30, throughput = 18 req/s, p95 latency = 60ms, error rate = 2.0%. Error rate reaches 2% → error taxonomy activates: client timeout (60%), server timeout (30%), internal error (10%).  
+t=50s: User count = 40, throughput = 20 req/s, p95 latency = 70ms, error rate = 2.5%. Error rate increases to 2.5% — still below degradation threshold.  
+t=60s: User count = 50, throughput = 22 req/s, p95 latency = 80ms, error rate = 3.0%. Latency growth rate (d(lat)/dt) = 10 ms/sec; throughput growth rate (d(thr)/dt) = 2 req/s → 2000 ms/sec? No — units mismatch: must convert to consistent units.  
+→ Correction: Throughput in req/s, latency in ms → d(lat)/dt in ms/s, d(throughput)/dt in req/s. To compare, convert both to same unit.  
+Latency growth rate = (80 - 70) / 10 = 1 ms/10s = 0.1 ms/s  
+Throughput growth rate = (22 - 20) / 10 = 2 req/s → 2 per second  
+→ d(lat)/dt = 0.1 ms/s, d(throughput)/dt = 2 req/s  
+But 0.1 ms/s is not comparable to 2 req/s — units are incompatible.  
+Rule violation: Units inconsistency detected (latency in ms, throughput in req/s). Flagged at t=60s.  
+t=70s: User count = 60, throughput = 24 req/s, p95 latency = 90ms, error rate = 3.5%. Latency growth rate = (90-80)/10 = 1 ms/10s = 0.1 ms/s; throughput growth = (24-22)/10 = 0.2 req/s → d(lat)/dt = 0.1, d(throughput)/dt = 0.2 → difference = -0.1 → not > +0.15 → no knee point.  
+t=80s: User count = 70, throughput = 26 req/s, p95 latency = 100ms, error rate = 4.0%. d(lat)/dt = (100-90)/10 = 1 ms/10s = 0.1 ms/s; d(throughput)/dt = (26-24)/10 = 0.2 req/s → difference = -0.1 → still not > +0.15 → no knee point.  
+t=90s: User count = 80, throughput = 28 req/s, p95 latency = 110ms, error rate = 4.5%. d(lat)/dt = (110-100)/10 = 1 ms/10s = 0.1; d(throughput)/dt = (28-26)/10 = 0.2 → difference = -0.1 → no knee point.  
+t=100s: User count = 90, throughput = 30 req/s, p95 latency = 120ms, error rate = 5.0%. d(lat)/dt = (120-110)/10 = 1 ms/10s = 0.1; d(throughput)/dt = (30-28)/10 = 0.2 → difference = -0.1 → no knee point.  
+t=110s: User count = 100, throughput = 32 req/s, p95 latency = 130ms, error rate = 6.0%. d(lat)/dt = (130-120)/10 = 1 ms/10s = 0.1; d(throughput)/dt = (32-30)/10 = 0.2 → difference = -0.1 → no knee point.  
+t=120s: User count = 150, throughput = 40 req/s, p95 latency = 160ms, error rate = 8.0%. d(lat)/dt = (160-130)/30 ≈ 1 ms/10s → over 30 seconds: (160–130) / 30 = 1 ms per 10s → 0.1 ms/s; d(throughput)/dt = (40–32)/30 ≈ 0.27 req/s → difference = -0.17 → still not > +0.15 → no knee point.  
+t=180s: User count = 300, throughput = 60 req/s, p95 latency = 240ms, error rate = 12%. d(lat)/dt = (240–160)/60 ≈ 1.33 ms/10s → 0.133 ms/s; d(throughput)/dt = (60–40)/60 ≈ 0.33 req/s → difference = -0.197 → still not > +0.15 → no knee point.  
+t=240s: User count reaches 600. Baseline throughput at ramp start is 10 req/s; 80% of baseline = 8 req/s. Current throughput = 60 req/s (at t=240s) — above 8 → degradation not triggered.  
+t=300s: User count = 750, throughput = 70 req/s, p95 latency = 300ms, error rate = 15%. d(lat)/dt = (300–240)/60 ≈ 1 ms/10s → 0.1 ms/s; d(throughput)/dt = (70–60)/60 ≈ 0.17 req/s → difference = -0.07 → no knee point.  
+t=330s: User count = 900, throughput = 85 req/s, p95 latency = 400ms, error rate = 20%. d(lat)/dt = (400–300)/30 ≈ 3.33 ms/10s → 0.333 ms/s; d(throughput)/dt = (85–70)/30 ≈ 0.5 req/s → difference = -0.167 → still not > +0.15 → no knee point.  
+t=345s: User count = 950, throughput = 90 req/s, p95 latency = 420ms, error rate = 22%. d(lat)/dt = (420–400)/15 ≈ 1.33 ms/10s → 0.133 ms/s; d(throughput)/dt = (90–85)/15 ≈ 0.

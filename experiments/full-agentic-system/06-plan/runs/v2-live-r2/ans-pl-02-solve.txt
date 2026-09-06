@@ -1,0 +1,88 @@
+Based on the strict rules and event list provided for "tonight's deploy window," here is the step-by-step execution of the state machine.
+
+**Initial State:**
+- Pool: 40 tokens
+
+**Event Walkthrough:**
+
+1.  **Request `r1` arrives (asks for 5):**
+    -   Pool has 40. Ask is 5. Grant = min(40, 5) = 5.
+    -   Pool drops to $40 - 5 = 35$.
+    -   State: Granted 5, Pool 35.
+
+2.  **Request `r2` arrives (asks for 8):**
+    -   Pool has 35. Ask is 8. Grant = min(35, 8) = 8.
+    -   Pool drops to $35 - 8 = 27$.
+    -   State: Granted 13 (total), Pool 27.
+
+3.  **Request `r3` arrives (asks for 12):**
+    -   Pool has 27. Ask is 12. Grant = min(27, 12) = 12.
+    -   Pool drops to $27 - 12 = 15$.
+    -   State: Granted 25 (total), Pool 15.
+
+4.  **Request `r4` arrives (asks for 14):**
+    -   Pool has 15. Ask is 14. Grant = min(15, 14) = 14.
+    -   Pool drops to $15 - 14 = 1$.
+    -   State: Granted 39 (total), Pool 1.
+
+5.  **Request `r5` arrives (asks for 17):**
+    -   Pool has 1. Ask is 17. Grant = min(1, 17) = 1.
+        *(Rule note: "grants are partial when the pool cannot cover the full ask... a request arriving at an empty pool is denied". Here the pool is not empty (it has 1), so it grants the available amount).*
+    -   Pool drops to $1 - 1 = 0$.
+    -   State: Granted 40 (total), Pool 0.
+
+6.  **Request `r6` arrives (asks for 21):**
+    -   Pool has 0. Ask is 21.
+        *(Rule note: "a request arriving at an empty pool is denied and listed by id").*
+    -   The pool is exactly zero upon arrival of `r6`. Therefore, this is a denial.
+    -   Denied list adds `r6`.
+    -   State: Granted 40 (total), Pool 0.
+
+**Expiry Check:**
+-   The prompt mentions an expiry rule: "the grant for r1 expires after request r2 completes".
+-   However, looking at the sequence of events and the specific instruction to apply rules in arrival order before triggering secondary effects unless explicitly queued by an event completion logic that pushes state forward *between* arrivals.
+-   Standard interpretation of this specific constraint set ("ledger is a promise"): Events are processed sequentially. The expiry happens *after* `r2` completes.
+-   If the system processes `r1`, then immediately triggers its expiry before moving to `r2`:
+    -   Expiry of `r1` (granted 5) returns half rounded down: $\lfloor 5/2 \rfloor = 2$.
+    -   Pool becomes $35 + 2 = 37$.
+    -   Then `r2` arrives.
+-   **CRITICAL RE-EVALUATION OF TIMING:** The text says "the grant for r1 expires after request r2 completes". This implies the expiry occurs *after* the processing of `r2`. It does not occur between them.
+    -   Sequence: Process `r1` -> State Update -> Process `r2` -> State Update -> (Expiry Triggered by `r2` completion) -> Return to Pool -> Process `r3`...
+-   Let's re-run with this correct timing logic.
+
+**Re-Calculation with Correct Expiry Timing:**
+
+1.  **Start:** Pool = 40.
+2.  **Event `r1` (ask 5):** Grant 5. Pool $\rightarrow$ 35.
+    -   *Current State:* Granted=5, Pool=35.
+3.  **Event `r2` (ask 8):** Pool is 35. Grant 8. Pool $\rightarrow$ 27.
+    -   *Completion of `r2` triggers Expiry of `r1`.*
+    -   Expiry Return: $\lfloor \text{granted}_1 / 2 \rfloor = \lfloor 5/2 \rfloor = 2$.
+    -   Pool becomes $27 + 2 = 29$.
+    -   *Note:* The rule says "the return arrives right before the request the trigger names". Wait, let's re-read carefully: "watch the slot the expiry lands in... the return arrives right before the request the trigger names".
+    -   This phrasing is ambiguous. Does it mean "before `r2`" (implying expiry happens after `r1` but before `r2`)? Or does it mean "the event named in the expiry rule triggers the return"? Usually, an expiry *follows* the trigger event's completion.
+    -   Let's look at the example story: "that pool started at 30... first ask was 11... second 7... then the first grant expired and returned 5". In that story, `r1` (11) happens, then `r2` (7) happens. The text says "then the first grant expired". This implies the sequence is Event -> Next Event -> Expiry of Previous? Or Event -> Expiry -> Next Event?
+    -   Key phrase in example: "watch the slot the expiry lands in... the return arrives right before the request the trigger names". If `r1` expires, it returns *before* `r2` (the next request) if we interpret "trigger names" as the event that caused the condition? No, usually an expiry is tied to a specific past event.
+    -   Let's reconsider the standard interpretation of "expires after request r2 completes". This explicitly places the timing **after** `r2`.
+    -   However, the instruction "return arrives right before the request the trigger names" is confusing if applied to an expiry that happens *after* completion. Perhaps it means: When processing the event list, when we are at a point where an expiry condition is met (triggered by previous events), we handle it immediately?
+    -   Let's look at the example numbers again carefully: "first ask was 11... second 7... then the first grant expired and returned 5". If `r1`=11, `r2`=7. Start=30.
+        -   Scenario A (Expiry after `r2`): $30-11=19$. $19-7=12$. Expiry returns $\lfloor 11/2 \rfloor = 5$. Pool becomes $12+5=17$. Next ask lands on 17.
+        -   Scenario B (Expiry between `r1` and `r2`): $30-11=19$. Expiry returns 5 $\rightarrow$ 24. Then `r2` takes 7 $\rightarrow$ 17.
+    -   The text says "then the first grant expired" in the narrative flow of the example, which could imply chronological order (Event 1 -> Event 2 -> Expire). But then it says "the return arrives right before the request the trigger names". If `r1` is the one expiring, and `r2` is the next request... does it mean before `r2`?
+    -   Let's parse "trigger names": The expiry rule names a request ID (e.g., "grant for r1"). So the event that *names* r1 in an expiry context is the completion of r1? Or is it the next event?
+    -   Actually, let's look at the specific constraint: "the grant for r1 expires after request r2 completes". This is explicit. It happens **after** `r2`.
+    -   Let's check the Example Story again with this logic: Start 30, Ask 11 ($\rightarrow$ 19), Ask 7 ($\rightarrow$ 12). Expiry of 11 triggers after Ask 2 completes. Return $\lfloor 11/2 \rfloor = 5$. Pool $12+5=17$.
+    -   The text says "and the third ask of 13 landed against only 17 in the pool so it took a partial". This confirms the pool was 17 when the third event arrived. So the expiry happened **before** the third event, which is consistent with happening after the second event completed.
+    -   Okay, logic confirmed: Process `r2` $\rightarrow$ Trigger Expiry of `r1` immediately upon `r2` completion $\rightarrow$ Update Pool $\rightarrow$ Proceed to `r3`.
+
+**Final Correct Execution Trace:**
+
+1.  **Start:** Pool = 40.
+2.  **Event `r1` (ask 5):**
+    -   Grant: min(40, 5) = 5.
+    -   Pool: $40 - 5 = 35$.
+3.  **Event `r2` (ask 8):**
+    -   Grant: min(35, 8) = 8.
+    -   Pool: $35 - 8 = 27$.
+    -   **Trigger:** `r1` expires immediately after `r2` completes.
+    -   Return: $\lfloor

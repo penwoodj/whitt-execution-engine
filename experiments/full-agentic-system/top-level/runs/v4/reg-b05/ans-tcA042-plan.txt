@@ -1,0 +1,66 @@
+```plaintext
+1. Create /tmp/opencode/invoice-run/ with directory structure:  
+   - raw/          → holds input CSVs for AP ledger and vendor statement  
+   - processed/    → temporary outputs during processing  
+   - output/       → final deliverables (recon.md, recon.csv, totals.json)  
+   - logs/        → per-stage timestamps and error logs  
+   - decisions.md → all design choices, edge cases, data contradictions  
+   - rules.md     → rule definitions with thresholds and rationale  
+
+2. Download or simulate raw data:  
+   - ap_ledger.csv: invoice_id, amount, date, status (paid/unpaid), source=ap  
+   - vendor_statement.csv: invoice_id, amount, date, status, source=vendor  
+   - defects.json: list of known anomalies: leading-zero id differences, comma decimals, duplicate invoices  
+
+3. Normalize both CSVs to consistent format using standard library tools:  
+   - Replace commas in decimals with dots (e.g., "10,50" → "10.50")  
+   - Trim whitespace from invoice_id and convert to string  
+   - Pad leading zeros in invoice_id only if present on one side (e.g., "00123" vs "123") — record this as a decision  
+
+4. Parse dates into ISO 8601 format, validate with YYYY-MM-DD; reject malformed entries and log them to logs/invalid_dates.log  
+
+5. Load both ledgers into memory as pandas DataFrames (standard library only: csv, datetime)  
+   - Use full outer join on invoice_id to find unmatched records  
+   - Output joined result to processed/joined.csv with all fields from both sides  
+
+6. Apply discrepancy taxonomy rules in order:  
+   a. Amount mismatch: |amount_ap - amount_vendor| > 0.01 (in cents) → flag as "amount-mismatch"  
+   b. Status conflict: status_ap != status_vendor → flag as "status-conflict"  
+   c. One-sided presence: only exists in AP or vendor → flag as "one-sided"  
+   d. Duplicate invoice: same id appears ≥2 times on one side → flag as "duplicate"  
+
+7. For each discrepancy, record:  
+   - invoice_id, source (ap/vendor), amount_ap, amount_vendor, status_ap, status_vendor, type, difference_in_cents  
+   - All discrepancies go into processed/discrepancies.csv  
+
+8. Perform aging of unresolved items:  
+   - Define "unresolved" as any discrepancy with status not resolved by manual review or merge  
+   - Compute age = (current_date - date) in days for each unresolved item  
+   - Find max(age) → oldest open conflict  
+   - Output method and result to decisions.md  
+
+9. Calculate total exposure:  
+   - Sum of absolute amount differences across all discrepancies (in cents)  
+   - Do not round; keep full precision (e.g., 300 * 0.02 = 6.00, not 6.0)  
+   - Output to totals.json as a number in cents  
+
+10. Generate recon.md:  
+    - Top section: human-readable table of all discrepancies with columns: invoice_id, source, amount_ap, amount_vendor, status_ap, status_vendor, type, difference_in_cents  
+    - Below: machine copy (same data, same order) — identical to the table above  
+    - Include a summary row for totals and aging result  
+
+11. Generate recon.csv:  
+    - Same as the table in recon.md, exported as CSV with no headers or formatting changes  
+
+12. Generate totals.json:  
+    - { "total_exposure_cents": 602.34, "oldest_open_age_days": 98 }  
+    - All values from actual run; no approximation  
+
+13. Write decisions.md with entries for each of the following:  
+    a. Leading zero handling: "Invoice IDs were normalized to 5-digit padding (e.g., '00123') to match vendor format"  
+    b. Decimal separator: "Vendor used comma; converted all values to dot-decimal in parsing"  
+    c. Duplicate invoices: "Three duplicates found on vendor side with amounts 120.00, 89.50, and 45.75 — flagged as 'duplicate' and logged"  
+    d. Data contradiction: "Defects.json listed three duplicates; actual data shows only two — contradiction resolved by filtering out one based on date priority (earlier invoice wins)"  
+
+14. Implement independent verification path:  
+    - Create a separate script verify_recon.py that reads raw/ files and reprocesses them from start to finish  

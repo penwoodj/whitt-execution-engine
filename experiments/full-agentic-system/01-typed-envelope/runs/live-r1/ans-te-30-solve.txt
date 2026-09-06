@@ -1,0 +1,46 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event stream, triggered by specific events.*
+
+1.  **Load Rule**: Triggered by `load A`. Action: Allocates capacity (3GB) from budget; if space insufficient, evicts LRU unpinned models until fit or deferral occurs.
+2.  **Pinned Rule**: Triggered by `load C` and implicitly present for all states. Action: Model C is pinned and never evicted regardless of pressure or age.
+3.  **Load Rule**: Triggered by `load D`. Action: Allocates capacity (2GB) from remaining budget; checks fit against current resident set.
+4.  **Unload Rule**: Triggered by `unload D`. Action: Frees capacity (2GB), removes Model D from active list, returns to "available" state immediately (no expiry/return logic applies here as this is an explicit unload command, not a budget limit trigger).
+
+### Phase 2 LEDGER WALK
+*Applying events one at one in strict arrival order.*
+
+**Initial State**: Capacity = 8GB. Residents = []. Budget = 0GB used. Free = 8GB. Pinned Set = {C}.
+
+**Event 1: `load A` (Size 3GB)**
+*   **Rule Applied**: Load Rule (Capacity allocation).
+*   **Check**: Current Used = 0. Requested = 3. Fit? Yes (0 + 3 <= 8). Evictions needed? No.
+*   **Action**: Add Model A to Residents. Update Used to 3GB.
+*   **State After Event 1**: Residents=[A], Pinned={C}, Used=3, Free=5.
+
+**Event 2: `load C` (Size 1GB)**
+*   **Rule Applied**: Load Rule (Capacity allocation).
+*   **Check**: Current Used = 3. Requested = 1. Fit? Yes (3 + 1 <= 8). Evictions needed? No. Note: Model C is pinned, reinforcing its presence but not changing eviction logic here as no space was lacking.
+*   **Action**: Add Model C to Residents. Update Used to 4GB.
+*   **State After Event 2**: Residents=[A, C], Pinned={C}, Used=4, Free=4.
+
+**Event 3: `load D` (Size 2GB)**
+*   **Rule Applied**: Load Rule (Capacity allocation).
+*   **Check**: Current Used = 4. Requested = 2. Fit? Yes (4 + 2 <= 8). Evictions needed? No.
+*   **Action**: Add Model D to Residents. Update Used to 6GB.
+*   **State After Event 3**: Residents=[A, C, D], Pinned={C}, Used=6, Free=2.
+
+**Event 4: `unload D`**
+*   **Rule Applied**: Unload Rule (Explicit removal).
+*   **Check**: Model D exists in Residents.
+*   **Action**: Remove Model D from Residents. Release its 2GB capacity back to free pool. Used decreases by 2.
+*   **State After Event 4**: Residents=[A, C], Pinned={C}, Used=4, Free=6.
+
+**Final Ledger Calculation:**
+*   **Loads (successful allocations)**: Models A, C, D were loaded. Count = 3.
+*   **Evictions**: No evictions occurred in this sequence because capacity was always sufficient. Count = 0.
+*   **Deferrals**: No deferrals occurred. Count = 0.
+*   **Deferred List**: Empty list [].
+
+```json
+{"loads": 3, "evictions": 0, "deferrals": 0, "deferred": []}
+```

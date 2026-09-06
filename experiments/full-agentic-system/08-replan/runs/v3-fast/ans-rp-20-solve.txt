@@ -1,0 +1,52 @@
+**Phase 1 RULE SCAN**
+1. **Load Rule**: A load request attempts to place a model of specific size into the pool; if it fits (including room for future requests implicitly handled by "fits"), it loads immediately. If it cannot fit, evictions occur first.
+2. **Eviction Rule**: When a load cannot fit, the system evicts the Least-Recently-Touched (LRT) *unpinned* models one at a time until enough space is available. Each eviction counts toward the total.
+3. **Deferral Rule**: If a load still cannot fit after all unpinned models are evicted (i.e., only pinned models remain), the load is deferred. No further evictions occur for this specific load. The load ID is recorded as deferred.
+4. **Touch/Recency Rule**: Every successful load or eviction of a model updates its recency to "Most-Recently-Touched". Unloaded models are removed from the resident set.
+5. **Unload Rule**: An unload request frees the specified amount of space immediately, regardless of current residency (if not resident, it is a no-op).
+
+**Phase 2 LEDGER WALK**
+*Initial State*: Pool = 8GB. Residents: {}. Recency: {}. Evictions=0, Deferrals=0, Loads=0. Deferred=[].
+
+1. **Event**: `load A (3 GB)`
+   - Check Fit: $8 - 0 \ge 3$. Fits.
+   - Action: Load A. Pool becomes $5$GB. Residents: {A}. Recency: {A}.
+   - State: `event -> resident {A} free 5 recency {A}`
+
+2. **Event**: `load B (3 GB)`
+   - Check Fit: $5 - 0 \ge 3$. Fits.
+   - Action: Load B. Pool becomes $2$GB. Residents: {A, B}. Recency: {B, A} (B touched last).
+   - State: `event -> resident {A, B} free 2 recency {B, A}`
+
+3. **Event**: `load C (1 GB)`
+   - Check Fit: $2 - 0 \ge 1$. Fits.
+   - Action: Load C. Pool becomes $1$GB. Residents: {A, B, C}. Recency: {C, B, A} (C touched last).
+   - State: `event -> resident {A, B, C} free 1 recency {C, B, A}`
+
+4. **Event**: `load D (7 GB)`
+   - Check Fit: $1 < 7$. Does not fit. Need $6$GB more.
+   - Eviction Step 1: Identify LRT unpinned model. Residents are {A, B, C}. All are unpinned (C is pinned but we look for *unpinned* to evict). Wait, rule says "evicts the least-recently-touched **unpinned** models".
+     - Current Residents: A (unpinned), B (unpinned), C (pinned).
+     - LRT Unpinned: Between A and B, who is older? Recency list {C, B, A} means C is newest, then B, then A. So A is the Least-Recently-Touched unpinned model.
+   - Evict A (3GB). Pool becomes $1 + 3 = 4$GB. Residents: {B, C}. Count Evictions=1.
+   - Check Fit again: Need $6$GB. Have $4$. Still need $2$GB.
+   - Eviction Step 2: Identify LRT unpinned model in {B, C}. B is unpinned, C is pinned. Only candidate is B.
+   - Evict B (3GB). Pool becomes $4 + 3 = 7$GB. Residents: {C}. Count Evictions=2.
+   - Check Fit again: Need $6$GB. Have $7$. Fits ($7 \ge 6$ remaining space effectively, or simply total capacity check: $8-1(\text{used by C}) = 7 \ge 7$).
+   - Action: Load D (7GB). Pool becomes $0$GB. Residents: {C, D}. Recency: {D, C} (D touched last).
+   - State: `event -> resident {C, D} free 0 recency {D, C}`
+
+5. **Event**: `unload B (3 GB)`
+   - Check Residency: Is B in residents? No (evicted in step 4).
+   - Action: No-op. Pool remains $0$GB. Residents remain {C, D}.
+   - State: `event -> resident {C, D} free 0 recency {D, C}`
+
+**Final Calculation**:
+- Loads: A, B, C, D successfully loaded = 4.
+- Evictions: A evicted, then B evicted = 2.
+- Deferrals: None (load D fit after evictions).
+- Deferred List: Empty.
+
+```json
+{"loads": 4, "evictions": 2, "deferrals": 0, "deferred": []}
+```

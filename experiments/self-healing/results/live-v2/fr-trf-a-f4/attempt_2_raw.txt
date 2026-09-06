@@ -1,0 +1,288 @@
+{
+  "mapping": {
+    "input_variants": [
+      "chargeback_ratio",
+      "decline_rate_by_bin_range",
+      "reserve_balance_vs_required_floor",
+      "holiday_season_projection_60_days"
+    ],
+    "field_mapping": {
+      "chargeback_ratio": {
+        "source": "chargeback_ratio_percent",
+        "target": "chargeback_ratio_pct",
+        "unit": "%",
+        "renames": [
+          "chargeback_ratio_percent",
+          "cb_ratio_pcnt"
+        ],
+        "absence_handling": "flag_as_missing",
+        "trigger_condition": "value present and numeric",
+        "output_flag": "missing_chargeback_ratio"
+      },
+      "decline_rate_by_bin_range": {
+        "source": "decline_rate_bins",
+        "target": "decline_rate_bin_ranges",
+        "unit": "%",
+        "renames": [
+          "decline_rate_bins",
+          "decline_bins"
+        ],
+        "absence_handling": "flag_as_missing",
+        "trigger_condition": "array of numeric values between 0 and 100",
+        "output_flag": "missing_decline_rate_bins"
+      },
+      "reserve_balance_vs_required_floor": {
+        "source": "reserve_balances",
+        "target": "reserve_balance_actual",
+        "unit": "USD",
+        "renames": [
+          "reserve_balances",
+          "reserves_actual"
+        ],
+        "absence_handling": "flag_as_missing",
+        "trigger_condition": "array of numeric values with length >= 1",
+        "output_flag": "missing_reserve_balance_data"
+      },
+      "holiday_season_projection_60_days": {
+        "source": "projection_window_60d",
+        "target": "holiday_season_projection_60d",
+        "unit": "USD",
+        "renames": [
+          "projection_window_60d",
+          "proj_60d"
+        ],
+        "absence_handling": "flag_as_missing",
+        "trigger_condition": "array of numeric values with length >= 1",
+        "output_flag": "missing_holiday_projection"
+      }
+    },
+    "edge_cases": {
+      "empty_input": {
+        "action": "halt_with_diagnostic",
+        "diagnostic": "Input record contains no fields matching any variant",
+        "output": null
+      },
+      "single_record_input": {
+        "action": "process_as_valid",
+        "rationale": "Single records are valid inputs; transformation proceeds as per field rules",
+        "output_flag": "single_record_input"
+      },
+      "multiple_variants_match": {
+        "action": "halt_with_diagnostic",
+        "diagnostic": "Multiple input variants match the same record; ambiguous source detected",
+        "output": null
+      },
+      "no_variant_matches": {
+        "action": "halt_with_diagnostic",
+        "diagnostic": "No input variant matches any field in the record",
+        "output": null
+      }
+    },
+    "resolution_rules": [
+      "If a value is missing, it must be flagged with an explicit output flag and not interpolated.",
+      "All renames are case-insensitive and follow exact string matching; no partial matches allowed.",
+      "Retyping from string to numeric occurs only if the input is parsable as a number; otherwise, halt.",
+      "Absence of any field triggers a flag in the output record with a named key indicating which variant was absent."
+    ],
+    "out_of_scope": [
+      "Support for legacy file formats (e.g., CSV, flat files) beyond the quarterly settlement extract schema",
+      "Integration with external risk models or third-party data sources",
+      "Computation of forward-looking stress scenarios or scenario-based exposures",
+      "Adjustments for geopolitical or macroeconomic shocks"
+    ],
+    "explanation_of_oos": "These are not part of the current scope. The transformation is strictly defined on raw settlement extracts as supplied, and any external inputs must be explicitly declared in a separate governance document."
+  },
+  "rules": {
+    "filters": [
+      {
+        "name": "chargeback_ratio_filter",
+        "condition": "value >= 0 AND value <= 1.02",
+        "action": "retain_value",
+        "unit_label": "%",
+        "rationale": "Regulatory threshold is 1.02%; values outside this range are invalid and must be flagged"
+      },
+      {
+        "name": "decline_rate_bin_range_filter",
+        "condition": "all elements in array between 0 and 100 inclusive",
+        "action": "retain_value",
+        "unit_label": "%",
+        "rationale": "Decline rates are bounded by 0–100%; any out-of-range value is invalid"
+      },
+      {
+        "name": "reserve_balance_filter",
+        "condition": "all values >= 0 and not null",
+        "action": "retain_value",
+        "unit_label": "USD",
+        "rationale": "Negative reserve balances are not permitted; must be flagged if present"
+      }
+    ],
+    "clamps": [
+      {
+        "name": "clamp_chargeback_ratio_to_threshold",
+        "value": 1.02,
+        "target_field": "chargeback_ratio_pct",
+        "unit": "%",
+        "rationale": "Regulatory scheme threshold is 1.02%; any value above must be clamped to this limit",
+        "override_reference": "appetite_paragraph_4.3"
+      },
+      {
+        "name": "clamp_decline_rate_to_max",
+        "value": 100,
+        "target_field": "decline_rate_bin_ranges",
+        "unit": "%",
+        "rationale": "Decline rates cannot exceed 100%; clamping ensures compliance with scheme rules",
+        "override_reference": "appetite_paragraph_5.2"
+      },
+      {
+        "name": "clamp_reserve_balance_to_floor",
+        "value": 0,
+        "target_field": "reserve_balance_actual",
+        "unit": "USD",
+        "rationale": "Reserve balances cannot be negative; floor at zero enforced by rule",
+        "override_reference": "appetite_paragraph_6.1"
+      }
+    ],
+    "normalizations": [
+      {
+        "name": "normalize_chargeback_ratio_to_percent",
+        "input_field": "chargeback_ratio_bps",
+        "output_field": "chargeback_ratio_pct",
+        "formula": "value / 100",
+        "unit_label": "%",
+        "rationale": "All chargeback ratios are required in percentage units; basis points must be explicitly labeled and converted",
+        "override_reference": "appetite_paragraph_4.3"
+      },
+      {
+        "name": "normalize_decline_rate_bins_to_percent",
+        "input_field": "decline_rate_bps",
+        "output_field": "decline_rate_bin_ranges",
+        "formula": "value / 100",
+        "unit_label": "%",
+        "rationale": "Decline rates are expressed in percentage units; basis points must be converted and labeled"
+      }
+    ],
+    "interpolations": [
+      {
+        "name": "interpolate_missing_reserve_balance",
+        "method": "linear_interpolation_between_adjacent_bins",
+        "input_fields": ["reserve_balance_actual", "required_floor"],
+        "output_field": "reserve_balance_imputed",
+        "condition": "missing_value AND adjacent_values_present",
+        "unit_label": "USD",
+        "rationale": "When reserve balance is missing, interpolate from adjacent bin values to maintain continuity; only if both sides exist",
+        "override_reference": "appetite_paragraph_6.1"
+      }
+    ],
+    "parameter_definitions": {
+      "threshold_chargeback": 1.02,
+      "max_decline_rate": 100,
+      "reserve_floor": 0
+    },
+    "unit_discipline_enforcement": [
+      "Every numeric column must carry its unit in the label; e.g., 'chargeback_ratio_pct' not 'chargeback_ratio'.",
+      "No column may contain a value without an explicit unit label.",
+      "Basis-point values (e.g., 50 bps) are never stored as percentages or floats without a unit label such as 'bps'."
+    ]
+  },
+  "gap_handling": {
+    "empty_input": {
+      "action": "halt_with_diagnostic",
+      "diagnostic": "Input record has no fields matching any of the defined variants (chargeback_ratio, decline_rate_by_bin_range, reserve_balance_vs_required_floor, holiday_season_projection_60_days)",
+      "output": null
+    },
+    "single_record_input": {
+      "action": "process_as_valid",
+      "rationale": "A single record is a valid input; all fields are processed individually with absence flags if applicable",
+      "output_flag": "single_record_input"
+    },
+    "multiple_variants_match": {
+      "action": "halt_with_diagnostic",
+      "diagnostic": "Multiple variants match the same input record (e.g., both 'chargeback_ratio_percent' and 'cb_ratio_pcnt')",
+      "output": null
+    },
+    "no_variant_matches": {
+      "action": "halt_with_diagnostic",
+      "diagnostic": "No field in the input matches any of the defined variants; no valid transformation path exists",
+      "output": null
+    },
+    "absence_resolution_rules": [
+      "If a value is absent, it must be flagged with an explicit key (e.g., missing_chargeback_ratio) and not replaced or interpolated.",
+      "All absence flags are included in the output record as named fields to enable spot-checking by reviewers."
+    ],
+    "reproducibility_of_gap_handling": "Gap handling decisions are deterministic: input records are evaluated field-by-field against a defined set of variants. The diagnostic message is generated based on exact field presence and naming, not heuristic matching."
+  },
+  "invariants": {
+    "total_chargeback_ratio_vs_component_sum": {
+      "description": "The sum of chargeback ratios across all segments must equal the total chargeback ratio in the portfolio",
+      "check_method": "sum of segment-level chargeback_ratios == total_chargeback_ratio",
+      "tolerance": 0,
+      "error_condition": "mismatch detected",
+      "rationale": "Regulators require recomputability from raw data; any discrepancy must be flagged as a hard error",
+      "override_reference": "appetite_paragraph_4.3"
+    },
+    "decline_rate_bins_sum_invariant": {
+      "description": "The sum of decline rate bin ranges across all segments must equal the total decline rate in portfolio",
+      "check_method": "sum of segment-level decline_rate_bin_ranges == total_decline_rate",
+      "tolerance": 0,
+      "error_condition": "mismatch detected",
+      "rationale": "Total decline rate is derived from bin ranges; any deviation indicates a transformation error",
+      "override_reference": "appetite_paragraph_5.2"
+    },
+    "reserve_balance_floor_invariant": {
+      "description": "All reserve balances must be greater than or equal to the required floor value (0 USD)",
+      "check_method": "min(reserve_balance_actual) >= 0",
+      "tolerance": 0,
+      "error_condition": "any negative balance detected",
+      "rationale": "Reserve balances cannot go below zero; violation is a hard error per appetite paragraph 6.1",
+      "override_reference": "appetite_paragraph_6.1"
+    },
+    "holiday_projection_sum_invariant": {
+      "description": "The sum of holiday season projections across segments must equal the total projected exposure",
+      "check_method": "sum(holiday_season_projection_60d) == total_holiday_exposure",
+      "tolerance": 0,
+      "error_condition": "mismatch detected",
+      "rationale": "Total projection is derived from segment-level values; any mismatch must be flagged as a hard error",
+      "override_reference": "appetite_paragraph_7.1"
+    },
+    "reconciliation_rules": [
+      "All component-level totals and their aggregate sums are reconciled at the portfolio level.",
+      "Any discrepancy between sum of components and total is treated as a hard error, not a rounding issue."
+    ],
+    "validation_checkpoints": [
+      {
+        "check_point": "pre-validation",
+        "action": "validate all fields exist and match variant definitions",
+        "responsible_role": "risk_analyst",
+        "timeframe": "within 1 hour of input ingestion"
+      },
+      {
+        "check_point": "post-transformation",
+        "action": "verify invariants hold true for each segment and portfolio-level totals",
+        "responsible_role": "compliance_liaison",
+        "timeframe": "within 2 hours of transformation completion"
+      }
+    ]
+  },
+  "reproducibility": {
+    "ordering_rules": [
+      "Input records are processed in the order they appear in the raw settlement extract.",
+      "Within each segment, fields are processed in the order defined by the field mapping table."
+    ],
+    "rounding_rules": [
+      "All numeric values are rounded to two decimal places when stored or reported.",
+      "Rounding occurs only at output stage; intermediate calculations retain full precision.",
+      "Rounding is applied uniformly across all fields with numeric units (e.g., chargeback_ratio_pct, reserve_balance_actual)."
+    ],
+    "serialization_rules": [
+      "All outputs are serialized in JSON format using double-quoted strings and ISO 8601 for dates if present.",
+      "Dates are only included when explicitly part of the input; no default or inferred timestamps are used."
+    ],
+    "determinism_assertion": "The transformation is deterministic: identical inputs, processed under identical conditions, produce identical outputs. All steps are idempotent and re-run safely without change.",
+    "idempotency_notes": [
+      "Repeated application of the transformation on the same input produces the same output.",
+      "No step depends on prior run state; all decisions are based solely on current input."
+    ],
+    "unit_consistency": "All units are explicitly labeled in field names. For example, 'chargeback_ratio_pct' indicates percentage, not basis points or decimal form."
+  },
+  "notes": "This specification is scoped strictly to the quarterly settlement extracts as supplied. It does not include support for external data sources, stress testing, or forward-looking modeling. All decisions are based on the provided material and governed by appetite paragraphs referenced in the rules section. Any input that fails field matching triggers a halt with diagnostic message; no silent drops or guesses are permitted."
+}

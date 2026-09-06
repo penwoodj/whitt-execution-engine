@@ -1,0 +1,92 @@
+### Fact Bullets (Tonight's Numbers Only)
+*   **LOW1**: Duration 4 minutes, Start Minute 0.
+*   **LOW2**: Duration 3 minutes, Start Minute 3.
+*   **HIGH**: Arrival Minute 5, Duration 4 minutes.
+
+### Per-Minute Table Walk
+| minute | core | event |
+| :--- | :--- | :--- |
+| 0 | LOW1 (start) | Bank@2 |
+| 1 | LOW1 (run) | |
+| 2 | LOW1 (banked) | Checkpoint OK (Bank@4) |
+| 3 | LOW1 (resume) | Start LOW2 queued; Core busy with LOW1. Bank@5 for LOW1. |
+| 4 | LOW1 (finish) | LOW1 completes at min 4. Core idle? No, LOW2 waiting. |
+| 5 | LOW2 (start) | HIGH arrives. Preempt LOW2 immediately. Start LOW2 resume? No, it just started. Bank@7 for LOW2. |
+| 6 | HIGH (run) | |
+| 7 | HIGH (banked) | Checkpoint OK (Bank@9). |
+| 8 | HIGH (finish) | HIGH completes at min 8. Core idle? No, LOW1 waiting (finished at 4). |
+| 9 | LOW2 (start) | Start LOW2 resume? No, it just started at 5 but was preempted instantly. Wait, logic check: At min 3, LOW2 queued. At min 4, LOW1 finished. Core goes to LOW2. At min 5, HIGH arrives. Preempt LOW2. LOW2 ran for 0 minutes (started min 4, preempted min 5). Bank@7 for LOW2? No, it didn't run. |
+| **Correction on Walk Logic**: Let's re-evaluate the "Bank" and "Preemption" strictly based on the rules provided in the prompt text vs my initial table.
+
+**Re-Walk with Strict Rule Application:**
+
+1.  **Minute 0**: LOW1 starts (Duration 4). Occupies [0, 1, 2, 3]. Finishes at 4.
+    *   Bank check: Start+2 = 2. Minute 2 is occupied by LOW1. Bank OK.
+2.  **Minute 3**: LOW2 arrives (Start 3). Queued behind LOW1? No, "LOW jobs take the core in order of their start minutes". LOW1 started at 0. LOW2 starts at 3.
+    *   At Minute 4: LOW1 finishes. Core becomes free.
+    *   Who is waiting? LOW2 (Start 3). Is there anyone else? No.
+    *   Action: Core takes LOW2.
+3.  **Minute 5**: HIGH arrives.
+    *   Current Job: LOW2 (Started at Minute 4, running for 1 minute [4]).
+    *   Preemption Rule: "On preemption the work past the last checkpoint is wasted".
+    *   Checkpoint Status for LOW2: It started at 4. Bank check = Start+2 = 6. Current time is 5. No bank yet.
+    *   Wasted Calculation: Minutes run since last bank (none) + minutes run since start? Rule says "work past the last checkpoint". Since no checkpoint was reached, all work done [Minute 4] is wasted.
+    *   Action: Preempt LOW2. Work wasted = 1 minute.
+    *   HIGH starts running. Occupies [5, 6, 7, 8]. Finishes at 9? Wait, Duration 4. Starts 5. Runs 5, 6, 7, 8. Finishes at 9.
+    *   Let's re-read "HIGH arrives at minute 5 and runs 4 minutes to completion".
+        *   Start 5. Run [5, 6, 7, 8]. Finish at 9.
+4.  **Minute 9**: HIGH finishes. Core free.
+    *   Who is waiting? LOW2 (Start 3). It was preempted at 5. It has not run any valid minutes.
+    *   Action: Core takes LOW2.
+    *   LOW2 runs remaining duration. Total 3. Ran 0. Remaining 3.
+    *   Occupies [9, 10, 11]. Finishes at 12.
+5.  **Wait, did I miss a job?** The task lists LOW1 and LOW2.
+    *   LOW1 finished at 4.
+    *   LOW2 started at 3 (queued). Ran at 4 (preempted). Resumed at 9. Finished at 12.
+    *   Order: LOW1, LOW2.
+    *   Wasted: 1 minute (from LOW2's run at min 4).
+    *   Makespan: Max finish time = 12? Or does HIGH extend it? HIGH finishes at 9. LOW2 finishes at 12. Makespan = 12.
+
+**Let's double check the "Bank" logic for LOW2.**
+*   LOW2 starts at 3 (queued).
+*   At Min 4, Core takes LOW2.
+*   Bank Checkpoint: Start+2 = 5? No, "Start-or-resume +2". If it resumes later, does the bank reset or carry over?
+    *   Rule: "a resumed LOW outranks a fresh one... on preemption the work past the last checkpoint is wasted and redone after resume."
+    *   This implies checkpoints are tied to the specific execution session.
+    *   Session 1 (Min 4): Start time effectively 4? Or does it keep the "Start Minute" of 3 for banking purposes?
+    *   Text: "a job that starts or resumes at minute s banks a checkpoint at minute s+2".
+    *   If LOW2 is considered to have "started" (or resumed) at Min 4, then Bank = 6.
+    *   If it keeps the original Start Minute 3, Bank = 5.
+    *   Regardless, HIGH arrives at 5.
+    *   If Bank=5: At min 5, LOW2 has reached its bank? "a bank landing on the exact minute HIGH arrives still counts and nothing is wasted".
+        *   If this interpretation holds, Wasted = 0.
+        *   But wait, did it run a full minute to reach the bank? Usually banks are milestones of running time. "Checkpoint every 2 completed minutes of running time".
+        *   LOW2 ran for 1 minute (Min 4). It has not completed 2 minutes. So no checkpoint reached yet.
+        *   Therefore, even if the clock hits 5, the condition "completed 2 minutes" is false. The bank hasn't been *reached* via running time.
+        *   Conclusion: Work done (1 min) is wasted.
+
+**Re-evaluating LOW1:**
+*   Starts 0. Runs [0, 1, 2, 3]. Finishes 4.
+*   Banks at 2 (completed 2 mins). OK.
+*   No preemption for LOW1. Wasted = 0.
+
+**Re-evaluating HIGH:**
+*   Arrives 5. Preempts LOW2.
+*   Runs [5, 6, 7, 8]. Finishes 9.
+*   Banks at 7 (Start+2). OK.
+
+**Re-evaluating LOW2 Resume:**
+*   Resumes at 9.
+*   Needs to run 3 minutes.
+*   Runs [9, 10, 11]. Finishes 12.
+*   Banks at 11 (Start+2 relative to resume? Or absolute?). "resumes with 3 minutes left". It runs them all. No preemption after HIGH finishes.
+
+**Final Totals:**
+*   Makespan: 12 (LOW2 finish).
+*   Wasted: 1 minute (LOW2's run at min 4).
+*   Order: ["LOW1", "LOW2"].
+
+### JSON Output
+```json
+{"makespan_min": 12, "wasted_min": 1, "order": ["LOW1", "LOW2"]}
+```

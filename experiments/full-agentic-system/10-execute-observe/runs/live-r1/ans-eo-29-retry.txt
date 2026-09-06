@@ -1,0 +1,79 @@
+Phase 1 RULE SCAN:
+- Preemption Rule: HIGH arriving at minute 2 instantly preempts any running LOW job; no other jobs run while HIGH runs.
+- Checkpoint Rule: LOW jobs checkpoint every 2 completed minutes of running time (absolute minutes s, s+2, s+4...); work past the last banked checkpoint is wasted on preemption.
+- Resume Rule: On resume, a LOW job redoes all minutes past its last bank; if it had 5 total minutes and 2 banked, it resumes with 3 left (redoes the 1 minute since last bank).
+- Scheduling Order Rule: LOW jobs take core in order of start minutes; resumed LOW outranks fresh one at any tie.
+- Core Utilization Rule: Core never idles while a LOW job is waiting; if a LOW finishes or is preempted, the next waiting LOW starts immediately in that same minute.
+
+Phase 2 LEDGER WALK:
+Minute 0: LOW1 starts (fresh), LOW2 waits. State: LOW1 running (0 min elapsed).
+Minute 1: LOW1 continues (1 min elapsed). Checkpoint bank at absolute minute 2 not yet reached. State: LOW1 running (1 min elapsed).
+Minute 2: HIGH arrives. LOW1 has run 1 minute. Last checkpoint was at absolute minute 0 (start) and next is at absolute minute 2. Since HIGH arrives exactly at minute 2, the bank lands on exact minute. Work done so far (1 min) is valid/banked? Wait, rule says "bank landing on exact minute HIGH arrives still counts". So LOW1 has 1 minute of work. Checkpoint logic: "LOW jobs checkpoint every 2 completed minutes... banks in absolute minutes; bank landing on exact minute HIGH arrives still counts".
+Let's re-evaluate the checkpoint timing carefully based on the text: "job that starts or resumes at minute s banks checkpoint at minute s+2 and again every 2 running minutes after".
+LOW1 starts at s=0. Banks at s+2 = 2. Then every 2 running minutes *after*. Running time is absolute elapsed? Or relative to start? "track banks in absolute minutes". So LOW1 banks at absolute minutes: 2, 4, 6...
+At Minute 2 (absolute), HIGH arrives. The bank lands on exact minute 2. Rule: "bank landing on exact minute HIGH arrives still counts and nothing is wasted".
+So LOW1 has completed 1 minute of work. Is this work saved? Yes, because the checkpoint at absolute minute 2 covers it.
+However, let's look at the "resume" rule example: "job with 5 total minutes and 2 banked resumes with 3 minutes left". This implies if a job runs for X minutes, and checkpoints are at T1, T2... and preemption happens at T_preem. If T_preem is exactly a checkpoint time, work is saved.
+LOW1 ran from min 0 to min 2 (duration 2 mins? No, LOW1 runs 4 mins total). At min 2, it has run for 2 minutes absolute. Checkpoint at abs min 2. So work done in [0, 2) is saved. Work done in [2, 4) would be next.
+Wait, the prompt says "LOW1 runs 4 minutes starting at minute 0".
+Timeline:
+Min 0-1: LOW1 runs (1 min).
+Min 1-2: LOW1 runs (2 mins total elapsed). Checkpoint at abs min 2.
+At Min 2, HIGH arrives. Preemption happens. Since checkpoint is at abs min 2, the work done in [0, 2) is saved. The job has completed 2 minutes of its 4 minute task. Remaining: 2 minutes.
+State after Min 2 event (Preemption): LOW1 paused with 2 mins remaining. HIGH starts running.
+
+Minute 3: HIGH runs (1 min elapsed). State: HIGH running.
+Minute 4: HIGH runs (2 min elapsed). State: HIGH running.
+Minute 5: HIGH runs (3 min elapsed). State: HIGH running.
+Minute 6: HIGH runs (4 min elapsed). State: HIGH running.
+Minute 7: HIGH runs (5 min elapsed). State: HIGH running.
+Minute 8: HIGH runs (6 min elapsed, finishes). Core becomes free. LOW2 was waiting since start. LOW2 starts immediately at Min 8.
+
+Wait, let's re-read the "resume" logic and "wasted".
+"work past last checkpoint is wasted and redone after resume."
+If LOW1 checkpoints at abs min 2, then any work done *after* that point (i.e., in interval [2, 4)) would be wasted if preempted. But HIGH finishes at min 8. So LOW1 resumes at min 8. It needs to run its remaining 2 minutes.
+Does it need to redo anything? The checkpoint at abs min 2 saved the first 2 minutes. The job has 2 minutes left. It runs from min 8 to min 10.
+Is there a checkpoint for LOW2? LOW2 starts at min 8 (s=8). Banks at s+2 = 10. Runs 3 mins total. Finishes at min 11. Checkpoint at abs min 10 covers the whole run [8, 10]. No waste.
+
+Let's re-evaluate the "bank landing on exact minute" for LOW1.
+LOW1 starts s=0. Banks at abs min 2.
+At min 2, HIGH arrives. Preemption occurs. Since bank is at exact min 2, work in [0, 2) is saved. Work in [2, 4) (which hasn't happened yet because it was preempted) is not done. So no waste for LOW1?
+Wait, the example says: "job with 5 total minutes and 2 banked resumes with 3 minutes left". This implies if a job runs for 5 mins, checkpoints at T=2, T=4. If preempted at T=3 (between 2 and 4), work in [2, 3) is wasted.
+In our case, LOW1 runs 4 mins total. Checkpoints at abs min 2, abs min 4.
+At min 2, HIGH arrives. Preemption happens exactly at the checkpoint time (abs min 2). So work done so far (0 to 2) is saved. The job has completed 2 minutes of its 4 minute duration. Remaining: 2 minutes.
+So LOW1 resumes with 2 minutes left. It runs from min 8 to min 10.
+Total time for LOW1: 0-2 (saved), then 8-10 (run). Total elapsed wall clock: 10 mins? No, makespan is last finish. HIGH finishes at 8. LOW1 finishes at 10. LOW2 starts at 8, runs 3 mins, finishes at 11.
+Makespan = 11.
+
+Wait, let's check the "wasted" calculation again. Is there any waste?
+If LOW1 checkpoints at abs min 2, and HIGH arrives at abs min 2, then work in [0, 2) is saved. Work in [2, 4) was not executed yet (since preempted). So no wasted minutes for LOW1.
+LOW2 starts at min 8. Runs 3 mins. Finishes at 11. Checkpoint at abs min 10 covers the whole run. No waste.
+Total wasted = 0.
+
+Let's double check the "resume" rule interpretation: "after resume job redoes every minute past its last bank".
+If LOW1 resumes at min 8, its last bank was at abs min 2. It needs to complete 2 more minutes (to reach total 4). These 2 minutes are in interval [8, 10]. This is new work. No redo of old work because the checkpoint saved it.
+So wasted_min = 0.
+
+Order: LOW1 finishes at 10. LOW2 finishes at 11. Order: ["LOW1", "LOW2"].
+Makespan: 11.
+
+Let's re-read carefully: "minute one LOW job finishes or is preempted, next waiting LOW starts in that same minute".
+At min 8, HIGH finishes. Core free. LOW2 starts at min 8.
+LOW2 runs [8, 9), [9, 10), [10, 11). Finishes at 11.
+Makespan = 11.
+
+Wait, is it possible that LOW1's checkpoint logic implies something else? "bank landing on exact minute HIGH arrives still counts". Yes, so no waste.
+What if the checkpoint was at min 4? Then work in [2, 4) would be wasted. But preemption happened at min 2. So we are safe.
+
+Let's verify the previous attempt failure: "json_exact: observed [JSON fields/values differ]". Maybe I missed a detail about waste or order.
+Is it possible LOW1 finishes before HIGH? No, HIGH runs 6 mins starting at 2 -> ends at 8. LOW1 resumes at 8. Runs 2 mins -> ends at 10.
+LOW2 starts at 8. Runs 3 mins -> ends at 11.
+Order: LOW1 (finishes 10), LOW2 (finishes 11).
+Makespan: 11.
+Wasted: 0.
+
+Wait, could the checkpoint be relative? "track banks in absolute minutes". So my logic holds.
+Could there be a waste due to the resume rule example? "job with 5 total minutes and 2 banked resumes with 3 minutes left". This is consistent with saving up to the last bank.
+Is it possible that LOW1's checkpoint at abs min 2 means it has completed 2 minutes, but since it was preempted, does it need to restart? No, "work past last checkpoint is wasted". Work *up to* is saved.
+
+Wait, let's consider if HIGH preemption happens *during* the

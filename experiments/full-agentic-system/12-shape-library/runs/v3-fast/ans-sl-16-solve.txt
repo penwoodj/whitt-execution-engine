@@ -1,0 +1,95 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the specific constraints provided (including the "EXPIRY DISCIPLINE" note which overrides general text regarding partials), here are the rules that change state during the event sequence:
+
+1.  **Arrival Rule**: Triggers on every new request arrival; increments `attempts` count by 1, adds current `wait_s` to total spend, and updates `budget_after`.
+2.  **Budget Check (Primary)**: Triggers after an attempt's cost is added; if `spend > budget`, the job is suppressed (`suppressed=true`) immediately without further processing for that cycle.
+3.  **Budget Doubling Rule**: Triggers only if a suppression occurs due to exceeding the budget; doubles the effective budget limit exactly once, then re-evaluates the same spend against this new doubled limit.
+4.  **Re-check Rule**: Triggers after the doubling rule fires; determines final `suppressed` status based on whether the original spend fits within the *doubled* budget (if it does, `suppressed=false`).
+5.  **Success Condition**: Triggers when `attempts` reaches 3 (after 2 failures); marks the job as complete/successful.
+
+*(Note: The text mentions "expiry" and "return", but the event list provided in the task description contains only arrivals for a successful run with waits observed [2, 4]. No expiry events or partial grants are listed in the specific "tonight's" scenario, so no Expiry Return Rule is triggered in this specific walk.)*
+
+---
+
+### Phase 2 LEDGER WALK
+
+Applying events one at a time in strict arrival order:
+
+**Event 1: Arrival (Attempt 1)**
+*   **Action**: First attempt starts.
+*   **Wait Cost**: Base wait is 2s. Spend += 2.
+*   **Attempt Cost**: 2 tokens. Spend += 2.
+*   **Total Spend**: 4.
+*   **Budget Check**: Budget = 24. 4 <= 24. Pass.
+*   **Result**: Attempt fails (implied by "job needs 2 failed attempts before the 3th succeeds").
+*   **State Update**: `attempts`=1, `wait_s`=2, `budget_after`=20.
+
+**Event 2: Arrival (Attempt 2)**
+*   **Action**: Second attempt starts. Wait doubles to 4s.
+*   **Wait Cost**: 4s. Spend += 4.
+*   **Attempt Cost**: 2 tokens. Spend += 2.
+*   **Total Spend**: Previous (4) + Current (6) = 10.
+*   **Budget Check**: Budget = 24. 10 <= 24. Pass.
+*   **Result**: Attempt fails.
+*   **State Update**: `attempts`=2, `wait_s`=2+4=6, `budget_after`=14.
+
+**Event 3: Arrival (Attempt 3)**
+*   **Action**: Third attempt starts. Wait doubles to 8s.
+*   **Wait Cost**: 8s. Spend += 8.
+*   **Attempt Cost**: 2 tokens. Spend += 2.
+*   **Total Spend**: Previous (10) + Current (10) = 20.
+*   **Budget Check**: Budget = 24. 20 <= 24. Pass.
+*   **Result**: Attempt succeeds ("3th succeeds"). Job completes.
+*   **State Update**: `attempts`=3, `wait_s`=6+8=14, `budget_after`=4.
+
+*(Verification against "Waits observed: 2, 4" in text)*: The text says "Waits observed: 2, 4". This implies the third wait (which would be 8) was *not* observed or the job ended before it?
+Re-reading carefully: "the job needs 2 failed attempts before the 3th succeeds." AND "Waits observed: 2, 4."
+If waits observed are strictly 2 and 4, then the third wait (8) did not happen. This implies the budget was exceeded *before* the third attempt could fully consume its wait? Or perhaps the "observed" list is a constraint on what actually happened in this specific instance, contradicting the standard logic?
+Let's re-read the "Waits observed: 2, 4" line in context of the failure/success logic.
+Standard Logic: Fail -> Wait(2) -> Try. Fail -> Wait(4) -> Try. Succeed -> Wait(8)? No, usually you wait *before* trying.
+Sequence:
+1. Arrive. Wait 2s. Cost 2. Total Spend 4. (Fail).
+2. Arrive. Wait 4s. Cost 2. Total Spend 10. (Fail).
+3. Arrive. Wait 8s? If the text says "Waits observed: 2, 4", it implies only two waits occurred. This suggests the third attempt did not incur a wait, or the job ended after the second failure? But the rule says "needs 2 failed attempts before the 3th succeeds".
+Hypothesis A: The third attempt happens immediately without waiting (common in some retry policies), but the text explicitly lists waits.
+Hypothesis B: The budget was exceeded during the calculation of the third attempt's cost, preventing it? But 10+8=18 < 24.
+Hypothesis C: "Waits observed: 2, 4" is a factual statement about this specific night's events. If only two waits were observed, then the third wait (8) did not occur. Why? Maybe the job succeeded *before* the third wait was applied? But it needs 2 failures first.
+Let's look at the "Orientation" example: "base wait 5s... total waiting 15s". That matches 5+10. It implies the successful attempt does not incur a wait cost in that specific accounting, or the wait happens *after* success? No, usually before.
+Wait, let's re-read the first paragraph carefully: "first wait is 2s, each next wait doubles... after each failed attempt the retry waits".
+This implies:
+Fail 1 -> Wait(2) -> Try 2.
+Fail 2 -> Wait(4) -> Try 3.
+Success on Try 3.
+Does Try 3 incur a wait? "after each *failed* attempt the retry waits". The third attempt is not failed (it succeeds). So there is no wait associated with the success of the third attempt in this specific phrasing ("after each failed attempt").
+Therefore, the sequence of waits is strictly tied to the failures.
+Fail 1 -> Wait(2).
+Fail 2 -> Wait(4).
+Success on Try 3 (No wait triggered by failure because it wasn't a failure).
+Total Waits = 2 + 4 = 6? But text says "Waits observed: 2, 4". This matches the sum of waits after failures.
+Wait, does the first attempt have a wait? "first wait is 2s... after each failed attempt the retry waits". Usually, there is an initial backoff before the first try too. But if the rule says "after each failed attempt", maybe the very first one doesn't wait?
+Let's check the math with "Waits observed: 2, 4".
+If Wait(2) happened after Fail 1.
+If Wait(4) happened after Fail 2.
+Total Wait = 6.
+But the text says "Waits observed: 2, 4". This is a list of values, not necessarily a sum? Or does it mean the total wait was 2+4=6?
+Let's re-read the orientation example: "total waiting 15s... waits 5+10 = 15". Here, base 5, double to 10. Sum is 15. This implies the successful attempt did NOT add a wait cost in that specific accounting model (or the wait happens after success and isn't counted as "waiting" for the job duration?).
+Actually, looking at the orientation: "three attempts in all... total waiting 15s". If waits were 5, 10, and maybe another? No, it says "waits 5+10=15". This confirms that only the waits following failures are counted. The successful attempt does not generate a wait cost in this specific ledger model.
+So:
+Attempt 1 (Fail) -> Wait(2).
+Attempt 2 (Fail) -> Wait(4).
+Attempt 3 (Success) -> No Wait generated by failure logic.
+Total Spend = (Wait 2 + Attempt 2) + (Wait 4 + Attempt 2) + (Attempt 2).
+Spend = (2+2) + (4+2) + 2 = 10?
+Let's re-calculate with the "Waits observed: 2, 4" constraint.
+If the list [2, 4] represents the wait seconds spent. Sum = 6.
+Attempts cost: 3 attempts * 2 tokens = 6.
+Total Spend = 6 (waits) + 6 (attempts) = 12.
+Budget = 24.
+Budget After = 24 - 12 = 12.
+Suppressed = false.
+
+Let's double check the "first wait" ambiguity. "first wait is 2s". Does this apply to the first attempt? If so, sequence: Wait(2), Try(Fail). Then Wait(4), Try(Fail). Then Try(Success)? That would be 3 waits (2, 4, ?). But text says "Waits observed: 2, 4". This strongly implies only two wait events occurred.
+This aligns with the rule: "after each failed attempt the retry waits".
+Event 1: Arrive. Try. Fail. Trigger Wait(2).
+Event 2: Arrive (after wait

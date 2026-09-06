@@ -1,0 +1,69 @@
+### PLAN FIRST (Steps & Formulas/Rules)
+
+1.  **Setup Workspace**: Create `/tmp/opencode/flake-run` with subdirs `scripts`, `outputs`, `data`. Seed random state for determinism.
+2.  **Generate Synthetic Data**: Write Python script to create `builds.csv` simulating 500 builds, 40 tests (including `test_retry_loop`), pass/fail records, duplicates, and missing fields.
+3.  **Stage 1: Pass Rate Calculation**: Compute total runs per test, count failures, calculate percentage ($failures / total * 100$). Flag if $5 \le p < 95$. Output `flakes_stage1.md` and `flakes_stage1.json`.
+4.  **Stage 2: Cluster Detection**: For flagged tests, identify consecutive failure indices or same-day bunching (simulated via build index gaps). Log edge cases (duplicates, missing data) with resolution rules. Output `flakes_stage2.md` and `flakes_stage2.json`.
+5.  **Stage 3: Correlation Check**: Compute Pearson correlation coefficient between pairs of flagged tests using raw failure counts ($r = \frac{\sum(x-\bar{x})(y-\bar{y})}{\sqrt{\sum(x-\bar{x})^2}\sqrt{\sum(y-\bar{y})^2}}$). Output precise unrounded numbers.
+6.  **Stage 4: Flake Scoreboard**: Rank flagged tests by a composite score (frequency + cluster density). Add confidence notes based on data completeness. Verify against Stage 1/2 outputs.
+7.  **Verification Script**: Independently recompute all metrics from raw CSV, compare bit-for-bit with output files, check invariants (e.g., percentages have denominators), and print strict diff if mismatches exist.
+8.  **Final Report Generation**: Aggregate timings, paths, decisions, and inventory into `report.md`. Include honest paragraph on stress-break points.
+
+---
+
+### TASK EXECUTION
+
+I will now execute the full end-to-end processing exercise in `/tmp/opencode/flake-run` using standard Python (stdlib only), Bash where appropriate, with deterministic seeding. All outputs will be generated, verified, and documented as specified.
+
+#### 1. Workspace Setup & Data Generation
+
+```bash
+mkdir -p /tmp/opencode/flake-run/{scripts,outputs,data}
+cd /tmp/opencode/flake-run
+```
+
+**Script: `scripts/generate_data.py`** (Deterministic synthetic data generator)
+
+```python
+#!/usr/bin/env python3
+import csv
+import random
+import os
+
+# Seed for determinism
+random.seed(42)
+
+NUM_BUILDS = 500
+NUM_TESTS = 40
+TEST_NAMES = [f"test_{i}" for i in range(NUM_TESTS)] + ["test_retry_loop"]
+TEST_NAMES = TEST_NAMES[:NUM_TESTS] # Ensure exactly 40 names, last one is test_retry_loop
+
+# Define flaky behavior: test_retry_loop is highly flaky (5-95%), others vary
+flakiness_profiles = {}
+for i, name in enumerate(TEST_NAMES):
+    if name == "test_retry_loop":
+        # High variance: 40% fail rate roughly, but fluctuates per build
+        base_fail_prob = 0.42 
+    else:
+        # Random flakiness between 10% and 80% for others to create clusters
+        base_fail_prob = random.uniform(0.15, 0.75)
+    
+    # Add noise per build (simulating flakiness without code change)
+    noise_factor = random.gauss(1.0, 0.2) 
+    fail_prob = min(0.98, max(0.02, base_fail_prob * noise_factor))
+    flakiness_profiles[name] = fail_prob
+
+# Introduce duplicates and missing data intentionally
+duplicate_indices = [random.randint(0, NUM_BUILDS-1), random.randint(0, NUM_BUILDS-1)]
+missing_build_ids = [random.randint(0, NUM_BUILDS-1) for _ in range(3)]
+
+with open('data/builds.csv', 'w', newline='') as f:
+    writer = csv.writer(f)
+    writer.writerow(['build_id', 'timestamp', 'test_name', 'status'])
+    
+    for i in range(NUM_BUILDS):
+        build_id = f"b_{i}"
+        
+        # Handle missing fields for 3 specific builds
+        if i in missing_build_ids:
+            continue # Skip writing tests for these builds entirely (missing test fields)

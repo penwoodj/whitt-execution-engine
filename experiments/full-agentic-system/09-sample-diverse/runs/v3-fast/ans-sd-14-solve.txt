@@ -1,0 +1,81 @@
+### Phase 1 RULE SCAN
+This phase lists every rule that changes state during the event sequence (Arrivals), including expiry, return, revocation, refill, promotion, fallback, or source-ranking rules, marked with their trigger events.
+
+1.  **Per-Attempt Cost Rule**: Triggers on `Arrival` of an attempt; deducts cost from budget immediately upon arrival.
+2.  **Wait Time Cost Rule**: Triggers on `Arrival` of a wait interval (observed waits: 3, 6, 12); deducts cost from budget immediately upon arrival.
+3.  **Budget Expiry/Double Rule**: Triggers if cumulative spend > initial budget; doubles the budget and re-checks suppression status after doubling.
+4.  **Suppression Verdict Rule**: Determines `suppressed` state based on whether spend exceeds the *current* (potentially doubled) budget after all events are processed.
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at a time in strict arrival order, showing the state after each event.
+
+**Initial State:**
+*   `Budget`: 30
+*   `Spend`: 0
+*   `Attempts`: 0
+*   `Wait_S`: 0
+*   `Suppressed`: false (pending check)
+
+**Event Sequence:**
+The task specifies: "Waits observed: 3, 6, 12." and "the job needs 3 failed attempts before the 4th succeeds."
+This implies a sequence of 4 Arrivals. The waits occur *between* or *after* failures as part of the retry logic described ("after each failed attempt the retry waits").
+Sequence reconstruction:
+1.  **Attempt 1 (Fail)** -> Wait 3s -> Attempt 2 (Fail) -> Wait 6s -> Attempt 3 (Fail) -> Wait 12s -> Attempt 4 (Success).
+
+**Walk:**
+
+*   **Event 1: Arrival of Attempt 1**
+    *   Rule Applied: Per-Attempt Cost.
+    *   Cost: 3 tokens.
+    *   State Update: `Spend` = 0 + 3 = 3. `Attempts` = 1.
+    *   Check Budget: 3 <= 30. No double.
+
+*   **Event 2: Arrival of Wait Interval (3s)**
+    *   Rule Applied: Wait Time Cost.
+    *   Cost: 3 seconds * 1 token/sec = 3 tokens.
+    *   State Update: `Spend` = 3 + 3 = 6. `Wait_S` = 0 + 3 = 3.
+
+*   **Event 3: Arrival of Attempt 2**
+    *   Rule Applied: Per-Attempt Cost.
+    *   Cost: 3 tokens.
+    *   State Update: `Spend` = 6 + 3 = 9. `Attempts` = 2.
+
+*   **Event 4: Arrival of Wait Interval (6s)**
+    *   Rule Applied: Wait Time Cost.
+    *   Cost: 6 seconds * 1 token/sec = 6 tokens.
+    *   State Update: `Spend` = 9 + 6 = 15. `Wait_S` = 3 + 6 = 9.
+
+*   **Event 5: Arrival of Attempt 3**
+    *   Rule Applied: Per-Attempt Cost.
+    *   Cost: 3 tokens.
+    *   State Update: `Spend` = 15 + 3 = 18. `Attempts` = 3.
+
+*   **Event 6: Arrival of Wait Interval (12s)**
+    *   Rule Applied: Wait Time Cost.
+    *   Cost: 12 seconds * 1 token/sec = 12 tokens.
+    *   State Update: `Spend` = 18 + 12 = 30. `Wait_S` = 9 + 12 = 21.
+
+*   **Event 7: Arrival of Attempt 4 (Success)**
+    *   Rule Applied: Per-Attempt Cost.
+    *   Cost: 3 tokens.
+    *   State Update: `Spend` = 30 + 3 = 33. `Attempts` = 4.
+
+*   **Event 8: Budget Re-evaluation (Expiry/Double Rule)**
+    *   Current Spend: 33. Initial Budget: 30.
+    *   Condition: Spend (33) > Budget (30). Triggered.
+    *   Action: Double the budget. New Budget = 30 * 2 = 60.
+    *   Re-check Suppression against Doubled Budget: Is Spend (33) > New Budget (60)? No.
+    *   State Update: `Budget` becomes 60. `Suppressed` remains false.
+
+*   **Final State Calculation:**
+    *   `Attempts`: 4
+    *   `Wait_S`: 21 (Sum of 3 + 6 + 12)
+    *   `Spend`: 33
+    *   `Budget_After`: Doubled Budget (60) - Spend (33) = 27.
+    *   `Suppressed`: false
+
+### Final Answer
+
+```json
+{"attempts": 4, "wait_s": 21, "budget_after": 27, "suppressed": false}
+```

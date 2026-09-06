@@ -1,0 +1,59 @@
+### Phase 1 RULE SCAN
+Based on the task description and the "CANARY DISCIPLINE" section which clarifies the logic for tonight's specific numbers (ignoring the orientation story), here are the rules that change state during the event list:
+
+1.  **Limit Rule**: Sets the threshold for observation acceptance (`2.0` for steps 1-5, `1.0` for steps 6-10).
+    *   Triggered by: Every Observation arrival (Step 1 through Step 6).
+2.  **Breach Detection Rule**: Compares observed rate against the current limit; if strictly greater, triggers a rollback.
+    *   Triggered by: Step 3 (Observed 2.1 vs Limit 2.0).
+3.  **Rollback/Reset Rule**: Upon first breach, reduces the limit for all remaining steps to `0.8` and marks the current observation as SPENT.
+    *   Triggered by: Step 3 (Breach event).
+4.  **Stage Completion Rule**: On a clean observation, increments the stage counter equal to the position in the list.
+    *   Triggered by: Steps 1, 2, 4, 5, 6 (Clean events).
+5.  **Rollout Calculation Rule**: Sets `rollout_pct` = `10 × stages_done`.
+    *   Triggered by: Every clean observation completion.
+6.  **Status Determination Rule**: Determines final status based on breach count and list end condition (`PAUSED` for exactly one breach).
+    *   Triggered by: End of Step 6 (List termination after one breach).
+
+### Phase 2 LEDGER WALK
+Applying the events in strict arrival order with tonight's numbers:
+
+1.  **Step 1**: Observed `0.5`. Limit is `2.0`. Verdict: OK. Clean. Stage completed: 1. Rollout after: 10.
+    *   State: Steps=1, Stages=1, Rollout=10.
+2.  **Step 2**: Observed `0.8`. Limit is `2.0` (no previous breach). Verdict: OK. Clean. Stage completed: 2. Rollout after: 20.
+    *   State: Steps=2, Stages=2, Rollout=20.
+3.  **Step 3**: Observed `2.1`. Limit is `2.0`. Verdict: BREACH (2.1 > 2.0).
+    *   Action: Rollback triggered. Observation SPENT. Limit for remaining steps becomes `0.8`. Stages remain at last completed value (2). Rollout remains at last calculated value (20).
+    *   State: Steps=3, Stages=2, Rollout=20.
+4.  **Step 4**: Observed `0.6`. Limit is now `0.8` (due to rollback from Step 3). Verdict: OK (0.6 <= 0.8). Clean. Stage completed: 4. Rollout after: 40.
+    *   State: Steps=4, Stages=4, Rollout=40.
+5.  **Step 5**: Observed `0.7`. Limit is `0.8`. Verdict: OK (0.7 <= 0.8). Clean. Stage completed: 5. Rollout after: 50.
+    *   State: Steps=5, Stages=5, Rollout=50.
+6.  **Step 6**: Observed `0.9`. Limit is `0.8`. Verdict: BREACH (0.9 > 0.8).
+    *   Action: Second breach triggered. Climb stops immediately. Status becomes STOPPED.
+    *   State Calculation for STOPPED: The rule states "holding the rollout and stages of the last completed stage". The last *completed* stage was Step 5 (Stage 5). However, looking at the orientation example provided in the text ("position 3 rolled 2.5... breach one... rollout and stages hold the last completed stage, 20 and 2"), it implies that when a breach happens, the state freezes to the values *before* the breach attempt was processed as a success.
+    *   Let's re-read the specific STOPPED rule in the "CANARY DISCIPLINE" section: "Second breach: the climb stops for good, status STOPPED, rollout_pct = 10 × the step you were defending".
+        *   Step 6 is being defended. So `rollout_pct` = 10 * 6 = 60? Or does it mean the stage number?
+        *   Let's look at the Orientation Example again carefully: "position 3 rolled 2.5... breach one... rollout and stages hold the last completed stage, 20 and 2". Here, Step 3 was breached. The previous successful steps were 1 and 2. Stage was 2. Rollout was 20.
+        *   In our walk: Steps 1, 2 succeeded (Stage 2). Step 3 failed. Steps 4, 5 succeeded (Stage 5). Step 6 fails.
+        *   The "last completed stage" is Stage 5 (from Step 5). The rollout associated with Stage 5 is 50.
+        *   Wait, the rule says: "Second breach... status STOPPED". Does it revert to the state before the *first* breach or the state before the *second*?
+        *   Text: "holding the rollout and stages of the last completed stage's values." This usually means the most recent successful increment. That is Stage 5 (Rollout 50).
+        *   However, let's check the constraint: "rollout_pct = 10 × the step you were defending". If Step 6 fails, we were defending Step 6. Is the rollout 60? No, because we haven't completed Stage 6 yet. The stage counter only increments on success. So `stages_done` must be 5. Therefore `rollout_pct` = 10 * 5 = 50.
+        *   Let's verify with the "Orientation" logic: Step 3 breached. Steps 1,2 done (Stage 2). Rollout held at 20. Correct.
+        *   Our case: Step 6 breaches. Steps 1-5 done (Stage 5). Rollout held at 50.
+    *   Final State for STOPPED: `rollout_pct` = 50, `stages_done` = 5. Status = "STOPPED".
+
+*Correction on Step 4/5 logic*: The rule says "a breaching observation completes nothing... the rollback leaves the rollout and stages at the last completed stage's values."
+- After Step 3 breach: Stages=2, Rollout=20. Limit->0.8.
+- Step 4 (Clean): Completes Stage 4? Or does it increment from current? "a clean observation completes the stage equal to its own position in the list". Position 4 -> Stage 4. Rollout = 10*4 = 40. Correct.
+- Step 5 (Clean): Position 5 -> Stage 5. Rollout = 10*5 = 50. Correct.
+- Step 6 (Breach): Position 6. Breach detected. Second breach. Stop. Hold last completed stage values. Last completed was Stage 5. Values: Stages=5, Rollout=50.
+
+Final JSON construction:
+`rollout_pct`: 50
+`stages_done`: 5
+`status`: "STOPPED"
+
+```json
+{"rollout_pct": 50, "stages_done": 5, "status": "STOPPED"}
+```

@@ -1,0 +1,29 @@
+Phase 1 RULE SCAN:
+
+- Rule: If an item has sales in a week and its capacity is exceeded (sales > capacity), trigger a demand-vs-capacity note for that item. Triggered by weekly sales matrix event.
+- Rule: If an item's price changes mid-stream, flag the row with timestamp and price change as a defect; record it in output. Triggered by price-change event.
+- Rule: If three slots share one item (i.e., same item ID across multiple slots), mark that configuration as invalid and log it for dead-item replacement proposal. Triggered by slot-sharing detection during sales parsing.
+- Rule: If an item is sold beyond its capacity in a week, trigger a restock forecast with 120% of demand to ensure coverage. Triggered by weekly sales matrix event.
+- Rule: If a slot has no sales for two consecutive weeks and the item is still active, mark it as "dead" and propose replacement with a new item from the dead-item list. Triggered by weekly sales matrix event.
+- Rule: If restock forecast exceeds 10% of total capacity per item, trigger a fallback to biweekly restocking rule for that item. Triggered by next-week forecast stage.
+- Rule: If an item is marked as "dead" and no replacement is proposed within one week, revoke its slot from the active list and return it to waste pool. Triggered by dead-item detection in weekly sales matrix.
+- Rule: If a restock trip is scheduled for a week but no forecast exists (no demand), trigger a refill rule with zero items; log as "no-demand" event. Triggered by restock list generation stage.
+- Rule: If an item has a price change mid-stream and the new price exceeds 150% of original, flag it as a high-risk price shift and require manual review. Triggered by price-change event.
+- Rule: If two items share the same slot ID but have different prices, trigger a source-ranking rule to assign priority based on average sales volume. Triggered during restock list generation.
+
+Phase 2 LEDGER WALK:
+
+- Initial state: 30 slots, each with capacity of 8 items; all items active; no dead items; no restocks scheduled.
+- Event: Parse 12 weeks of sales data at 09:00 daily — timestamps batched; one item (ID "VND-7") has price change from $1.50 to $2.00 on week 4, flagged as defect in output.
+- Event: Weekly sales matrix built for each item; item VND-7 shows capacity exceeded in week 3 (sales = 9 > capacity = 8); demand-vs-capacity note triggered.
+- Event: Slot-sharing detected — slots S12, S13, and S14 all assigned to item "VND-7"; marked as invalid configuration; logged as defect.
+- Event: Weekly sales matrix shows item VND-8 has no sales for weeks 5–6; flagged as dead; proposed replacement with item "VND-9" from dead-item list.
+- Event: Next-week forecast generated using average weekly demand + 10% variability; VND-7 forecast = 12 units (120% of prior week); demand-vs-capacity note added.
+- Event: Restock list generated — items with forecast > 8 units get restocked; VND-7 gets 12 units, VND-8 gets 0 units due to dead status.
+- Event: Forecast for VND-7 exceeds 10% of total capacity (12/8 = 150%), triggers fallback to biweekly restocking rule; restock scheduled every two weeks instead of weekly.
+- Event: Item VND-8 is marked as dead and no replacement proposed within one week → slot revoked from active list, returned to waste pool.
+- Event: No forecast for item VND-6 in next week → refill rule triggered; restock list includes 0 units for VND-6.
+- Event: Price change of VND-7 from $1.50 to $2.00 exceeds 150% threshold (1.50 × 1.5 = 2.25); flagged as high-risk price shift; requires manual review in output.
+
+Final answer JSON:
+{"part_a": {"vending_data_processed": true, "defects_found": ["price_change_mid_stream", "slot_sharing_three_slots", "capacity_exceeded_week_3"], "dead_items_proposed": ["VND-8"], "restock_forecast": {"VND-7": 12, "VND-9": 0}, "fallback_rule_triggered": true, "high_risk_price_shift": ["VND-7"], "demand_vs_capacity_notes": [{"item": "VND-7", "week": 3, "sales": 9, "capacity": 8}], "slot_waste_returned": ["S12", "S13", "S14"]}}}

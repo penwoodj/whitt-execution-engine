@@ -1,0 +1,102 @@
+The user wants me to process a specific set of rules and events related to a "canary rollout" for a cache change. The input consists of 6 observations with error rates. I need to follow a strict two-phase process: Phase 1 (Rule List) and Phase 2 (Ledger Walk), then output the final JSON state.
+
+**Phase 1: Rule Extraction**
+Based on the text provided, here are the rules governing the state changes:
+1.  **Limit Assignment**: Steps 1-5 have a limit of 2.0%; Steps 6-10 have a limit of 1.0%.
+2.  **Clean Observation Logic**: If an observation is clean (rate <= limit), it completes a stage equal to its position in the list, and the rollout becomes `10 * stage`.
+3.  **Breach Observation Logic**: If an observation breaches (rate > limit), it is spent (completes nothing). The state holds the last completed stage's values.
+4.  **Post-Breach Limit Tightening**: After any breach, the limit for every remaining step tightens to 0.8%.
+5.  **Termination Conditions**:
+    *   `STOPPED`: A second breach occurs (or a breach happens after the list ends? No, text says "A second breach stops everything").
+    *   `PAUSED`: Exactly one breach occurs and the list ends.
+    *   `DONE`: No breaches occur at all and the climb finishes.
+
+**Phase 2: Ledger Walk**
+I will walk through the 6 observations in order.
+
+*   **Observation 1**: Step 1, Rate 0.4%. Limit is 2.0%. Clean. Stage completed = 1. Rollout = 10 * 1 = 10. State: (Rollout=10, Stages=1).
+*   **Observation 2**: Step 2, Rate 0.6%. Limit is 2.0%. Clean. Stage completed = 2. Rollout = 10 * 2 = 20. State: (Rollout=20, Stages=2).
+*   **Observation 3**: Step 3, Rate 0.9%. Limit is 2.0%. Clean. Stage completed = 3. Rollout = 10 * 3 = 30. State: (Rollout=30, Stages=3).
+*   **Observation 4**: Step 4, Rate 1.2%. Limit is 2.0%. Clean. Stage completed = 4. Rollout = 10 * 4 = 40. State: (Rollout=40, Stages=4).
+*   **Observation 5**: Step 5, Rate 1.4%. Limit is 2.0%. Clean. Stage completed = 5. Rollout = 10 * 5 = 50. State: (Rollout=50, Stages=5).
+*   **Observation 6**: Step 6, Rate 1.9%. Limit is 1.0% (Base limit for step 6-10). Breach!
+    *   Wait, let's re-read the "Post-Breach" rule carefully: "after any rollback [breach] the limit tightens to 0.8 for every remaining step."
+    *   Since this is the last observation (Step 6), there are no remaining steps after it. However, the breach itself happens against the current limit (1.0%).
+    *   The rule says: "A second breach stops everything...". We only have one breach so far in this sequence.
+    *   The rule for termination when exactly one breach occurs and the list ends is `PAUSED`.
+    *   State holds last completed stage values: Rollout=50, Stages=5.
+
+Let's double check the "Limit Tightening" logic vs the "Breach" definition.
+Rule: "steps 6 through 10 only 1.0 percent." -> Limit for step 6 is 1.0%.
+Rate for step 6 is 1.9%. 1.9 > 1.0, so it is a breach.
+Consequence of breach: "completes nothing", "spent".
+Termination check: "Exactly one breach and the list ends: status PAUSED".
+
+So the final state is Rollout=50, Stages=5, Status="PAUSED".
+
+Let's re-verify the "Orientation" example to ensure I'm not missing a nuance about skipping stages or limit application.
+Example: 0.2 (clean), 0.75 (clean), 2.5 (breach > 2.0), 0.5 (clean).
+In the example, after breach at pos 3, limit tightens to 0.8. Pos 4 rate 0.5 is clean against 0.8. It completes stage 4. Rollout jumps to 40. Status PAUSED because exactly one breach occurred and list ended.
+This matches my logic for the current task. The breach at step 6 prevents completing a stage 6, but since it's the last item, we just evaluate termination status based on count of breaches (1).
+
+Final State Calculation:
+Rollout_pct: 50
+Stages_done: 5
+Status: PAUSED
+
+The request asks for Phase 1 rule list and Phase 2 walk lines before the final answer.
+
+**Phase 1 Rule List:**
+1. Steps 1-5 limit: 2.0%; Steps 6-10 limit: 1.0%.
+2. Clean observation (rate <= limit): completes stage = position, rollout = 10 * stage.
+3. Breach observation (rate > limit): spent, state holds last completed values.
+4. Post-breach rule: remaining steps limit tightens to 0.8%.
+5. Termination: 2 breaches -> STOPPED; 1 breach + list end -> PAUSED; 0 breaches + list end -> DONE.
+
+**Phase 2 Walk:**
+Pos 1, Rate 0.4, Limit 2.0, Verdict Clean, Stage 1, Rollout 10
+Pos 2, Rate 0.6, Limit 2.0, Verdict Clean, Stage 2, Rollout 20
+Pos 3, Rate 0.9, Limit 2.0, Verdict Clean, Stage 3, Rollout 30
+Pos 4, Rate 1.2, Limit 2.0, Verdict Clean, Stage 4, Rollout 40
+Pos 5, Rate 1.4, Limit 2.0, Verdict Clean, Stage 5, Rollout 50
+Pos 6, Rate 1.9, Limit 1.0, Verdict Breach, Stage -, Rollout - (Holds previous)
+
+Final JSON: {"rollout_pct": 50, "stages_done": 5, "status": "PAUSED"}
+
+Wait, looking at the orientation example again:
+"position 3 rolled 2.5, over the 2.0 line, breach one... limit tightens to 0.8."
+"position 4 rolled 0.5, under 0.8, clean: it carries stage 4 by position..."
+This confirms that a breach does not skip the *next* observation's ability to complete its own stage if it is clean against the new limit. But in my current task, step 6 is the last one. So there is no "step 7" to complete. The breach at step 6 simply means we don't get a stage 6 completion. We stop and check status.
+
+One detail: "after any rollback [breach] the limit tightens to 0.8 for every remaining step."
+Since step 6 is the last step, there are no remaining steps. The breach happens against the standard limit (1.0%). It breaches. Status becomes PAUSED because exactly one breach occurred and list ended.
+
+Final check of values:
+Rollout = 50.
+Stages = 5.
+Status = PAUSED.
+
+The output format requires Phase 1, then Phase 2, then Final JSON.
+
+Phase 1 Rule List:
+- Steps 1 through 5 limit is 2.0 percent; steps 6 through 10 limit is 1.0 percent.
+- Clean observation completes stage equal to position and sets rollout to 10 times that stage number.
+- Breach observation spends the step, holding state at last completed values.
+- After any breach, remaining steps have a tightened limit of 0.8 percent.
+- Exactly one breach with list end results in status PAUSED; two breaches result in STOPPED; zero breaches result in DONE.
+
+Phase 2 Walk:
+1 | 0.4 | 2.0 | Clean | Stage 1 | Rollout 10
+2 | 0.6 | 2.0 | Clean | Stage 2 | Rollout 20
+3 | 0.9 | 2.0 | Clean | Stage 3 | Rollout 30
+4 | 1.2 | 2.0 | Clean | Stage 4 | Rollout 40
+5 | 1.4 | 2.0 | Clean | Stage 5 | Rollout 50
+6 | 1.9 | 1.0 | Breach | - | -
+
+Final Answer: {"rollout_pct": 50, "stages_done": 5, "status": "PAUSED"}
+
+Wait, I need to make sure the "Phase 2 Walk" lines match the requested format exactly: "columns: position, rate, limit, verdict, and for cleans the stage completed and the rollout after".
+My draft above looks correct.
+
+One final sanity check on the "Limit Tightening" rule application in the current task vs the example.
+In the example, breach happened at pos 3 (limit 2.0). Pos 4 had limit 0.8. Rate was 0.5.

@@ -1,0 +1,195 @@
+```json
+{
+  "mapping": {
+    "input_variants": [
+      { "type": "proof_pillar", "fields": ["category", "buyer_segment", "pain_point", "genuine_strength_incumbents", "structural_weakness_incumbents", "quantified_claim", "differentiated_claim", "reason_to_believe"] },
+      { "type": "audience_segment", "fields": ["segment_name", "targeted_industries", "technical_savviness", "pain_level_scale"], "renames": {"segment_name": "audience_segment_id"} },
+      { "type": "incumbent_category", "fields": ["category_name", "incumbents_mentioned", "genuine_strength_incumbents", "structural_weakness_incumbents"] }
+    ],
+    "target_shape": {
+      "proof_pillar": [
+        "pillar_id",
+        "category",
+        "buyer_segment",
+        "pain_point",
+        "incumbent_contrast_category",
+        "incumbent_genuine_strength",
+        "incumbent_structural_weakness",
+        "quantified_claim_value",
+        "unit",
+        "differentiated_claim",
+        "reason_to_believe"
+      ],
+      "audience_segment": [
+        "segment_id",
+        "industry_targets",
+        "technical_intelligence_level",
+        "pain_sensitivity_score"
+      ]
+    },
+    "renames": {
+      "genuine_strength_incumbents": "incumbent_genuine_strength",
+      "structural_weakness_incumbents": "incumbent_structural_weakness",
+      "audience_segment_id": "segment_id"
+    },
+    "retypes": {
+      "quantified_claim": { "type": "object", "fields": ["value", "unit"] },
+      "industry_targets": { "type": "array", "items": "string" }
+    },
+    "absences": [
+      { "input_type": "proof_pillar", "field": "pillar_id", "action": "auto_generate_as_integer_sequence" },
+      { "input_type": "audience_segment", "field": "segment_id", "action": "auto_generate_as_alphanumeric_sequence" }
+    ],
+    "branches": [
+      {
+        "trigger": "input matches multiple incumbent_category variants",
+        "actions": [
+          { "field": "incumbent_contrast_category", "value": "merged_from_input_variants" },
+          { "flag": "warning: duplicate_incumbents_detected" }
+        ]
+      },
+      {
+        "trigger": "quantified_claim unit is missing in input",
+        "actions": [
+          { "field": "unit", "value": "default_to_percentage_if_numeric_value_only" },
+          { "flag": "warning: unit_inferred_from_value_format" }
+        ]
+      }
+    ],
+    "edge_cases": {
+      "empty_input": {
+        "action": "halt",
+        "output": null,
+        "flags": ["error: empty_input_received"]
+      },
+      "single_record_input": {
+        "action": "process_as_single_unit",
+        "fields_to_preserve": ["differentiated_claim", "reason_to_believe"],
+        "numeric_fields": { "rounding": "to_nearest_integer" }
+      },
+      "multiple_variant_matches": {
+        "action": "prioritize_proof_pillar_over_segment",
+        "fields_conflict": { "field": "pain_point", "value": "merged_from_proof_pillar" }
+      }
+    }
+  },
+
+  "rules": {
+    "filtering": [
+      {
+        "input_field": "quantified_claim_value",
+        "clamp_range": [0, 100],
+        "rationale": "Clamped to ensure non-negative values and unitless comparisons are avoided"
+      },
+      {
+        "input_field": "pain_level_scale",
+        "clamp_range": [1, 5],
+        "rationale": "Standardized scale for audience pain sensitivity"
+      }
+    ],
+    "normalization": [
+      {
+        "field": "category",
+        "standard_form": "lowercase_with_underscores",
+        "example": { "input": "Cloud-Native", "output": "cloud-native" },
+        "rationale": "Ensures consistent category naming for competitive contrast"
+      }
+    ],
+    "interpolation": [
+      {
+        "trigger": "missing_differentiated_claim in proof_pillar",
+        "action": "derive_from_pain_point_and_unitless_value",
+        "example": {
+          "pain_point": "latency_bottlenecks",
+          "unitless_value": 0.85,
+          "derived_claim": "reduces latency by 15% in 95th percentile"
+        }
+      }
+    ]
+  },
+
+  "gap_handling": {
+    "discovery_items": [
+      { "question": "What are the exact units for all quantified claims?", "basis": "Supply material states 'quantified' but does not specify unit types" },
+      { "question": "How is the 'technical_savviness' scale defined?", "basis": "Audience segment data lacks explicit definition" }
+    ],
+    "assumptions": [
+      {
+        "item": "All quantified claims are treated as percentage improvements unless otherwise specified",
+        "audit_hook": "Review team will validate against raw material"
+      },
+      { "item": "Segment IDs auto-generate sequentially for single-run campaigns", "audit_hook": "Checkpoint 2: Campaign asset validation" }
+    ],
+    "out_of_scope": [
+      {
+        "reason": "Derived metrics like 'pain_sensitivity_score' are calculated from inputs but not stored as raw values",
+        "rationale": "Audience segmentation requires operational implementation beyond this spec"
+      },
+      { "reason": "Invented customer names or quotes are prohibited", "rationale": "References team handles placeholder resolution" }
+    ]
+  },
+
+  "invariants": {
+    "validation_rules": [
+      {
+        "name": "proof_pillar_integrity",
+        "checks": [
+          { "field": "quantified_claim_value", "operator": "is_numeric", "error": "invalid_numeric_value" },
+          { "fields": ["differentiated_claim", "reason_to_believe"], "operator": "non_empty_strings", "error": "empty_claim_components" }
+        ],
+        "audit_hook": "Checkpoint 1: Proof pillar validation"
+      },
+      {
+        "name": "audience_segment_consistency",
+        "checks": [
+          { "field": "industry_targets", "operator": "array_length", "min": 2, "max": 5, "error": "invalid_industry_count" }
+        ],
+        "audit_hook": "Checkpoint 3: Audience segment review"
+      },
+      {
+        "name": "numeric_reconciliation",
+        "checks": [
+          { "fields": ["quantified_claim_value", "unit"], "operator": "reconcile_with_components", "error": "mismatched_quantified_values" }
+        ],
+        "audit_hook": "Checkpoint 4: Asset reconciliation"
+      }
+    ],
+    "verification_markers": [
+      { "field": "differentiated_claim", "marker": "[VERIFIED_CLAIM]", "description": "Claim must appear in approved claims register" },
+      { "number": "quantified_claim_value", "marker": "[APPROVED_REGISTER]", "description": "All numbers must be traced to supplied material" }
+    ]
+  },
+
+  "reproducibility": {
+    "ordering": {
+      "proof_pillar": "chronological_by_proof_order",
+      "audience_segment": "alphabetical_by_segment_name"
+    },
+    "rounding": {
+      "numeric_fields": ["quantified_claim_value", "pain_sensitivity_score"],
+      "precision": 2,
+      "exception": { "field": "unitless_percentage_values", "precision": 1 }
+    },
+    "serialization": {
+      "dates": "ISO_8601",
+      "arrays": "sorted_ascending",
+      "objects": "key_sorted_alphabetically"
+    },
+    "audit_trail": [
+      { "checkpoint": "Checkpoint 5: Final asset validation", "tool": "ContentAuditTool", "location": "/validation/results" }
+    ]
+  },
+
+  "notes": {
+    "supply_material_basis": [
+      "3 proof pillars with quantified claims (e.g., 'reduces latency by X%')",
+      "3 audience segments defined by technical savviness and pain levels",
+      "2 incumbent categories for competitive contrast analysis"
+    ],
+    "verification_anchors": {
+      "claims_register": "Approved pillar claims list (supplied material)",
+      "banned_hype_words": "Explicitly excluded terms per brand style guide"
+    }
+  }
+}
+```

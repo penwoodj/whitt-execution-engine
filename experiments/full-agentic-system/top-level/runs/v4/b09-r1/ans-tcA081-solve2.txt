@@ -1,0 +1,114 @@
+Phase 1 RULE SCAN:
+
+- Rule: Cumulative size must be computed as sum of prior layer sizes. Triggered by every layer entry after index 0.  
+  Reason: Size is cumulative in raw dump; this rule ensures correct aggregation, with threshold at index=0 to avoid double-counting.
+
+- Rule: Flag "install-without-clean" if a layer contains apt-get install and no subsequent layer removes it or cleans up. Triggered when command includes "apt-get install" and no later layer has "rm -rf /var/lib/apt/lists/*" or equivalent cleanup.  
+  Threshold: Must have at least one layer with "apt-get install" AND no later layer with cleanup command; if any such layer exists, flag it.
+
+- Rule: Flag "duplicated data adds" when a layer contains identical content (via hash comparison) to a prior layer. Triggered by comparing layer hashes (simulated via size and command similarity); threshold: 90%+ similarity in command and size, with same file paths or known duplicates.  
+  Reason: Duplicates indicate redundant storage; this rule is based on observed data patterns from real Docker image dumps.
+
+- Rule: Flag "secrets-in-layer" if a layer contains any string matching 'password', 'secret', 'key', or 'token' in command  
+  Threshold: Any occurrence of the keywords in any command line; no threshold needed as it's a presence rule.
+
+---
+
+Phase 2 LEDGER WALK:
+
+Index 0: Command: "mkdir -p /tmp/layer0", Size: 1024, Cumulative size: 1024  
+→ State after: Layer 0 created with base size; no install or cleanup yet.  
+
+Index 1: Command: "apt-get update && apt-get install nginx", Size: 5120, Cumulative size: 6144  
+→ Flagged: "install-without-clean" (contains apt-get install), no cleanup in future layers yet → flag set.  
+→ State after: Install recorded; cumulative size updated.  
+
+Index 2: Command: "echo 'secret' > /tmp/secret.txt", Size: 512, Cumulative size: 6656  
+→ Flagged: "secrets-in-layer" (contains 'secret') → flag set.  
+→ State after: Secret detected; cumulative size updated.  
+
+Index 3: Command: "cp -r /tmp/layer0/* /tmp/layer1/", Size: 2048, Cumulative size: 8704  
+→ Flagged: "duplicated data adds" — content matches layer 0 (same paths, same structure), size similarity >90% → flag set.  
+→ State after: Duplicate detected; cumulative size updated.  
+
+Index 4: Command: "apt-get install python3", Size: 1536, Cumulative size: 10240  
+→ Flagged: "install-without-clean" — contains apt-get install, no cleanup later → flag set (still active).  
+→ State after: Install recorded; cumulative size updated.  
+
+Index 5: Command: "rm -rf /var/lib/apt/lists/*", Size: 0, Cumulative size: 10240  
+→ Flagged: "install-without-clean" — now cleaned up; this layer removes apt-get install artifacts → flag removed (only if prior install was not followed by cleanup).  
+→ But since index 1 and 4 had installs with no cleanup before this, and cleanup happens here, the flags for those are now resolved.  
+→ Final status: "install-without-clean" remains flagged only if no cleanup after install. Since cleanup occurs at index 5, and it is after both index 1 and 4, then both index 1 and 4 are now cleaned → flag removed from index 1 and 4.  
+→ Correction: Rule says “no subsequent layer” has cleanup — so if a cleanup happens *after* an install, the flag should be removed only if that cleanup is in a later layer. Since index 5 is after both index 1 and 4, then both are now cleaned → flags for index 1 and 4 are revoked.  
+→ Final: "install-without-clean" flag only applies to layers with install *and* no later cleanup. So if cleanup occurs at index 5, then index 1 and 4 are not flagged anymore.  
+→ State after: Cleanup applied; cumulative size unchanged (0-size layer).  
+
+Index 6: Command: "echo 'password' > /tmp/pass.txt", Size: 256, Cumulative size: 10496  
+→ Flagged: "secrets-in-layer" — contains 'password' → flag set.  
+→ State after: Secret detected; cumulative size updated.  
+
+Index 7: Command: "cp -r /tmp/layer3/* /tmp/layer4/", Size: 2560, Cumulative size: 13056  
+→ Flagged: "duplicated data adds" — layer 3 content matches prior layers (same paths), size similarity >90% → flag set.  
+→ State after: Duplicate detected; cumulative size updated.  
+
+Index 8: Command: "apt-get install curl", Size: 1024, Cumulative size: 14080  
+→ Flagged: "install-without-clean" — contains apt-get install, no cleanup later → flag set (no cleanup after this).  
+→ State after: Install recorded; cumulative size updated.  
+
+Index 9: Command: "rm -rf /var/lib/apt/lists/*", Size: 0, Cumulative size: 14080  
+→ Flagged: Cleanup occurs — removes install artifacts → flag for index 8 is revoked (since cleanup happens after).  
+→ State after: Install at index 8 now cleaned; cumulative size unchanged.  
+
+Index 10: Command: "echo 'token' > /tmp/token.txt", Size: 512, Cumulative size: 14592  
+→ Flagged: "secrets-in-layer" — contains 'token' → flag set.  
+→ State after: Secret detected; cumulative size updated.  
+
+Index 11: Command: "echo 'key' > /tmp/key.txt", Size: 512, Cumulative size: 15104  
+→ Flagged: "secrets-in-layer" — contains 'key' → flag set.  
+→ State after: Secret detected; cumulative size updated.  
+
+Index 12: Command: "rm -rf /tmp/layer3", Size: 0, Cumulative size: 15104  
+→ No install or secret; only removal of prior layer content — no flags triggered.  
+→ State after: Removal recorded; cumulative size unchanged.  
+
+Index 13: Command: "apt-get update && apt-get install vim", Size: 2048, Cumulative size: 17152  
+→ Flagged: "install-without-clean" — contains apt-get install, no cleanup later → flag set (no cleanup after).  
+→ State after: Install recorded; cumulative size updated.  
+
+Index 14: Command: "rm -rf /var/lib/apt/lists/*", Size: 0, Cumulative size: 17152  
+→ Cleanup occurs — removes install artifacts → flag for index 13 is revoked.  
+→ State after: Install at index 13 now cleaned; cumulative size unchanged.  
+
+Index 15: Command: "echo 'secret' > /tmp/secret2.txt", Size: 512, Cumulative size: 17664  
+→ Flagged: "secrets-in-layer" — contains 'secret' → flag set.  
+→ State after: Secret detected; cumulative size updated.  
+
+Index 16: Command: "cp -r /tmp/layer0/* /tmp/layer18/", Size: 2048, Cumulative size: 19712  
+→ Flagged: "duplicated data adds" — content matches layer 0 (same paths), size similarity >90% → flag set.  
+→ State after: Duplicate detected; cumulative size updated.  
+
+Index 17: Command: "apt-get install git", Size: 1536, Cumulative size: 21248  
+→ Flagged: "install-without-clean" — contains apt-get install, no cleanup later → flag set (no cleanup after).  
+→ State after: Install recorded; cumulative size updated.  
+
+Index 18: Command: "rm -rf /var/lib/apt/lists/*", Size: 0, Cumulative size: 21248  
+→ Cleanup occurs — removes install artifacts → flag for index 17 is revoked.  
+→ State after: Install at index 17 now cleaned; cumulative size unchanged.  
+
+Index 19: Command: "echo 'password' > /tmp/pass2.txt", Size: 512, Cumulative size: 21760  
+→ Flagged: "secrets-in-layer" — contains 'password' → flag set.  
+→ State after: Secret detected; cumulative size updated.  
+
+Index 20: Command: "echo 'key' > /tmp/key2.txt", Size: 512, Cumulative size: 22272  
+→ Flagged: "secrets-in-layer" — contains 'key' → flag set.  
+→ State after: Secret detected; cumulative size updated.  
+
+Index 21: Command: "rm -rf /tmp/layer0", Size: 0, Cumulative size: 22272  
+→ No install or secret; only removal of prior layer content — no flags triggered.  
+→ State after: Removal recorded; cumulative size unchanged.  
+
+Index 22: Command: "apt-get update && apt-get install nodejs", Size: 3072, Cumulative size: 25344  
+→ Flagged: "install-without-clean" — contains apt-get install, no cleanup later → flag set (no cleanup after).  
+→ State after: Install recorded; cumulative size updated.  
+
+Index 23: Command: "echo 'token' > /tmp/token2.txt", Size: 512, Cumulative size: 

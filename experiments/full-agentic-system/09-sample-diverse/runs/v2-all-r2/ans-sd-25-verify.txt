@@ -1,0 +1,114 @@
+**Fact Bullets:**
+- LOW1: duration 5 min, start minute 0.
+- LOW2: duration 7 min, start minute 2.
+- HIGH: arrival minute 3, duration 8 min (preempts core).
+
+**Minute-by-Minute Table:**
+
+| Minute | Core Status | Event Details | Bank Checkpoint (Absolute Min) | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| **0** | Running LOW1 | Start LOW1. | 2 | LOW1 runs [0,1]. |
+| **1** | Running LOW1 | Continue LOW1. | - | LOW1 runs [1,2]. |
+| **2** | Running LOW1 | Continue LOW1. (LOW2 waits). | 4 | LOW1 runs [2,3]. Bank @ 4? No, bank is at start+2=2 and every 2 mins running. Start=0 -> Bank@2. Next run starts at 2, so next bank would be at 4 relative to that block? Let's re-read checkpoint rule: "checkpoint every 2 completed minutes of running time". <br>Running time accumulates continuously.<br>At Min 0 start. <br>Min 1 end (1 min done). <br>Min 2 end (2 mins done) -> **Bank @ 2**. <br>Min 3 end (3 mins done). |
+| **3** | Running HIGH | Preempt LOW1. HIGH starts. | - | LOW1 interrupted at 3 mins run time. Last Bank was @ 2. Wasted = 3 - 2 = **1 min**. <br>HIGH runs [3,4]. |
+| **4** | Running HIGH | Continue HIGH. | - | HIGH runs [4,5]. |
+| **5** | Running HIGH | Continue HIGH. | - | HIGH runs [5,6]. |
+| **6** | Running HIGH | Continue HIGH. | - | HIGH runs [6,7]. |
+| **7** | Running HIGH | Continue HIGH. | - | HIGH runs [7,8]. |
+| **8** | Running HIGH | Continue HIGH. | - | HIGH runs [8,9]. |
+| **9** | Running HIGH | Continue HIGH. | - | HIGH runs [9,10]. |
+| **10**| Running HIGH | Continue HIGH. | - | HIGH runs [10,11]. |
+| **11**| Running HIGH | Continue HIGH. | - | HIGH runs [11,12]. |
+| **12**| Running HIGH | Continue HIGH. | - | HIGH runs [12,13]. |
+| **13**| Running HIGH | Continue HIGH. | - | HIGH runs [13,14]. <br>HIGH finishes at 14. |
+| **14**| Running LOW2 | Resume/Start LOW2? (Wait for start). | - | LOW2 was waiting since minute 2. Core becomes free at 14. LOW2 starts immediately. |
+| **15**| Running LOW2 | Continue LOW2. | - | LOW2 runs [14,15]. |
+| **16**| Running LOW2 | Continue LOW2. | - | LOW2 runs [15,16]. <br>Running time = 2 mins -> **Bank @ 16**. |
+| **17**| Running LOW2 | Continue LOW2. | - | LOW2 runs [16,17]. |
+| **18**| Running LOW2 | Continue LOW2. | - | LOW2 runs [17,18]. <br>Running time = 4 mins -> **Bank @ 18**. |
+| **19**| Running LOW2 | Continue LOW2. | - | LOW2 runs [18,19]. |
+| **20**| Running LOW2 | Continue LOW2. | - | LOW2 runs [19,20]. <br>Running time = 6 mins -> **Bank @ 20**. |
+| **21**| Running LOW2 | Continue LOW2. | - | LOW2 runs [20,21]. |
+| **22**| Running LOW2 | Finish LOW2. | - | LOW2 finishes at 22. Duration was 7 mins (14 to 21). Wait, duration is 7 minutes. Start 14 -> End 21? <br>Let's re-calc finish time.<br>Starts at 14. Runs for 7 minutes: [14,15), [15,16), ..., [20,21). Finishes AT minute 21. |
+
+**Correction on Finish Times:**
+- LOW1: Starts 0, runs 5 mins -> Finishes at **5**. (Preempted at 3, but "finishes" usually implies completion of the job instance or the last scheduled slot? The prompt asks for "completion order". If preempted, does it count as completed? Usually in these problems, a preempted job is not "completed" until resumed. However, LOW1 was never resumed. Is it considered finished at 5 (theoretical) or just abandoned?
+Re-reading: "LOW jobs checkpoint every 2 completed minutes... on preemption work past last checkpoint is wasted and redone after resume." This implies the job *must* be resumed to complete. Since HIGH runs until minute 14, LOW1 resumes at 14.
+Wait, does LOW1 resume? The prompt says "resume LOW outranks fresh one". It doesn't explicitly say LOW1 resumes in this specific scenario unless there is a tie or it's the only job. But typically, if a job is preempted and never resumed, it might be considered "failed" or just not completed.
+However, looking at the previous failed attempt logic: `order`: ["LOW1", "LOW2"]. This suggests LOW1 *is* in the order. If LOW1 resumes at 14, its duration is 5 mins. It would finish at 19.
+Let's check the constraint: "completion order lists LOW jobs by minute each finishes". If LOW1 was preempted and never resumed, it technically didn't finish. But if the system assumes it resumes (perhaps because there are no other jobs waiting?), then it finishes later.
+BUT, look at the "wasted" calculation in the failed attempt: `wasted_min`: 1. This matches my calc for LOW1 preemption (3-2=1). If LOW1 resumed and ran to completion, wasted would still be 1.
+Does LOW1 resume? The prompt says "resume LOW outranks fresh one". It implies resumption happens if needed. Since LOW1 is the only job waiting when HIGH finishes, it resumes.
+So:
+- LOW1 resumes at 14. Runs 5 mins. Finishes at **19**.
+- LOW2 starts at 14 (waiting since min 2). Runs 7 mins. Finishes at **21**.
+
+**Re-evaluating Order:**
+- LOW1 finishes at 19.
+- LOW2 finishes at 21.
+Order: ["LOW1", "LOW2"].
+
+**Wasted Calculation:**
+- LOW1 preemption at min 3. Last bank at min 2. Wasted = 1.
+- LOW2 never preempted. Wasted = 0.
+Total wasted = **1**.
+
+**Makespan:**
+- HIGH finishes at 14.
+- LOW1 resumes at 14, runs [14..19). Finishes at 19.
+- LOW2 starts at 14, runs [14..21). Finishes at 21.
+Max finish time = **21**.
+
+**Final Check:**
+- Makespan: 21.
+- Wasted: 1.
+- Order: ["LOW1", "LOW2"].
+
+Let's double check the "resume" logic. If LOW1 is preempted, does it automatically resume? The text says "resume LOW outranks fresh one". This phrasing suggests that when the core becomes free and there are waiting jobs (both LOW1 and LOW2), the system picks the best one.
+At minute 14:
+- Waiting: LOW1 (preempted at 3, needs to finish its 5 mins).
+- Waiting: LOW2 (waiting since min 2, needs to start its 7 mins).
+Which one runs first? "resume LOW outranks fresh one". LOW1 is a resume job. LOW2 is a fresh start job (it hasn't run yet). So LOW1 runs first.
+LOW1 runs [14..19). Finishes at 19.
+Then LOW2 starts [19..26)? No, duration is 7 mins. Starts at 19? Or does it start immediately if there was a tie? There is no tie in priority here (Resume > Fresh). So LOW1 goes first.
+Wait, my previous table had LOW2 starting at 14 because I assumed "waiting since min 2" meant it's ready to go. But priority dictates order.
+If LOW1 runs [14..19), then LOW2 starts at 19 and finishes at 26.
+Makespan = 26.
+Wasted = 1.
+Order: ["LOW1", "LOW2"].
+
+Let's re-read carefully: "resume LOW outranks fresh one". Yes, this is a priority rule for scheduling the next job on the core.
+So at minute 14, Core is free. Jobs waiting: LOW1 (Resume), LOW2 (Fresh).
+Schedule: LOW1 first.
+LOW1 runs [14..19). Finishes at 19.
+Then LOW2 starts [19..26). Finishes at 26.
+
+Is there any interpretation where they run in parallel? No, "one core".
+Is there any interpretation where LOW2 is considered "fresh" but has already "started"? The prompt says "LOW2 runs 7 minutes starting at minute 2". It hasn't started yet because the core was busy. So it is a fresh job instance waiting to start.
+So Priority: Resume (LOW1) > Fresh (LOW2).
+Sequence: LOW1 then LOW2.
+
+**Recalculating with this sequence:**
+- HIGH finishes at 14.
+- Minute 14: Start LOW1 (Resume).
+- Minute 15: Run LOW1.
+- Minute 16: Run LOW1.
+- Minute 17: Run LOW1.
+- Minute 18: Run LOW1.
+- Minute 19: Finish LOW1.
+- Minute 19: Start LOW2 (Fresh).
+- Minute 20: Run LOW2.
+- Minute 21: Run LOW2.
+- Minute 22: Run LOW2.
+- Minute 23: Run LOW2.
+- Minute 24: Run LOW2.
+- Minute 25: Run LOW2.
+- Minute 26: Finish LOW2.
+
+Makespan = **26**.
+Wasted = **1** (from LOW1 preemption).
+Order = ["LOW1", "LOW2"].
+
+Wait, let's check the checkpoint logic again for LOW1 resume.
+"on preemption work past last checkpoint is wasted and redone after resume".
+LOW1 resumed at 14. It needs to run 5

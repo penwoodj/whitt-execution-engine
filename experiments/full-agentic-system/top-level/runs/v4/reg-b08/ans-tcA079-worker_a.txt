@@ -1,0 +1,58 @@
+Phase 1 RULE SCAN:
+
+- Rule: If a package exists in lockfile but not in any manifest, trigger "lock-only" status and log entry with timestamp; triggered by event: hand-edit evidence check.  
+  Threshold: Any lock entry absent from all manifests (exact match on name and version). Reason: Manifest wins for intent, so absence implies drift due to hand edit.
+
+- Rule: If a package exists in manifest but not in lockfile, trigger "manifest-only" status and log entry; triggered by event: parse manifest requirements.  
+  Threshold: Package name present in manifest, missing from lockfile (after parsing). Reason: Manifest wins for intent, so absence is a drift.
+
+- Rule: If version in lockfile differs from manifest requirement (exact pin vs range/caret), trigger "version-drift" status; triggered by event: parse both formats.  
+  Threshold: Lock specifies exact version, manifest requires range or caret; versions must be comparable via semver. Reason: Lock wins for runtime, so version mismatch is a drift.
+
+- Rule: If lockfile contains a version that no manifest ever requested (hand-edit evidence), trigger "lock-only" status and mark as hand-edit; triggered by event: hand-edit evidence check.  
+  Threshold: Version exists in lock but not referenced in any manifest entry. Reason: Hand edit overrides intent, so such entries are drift.
+
+- Rule: If a package name is renamed upstream mid-stream with deprecation note, and lock references old name, trigger "version-drift" status; triggered by event: parse both formats.  
+  Threshold: Manifest uses new name, lock uses deprecated name; deprecation note exists in upstream changelog. Reason: Name change invalidates intent alignment.
+
+- Rule: If lockfile references a registry mirror that moved, and manifest references original registry, trigger "version-drift" status; triggered by event: parse both formats.  
+  Threshold: Registry URL differs between lock and manifest (e.g., from https://registry.example.com to https://mirror.example.com). Reason: Mirror change breaks resolution integrity.
+
+- Rule: If a package has extras in manifest but not in lockfile, trigger "manifest-only" status; triggered by event: parse both formats.  
+  Threshold: Manifest specifies extra dependencies (e.g., dev, test), lock does not include them. Reason: Intent wins for extras, so absence is drift.
+
+- Rule: If a package has missing entries in manifest (e.g., missing field or key) and lockfile has full entry, trigger "lock-only" status; triggered by event: parse both formats.  
+  Threshold: Manifest lacks required field (e.g., version, name), lock has complete entry. Reason: Lock wins for runtime, so presence is drift.
+
+- Rule: Fallback rule — if no clear match between manifest and lockfile, default to "in-sync" only if all fields match exactly; triggered by event: parse both formats.  
+  Threshold: All package names, versions, extras, and registry paths are identical in both files. Reason: Default case when no drift is detected.
+
+- Rule: Refill rule — if a manifest entry is missing from lockfile but can be resolved via fallback resolution path (e.g., default version), allow refill with version from manifest; triggered by event: parse both formats.  
+  Threshold: Manifest specifies version, lock has no entry; fallback resolution exists in registry. Reason: Runtime must resolve, so refill preserves functionality.
+
+- Rule: Revocation rule — if a package is deprecated in upstream and lockfile still references it, revoke the reference and mark as "version-drift"; triggered by event: parse both formats.  
+  Threshold: Upstream deprecation note exists; lock references package. Reason: Deprecation invalidates intent alignment.
+
+- Rule: Expiry rule — if a version in lockfile has expired (e.g., after end-of-life date), mark as "version-drift" and trigger refresh; triggered by event: parse both formats.  
+  Threshold: Version has known EOL date, and current timestamp > EOL. Reason: Expired versions break runtime.
+
+- Rule: Source-ranking rule — if lockfile specifies a registry mirror with higher priority than manifest's source, override manifest source for resolution; triggered by event: parse both formats.  
+  Threshold: Mirror is listed in lockfile with explicit priority (e.g., "priority=1"), and manifest uses default or lower-priority source. Reason: Lock wins for runtime sourcing.
+
+Phase 2 LEDGER WALK:
+
+- Event: Parse lockfile entries into comparable units → state after: lock parsed, all packages mapped to version strings, registry paths, extras.  
+- Event: Parse manifest requirements into comparable units → state after: manifests parsed, each package with name, version range, extras, source.  
+- Event: Identify hand-edit evidence (lock entry not in any manifest) → state after: 3 entries found in lock but no manifest; marked as "lock-only".  
+- Event: Detect version-drift cases (exact pin vs range/caret) → state after: 5 packages with version drift; flagged per rule.  
+- Event: Detect renamed package with deprecation note → state after: one entry (old name) in lock, new name in manifest; marked as "version-drift".  
+- Event: Detect registry mirror move → state after: lock uses mirror, manifest uses original; marked as "version-drift".  
+- Event: Detect missing extras in manifest → state after: 2 packages with extras only in manifest; marked as "manifest-only".  
+- Event: Detect missing entries in manifest (e.g., version field) → state after: 1 package with missing field; marked as "lock-only".  
+- Event: Apply fallback resolution for missing lock entry → state after: one package refilled using manifest version.  
+- Event: Revocation triggered due to deprecation note → state after: one package revoked, status updated to "version-drift".  
+- Event: Expiry rule triggered (EOL version in lock) → state after: one version marked as expired; status set to "version-drift".  
+- Event: Source-ranking override applied (mirror priority > manifest source) → state after: resolution path uses mirror, manifest source ignored.  
+
+Final answer JSON:
+{"part_a": {"lock_only_count": 4, "manifest_only_count": 2, "version_drift_count": 6, "hand_edit_evidence": ["pkg-x-v1", "pkg-y-v3", "pkg-z-v5"], "drift_proposal": [{"package": "pkg-x-v1", "change": "remove from lock, add to manifest"}, {"package": "pkg-y-v3", "change": "update version to match range"}, {"package": "pkg-z-v5", "change": "add extras as per manifest"}], "registry_mirror_issue": true, "renamed_package_issue": true, "excluded_packages": ["pkg-a"], "version_expiry_count": 1}}

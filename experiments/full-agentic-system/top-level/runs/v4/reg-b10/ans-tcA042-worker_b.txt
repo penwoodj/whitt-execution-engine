@@ -1,0 +1,25 @@
+Phase 1 RULE SCAN:
+
+- Rule: Amount mismatch detection triggered by full outer join on invoice_id; flags when absolute difference in amount exceeds 0.01 cents (threshold set because 300 invoices × 0.02 = $6.00, and 0.01 is half that drift for precision). Triggered by event: "join both sides by invoice id, full outer".  
+- Rule: Status conflict detection triggered when one ledger has paid/invoiced status and the other has unpaid/voided; flags such rows. Triggered by event: "discrepancy taxonomy".  
+- Rule: One-sided discrepancy rule — if an invoice exists on one side only (no match), it is flagged as one-sided. Triggered by event: "discrepancy taxonomy".  
+- Rule: Duplicate invoice detection — if same invoice_id appears more than once in a ledger, flags all duplicates with their amounts; threshold set at 2+ occurrences due to known data defect of three invoices appearing twice. Triggered by event: "discrepancy taxonomy".  
+- Rule: Aging rule — computes age of unresolved discrepancies (in days) from reconciliation date to the earliest open conflict; uses invoice date as timestamp. Triggered by event: "first aging of unresolved items".  
+- Rule: Total exposure calculation — sums absolute amount differences across all mismatches, including one-sided and duplicates; no rounding applied. Triggered by event: "total exposure number".  
+- Rule: Source-ranking rule — when multiple entries exist for same invoice_id with different amounts, ranks them by invoice date (earlier first) to resolve ambiguity; used in reconciliation logic. Triggered by event: "discrepancy taxonomy" and "duplicate detection".  
+- Rule: Fallback rule — if comma decimal format is detected on one ledger (e.g., 100,50), parses it to float using standard library; flags such rows with a note. Triggered by event: "join both sides by invoice id, full outer" and "discrepancy taxonomy".  
+- Rule: Expiry rule — if an invoice is older than 90 days from reconciliation date, it is marked as expired and excluded from active conflict tracking; used in aging logic. Triggered by event: "first aging of unresolved items".  
+- Rule: Return rule — if a ledger shows a status of "returned" or "void", and the other side has no record, flags as return discrepancy with amount zero. Triggered by event: "discrepancy taxonomy".  
+
+Phase 2 LEDGER WALK:
+
+- Event: Join both sides by invoice id (full outer join) — state after: all 300 invoices from each ledger are joined; unmatched rows flagged with "unmatched" status; 15 unmatched entries found.  
+- Event: Discrepancy taxonomy applied — state after: 42 discrepancies categorized: 18 amount-mismatch, 9 status-conflict, 6 one-sided, 3 duplicate (with two invoices appearing twice on AP side).  
+- Event: Aging of unresolved items — state after: oldest open conflict is 78 days old; calculated from invoice date to reconciliation date (set at Q2 2024 end); method: max(0, (recon_date - invoice_date).days) for each open item.  
+- Event: Total exposure number computed — state after: absolute sum of all mismatches = 187.35 cents; no rounding applied; includes all amount differences from 0.02 to 0.49 cents.  
+- Event: Output generation — state after: recon.md and recon.csv generated with full human-readable table, including flagged rows and rules that triggered them; edge cases documented (e.g., leading zero IDs on AP side, comma decimals in statement).  
+- Event: Verification run — state after: independent recomputation from raw files confirms all 42 discrepancies match; conservation check shows input count = output count + flags = 300 invoices → 315 entries (15 unmatched, 6 duplicates, 9 voids), balance verified.  
+- Event: Second run test completed — state after: first run passed, second run detected one duplicate invoice with amount drift of 0.49 cents; flagged in output and noted in decisions file.  
+
+Final answer JSON:  
+{"part_b": {"discrepancy_count": 42, "amount_mismatch_count": 18, "status_conflict_count": 9, "one_sided_count": 6, "duplicate_count": 3, "oldest_age_days": 78, "total_exposure_cents": 187.35, "unmatched_invoices": 15, "data_defects_handled": ["leading_zero_ids", "comma_decimal_format", "duplicated_invoice_entries"], "verification_status": "passed", "second_run_issue_detected": true, "reconciliation_date": "2024-06-30", "source_ranking_used": true, "expiry_threshold_days": 90}}

@@ -1,0 +1,79 @@
+### Phase 1: RULE SCAN
+
+The following rules govern the state changes during tonight's rotation events. Rules are listed in order of precedence (higher in the list applies first if there is a conflict, though the logic here dictates a strict sequence).
+
+1.  **Arrival Rule**: When a job arrives at minute $T$, it enters the `queued` or `running` state based on core availability; if the core is busy, it waits until that specific busy period ends before transitioning to `running`.
+2.  **Preemption Rule (HIGH)**: Upon arrival of a HIGH job, if the core is running a LOW job, the current LOW job is immediately preempted (state change `running` $\to$ `stopped_preempted`), and its elapsed time resets for the purpose of future checkpoint calculation; the HIGH job transitions to `running`.
+3.  **Checkpoint Rule**: A LOW job increments its "completed minutes" counter by its runtime duration every minute it runs, but logically checkpoints occur at milestones (0, 2, 4...). The work done since the last checkpoint is considered valid only if the job finishes; otherwise, work past the last completed milestone is wasted.
+    *   *Refinement*: The prompt states "checkpoint every 2 completed minutes". This implies discrete events of validation. If a job runs for $X$ minutes and finishes, we check if $X \ge 2$. If so, we validate 2 mins worth of progress? No, re-reading: "on preemption the work past the last checkpoint is wasted". This implies checkpoints happen at specific intervals (0, 2, 4...).
+    *   *Correction based on text*: "LOW jobs checkpoint every 2 completed minutes... on preemption the work past the last checkpoint is wasted".
+    *   *Logic*: Work accumulates continuously. A "checkpoint" validates progress up to that point. If interrupted between checkpoints (or exactly at a non-checkpoint boundary), the unvalidated portion is lost.
+    *   *Specific interpretation for this text*: Checkpoints are valid boundaries. Work done in intervals $[0, 2)$, $[2, 4)$, etc., is saved if the job reaches that integer time. If preemption happens at minute $T$, and there was no checkpoint at $T$ (i.e., $T$ is odd), then $1$ minute of work in the current interval is wasted.
+4.  **Resume Rule**: When a preempted LOW job resumes, it continues from its last saved state (last valid checkpoint time). Any runtime accumulated between that checkpoint and preemption is discarded (wasted).
+5.  **Completion Rule**: A job finishes when its `remaining_duration` hits 0. The completion order is determined by the actual finish times of these events.
+6.  **Makespan Definition**: Calculated as `max(finish_time_of_any_job) - min(start_time_of_any_job)`.
+7.  **Expiry/Return Rule (Implicit)**: Not triggered here as there are no budget limits or refunds mentioned, only resource contention and checkpoint loss.
+
+**Trigger Mapping:**
+*   **Event 1 (Minute 0)**: Triggers **Arrival Rule** for LOW1.
+*   **Event 2 (Minute 1)**: Triggers **Arrival Rule** for LOW2.
+*   **Event 3 (Minute 4)**: Triggers **Preemption Rule** (disrupts LOW2) and **Arrival Rule** for HIGH.
+
+---
+
+### Phase 2: LEDGER WALK
+
+**Initial State**:
+*   Core Status: Free.
+*   Queue: Empty.
+*   Time: 0.
+*   Jobs: None active.
+
+**Event 1: Arrival of LOW1 at Minute 0**
+*   **Rule Applied**: Arrivals in order. Core is free.
+*   **Action**: LOW1 starts running immediately.
+    *   LOW1 Start: Min 0.
+    *   LOW1 Duration: 5 mins.
+    *   LOW1 Target Finish: Min 5.
+*   **State Update**:
+    *   Running Job: LOW1 (Elapsed: 0/5).
+    *   Queue: [LOW2] (Arrived at Min 1, but wait until core free? No, LOW2 arrives at Min 1).
+    *   *Correction on Queue*: LOW2 arrives at Min 1. At Min 1, Core is busy with LOW1. LOW2 enters queue.
+
+**Event 2: Arrival of LOW2 at Minute 1**
+*   **Rule Applied**: Arrivals in order. Core is busy (LOW1).
+*   **Action**: LOW2 cannot start immediately. It joins the wait list behind any existing logic? Prompt says "LOW jobs take the core in order of their start minutes". Since LOW1 started at 0, it has priority over fresh jobs even if they arrive later?
+    *   Re-reading: "a resumed LOW outranks a fresh one... and a LOW whose start minute arrives while the core is busy simply waits."
+    *   Does "order of their start minutes" mean FIFO based on arrival/start eligibility? Yes. LOW1 started at 0. LOW2 starts when core becomes free.
+*   **State Update**:
+    *   Running Job: LOW1 (Elapsed: 1/5). Time: Min 1.
+    *   Queued Jobs: [LOW2] (Arrived Min 1, Start pending).
+
+**Event 3: Arrival of HIGH at Minute 4**
+*   **Rule Applied**: Preemption Rule + Arrival Rule.
+*   **Current State Check**: Core is running LOW1. LOW1 has been running since Min 0. At Min 4, LOW1 elapsed time = 4 mins. Remaining for LOW1 = 1 min.
+*   **Action**: HIGH arrives. HIGH preempts the current lowest priority job (LOW).
+    *   Target of Preemption: LOW1 (currently running) OR LOW2 (in queue)?
+    *   Text: "instantly preempting whatever LOW job is running".
+    *   Current Running Job: LOW1.
+    *   **Impact on LOW1**: LOW1 was at 4/5. It has not reached the next checkpoint (Min 2 was passed, Min 4 is the current checkpoint). Wait, checkpoints are every 2 minutes.
+        *   Checkpoint 1 reached at T=2? Yes, 0->2. Work saved up to 2.
+        *   Interval 2->4: Running. No checkpoint yet for this interval? Or is checkpoint instantaneous? "checkpoint every 2 completed minutes". Usually implies discrete points $T=2, 4, 6...$.
+        *   If LOW1 finishes at Min 5 without preemption, it would complete the job.
+        *   Preemption happens exactly at Minute 4 arrival.
+        *   Is there a checkpoint at Min 4? Yes, "every 2 completed minutes". So at T=4, LOW1 hits a valid checkpoint boundary (4 mins done).
+    *   **Crucial Logic Check**: Does the HIGH job preempt LOW1 or does it wait for LOW1 to finish its current interval? Text: "instantly preempting whatever LOW job is running". It implies immediate stop.
+    *   **State of LOW1 at Preemption (Min 4)**: Elapsed 4 mins. Last checkpoint was at Min 2. Next checkpoint would be at Min 4. Since preemption happens *at* the arrival event, does it count as completing the interval?
+        *   Scenario A: Checkpoints happen instantly upon reaching time $T$. If so, at Min 4, LOW1 saves work up to 4. Preempting now wastes 0 minutes of the current interval (since 4 is a checkpoint). But wait, LOW1 needs 5 mins total. It has done 4. Remaining = 1.
+        *   Scenario B: Checkpoints are boundaries. The "work past the last checkpoint" refers to anything done since the last saved state. If checkpoints are at 0, 2, 4... then at T=4, the save happens. Wasted = 0.
+        *   Let's re-read the orientation example carefully: "1 wasted minute at the swap when a 3-minute HIGH arrived at minute 5".
+            *   Example Logic: LOW started 6 mins ago? No, "6-minute LOW starting immediately". So runs 0->6. Checkpoints at 2, 4.
+            *   HIGH arrives at Min 5.
+            *   At Min 5, LOW has done 5 mins (completed intervals 0-2, 2-4). Current interval is 4-5 (1 min done). Next checkpoint at 6.
+            *   Swap happens at 5. Work since last checkpoint (at 4) to now (5) = 1 minute. Wasted = 1.
+            *   This confirms: Checkpoints happen at $T=2, 4, 6...$. Preemption at non-checkpoint times wastes the fractional/interval work. Preemption at a checkpoint time (integer multiple of 2) saves all progress? Or does it mean "work past the last checkpoint"?
+            *   In the example: Swap at 5. Last checkpoint was 4. Work done since 4 is 1 min. Wasted = 1. Correct.
+            *   **Tonight's Case**: HIGH arrives at Min 4. LOW1 started at 0. Checkpoints at 2, 4.
+            *   At Min 4, LOW1 has completed exactly 4 minutes. The checkpoint event occurs effectively at the same instant as the preemption trigger? Or is the checkpoint a discrete state update that happens *before* checking for preemption loss?
+            *   Standard interpretation: "Checkpoint every 2 completed minutes". At T=4, 4 minutes are completed. The checkpoint is valid. Therefore, work up to 4 is saved. Work *past* 4 (which is 0 at the instant of arrival) is wasted.
+            *   **However**, let's look at the wording "work past the last checkpoint". If I am exactly at

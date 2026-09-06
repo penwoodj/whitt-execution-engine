@@ -1,0 +1,47 @@
+The task requires processing two independent streams of events based on specific rules provided in the text. The first stream ("canary rollout") involves a sequence of observations with error rates against dynamic limits, resulting in a final state defined by `rollout_pct`, `stages_done`, and `status`. The second stream ("residency") involves loading/unloading models from memory cards with eviction policies, resulting in counts for `loads`, `evictions`, `deferrals`, and a list of `deferred` IDs.
+
+**Part A: Canary Rollout Analysis**
+*   **Rules:**
+    1.  Limits are fixed by position (Stage): Steps 1-5 allow up to 2.0%, Steps 6-10 allow up to 1.0%.
+    2.  Clean observation completes the stage equal to its position; Rollout becomes `10 * Stage`.
+    3.  Breach: Observation spent, state holds last completed values, limit tightens to 0.8 for remaining steps.
+    4.  Second breach -> STOPPED. One breach + end -> PAUSED. No breach -> DONE.
+*   **Events (5 observations):**
+    *   Step 1: Rate 0.5%. Limit 2.0%. Clean. Stage=1, Rollout=10.
+    *   Step 2: Rate 0.7%. Limit 2.0%. Clean. Stage=2, Rollout=20.
+    *   Step 3: Rate 1.0%. Limit 2.0%. Clean. Stage=3, Rollout=30.
+    *   Step 4: Rate 1.5%. Limit 2.0%. Clean. Stage=4, Rollout=40.
+    *   Step 5: Rate 2.0%. Limit 2.0%. Clean. Stage=5, Rollout=50.
+*   **Result:** No breaches occurred. The list ends with a clean observation at position 5. Status is DONE.
+
+**Part B: Residency Analysis**
+*   **Rules:**
+    *   Models A(3), B(4), C(1), D(2) GB. Total capacity = 8GB (implied by "one 8GB card").
+    *   Model C is pinned and never evicted.
+    *   Eviction policy: LRU unpinned model. Load cost 30s, Unload 10s.
+    *   Load logic: If load fits, execute. If not fit, evict LRU unpinned models until it fits or only pinned remain (defer).
+*   **Events:**
+    1.  `load A` (3 GB): Fits in empty card? Yes. Executed. Loads=1.
+    2.  `load C` (1 GB): Fits with A present? Total used = 4GB <= 8GB. Yes. Executed. Loads=2.
+    3.  `load D` (2 GB): Fits with A+C present? Total used = 6GB + 2GB = 8GB. Yes. Executed. Loads=3.
+    4.  `unload D` (2 GB): Model D is resident. Unload executed. Loads=3, Evictions=0, Deferrals=0. Deferred list empty.
+
+**Final State Construction:**
+*   Part A: Rollout 50%, Stages Done 5, Status DONE.
+*   Part B: Loads 3, Evictions 0, Deferrals 0, Deferred [].
+
+```json
+{
+  "part_a": {
+    "rollout_pct": 50,
+    "stages_done": 5,
+    "status": "DONE"
+  },
+  "part_b": {
+    "loads": 3,
+    "evictions": 0,
+    "deferrals": 0,
+    "deferred": []
+  }
+}
+```

@@ -1,0 +1,79 @@
+**Phase 1 RULE SCAN**
+Based on the text provided, here are the rules that change state during the event or claim list (tonight's events), listed one per line with their triggers:
+
+1.  **Arrival Rule**: Requests arrive in strict arrival order; each asks for a fixed number of tokens. *Triggered by every request ID (r1 through r6).*
+2.  **Grant Logic (Partial)**: Grants are partial when the pool cannot cover the full ask; grant what is there and the pool drops to zero. *Triggered by requests where `ask > current_pool`.*
+3.  **Denial Rule**: A request arriving at an empty pool is denied and listed by id. *Triggered by requests where `pool == 0`.*
+4.  **Expiry Rule**: The grant for r2 expires after request r3 completes; an expired grant returns half its granted tokens rounded down to the pool. *Triggered immediately after r3 completes.*
+5.  **Source Constraint**: Half of the tokens it itself received (never any other grant), and grants never return any other way. *Applies to the specific source "r2" identified in Rule 4.*
+
+**Phase 2 LEDGER WALK**
+Applying events one at a time in strict arrival order:
+
+*   **Event r1**: Asks for 5. Pool starts at 40. $40 \ge 5$. Grant 5. Pool becomes 35. (State: Pool=35)
+*   **Event r2**: Asks for 8. Pool is 35. $35 \ge 8$. Grant 8. Pool becomes 27. (State: Pool=27, Pending Expiry Source=r2 amount=8)
+*   **Event r3**: Asks for 12. Pool is 27. $27 \ge 12$. Grant 12. Pool becomes 15. (State: Pool=15). *r3 completes.*
+    *   *Action*: Expiry of r2 triggers immediately after r3. r2 granted amount was 8. Half rounded down is $\lfloor 4 \rfloor = 4$. Add 4 to pool. Pool becomes $15 + 4 = 19$. (State: Pool=19)
+*   **Event r4**: Asks for 14. Pool is 19. $19 \ge 14$. Grant 14. Pool becomes 5. (State: Pool=5)
+*   **Event r5**: Asks for 17. Pool is 5. $5 < 17$. Partial grant of 5. Pool becomes 0. (State: Pool=0). *Denial logic does not trigger yet because a partial was granted.*
+    *   Wait, re-evaluating "partial when the pool cannot cover". If I grant 5, the pool drops to 0. The request is satisfied partially. It is only denied if the pool is already 0 *before* any partial transfer? Or does "denied" apply if no tokens can be given?
+    *   Text: "grants are partial when the pool cannot cover the full ask, grant what is there and the pool drops to zero". This implies a successful partial transaction.
+    *   Text: "a request arriving at an empty pool is denied". At start of r5, pool=5 (not empty). Grant 5 occurs. Pool becomes 0. Request accepted partially. Not denied.
+*   **Event r6**: Asks for 21. Pool is 0. $0 < 21$. Cannot cover even partial? Or is it denied because pool is empty? Text: "a request arriving at an empty pool is denied". At start of r6, pool=0. This matches the condition. Denied. ID added to list.
+
+**Final Calculation:**
+*   **Granted Units**: $5 (r1) + 8 (r2) + 12 (r3) + 4 (return/r2\_half) + 14 (r4) + 5 (r5\_partial) = 48$.
+    *   Let's re-read carefully: "granted what is there and the pool drops to zero". Does the return count towards "granted_units"? The schema asks for `granted_units`. Usually, this implies successful grants. The expiry returns tokens to the pool; it doesn't grant them to a request ID in this flow (no r7). So granted units = sum of successful partials + fulls.
+    *   Sum: $5+8+12+14+5 = 44$.
+    *   Wait, did I miss something? "the grant for r2 expires... returns half its granted tokens". This is a return to the pool, not a grant to a request.
+    *   Let's re-verify the r5 step. Pool was 19. Ask 14. Grant 14. Pool 5. Correct.
+    *   Next r6: Asks 21. Pool 0? No, wait.
+    *   Sequence check:
+        1. Start: 40
+        2. r1 (ask 5) -> Grant 5. Rem: 35.
+        3. r2 (ask 8) -> Grant 8. Rem: 27.
+        4. r3 (ask 12) -> Grant 12. Rem: 15.
+           *   Trigger Expiry r2 (amount 8). Return $\lfloor 8/2 \rfloor = 4$. New Pool: $15+4=19$.
+        5. r4 (ask 14) -> Grant 14. Rem: 5.
+        6. r5 (ask 17) -> Grant 5 (partial). Rem: 0.
+        7. r6 (ask 21) -> Pool is 0. Condition "arriving at an empty pool" met. Denied.
+
+    *   Total Granted to requests: $5 + 8 + 12 + 14 + 5 = 44$.
+    *   Denied IDs: ["r6"]
+    *   Pool Left: 0 (after r5 partial, then r6 denied, no change to pool).
+
+    *   Let's double check the "orientation" example logic vs tonight.
+    *   Orientation: Start 30. Ask 11 -> Grant 11, Rem 19? No, text says "first grant expired and returned 5... third ask of 13 landed against only 17".
+        *   Let's trace orientation mentally to ensure I understand the flow.
+        *   Start 30. Ask 11. If full granted -> Rem 19. Then expiry? Or partial? Text says "first grant expired". Implies first ask was fully granted? But later it says "third ask of 13 landed against only 17". $30 - 11 = 19$. Where did the 2 go? Maybe rounding or another rule?
+        *   Actually, looking at my trace for tonight: r5 leaves pool at 0. r6 arrives at 0 -> Denied.
+        *   Is it possible "partial" means something else? "grant what is there and the pool drops to zero". Yes.
+        *   So r5 grants 5. Pool 0.
+        *   r6 denied.
+        *   Total granted: 44.
+
+    *   Wait, let's re-read the expiry trigger condition carefully: "the grant for r2 expires after request r3 completes".
+    *   Does "after request r3 completes" mean immediately after processing r3? Yes.
+    *   So the sequence is strictly: Process r1 -> Process r2 -> Process r3 -> [Expiry Event] -> Process r4...
+    *   My trace holds.
+
+    *   Let's check the math on "half its granted tokens rounded down". r2 got 8. Half is 4. Exact integer. No rounding issue.
+    *   Orientation example mentions "11 rounds down" (presumably from 11 to something? Or 11 was asked, maybe pool was low?). In orientation: "first grant expired and returned 5". If first ask was 11, half is 5.5 -> round down to 5. Matches.
+    *   So the logic is consistent.
+
+    *   Final check on totals:
+        *   r1: +5 (Pool 35)
+        *   r2: +8 (Pool 27)
+        *   r3: +12 (Pool 15). Then Expiry: +4 (Pool 19).
+        *   r4: +14 (Pool 5).
+        *   r5: +5 (Pool 0).
+        *   r6: Denied.
+    *   Sum granted: $5+8+12+14+5 = 44$.
+    *   Pool left: 0.
+
+**Final Answer Construction:**
+JSON: `{"granted_units": 44, "denied": ["r6"], "pool_left": 0}`
+
+```json
+{"granted_units": 44, "denied": ["r6"], "pool_left": 0}
+```

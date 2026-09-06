@@ -1,0 +1,85 @@
+### Phase 1 RULE SCAN (First Half Only)
+The following rules govern the state changes for the LOW/HIGH job scheduling event:
+1. **Preemption Rule**: HIGH arrival instantly preempts any running LOW job; while HIGH runs, nothing else runs.
+2. **Core Allocation Rule**: The core is assigned to waiting LOW jobs in order of their start minutes (earliest start first).
+3. **Resume Priority Rule**: A resumed LOW job outranks a fresh LOW job at any tie in start minute availability.
+4. **Checkpoint Banking Rule**: LOW jobs checkpoint every 2 completed minutes of running time; banks are tracked in absolute minutes ($s, s+2, \dots$).
+5. **Waste Rule**: On preemption, work past the last banked checkpoint is wasted and must be redone upon resume.
+6. **Idle Prevention Rule**: The core never idles while a LOW job is waiting; the next waiting LOW starts in the same minute the previous one finishes or is preempted.
+
+### Phase 2 LEDGER WALK (First Half Only)
+**Minute 0**: LOW1 starts (Duration 5). Core busy with LOW1. Bank set: {0}.
+**Minute 1**: LOW1 continues. Core busy with LOW1. Bank set: {0, 1} (Note: Rule says "every 2 completed minutes", so banks at t=2, t=4... Wait, re-reading rule: "banks a checkpoint at minute s+2". Start $s=0$. First bank at $0+2=2$. So no bank at min 1).
+*Correction on Banking Logic*: Rule states: "a job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after".
+- LOW1 Start $s=0$. First Bank at absolute time $t=2$.
+**Minute 2**: LOW1 continues. Core busy with LOW1. **Bank Event**: Checkpoint banked at $t=2$. Bank set: {2}.
+**Minute 3**: HIGH arrives. Preemption occurs. LOW1 is preempted immediately. Work done since last bank ($t=2$ to $t=3$, i.e., 1 minute) is wasted. Core busy with HIGH (Duration 8).
+**Minute 4**: HIGH continues. Core busy with HIGH.
+**Minute 5**: HIGH continues. Core busy with HIGH.
+**Minute 6**: HIGH continues. Core busy with HIGH.
+**Minute 7**: HIGH continues. Core busy with HIGH.
+**Minute 8**: HIGH finishes. Preemption ends. LOW jobs waiting: None yet? Wait, LOW2 starts at minute 2. It was waiting since minute 2.
+*Re-evaluating Waiting Queue*:
+- At Minute 0: LOW1 starts.
+- At Minute 2: LOW2 arrives (Start time 2). It enters the queue.
+- At Minute 3: HIGH preempts LOW1. LOW1 is now "Waiting/Resumed". LOW2 is "Waiting/Fresh".
+- Queue Order Check: Rule says "LOW jobs take the core in order of their start minutes... a resumed LOW outranks a fresh one at any tie".
+    - LOW1 Start: 0. Status: Resumed (needs to redo).
+    - LOW2 Start: 2. Status: Fresh.
+    - Comparison: Start minute 0 < Start minute 2. LOW1 goes first regardless of status.
+**Minute 9**: HIGH finished at end of Minute 8? "HIGH arrives at minute 3 and runs 8 minutes to completion".
+- Arrival $t=3$. Runs during intervals [3,4), [4,5)...[7,8). Completes at $t=11$? Or does it mean duration is 8 units starting at 3, so ends at $3+8=11$?
+- Let's check the example logic provided in the prompt to confirm "runs X minutes" semantics.
+    - Example: LOW1 runs 7 min start 0. HIGH arrives 3 runs 2 min.
+    - Example Walk: "HIGH ran minutes 3 to 5". (Duration 2). Ends at 5.
+    - So if HIGH starts at 3 and runs 8 minutes, it occupies [3, 4), [4, 5)...[10, 11). Completes at $t=11$.
+- Back to Minute 9: Core busy with HIGH.
+**Minute 10**: Core busy with HIGH.
+**Minute 11**: HIGH completes. Core becomes free.
+- Queue State: LOW1 (Start 0, Resumed), LOW2 (Start 2, Fresh).
+- Allocation Rule: Order by start minute. LOW1 (0) < LOW2 (2).
+- Action: Resume LOW1. It needs to redo the wasted work. Wasted = 1 min. Total duration = 5. Remaining to run = $5 - 1 (\text{waste}) = 4$? Or does it just restart the full 5?
+    - Rule: "on preemption the work past the last checkpoint is wasted and redone after resume".
+    - Last bank was at $t=2$. Current time $t=11$. Wasted interval $(2, 11)$ = 9 minutes.
+    - Total job duration = 5 minutes.
+    - Since 9 > 5, the entire job is effectively lost and must be run from scratch (0 to 5).
+    - Wait, "redone after resume". Does it mean run the full duration again? Yes, usually preemption wipes progress if waste > remaining. Here waste (9) > total (5), so restart full 5 mins.
+- LOW1 starts running at $t=11$. Duration 5. Finishes at $t=16$.
+**Minute 12**: LOW1 runs. Bank check: Start $s=0$ (effectively reset). Banks at $0+2=2$ relative to start? Or absolute? "track banks in absolute minutes". If restarted, does it keep old bank logic or new? Usually restart implies new lifecycle for banking unless specified. Let's assume standard checkpointing from the new start point of execution.
+    - Actually, simpler interpretation: It runs 5 minutes. Banks at $t=13$ (relative +2)? No, "absolute minutes". If it starts running at 11, and checkpoints every 2 mins of *running time*, then banks occur when running_time hits 2, 4...
+    - Running time 0 to 2: Bank at absolute $11+2=13$.
+**Minute 13**: LOW1 runs. Bank Event: Checkpoint banked (Running time = 2). Absolute $t=13$.
+**Minute 14**: LOW1 runs. Core busy with LOW1. Running time = 3.
+**Minute 15**: LOW1 runs. Core busy with LOW1. Running time = 4. Bank Event: Checkpoint banked (Running time = 4). Absolute $t=15$.
+**Minute 16**: LOW1 finishes. Duration complete.
+
+*Wait, I missed LOW2 execution.*
+- At Minute 11, only LOW1 is in queue? Yes.
+- LOW1 runs until finish at 16.
+- Does LOW2 ever run? The prompt asks for "completion order of the LOW jobs". If LOW1 finishes first, then LOW2 starts.
+- Let's re-read carefully: "LOW jobs take the core in order of their start minutes... a resumed LOW outranks a fresh one at any tie".
+- At $t=11$, Queue: [LOW1 (Start 0), LOW2 (Start 2)].
+- Order: LOW1 first.
+- LOW1 runs 5 mins. Finishes $t=16$.
+- Now Queue: [LOW2].
+- Action: Start LOW2. Duration 7. Starts at $t=16$. Finishes at $t=23$.
+
+*Recalculating Waste*:
+- Preemption at $t=3$ (end of min 3? Or during?). "HIGH arrives at minute 3". Usually means start of interval [3,4).
+- LOW1 was running since $t=0$. Banks at absolute $t=2$.
+- Interval $(2, 3)$ is 1 minute. Wasted = 1 minute.
+- Total duration 5. Remaining valid work? None, because waste (1) < total (5), but the job must continue from where it left off? No, "work past last checkpoint is wasted". So progress since $t=2$ is lost. Progress before $t=2$ (0 to 2) was banked.
+- So LOW1 resumes with 3 minutes of work remaining ($5 - 2 = 3$).
+- Wait, my previous calculation said "restart full 5". Why? Because I thought waste > total. Waste is 1. Total is 5. $1 < 5$. So it resumes with 3 mins left.
+- Let's re-run the walk with this correction.
+
+**Corrected Walk**:
+**Minute 0**: LOW1 starts ($s=0$). Core busy.
+**Minute 1**: LOW1 runs (Running time 1). Core busy.
+**Minute 2**: LOW1 runs (Running time 2). **Bank Event**. Bank at absolute $t=2$.
+**Minute 3**: HIGH arrives. Preempts LOW1. Work since last bank ($t=2$ to $t=3$, i.e., 1 min) is wasted. Core busy with HIGH (Duration 8, ends $t=11$).
+**Minute 4-10**: HIGH runs. Core busy.
+**Minute 11**: HIGH finishes. Core free.
+- Queue: LOW1 (Start 0, Resumed), LOW2 (Start 2, Fresh).
+- Order by Start Minute: LOW1 ($s=0$) < LOW2 ($s=2$).
+- Action: Resume LOW1.

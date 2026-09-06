@@ -1,0 +1,65 @@
+The task requires processing two independent streams of events based on specific rules provided in the text. The first stream ("canary rollout") involves a sequence of observations with error rates against dynamic limits, resulting in a final state defined by `rollout_pct`, `stages_done`, and `status`. The second stream ("residency") involves loading/unloading models from memory cards with eviction policies, resulting in counts for `loads`, `evictions`, `deferrals`, and an array of `deferred` IDs.
+
+**Part A: Canary Rollout Analysis**
+*   **Rules:**
+    1.  Limits are fixed by position (Stage): Steps 1-5 allow up to 2.0%, Steps 6-10 allow up to 1.0%.
+    2.  Clean observation completes the stage equal to its position; Rollout becomes `10 * Stage`.
+    3.  Breach observation is spent; Rollout and Stages hold last completed values. Limit tightens to 0.8% for remaining steps.
+    4.  Second breach -> STOPPED. One breach + end -> PAUSED. No breach -> DONE.
+*   **Events (5 observations):**
+    *   Step 1: Rate 0.4%. Limit 2.0%. Clean. Stage=1, Rollout=10.
+    *   Step 2: Rate 1.9%. Limit 2.0%. Clean. Stage=2, Rollout=20.
+    *   Step 3: Rate 0.5%. Limit 2.0% (Previous stage was clean). Clean. Stage=3, Rollout=30.
+    *   Step 4: Rate 2.2%. Limit 2.0%. **Breach**. Spent. Last completed state held (Stage=2, Rollout=20). New Limit for remaining steps = 0.8%.
+    *   Step 5: Rate 0.6%. Limit 0.8% (Tightened after breach). Clean. Stage=4 (Position), Rollout=40.
+*   **Result:** One breach occurred, list ended. Status is PAUSED. Final values from last completed stage logic applied to the final clean step? Wait, re-reading rule: "a clean observation completes the stage equal to its own position... even if earlier positions were spent on breaches."
+    *   Step 4 was a breach (spent). Last valid state before Step 4 was Stage 2, Rollout 20.
+    *   Step 5 is clean. It completes Stage 5? Or does it skip to the next available stage number? Rule: "completes the stage equal to its own position". So Step 5 -> Stage 5. Rollout = 10 * 5 = 50.
+    *   Let's re-evaluate Step 4 breach impact on Step 5 limit. "after any rollback the limit tightens to 0.8 for every remaining step." Step 5 is a remaining step. Rate 0.6 < 0.8. Clean.
+    *   Does Step 5 complete Stage 5? Yes, "completes the stage equal to its own position".
+    *   So Final State: Rollout=50, Stages=5. Status=PAUSED (because there was exactly one breach and list ended).
+
+**Part B: Residency Analysis**
+*   **Rules:**
+    1.  Models A(3), B(3), C(1), D(7) GB. Total Capacity = 8GB.
+    2.  Model C is pinned (never evicted).
+    3.  Eviction policy: LRU unpinned model. Load cost 30s, Unload 10s.
+    4.  Loads count every executed load command.
+    5.  Deferral logic: If a load cannot fit after max evictions of unpinned models -> Deferred ID is that load's own id.
+*   **Events:**
+    1.  `load A (3 GB)`: Fits in empty 8GB. Executed. Loads=1. State: {A:3}.
+    2.  `load B (3 GB)`: Current used 3GB. Available 5GB. Fits. Executed. Loads=2. State: {A:3, B:3}.
+    3.  `load C (1 GB)`: Current used 6GB. Available 2GB. Fits. Executed. Loads=3. State: {A:3, B:3, C:1} (C is pinned).
+    4.  `load D (7 GB)`: Current used 7GB. Available 1GB. Needs 7GB.
+        *   Eviction candidates: Unpinned models are A and B. C is pinned.
+        *   Evict LRU unpinned? We need to know LRU order. Assuming arrival order implies LRU unless touched more recently. A loaded first, then B. So A is older than B? Or B is older? Usually "least-recently-touched". If we assume simple FIFO for unpinned: A was loaded at step 1, B at step 2. A is less recent.
+        *   Evict A (3GB). New used: 7-3=4GB. Available space = 8-4=4GB. Still need 7GB.
+        *   Evict B (3GB). New used: 4-3=1GB. Available space = 8-1=7GB. Fits D? Yes, exactly 7GB fits in remaining 7GB.
+        *   Wait, does the load execute or defer? "a load that cannot fit evicts as many LRU unpinned models as needed". It fits after evicting A and B. So it executes. Loads=4. Evictions=2 (A and B). State: {C:1, D:7}.
+    5.  `unload B (3 GB)`: Model B is no longer resident (evicted in step 4). Rule: "an unload for a model no longer resident is a no-op." No change to counts or state.
+
+*   **Totals:**
+    *   Loads: 4 (A, B, C, D executed).
+    *   Evictions: 2 (A and B evicted to make room for D).
+    *   Deferrals: 0.
+    *   Deferred IDs: [].
+
+**Final JSON Construction**
+Part A: `{"rollout_pct": 50, "stages_done": 5, "status": "PAUSED"}`
+Part B: `{"loads": 4, "evictions": 2, "deferrals": 0, "deferred": []}`
+
+```json
+{
+  "part_a": {
+    "rollout_pct": 50,
+    "stages_done": 5,
+    "status": "PAUSED"
+  },
+  "part_b": {
+    "loads": 4,
+    "evictions": 2,
+    "deferrals": 0,
+    "deferred": []
+  }
+}
+```

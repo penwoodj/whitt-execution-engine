@@ -1,0 +1,85 @@
+To ensure accuracy, I will first walk through the **Phase 1 Rule List** to explicitly define the logic governing state changes (grants, partials, expiries, returns), followed by a strict **Phase 2 Ledger Walk** applying the events in arrival order ($r1$ to $r6$) with the specific numbers provided for "tonight". Finally, I will output the JSON response.
+
+### Phase 1: Rule List
+Based on the text, the rules governing state changes are defined as follows:
+
+1.  **Grant Rule**: A request arrives; if `pool >= ask`, grant full amount (`grant = ask`). If `pool < ask`, grant partial amount (`grant = pool`), and set `pool = 0`.
+    *   *Trigger*: Every arrival event ($r_i$).
+2.  **Denial Rule**: A request arrives; if the pool is already exactly 0 (before this request's logic executes), the request is denied.
+    *   *Trigger*: Only if a previous grant drained the pool to 0 and no return has occurred yet, OR if a return hasn't happened before the current arrival. The text clarifies: "a pool that still holds tokens never denies anyone... denied means arriving to find the pool already at exactly zero". Since partial grants reset the pool to 0, subsequent requests arrive to a 0 pool.
+    *   *Correction/Refinement based on text*: "grant what is there and the pool drops to zero, a request arriving at an empty pool is denied". This implies that after $r2$ (partial), $pool=0$. When $r3$ arrives, it finds $pool=0$, so it should be denied? Let's re-read carefully: "a pool that still holds tokens never denies anyone... denied means arriving to find the pool already at exactly zero".
+    *   *Crucial distinction*: If a request is granted partially, does it count as "denied"? No. But if $r3$ arrives after $r2$'s partial grant (which set $pool=0$), does $r3$ get denied? The text says "a request arriving at an empty pool is denied". However, usually in these puzzles, the *next* arrival finds it empty and gets denied. Let's trace:
+        *   Start 40.
+        *   $r1$ (5) -> Grant 5, Pool 35.
+        *   $r2$ (8) -> Grant 8, Pool 27.
+        *   $r3$ (12) -> Grant 12, Pool 15.
+        *   Wait, let's re-evaluate the "partial" condition vs the "empty" condition. The text says: "grants are partial when the pool cannot cover the full ask... a request arriving at an empty pool is denied". This implies if $pool < ask$ AND $ask > 0$, it's a partial grant (not denial). It only denies if $pool == 0$ AND we try to take something? Or does "arriving at an empty pool" mean the state *before* processing the request is 0?
+        *   Let's look at the example story ("orientation"): Pool started 30. Ask 11 -> Grant 11 (Pool 19). Ask 7 -> Grant 7 (Pool 12). First grant expired... Third ask of 13 landed against only 17 in the pool so it took a partial and drained it.
+        *   Okay, if $pool < ask$, it's a partial grant. If $pool == 0$, is it denied? The text says "a request arriving at an empty pool is denied". This suggests if state is 0, result is Denied. But wait, if I have 12 in the pool and ask for 5, that's full. If I have 12 and ask for 15, that's partial (grant 12, pool 0). If next arrival happens, pool is 0.
+        *   Let's re-read the specific constraint: "a request arriving at an empty pool is denied". This implies if `pool == 0` upon arrival, result = Denied. But does a partial grant set pool to 0 immediately? Yes ("the pool drops to zero"). So subsequent requests arrive to 0. Are they denied?
+        *   Let's check the example again: "Third ask of 13 landed against only 17 in the pool so it took a partial and drained it." Here, 17 > 0. It didn't deny. What if there was a 4th request after that? The text doesn't explicitly show a denial case in the example where $pool=0$.
+        *   However, the rule list says: "grants are partial when the pool cannot cover the full ask... denied means arriving to find the pool already at exactly zero". This confirms: If `ask > pool` (partial), it's a grant. If `pool == 0`, it is a denial? But wait, if `ask > pool`, then `pool` becomes 0 after the partial grant. The *next* request arrives to `pool=0`. So that next request would be denied?
+        *   Let's assume standard logic: Partial grant happens when $0 < pool < ask$. Result is Grant (partial). Pool becomes 0. Next event arrives to 0 -> Denied.
+        *   Wait, looking at the provided task numbers vs example: The example has a partial that drains it ("drained it"). If the next request came, would it be denied? Yes, per "arriving to find pool already at exactly zero".
+
+3.  **Expiry Rule**: After request $r3$ completes, the grant for $r2$ expires.
+    *   *Trigger*: Completion of $r3$.
+4.  **Return Rule**: Upon expiry, return half of the tokens originally granted to that specific expired grant, rounded down (`floor(grant / 2)`). This amount is added to the pool.
+    *   *Condition*: Only applies to the grant associated with the specific request ID named in the rule ($r2$'s grant).
+
+### Phase 2: Ledger Walk (Tonight's Numbers)
+*Initial Pool:* 40
+*Events:* $r1(5), r2(8), r3(12), r4(14), r5(17), r6(21)$
+
+**Step-by-Step Execution:**
+
+1.  **Event $r1$ (Ask: 5)**
+    *   Current Pool: 40.
+    *   Logic: $40 \ge 5$. Full Grant.
+    *   Action: Grant 5.
+    *   New Pool: $40 - 5 = 35$.
+    *   State after event: **Pool 35**.
+
+2.  **Event $r2$ (Ask: 8)**
+    *   Current Pool: 35.
+    *   Logic: $35 \ge 8$. Full Grant.
+    *   Action: Grant 8.
+    *   New Pool: $35 - 8 = 27$.
+    *   State after event: **Pool 27**.
+
+3.  **Event $r3$ (Ask: 12)**
+    *   Current Pool: 27.
+    *   Logic: $27 \ge 12$. Full Grant.
+    *   Action: Grant 12.
+    *   New Pool: $27 - 12 = 15$.
+    *   **Trigger**: Expiry of $r2$'s grant occurs after $r3$ completes.
+    *   Expiry Logic: Return half of $r2$'s grant ($\lfloor 8 / 2 \rfloor = 4$). Add to pool.
+    *   Action: Add 4 to Pool.
+    *   New Pool: $15 + 4 = 19$.
+    *   State after event: **Pool 19**.
+
+4.  **Event $r4$ (Ask: 14)**
+    *   Current Pool: 19.
+    *   Logic: $19 \ge 14$. Full Grant.
+    *   Action: Grant 14.
+    *   New Pool: $19 - 14 = 5$.
+    *   State after event: **Pool 5**.
+
+5.  **Event $r5$ (Ask: 17)**
+    *   Current Pool: 5.
+    *   Logic: $5 < 17$. Partial Grant condition met ($0 < pool < ask$).
+    *   Action: Grant partial amount = current pool = 5.
+    *   New Pool: $5 - 5 = 0$.
+    *   State after event: **Pool 0**.
+
+6.  **Event $r6$ (Ask: 21)**
+    *   Current Pool: 0.
+    *   Logic: Arriving to find pool already at exactly zero ($pool == 0$). Denial condition met.
+    *   Action: Denied. No tokens granted. Pool remains 0.
+    *   State after event: **Pool 0**.
+
+**Final Totals:**
+*   Total Granted Units: $5 (r1) + 8 (r2) + 12 (r3) + 14 (r4) + 5 (r5 \text{ partial}) = 44$.
+    *   Note: The expiry return was an internal state adjustment, not a "request" to the system in terms of service units requested by users, but it adds to the pool. The sum of "granted_units" usually refers to the successful allocations from requests. Let's verify if "granted_units" includes the returned tokens as part of the total volume granted *to requests*. Yes, $r5$ got 5 units. Total = 44.
+*   Denied Requests: Only $r6$. ID list: `["r6"]`.
+*  

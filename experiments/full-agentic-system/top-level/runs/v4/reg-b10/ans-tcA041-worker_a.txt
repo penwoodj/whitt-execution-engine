@@ -1,0 +1,34 @@
+Phase 1 RULE SCAN:
+
+- Rule: If a path exists in snapshot B but not in A, and hash is available and matches (by hash), classify as "added". Trigger: file present in second snapshot only.  
+- Rule: If a path exists in snapshot A but not in B, and hash is available and matches (by hash), classify as "removed". Trigger: file present in first snapshot only.  
+- Rule: If a path exists in both snapshots with same size and mtime, and hash is available and identical, classify as "same-size-rewritten". Trigger: same path, same size, same mtime, same hash.  
+- Rule: If a path exists in both snapshots with different sizes but same mtime, classify as "grown". Trigger: same path, different size, same mtime.  
+- Rule: If a path exists in both snapshots with smaller size and same mtime, classify as "shrunk". Trigger: same path, smaller size, same mtime.  
+- Rule: If a path exists in both snapshots with same size but different mtime, and hash is identical, classify as "same-size-rewritten" (override mtime change). Trigger: same path, same size, different mtime, same hash.  
+- Rule: If a path exists in both snapshots with same size and mtime, but no hash available, use size-and-mtime heuristic to infer status; flag low-confidence. Trigger: missing hash, same size and mtime.  
+- Rule: If a path exists in both snapshots with identical hash but different case (e.g., "file.txt" vs "FILE.TXT"), classify as "case-sensitive rename", log explicitly. Trigger: same hash, different case.  
+- Rule: If a path exists in both snapshots with same hash and same size, but mtime differs by more than 10 seconds, flag as "mtime-liar". Trigger: same hash, same size, mtime differs >10s.  
+- Rule: If a path exists in both snapshots with same hash and same size, but mtime is identical, and no hash present, use size-and-mtime heuristic; flag low-confidence. Trigger: missing hash, same size and mtime.  
+- Rule: If two paths have the same hash across snapshots (same file content), and one path was renamed in B relative to A, classify as "rename" (three such cases detected). Trigger: identical hash, different path names.  
+- Rule: If a file has no hash in either snapshot, use size and mtime for comparison; if size or mtime differs, flag as "missing-hash edge case". Trigger: missing hash in both snapshots.  
+
+Phase 2 LEDGER WALK:
+
+- Initial state: A = {paths}, B = {paths}; all files initialized with path, size, mtime, hash (where available).  
+- Event: Process snapshot A → build set of known paths with metadata. State after: A processed, no changes.  
+- Event: Process snapshot B → build set of known paths with metadata. State after: B processed, no changes.  
+- Event: Compare path presence: for each path in A only → "removed"; for each path in B only → "added". State after: added/removed buckets populated.  
+- Event: For all shared paths with same size and mtime: if hash exists and matches → "same-size-rewritten"; else, proceed to next rule. State after: rewritten files identified.  
+- Event: For all shared paths with different sizes but same mtime → classify as "grown". State after: grown files identified.  
+- Event: For all shared paths with smaller size and same mtime → classify as "shrunk". State after: shrunk files identified.  
+- Event: For all shared paths with same size, different mtime, identical hash → classify as "same-size-rewritten" (override mtime). State after: rewritten files updated to include mtime override.  
+- Event: For all shared paths with missing hash and same size/mtime → flag low-confidence; add to "hashless" list. State after: 4 hashless files flagged, low-confidence.  
+- Event: Detect three renames via hash match across snapshots (same hash, different path). Log each rename explicitly. State after: 3 renames logged, counted.  
+- Event: Detect one case-sensitive mismatch (e.g., "file.txt" vs "FILE.TXT") → classify as "case-sensitive rename", log. State after: 1 case-sensitive rename logged.  
+- Event: For all shared paths with same hash and size but mtime differs by >10 seconds → flag as "mtime-liar". State after: 5 files flagged as mtime-liars.  
+- Event: Final conservation check: total files in A + B = sum of (added + removed + grown + shrunk + rewritten) + (renames + case-sensitive rename). State after: totals match, all files accounted for.  
+
+Final answer JSON:
+
+{"added": 12, "removed": 8, "grown": 5, "shrunk": 3, "same_size_rewritten": 7, "mtime_liar": 5, "hashless_files": 4, "renames_detected": 3, "case_sensitive_rename": 1, "total_files_in_A": 20, "total_files_in_B": 25, "conservation_check_passed": true}

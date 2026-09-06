@@ -1,0 +1,39 @@
+Phase 1 RULE SCAN:
+
+- Failed-login frequency by IP: triggers when a log entry contains "failed login" and has an IP address; counts per IP, top twenty with counts.  
+- Path scanning detection: triggers when a log entry has HTTP status 404 and the path is not in a known legitimate directory (e.g., /static/, /api/); records distinct paths from one source IP.  
+- /admin hammer detection: triggers when an IP makes more than 5 requests to "/admin" within a 1-minute window; tracks start time, stop time, and request rate per IP.  
+- Whitelist pass rule: triggers when a log entry matches a known legitimate crawler pattern (e.g., User-Agent: "Googlebot", "Bingbot") or comes from an IP in a predefined whitelist; excludes such entries from failed-login, path scanning, and /admin hammer counts.  
+- Expiry rule for failed-login frequency: after 24 hours of no new failed logins from an IP, the entry is removed from the top twenty list.  
+- Return rule for path scanning: if a 404 path appears in less than 3 distinct logs from one source, it is marked as noise and not counted.  
+- Revocation rule for /admin hammer: if an IP stops making requests to "/admin" after a peak rate of over 10 per minute, the hammer event is revoked and no longer tracked.
+
+Phase 2 LEDGER WALK:
+
+- Log entry: "192.168.1.100 - - [10/Jan/2024:08:05:12] \"GET /login\" 401" → No failed login, no action.  
+- Log entry: "172.16.0.5 - - [10/Jan/2024:08:06:15] \"POST /login\" 403" → Failed login from IP 172.16.0.5; count = 1.  
+- Log entry: "192.168.1.100 - - [10/Jan/2024:08:07:20] \"POST /login\" 403" → Failed login from IP 192.168.1.100; count = 1 (now total for that IP).  
+- Log entry: "10.0.0.23 - - [10/Jan/2024:08:08:35] \"POST /login\" 403" → Failed login from IP 10.0.0.23; count = 1.  
+- Log entry: "172.16.0.5 - - [10/Jan/2024:08:09:40] \"POST /login\" 403" → Failed login from IP 172.16.0.5; count = 2 (now total for that IP).  
+- Log entry: "192.168.1.100 - - [10/Jan/2024:08:10:55] \"POST /login\" 403" → Failed login from IP 192.168.1.100; count = 2 (now total for that IP).  
+- Log entry: "172.16.0.5 - - [10/Jan/2024:08:12:10] \"GET /backup\" 404" → Path scanning detected: path "/backup", source IP 172.16.0.5, log_count = 1 (not yet in threshold).  
+- Log entry: "192.168.1.100 - - [10/Jan/2024:08:13:25] \"GET /config\" 404" → Path scanning detected: path "/config", source IP 192.168.1.100, log_count = 1 (not yet in threshold).  
+- Log entry: "10.0.0.23 - - [10/Jan/2024:08:14:40] \"GET /tmp\" 404" → Path scanning detected: path "/tmp", source IP 10.0.0.23, log_count = 1 (not yet in threshold).  
+- Log entry: "172.16.0.5 - - [10/Jan/2024:08:15:55] \"GET /backup\" 404" → Path scanning: path "/backup", source IP 172.16.0.5, log_count = 2 (still below threshold).  
+- Log entry: "192.168.1.100 - - [10/Jan/2024:08:17:10] \"GET /config\" 404" → Path scanning: path "/config", source IP 192.168.1.100, log_count = 2 (still below threshold).  
+- Log entry: "10.0.0.23 - - [10/Jan/2024:08:18:25] \"GET /tmp\" 404" → Path scanning: path "/tmp", source IP 10.0.0.23, log_count = 2 (still below threshold).  
+- Log entry: "172.16.0.5 - - [10/Jan/2024:08:19:40] \"GET /backup\" 404" → Path scanning: path "/backup", source IP 172.16.0.5, log_count = 3 (now meets threshold; marked as high-risk).  
+- Log entry: "192.168.1.100 - - [10/Jan/2024:08:20:55] \"GET /config\" 404" → Path scanning: path "/config", source IP 192.168.1.100, log_count = 3 (now meets threshold; marked as high-risk).  
+- Log entry: "10.0.0.23 - - [10/Jan/2024:08:22:10] \"GET /tmp\" 404" → Path scanning: path "/tmp", source IP 10.0.0.23, log_count = 3 (now meets threshold; marked as high-risk).  
+- Log entry: "172.16.0.5 - - [10/Jan/2024:08:23:25] \"GET /admin\" 200" → No hammer event, no action.  
+- Log entry: "192.168.1.100 - - [10/Jan/2024:08:24:40] \"GET /admin\" 200" → No hammer event, no action.  
+- Log entry: "172.16.0.5 - - [10/Jan/2024:08:25:55] \"POST /admin\" 403" → First request to "/admin"; count = 1 (no hammer yet).  
+- Log entry: "172.16.0.5 - - [10/Jan/2024:08:27:10] \"POST /admin\" 403" → Second request; count = 2.  
+- Log entry: "172.16.0.5 - - [10/Jan/2024:08:28:25] \"POST /admin\" 403" → Third request; count = 3.  
+- Log entry: "172.16.0.5 - - [10/Jan/2024:08:29:40] \"POST /admin\" 403" → Fourth request; count = 4.  
+- Log entry: "172.16.0.5 - - [10/Jan/2024:08:30:55] \"POST /admin\" 403" → Fifth request; now triggers /admin hammer detection (rate = 5 per minute). Start time: 10/Jan/2024:08:25:55, stop time: not yet known.  
+- Log entry: "172.16.0.5 - - [10/Jan/2024:08:32:10] \"GET /admin\" 200" → No hammer request; hammer event continues until stopped.  
+- Log entry: "172.16.0.5 - - [10/Jan/2024:08:33:25] \"GET /admin\" 200" → Still no hammer request; hammer active.  
+- Log entry: "172.16.0.5 - - [10/Jan/2024:08:34:40] \"GET /admin\" 200" → No hammer request; hammer event continues.  
+- Log entry: "172.16.0.5 - - [10/Jan/2024:08:35:55] \"GET /admin\" 200" → No hammer request; hammer event continues.  
+- Log entry: "172.16.0.5 - - [10/Jan/

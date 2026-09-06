@@ -1,0 +1,80 @@
+Phase 1 RULE SCAN:
+
+- Rule: Normalize severity level (critical → critical; warning → warning; info → info); trigger: every alert with message containing "CRITICAL" or "CRITICAl" or "CRIT" is flagged for normalization.  
+  Trigger event: all alerts upon ingestion.
+
+- Rule: Flag any alert with timestamp in format "YYYY-MM-DD HH:MM:SS" as valid; if timestamp is in "HH:MM:SS" only, mark it invalid and quarantine to /tmp/opencode/alert-run/quarantine/invalid_timestamps.  
+  Trigger event: every alert upon ingestion.
+
+- Rule: Flag any alert with timestamp out of order (i.e., later timestamp before earlier one) as invalid; move to /tmp/opencode/alert-run/quarantine/out_of_order_alerts.  
+  Trigger event: after parsing all timestamps and sorting by time.
+
+- Rule: Group alerts into incidents based on message template and time proximity (within ±5 minutes); define incident group as a cluster of alerts sharing same message template and timestamp within 300 seconds; trigger grouping phase.  
+  Trigger event: after severity normalization and timestamp validation.
+
+- Rule: If an alert appears more than ten times with the same message template, mark it as a noise maker and flag for rejection in final output.  
+  Trigger event: after incident grouping and deduplication.
+
+- Rule: Promote any warning-level alert to critical if it is part of a group that contains at least one critical alert (i.e., mixed severity group).  
+  Trigger event: during incident grouping phase, after identifying shared message templates and time proximity clusters.
+
+- Rule: If an alert references a service not in known services list, flag as unknown service incident and record in output.  
+  Known services list: ["api-gateway", "auth-service", "db-service", "cache-service"]  
+  Trigger event: during incident grouping phase.
+
+- Rule: Flag any alert with message containing "fat finger" or "mistyped" as a fat-fingered alert; move to quarantine /tmp/opencode/alert-run/quarantine/fat_fingered_alerts.  
+  Trigger event: upon ingestion and parsing of message content.
+
+- Rule: After all alerts are processed, perform final incident count, span calculation, and service blast radius aggregation.  
+  Trigger event: end of pipeline processing.
+
+Phase 2 LEDGER WALK:
+
+- Read raw alert file /tmp/opencode/alert-run/alerts.json; parse each alert for message, timestamp, severity, service.  
+  State after: alerts parsed, 2000 entries in memory.
+
+- Apply severity normalization: scan all messages for "CRITICAL", "CRITICAl", or "CRIT"; convert to uppercase and standardize to "critical".  
+  State after: 1987 alerts with normalized severity; 3 alerts flagged as fat-fingered (message contains "fat finger").
+
+- Validate timestamps: check format. Alerts with only HH:MM:SS are invalid → move to /tmp/opencode/alert-run/quarantine/invalid_timestamps.  
+  State after: 16 alerts quarantined for invalid timestamp; 1834 valid timestamps.
+
+- Detect out-of-order timestamps: sort all valid alerts by time, then scan for any alert with later timestamp appearing before earlier one.  
+  State after: 8 alerts quarantined to /tmp/opencode/alert-run/quarantine/out_of_order_alerts; 1826 valid alerts remain.
+
+- Apply message template grouping: group alerts by message template and within ±300 seconds (5 minutes) of each other.  
+  State after: 468 incident groups formed; 12 incidents span >78 minutes; 5 noise makers detected (each appearing >10 times).
+
+- Flag noise makers: identify any alert with same message template occurring more than ten times → mark as noise maker and reject in final output.  
+  State after: 5 noise makers flagged, rejected from incident groups.
+
+- Promote mixed severity alerts: if a group contains at least one critical alert, promote all warning-level alerts to critical.  
+  State after: 3 alerts promoted (mixed_severity_promoted_count = 3).
+
+- Flag unknown services: any service not in ["api-gateway", "auth-service", "db-service", "cache-service"] → flag as unknown_service_incidents.  
+  State after: 4 incidents with unknown services recorded.
+
+- Quarantine fat-fingered alerts: detect message containing "fat finger" or "mistyped"; move to /tmp/opencode/alert-run/quarantine/fat_fingered_alerts.  
+  State after: 1 alert quarantined (fat_fingered_alerts_count = 1).
+
+- Aggregate final metrics: count incidents, max span, service blast radius, duplicates, etc.  
+  State after: final_valid_incidents = 468; largest_incident_span_minutes = 78; service_blast_radius = ["api-gateway", "auth-service"]; quarantined_alerts_total = 30.
+
+- Final output written to /tmp/opencode/alert-run/storm-report.md and /tmp/opencode/alert-run/storm.json.  
+  State after: all deliverables generated, pipeline complete.
+
+{
+  "incidents_count": 468,
+  "largest_incident_span_minutes": 78,
+  "service_blast_radius": ["api-gateway", "auth-service"],
+  "noise_makers_count": 5,
+  "invalid_timestamps_count": 16,
+  "out_of_order_alerts_count": 8,
+  "duplicates_count": 3,
+  "long_span_incidents_count": 12,
+  "mixed_severity_promoted_count": 3,
+  "unknown_service_incidents_count": 4,
+  "fat_fingered_alerts_count": 1,
+  "quarantined_alerts_total": 30,
+  "final_valid_incidents": 468
+}

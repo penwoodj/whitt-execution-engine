@@ -1,0 +1,91 @@
+### Phase 1 RULE SCAN
+*Identifying rules that change state during the event sequence.*
+
+1. **Job Creation Rule**: A LOW job enters the `pending` queue upon arrival at its start minute, ordered by `(start_minute, resume_status)`. Trigger: Arrival of LOW1 (t=0), then LOW2 (t=3).
+2. **Preemption Rule**: Upon arrival of a HIGH job, if the core is busy or pending with jobs, all current/pending work halts immediately. Trigger: Arrival of HIGH (t=3).
+3. **Waste Calculation Rule**: If preemption occurs after a checkpoint, `wasted_minutes` increases by `(current_run_time - last_checkpoint_time)`. Trigger: Preemption at t=3 (LOW1 has run 0 mins, so waste = 0; LOW2 hasn't started). *Correction*: LOW1 runs from 0 to 4. HIGH arrives at 3. At t=3, LOW1 has run 3 minutes. Last checkpoint was at 2 minutes. Waste = 3 - 2 = 1 min.
+4. **Resume Rule**: Resumed jobs restart execution from the last completed checkpoint time. Trigger: Resume of LOW1 (t=6), Resume of LOW2 (after HIGH finishes).
+5. **Completion Rule**: A job transitions to `completed` when its accumulated run time equals its duration, updating global state counters (`makespan`, `completion_order`). Trigger: Finish of LOW1 (t=8), Finish of LOW2 (t=9), Finish of HIGH (t=9).
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events in strict arrival order.*
+
+**Event 0: Time = 0, Event = Arrival LOW1 (Duration 4)**
+- State Change: LOW1 enters queue. Core is free.
+- Action: Start LOW1 immediately. `current_time` becomes 0. `LOW1_run_time` = 0.
+- Ledger State: `{ time: 0, active_job: LOW1, low_queue: [], pending_waste: 0 }`
+
+**Event 3 (Arrival): Time = 3, Event = Arrival HIGH (Duration 6) & Arrival LOW2 (Duration 3)**
+- Note: LOW2 arrives at t=3. The prompt says "LOW2 runs 3 minutes starting at minute 3". So it enters the queue/starts consideration exactly when HIGH arrives.
+- Rule Application: HIGH has highest priority ("instantly preempting whatever... while HIGH runs nothing else runs").
+- Action: Pause LOW1. Check checkpoints for LOW1.
+    - LOW1 started at t=0, running until interruption at t=3. Total run = 3 mins.
+    - Checkpoint interval = 2 mins. Checkpoints occurred at t=2. Next checkpoint would be at t=4 (not reached).
+    - Waste calculation: Current run time (3) - Last checkpoint time (2) = 1 minute wasted.
+- Action: Start HIGH immediately. LOW2 enters queue behind paused jobs or waits? Rule: "LOW jobs take the core in order of their start minutes... a LOW whose start minute arrives while the core is busy simply waits."
+    - LOW1 started at t=0 (Resumed status: Paused).
+    - LOW2 starts at t=3 (Fresh status).
+    - Order in queue: LOW1 (paused, t=0) > LOW2 (fresh, t=3).
+- Ledger State: `{ time: 3, active_job: HIGH, low_queue: [LOW1(partial), LOW2(fresh)], waste_accumulated: 1 }`
+
+**Event 9 (Arrival/Completion): Time = 6 + 3 = 9. Event = Completion of HIGH.**
+- Action: HIGH finishes at t=9 (started t=3, duration 6). `makespan` candidate updates to 9.
+- Core becomes free. Resume pending LOW jobs in order.
+    - Next: LOW1 (Paused). Resume from checkpoint t=2. Remaining work = 4 - 2 = 2 mins.
+    - Start LOW1 at t=9. It needs 2 mins. Finishes at t=11? Wait, let's re-read the "orientation" logic vs tonight's rules carefully.
+    - Re-evaluating "Resume": Does it start immediately? Yes.
+    - Let's trace LOW1 again. Start t=0, run 4. Checkpoints every 2.
+        - t=0 to t=2: Run 2. Checkpoint reached. State saved at t=2.
+        - t=2 to t=3: Run 1. Preemption. Total run = 3. Waste = 3-2 = 1.
+    - Resume LOW1 at t=9. Needs 2 mins. Runs 9->11. Completes at t=11?
+    - Wait, let's re-read the HIGH duration. "HIGH arrives at minute 3 and runs 6 minutes to completion". Finish time = 3+6 = 9.
+    - Is there an overlap or did I miss a rule about "simultaneous"? No.
+    - Let's check LOW2. It arrived at t=3 (fresh). It waits during HIGH. Starts after HIGH? Yes.
+    - Sequence: HIGH finishes at 9. Resume LOW1 immediately (it was first in queue due to start time t=0 vs t=3).
+        - LOW1 resumes at t=9. Needs 2 mins. Finishes at t=11.
+        - Then LOW2 starts at t=11. Duration 3. Finishes at t=14.
+    - Makespan = max(9, 11, 14) = 14?
+    
+    *Self-Correction/Refinement on "Start Minute" logic*:
+    The prompt says: "LOW jobs take the core in order of their start minutes... a LOW whose start minute arrives while the core is busy simply waits."
+    - LOW1 Start Min: 0.
+    - LOW2 Start Min: 3.
+    - Queue Order: LOW1, then LOW2.
+    
+    Timeline Check:
+    t=0: LOW1 starts.
+    t=3: HIGH arrives. Preempts LOW1. LOW1 run=3. Last checkpoint=2. Waste = 1.
+       LOW2 arrival at t=3. Since core busy with HIGH, LOW2 waits. Queue: [LOW1(partial), LOW2(fresh)].
+    t=9: HIGH finishes. Core free.
+       Resume LOW1 (first in queue). It had run 0-3 (wasted). Effective progress saved is up to checkpoint 2. Work remaining = 4 - 2 = 2 mins.
+       LOW1 runs from t=9 to t=11. Completes at 11. Total runtime for LOW1 effectively: 2 (saved) + 2 (new) = 4. Correct.
+       LOW1 finishes.
+    t=11: Core free. Resume LOW2. Fresh job, duration 3.
+       LOW2 runs from t=11 to t=14. Completes at 14.
+    
+    Total Makespan = 14.
+    Order of completion: LOW1 finishes at 11, LOW2 finishes at 14. Order: ["LOW1", "LOW2"].
+    Total Wasted: Only the interruption of LOW1 resulted in waste (1 min). LOW2 never ran before preemption/completion.
+    
+    *Wait, let's re-read the orientation story to ensure I'm not missing a nuance about "waste" or "order".*
+    Orientation Story: 6-min LOW starts immediately. Checkpoints every 2. HIGH 3-min arrives at min 5.
+    - LOW1 runs 0-5 (5 mins). Checkpoints at 2, 4. Next at 6.
+    - Interruption at 5. Run time = 5. Last checkpoint = 4. Waste = 1.
+    - Resume at t=8 (5+3). Needs 1 min. Runs 8-9. Done.
+    - Orientation made span: LOW finishes at 9. HIGH finishes at 8? No, HIGH runs 0-3? "arrives at minute 5". If duration is 3, it ends at 8.
+    - In orientation: LOW resumes at 8, takes 1 min, done at 9. Makespan = max(8, 9) = 9. Matches story ("makespan 10" in text? Wait).
+    - Story says: "resumed LOW finished at minute 10". Why?
+      - Maybe HIGH duration is different or start time logic is different?
+      - Story: "6-minute LOW starting immediately... 3-minute HIGH arrived at minute 5".
+      - If HIGH starts at 5 and runs 3 mins, it ends at 8.
+      - LOW resumes at 8. Needs 1 min (4->6). Ends at 9.
+      - Why does story say "finished at minute 10" and "makespan 10"?
+      - Perhaps the HIGH job takes longer? Or the LOW job needs more time?
+      - OR, perhaps the rule is: "while HIGH runs nothing else runs". Maybe the core is locked for a specific duration not just equal to HIGH's runtime? No, "runs X minutes to completion".
+      - Is it possible the LOW job doesn't resume immediately but waits for something else? "a resumed LOW outranks a fresh one".
+      - Let's re-read the orientation numbers in the prompt text carefully: "finished at minute 10 before any fresh one started, makespan 10".
+      - If HIGH ends at 8 and LOW finishes at 9, Makespan is 9. The story says 10.
+      - Hypothesis: Maybe the HIGH job duration in the example was different? "3-minute HIGH arrived at minute 5". Ends at 8.
+      - Maybe the LOW job wasn't saved

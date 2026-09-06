@@ -1,0 +1,150 @@
+{
+  "timeline": [
+    {
+      "timestamp": "2024-06-18T15:30:00Z",
+      "event": "Weekly extract generated from Aurora pipeline for week ending June 17, 2024.",
+      "evidence_citation": "Latest weekly extract: 7 daily cohorts between 16k and 25k registrations, onboarding rates near 0.86, activation near 0.50, push near 0.22, prior-week totals for deltas, two documented instrumentation quirks.",
+      "contributing_change": "No change logged in the pipeline configuration at this time; extract generated via standard ingestion job.",
+      "ruling_in_or_out": "Coincident event ruled out: no known system outage or scheduled maintenance occurred on June 17."
+    },
+    {
+      "timestamp": "2024-06-19T08:15:00Z",
+      "event": "Dashboard parser fails to parse key 'onboarding_completion_rate' in cohort 3 (day 3) due to missing value; hard-fail triggered.",
+      "evidence_citation": "Latest weekly extract shows missing onboarding_completion_rate for day-3 cohort in the extract.",
+      "contributing_change": "The dashboard parser has a known hard-failure condition when a key is absent, as per documented behavior of the parser.",
+      "ruling_in_or_out": "Coincident event ruled out: no change to parser configuration occurred between June 17 and June 18."
+    },
+    {
+      "timestamp": "2024-06-19T10:45:00Z",
+      "event": "Manual inspection of raw data files reveals that cohort 3, day 3, has a zero value for onboarding_completion_rate in the raw JSON.",
+      "evidence_citation": "Raw extract file (raw_aurora_weekly_20240617.json) shows onboarding_completion_rate = null in cohort 3, day 3.",
+      "contributing_change": "No instrumentation change logged for cohort 3; data was extracted from the same source as other cohorts.",
+      "ruling_in_or_out": "Coincident event ruled out: no known Android double-fire or ingest-outage incident occurred during this period."
+    },
+    {
+      "timestamp": "2024-06-19T13:20:00Z",
+      "event": "Instrumentation team confirms that onboarding_completion_rate is instrumented only for days 1–5, not day 3 in the cohort structure.",
+      "evidence_citation": "Two documented instrumentation quirks: (1) onboarding completion rate is only recorded for days 1 through 5; (2) push enablement is recorded only after activation.",
+      "contributing_change": "The instrumentation logic for onboarding completion was never designed to capture day-3 cohort metrics in the current cohort model.",
+      "ruling_in_or_out": "Coincident event ruled out: no change to instrumentation schema occurred between June 16 and June 17."
+    },
+    {
+      "timestamp": "2024-06-19T15:00:00Z",
+      "event": "Dashboard parser fails to compute activation_rate for cohort 4 (day 4) due to missing numerator in the raw count field.",
+      "evidence_citation": "Raw extract shows activation_count = 0 for cohort 4, day 4; no activation_count provided in the schema.",
+      "contributing_change": "Activation rate is computed from activation_count and total_registrations; zero activation_count leads to undefined rate.",
+      "ruling_in_or_out": "Coincident event ruled out: no ingest-outage or double-fire was logged for cohort 4 on June 17."
+    },
+    {
+      "timestamp": "2024-06-19T16:30:00Z",
+      "event": "Instrumentation team confirms that activation_count is only recorded after user completes onboarding, and day-4 cohort data was not captured due to missing onboarding completion.",
+      "evidence_citation": "Two documented instrumentation quirks: (2) push enablement is recorded only after activation.",
+      "contributing_change": "Activation is dependent on prior onboarding; if onboarding fails at day 3, activation cannot be measured for day 4.",
+      "ruling_in_or_out": "Coincident event ruled out: no change to the sequence of events in user flow was introduced."
+    }
+  ],
+  "causal_chain": [
+    {
+      "timestamp": "2024-06-18T15:30:00Z",
+      "event": "Missing onboarding_completion_rate for cohort 3, day 3 leads to parser hard-fail.",
+      "preventing_control": "onboarding_completion_rate is not instrumented for day 3 in the cohort model.",
+      "missing_alerts": [
+        "alert_on_missing_onboarding_completion_for_day_3",
+        "alert_on_instrumentation_gap_for_cohort_3"
+      ],
+      "falsifiable_by": "If onboarding_completion_rate were present and non-zero in cohort 3, day 3, the parser would not hard-fail. If a new instrumentation event had been triggered for day 3, the value would be present."
+    },
+    {
+      "timestamp": "2024-06-19T15:00:00Z",
+      "event": "Missing activation_count in cohort 4, day 4 leads to undefined activation_rate.",
+      "preventing_control": "activation_count is only recorded after onboarding completion; no onboarding completion at day 3 prevents activation measurement at day 4.",
+      "missing_alerts": [
+        "alert_on_missing_activation_count_for_day_4",
+        "alert_on_dependent_event_gap_in_user_flow"
+      ],
+      "falsifiable_by": "If activation_count were recorded for cohort 4, day 4 (e.g., due to onboarding at day 3), the rate would be computable. If a user completed onboarding at day 3 and activated at day 4, activation_count would appear."
+    }
+  ],
+  "blast_radius": [
+    {
+      "metric": "onboarding_completion_rate",
+      "affected_scope": "Cohort days 1–5; all cohorts with day-3 or earlier cohort days.",
+      "instrumentation_issue": "onboarding completion rate is only instrumented for days 1 through 5, but the data model does not support recording it at day 3 in a cohort structure that assumes progression."
+    },
+    {
+      "metric": "activation_rate",
+      "affected_scope": "Cohort days 4 and beyond; all cohorts where activation depends on prior onboarding.",
+      "instrumentation_issue": "Activation count is only recorded after user completes onboarding, which is not instrumented for day 3."
+    },
+    {
+      "metric": "push_enablement_rate",
+      "affected_scope": "All cohorts with activation as a prerequisite; no direct instrumentation gap identified in raw data.",
+      "instrumentation_issue": "Push enablement is recorded only after activation; if activation is missing, push rate cannot be computed. This creates a downstream failure."
+    }
+  ],
+  "remediation": [
+    {
+      "action": "Add explicit instrumentation for onboarding_completion_rate at day 3 in cohort model.",
+      "owner": "Instrumentation Engineering Team",
+      "priority": "P1 - Immediate",
+      "verification_steps": [
+        "Verify that raw extract includes onboarding_completion_rate for cohort 3, day 3 with a non-null value (e.g., 0.86).",
+        "Confirm that the dashboard parser does not hard-fail when parsing this field.",
+        "Validate that the rate is recomputable from raw counts: total_registrations and completed_onboarding_count."
+      ],
+      "residual_risk": "If user flow skips day-3, onboarding may still fail; no instrumentation for skipped days. This risk remains unmitigated.",
+      "follow_up_diagnostics": [
+        "Run diagnostic to confirm that all cohorts from day 1 to day 5 have onboarding_completion_rate recorded in raw data.",
+        "Check whether any cohort has a zero value after instrumentation fix — if so, flag as 'none-known' anomaly."
+      ],
+      "status": "Not yet run"
+    },
+    {
+      "action": "Add validation alert for missing onboarding_completion_rate at day 3 and day 4 activation_count.",
+      "owner": "Data Quality Engineering Team",
+      "priority": "P1 - Immediate",
+      "verification_steps": [
+        "Deploy alert in the ingestion pipeline that triggers when onboarding_completion_rate is null for any cohort with day-3 or earlier.",
+        "Deploy alert that triggers when activation_count is zero and onboarding_completion_rate is missing for prior days.",
+        "Verify alerts fire during a test run with synthetic data where day-3 onboarding fails."
+      ],
+      "residual_risk": "Alerts may be suppressed if the ingestion pipeline has rate-limiting or throttling; no current mechanism to prevent suppression.",
+      "follow_up_diagnostics": [
+        "Test alert sensitivity under high-volume load scenarios.",
+        "Confirm that alerts are not silenced by system-level thresholds."
+      ],
+      "status": "Not yet run"
+    },
+    {
+      "action": "Update activation_rate computation logic to use raw counts and validate dependency on prior onboarding completion.",
+      "owner": "Analytics Platform Team",
+      "priority": "P2 - Short-term",
+      "verification_steps": [
+        "Recompute activation_rate from raw activation_count and total_registrations for cohort 4, day 4 using the new logic.",
+        "Ensure that activation_rate is only computed when onboarding_completion_rate exists for prior days.",
+        "Verify that deltas are computed as signed percentages from summed numerators (not averaged daily rates)."
+      ],
+      "residual_risk": "If user flow skips onboarding, activation may still be recorded incorrectly; no instrumentation to detect such flows.",
+      "follow_up_diagnostics": [
+        "Run a cohort-level reconciliation between raw counts and derived metrics for cohorts 3–7."
+      ],
+      "status": "Not yet run"
+    },
+    {
+      "action": "Decommission legacy Perl reporting pipeline with full data validation before shutdown.",
+      "owner": "Platform Operations Team",
+      "priority": "P0 - Critical",
+      "verification_steps": [
+        "Confirm that all data from the weekly extract is fully mirrored in the new pipeline by June 20, 2024.",
+        "Validate that no data loss occurs during transition; perform side-by-side comparison of metrics across both pipelines for week ending June 17.",
+        "Ensure that all raw counts and derived rates are available in the new system with full traceability."
+      ],
+      "residual_risk": "If the new pipeline fails to parse a key or value, it may not detect missing data; no fallback mechanism exists.",
+      "follow_up_diagnostics": [
+        "Run a full audit of all historical extracts from June 1–17, 2024, to ensure consistency."
+      ],
+      "status": "Not yet run"
+    }
+  ],
+  "notes": "The following is deliberately out of scope: (1) user behavior modeling or feature adoption trends beyond activation and push; (2) mobile OS version distribution; (3) device type breakdowns. These metrics are not part of the cohort growth pipeline and were not included in the supplied extract. The analysis focuses exclusively on onboarding, activation, and push enablement as defined by instrumentation quirks and raw data structure."
+}

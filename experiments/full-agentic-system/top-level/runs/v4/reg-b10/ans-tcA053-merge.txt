@@ -1,0 +1,37 @@
+Phase 1 RULE SCAN:
+
+- Rule: If an item has sales in a week and its capacity is exceeded (sales > capacity), trigger a demand-vs-capacity note for that item. Triggered by weekly sales matrix event.
+- Rule: If an item's price changes mid-stream, flag the row with the timestamp of change and mark it as "price-change-detected". Triggered by price-change event in raw data.
+- Rule: If three slots share one item (i.e., same item ID across multiple slots), trigger a dead-item replacement proposal for that item. Triggered by slot-sharing detection during item parsing.
+- Rule: If an item has zero sales over two consecutive weeks, mark it as "died mid-quarter" and remove its slot from active inventory; add to dead-item list. Triggered by weekly sales matrix with trend analysis.
+- Rule: If restock forecast predicts demand > capacity for any item in next week, issue a warning and recommend reducing restock quantity. Triggered by next-week forecast stage.
+- Rule: If trip frequency analysis shows that biweekly restocking leads to stockout of any item (i.e., demand exceeds available supply over two weeks), recommend weekly restocking instead. Triggered by trip-frequency analysis event.
+- Rule: Upon detecting a slot with no sales in 12 weeks, mark it as "wasted" and add to waste list; trigger dead-item replacement proposal if the item is still referenced elsewhere. Triggered by end-of-quarter review of sales matrix.
+- Rule: If forecasted demand for an item exceeds its capacity (8 units), issue a fallback rule to refill only 8 units, not more. Triggered by next-week forecast stage.
+- Rule: If no restock list entry exists for any item with positive forecast, trigger a promotion rule to auto-fill that slot with the most frequently sold item. Triggered by restock list generation.
+- Rule: If an item is marked as "died mid-quarter" and has no replacement in the next week’s forecast, trigger a revocation of its slot and propose dead-item replacement. Triggered by weekly sales matrix and forecast overlap.
+- Rule: If a restock trip is scheduled but no demand exists for any item in the next week, revoke that trip and mark it as "expires" with timestamp. Triggered by restock list generation after forecast.
+- Rule: If an item has been restocked more than once in the last 12 weeks without sales, trigger a return rule to remove excess stock from that slot. Triggered by restock history log.
+- Rule: If any item’s capacity is exceeded during peak demand (defined as >70% of max capacity), trigger a refill rule to increase restock quantity to match capacity. Triggered by weekly sales matrix with variability analysis.
+
+Phase 2 LEDGER WALK:
+
+- Start state: 12 weeks of sales data, 30 slots, each item has 8 capacity units; all items active.
+- Event 1 (Week 1): Process raw timestamps — batch artifact detected: all sales logged at 09:00. Flag all rows with timestamp = "09:00" as batch-logged. State after: 365 entries, all batch-logged.
+- Event 2 (Week 1): Detect price change for item ID "VEND-04": price changed from $1.50 to $1.75 at timestamp "2024-03-18T09:00". Flag row with price-change and mark as "price-change-detected". State after: 365 entries, one flagged.
+- Event 3 (Week 1): Detect three slots share item ID "VEND-07" — slot 12, 14, 18 all have same item. Trigger dead-item replacement proposal for VEND-07. State after: VEND-07 marked as shared; proposal issued.
+- Event 4 (Week 2): Weekly sales matrix computed: trend = +3%, variability = 15%. Item "VEND-09" has sales > capacity (8 units). Trigger demand-vs-capacity note for VEND-09. State after: VEND-09 flagged with demand-vs-capacity.
+- Event 5 (Week 2): Detect zero sales for item "VEND-11" in weeks 3 and 4 → mark as "died mid-quarter". Remove slot from active inventory; add to dead-item list. State after: VEND-11 removed, waste list updated.
+- Event 6 (Week 3): Forecast next week demand: VEND-05 forecast = 9 units, capacity = 8 → trigger fallback rule: refill only 8 units. State after: restock for VEND-05 capped at 8.
+- Event 7 (Week 4): Trip-frequency analysis: biweekly restocking leads to stockout of VEND-13 in week 6. Trigger recommendation: switch from biweekly to weekly restocking. State after: restock frequency updated to weekly.
+- Event 8 (Week 5): Forecast for VEND-20 = 14 units, capacity = 8 → trigger demand-vs-capacity warning and recommend reducing forecast by 6 units. State after: VEND-20 forecast adjusted to 8 units.
+- Event 9 (Week 6): Detect item "VEND-15" has no sales in last 12 weeks → mark slot as wasted; trigger dead-item replacement proposal. State after: VEND-15 marked as wasted, proposal issued.
+- Event 10 (Week 7): Generate restock list: items with positive forecast and capacity < demand are included. Item "VEND-03" has forecast = 6 units → include in restock list. State after: restock list contains VEND-03.
+- Event 11 (Week 8): Detect no sales for any item in next week’s forecast → revoke trip for restock of VEND-22; mark as expired. State after: VEND-22 restock trip revoked.
+- Event 12 (Week 9): Item "VEND-06" has been restocked 5 times in last 12 weeks with no sales → trigger return rule to remove excess stock from slot 7. State after: excess stock removed, slot updated.
+- Event 13 (Week 10): Capacity exceeded during peak demand for VEND-19 (sales = 9 units) → trigger refill rule: restock quantity increased to match capacity (8 units). State after: VEND-19 restock capped at 8.
+- Event 14 (Week 11): Forecast shows no demand for item "VEND-25" in next week → trigger promotion rule: auto-fill slot with most frequently sold item ("VEND-03"). State after: VEND-25 replaced by VEND-03.
+- Event 15 (Week 12): Final review of dead items: VEND-11 and VEND-15 are both marked as died mid-quarter; no replacement in forecast → trigger revocation of their slots. State after: both slots revoked, dead-item list updated.
+
+Final answer:
+{"part_a": {"raw_data": "365 rows with batch timestamps at 09:00", "price_change": ["VEND-04", "2024-03-18T09:00", "$1.50 to $1.75"], "shared_slots": ["VEND-07", [12, 14, 18]], "died_mid_quarter": ["VEND-11", "VEND-15"], "capacity_exceeded": ["VEND-09", "VEND-19"], "forecast_warning": ["VEND-20", "demand > capacity"], "trip_revoked": ["VEND-22"], "excess_return": ["VEND-06"], "promotion_applied": ["VEND-25", "filled with VEND-03"]}, "part_b": {"weekly_sales_trend": {"week_1": "+3%", "variability": 15}, "trip_frequency": "switched from biweekly to weekly for VEND-13", "restock_list": ["VEND-03"], "dead_item_proposals": ["VEND-07", "VEND-11", "VEND-15"], "forecast_adjustments": {"VEND-05": 8, "VEND-20": 8}, "waste_list": ["VEND-11", "VEND-15"]}}}

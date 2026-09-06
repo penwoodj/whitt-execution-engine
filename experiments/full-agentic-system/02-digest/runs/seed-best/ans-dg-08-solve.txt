@@ -1,0 +1,95 @@
+The task requires simulating a specific event sequence based on provided rules and calculating the final state (attempts, total wait time, remaining budget, suppression status). The narrative contains "orientation" examples with different numbers which must be ignored in favor of the explicit "tonight's" parameters.
+
+**Phase 1: Rule List & Event Triggers**
+Based on the text "arrivals in order, budgets and limits exactly as stated", here are the rules governing the simulation for tonight:
+
+1.  **Event Arrival (Attempt):** Increments the `attempts` counter by 1.
+2.  **Wait Time Accumulation:** Adds the specified wait duration to the total `wait_s`.
+3.  **Cost Calculation:** Calculates spend as `(Total Wait Seconds) + (Attempts * Cost Per Attempt)`.
+4.  **Budget Check:** Compares current Spend against the initial Budget (30).
+5.  **Suppression Logic:** If Spend > Budget, the job is `suppressed` and the budget doubles exactly once for re-checking. The state remains suppressed if still over after doubling.
+6.  **Final State Freeze:** After all events, calculate `budget_after` as `(Initial Budget * Multiplier) - Total Spend`.
+
+**Phase 2: Ledger Walk (Tonight's Events)**
+*   **Parameters:**
+    *   Initial Budget: 30
+    *   Cost Per Attempt: 3
+    *   Waits Observed: 3, 6, 12
+    *   Job Requirement: Needs 3 failed attempts before the 4th succeeds (Total Attempts = 4).
+
+*   **Event 1:** First attempt. Wait = 3s.
+    *   `attempts`: 1
+    *   `wait_s`: 3
+    *   Spend: $3 + (1 \times 3) = 6$
+    *   Budget Check: $6 \le 30$. OK.
+
+*   **Event 2:** Second attempt. Wait = 6s.
+    *   `attempts`: 2
+    *   `wait_s`: $3 + 6 = 9$
+    *   Spend: $9 + (2 \times 3) = 15$
+    *   Budget Check: $15 \le 30$. OK.
+
+*   **Event 3:** Third attempt. Wait = 12s.
+    *   `attempts`: 3
+    *   `wait_s`: $9 + 12 = 21$
+    *   Spend: $21 + (3 \times 3) = 30$
+    *   Budget Check: $30 \le 30$. OK.
+
+*   **Event 4:** Fourth attempt (Success). Wait = Doubles previous? The text says "each next wait doubles". Previous was 12, so this would be 24s. However, the prompt explicitly lists "waits observed: 3, 6, 12" for tonight's events. It does not list a fourth wait. Given the constraint "the job needs 3 failed attempts before the 4th succeeds", and the explicit list of waits provided ("waits observed: 3, 6, 12"), we assume the simulation ends after these specific observed waits or that the cost calculation for the success attempt uses the standard rule without an additional wait if not listed. Let's re-read carefully: "after each failed attempt the retry waits, then runs." The list "waits observed: 3, 6, 12" corresponds to the waits *before* attempts 1, 2, and 3 (or after failures).
+    *   Wait logic check: "first wait is 3s, each next wait doubles".
+        *   Attempt 1 wait: 3.
+        *   Attempt 2 wait: $3 \times 2 = 6$.
+        *   Attempt 3 wait: $6 \times 2 = 12$.
+        *   Attempt 4 (Success) wait: The text says "waits observed: 3, 6, 12". It does not list a wait for the successful attempt. Usually, in these retry loops, the wait happens before the attempt. If the sequence is defined by the observed waits, we sum only those.
+    *   Let's calculate Spend including Attempt 4 cost but no additional wait (as it wasn't listed):
+        *   `attempts`: 4
+        *   `wait_s`: $3 + 6 + 12 = 21$
+        *   Spend: $21 + (4 \times 3) = 33$.
+    *   Budget Check: $33 > 30$. **Suppression Triggered.**
+    *   Rule Application: "if the spend exceeds the budget the job is suppressed and the budget doubles exactly once, re-checked after doubling".
+        *   New Budget Base: $30 \times 2 = 60$.
+        *   Re-check Spend (33) against New Budget (60): $33 \le 60$. OK.
+    *   Final State: `suppressed` is true because the initial check failed, triggering the suppression logic described ("the job is suppressed"). The budget doubles for accounting purposes to determine if it was a "fatal" failure or just a temporary overage handled by the doubling rule. However, the prompt asks for `budget_after`.
+    *   Calculation of `budget_after`: The text says "budget doubles exactly once... re-checked after doubling". This implies the effective budget used for the final calculation is the doubled amount ($60$).
+        *   `budget_after` = $60 - 33 = 27$.
+
+*Alternative Interpretation Check:* Does "waits observed: 3, 6, 12" imply these are the *only* waits? Yes. Does the successful attempt incur a wait? The rule says "after each failed attempt...". It doesn't explicitly say there is a wait before the successful one in this specific list context, but standard retry logic implies a wait before every attempt. However, since it's not listed, we cannot invent data. We stick to the sum of observed waits ($21$).
+Spend = $21 (\text{waits}) + 4 \times 3 (\text{attempts}) = 33$.
+Initial Budget = 30.
+$33 > 30 \rightarrow$ Suppressed.
+Budget Doubles $\rightarrow 60$.
+Final Check: $33 < 60$.
+`budget_after`: $60 - 33 = 27$.
+
+Let's double check the "orientation" example to ensure I'm not missing a hidden rule about how `budget_after` is calculated when suppressed.
+Orientation Example: Spend 30, Budget 39. Under it. No suppression. `budget_after` = $39 - 30 = 9$.
+Tonight's Case: Spend 33, Budget 30. Over it. Suppressed. Doubles to 60. `budget_after` = $60 - 33 = 27$.
+
+Wait, is the "suppressed" flag true if we successfully pass the doubled check? The text says "the job is suppressed and the budget doubles exactly once". This implies the state of being "suppressed" is a result of the initial overage. Even if it recovers via doubling, the event was marked as suppressed initially.
+However, let's look at the phrase: "if the spend exceeds the budget the job is suppressed... re-checked after doubling, suppressed only if still over."
+This implies `suppressed` = true ONLY IF (Spend > Doubled_Budget).
+In our case: $33 \le 60$. So it is NOT suppressed in the final state? Or does "the job is suppressed" describe the *action* taken, and the flag reflects whether the job was ultimately rejected?
+Re-reading: "suppressed only if still over". This suggests the boolean `suppressed` should be false if the doubled check passes.
+Let's re-evaluate the logic flow:
+1. Check Spend vs Budget. If Over -> Trigger Suppression Protocol.
+2. Double Budget.
+3. Re-check Spend vs New Budget.
+4. If Still Over -> Set `suppressed = true`. Else -> Set `suppressed = false` (Job continues/succeeds).
+
+If this is the logic, then:
+Spend 33 > 30 (Over). Double to 60.
+33 <= 60 (OK).
+Result: `suppressed = false`.
+`budget_after`: The budget used for the final state is the doubled one ($60$) because that was the "re-checked" value? Or is it the original minus spend?
+Text: "budget doubles exactly once, re-checked after doubling". This implies the effective budget for the final calculation is the doubled amount.
+So `budget_after` = $60 - 33 = 27$.
+
+Let's verify with the orientation example again. Spend 30, Budget 39. No overage. No doubling. `budget_after` = $39 - 30 = 9$.
+If tonight we have an overage but recover: Do we use original budget ($30$) or doubled ($60$)? "re-checked after doubling" implies the check is against the doubled value, so the state reflects that.
+
+Wait, there is a nuance in "the job needs 3 failed attempts before the 4th succeeds".
+Events:
+1. Wait 3. Attempt 1 (Fail). Cost $3+3=6$. Total Spend 6.
+2. Wait 6. Attempt 2 (Fail). Cost $6+3=9$. Total Spend 15.
+3. Wait 12. Attempt 3 (Fail). Cost $12+3=15$. Total Spend 30.
+4. Success? The text says "waits observed: 3, 6, 12". It does not list a wait for the success. But usually, there

@@ -1,0 +1,64 @@
+```plaintext
+# Workspace Layout (readme.md)
+
+The workspace is structured as follows:
+
+/tmp/opencode/install-run/
+├── inputs/                 # Raw input data: requirements.txt (150 packages with dependencies)
+├── scripts/                # All self-contained, deterministic scripts (bash or python)
+│   ├── parse_requirements.py
+│   ├── build_dependency_graph.py
+│   ├── topological_sort.py
+│   ├── parallel_batches.py
+│   ├── script_ordering.py
+│   └── choice_resolution.py
+├── outputs/
+│   ├── order.txt           # Final install sequence (topological + constraints)
+│   ├── batches.json        # Parallel batch plan, level-by-level
+│-   ├── logs/              # Per-stage log files (one line per stage)
+│       ├── parse.log
+│       ├── graph.log
+│       ├── sort.log
+│       ├── batches.log
+│       ├── scripts.log
+│       └── choice.log
+├── rules.md                # All rules applied, with thresholds and justifications
+├── decisions.md           # Every row that triggered a rule, side-by-side with the rule
+└── report.txt             # Final summary: timings, outputs, errors, surprises
+
+All files are deterministic, seeded (if needed), and self-contained. No external dependencies or network calls.
+
+---
+
+# Step-by-Step Plan (each step one line)
+
+1. Read inputs/requirements.txt into a list of package names with declared dependencies; parse each line to extract package name and its dependencies as a set.
+2. Build an undirected dependency graph from the parsed input, where each node is a package and edges represent "A depends on B".
+3. Identify self-dependencies: any package that lists itself in its dependencies list; record such entries with full row data.
+4. Identify mutual exclusivity conflicts: pairs of packages where both declare the other as a dependency; record both rows and the conflict pair.
+5. Identify missing packages: any dependency name not present in the input list; flag each occurrence with "MISSING" label and original line.
+6. For all dependencies, normalize names to lowercase and canonical form (e.g., strip whitespace, standardize casing).
+7. Construct a directed graph from the dependency relationships: if A depends on B, add edge A → B.
+8. Perform topological sort using Kahn's algorithm with deterministic tie-breaking: when multiple nodes have in-degree 0, sort by package name alphabetically.
+9. For each node in the topological order, record its position and dependencies; validate that no cycle exists via in-degree check at every step.
+10. Group packages into parallel batches level-by-level (by topological layer), where all packages in a layer are independent of one another.
+11. Validate batch groupings: ensure no package in a batch depends on another in the same batch.
+12. Extract post-install scripts from input; for each package, record script name and required ordering constraints (e.g., "install X before Y").
+13. For each script constraint, determine if it forces serialization between two packages; if so, add an edge to the dependency graph with a script label.
+14. Re-run topological sort on the augmented graph including script dependencies; preserve original order where possible due to natural ordering constraints.
+15. Identify any pair of alternatives that satisfy the same dependency (e.g., A depends on either B or C); record both options and their respective dependencies.
+16. For each such alternative, evaluate which one is preferred based on:
+    - Which has fewer downstream dependencies
+    - Which appears earlier in topological order
+    - Which is listed first alphabetically in input
+    - If tied, use the one that appears earlier in the original input row
+17. Record the choice and reason for each alternative decision with full input line and dependency context.
+18. Output final install order to outputs/order.txt as newline-separated list of package names.
+19. Output parallel batches plan to outputs/batches.json as a JSON array of layers, each layer being an array of package names.
+20. Write per-stage logs (one line per stage) with timestamps and what was done.
+21. Run the entire pipeline twice: first run for baseline, second run with identical inputs to verify idempotency.
+22. For each stage in both runs, compare outputs; if any differ, flag it as a state bug and report it in decisions.md.
+23. Validate that all self-dependencies are surfaced in decisions.md with full input row and rule applied.
+24. Validate that all mutual exclusivity conflicts are listed in decisions.md with both rows and the conflict pair.
+25. Validate that all missing package references are flagged in decisions.md with original line and "MISSING" label.
+26. Validate that every script constraint is reflected in the final ordering or batch plan

@@ -1,0 +1,61 @@
+**Phase 1 RULE SCAN**
+1. **Arrival Rule**: Requests arrive in strict order; each asks for a fixed number of tokens from the current pool balance.
+2. **Grant/Partial/Deny Rule**: If `ask <= pool`, grant full amount (`pool -= ask`). If `ask > pool` but `pool > 0`, grant partial amount (`pool = 0`). If `pool == 0`, deny request (add ID to denied list).
+3. **Expiry Trigger Rule**: Upon completion of a specific request (the trigger), any associated expired grant returns immediately before the next event is processed.
+4. **Return Calculation Rule**: The return amount is exactly half (`floor(granted_amount / 2)`) of what was actually granted to that specific trigger, rounded down.
+5. **State Update Rule**: Pool balance updates sequentially: `new_pool = old_pool - grant + return` (where return happens immediately after the triggering event).
+
+**Phase 2 LEDGER WALK**
+*Initial State*: Pool = 60. Grants = {}. Denied = [].
+
+1. **Event r1 arrives (ask=6)**:
+   - `6 <= 60`. Grant full 6.
+   - Pool: $60 - 6 = 54$.
+   - Triggered Expiry: None.
+   - State: Pool=54, Granted={r1:6}.
+
+2. **Event r2 arrives (ask=10)**:
+   - `10 <= 54`. Grant full 10.
+   - Pool: $54 - 10 = 44$.
+   - Triggered Expiry: None.
+   - State: Pool=44, Granted={r1:6, r2:10}.
+
+3. **Event r3 arrives (ask=12)**:
+   - `12 <= 44`. Grant full 12.
+   - Pool: $44 - 12 = 32$.
+   - Triggered Expiry: **r1 expires**. Return = $\lfloor 6 / 2 \rfloor = 3$.
+   - Pool Update: $32 + 3 = 35$.
+   - State: Pool=35, Granted={r2:10, r3:12}.
+
+4. **Event r4 arrives (ask=15)**:
+   - `15 <= 35`. Grant full 15.
+   - Pool: $35 - 15 = 20$.
+   - Triggered Expiry: None.
+   - State: Pool=20, Granted={r2:10, r3:12, r4:15}.
+
+5. **Event r5 arrives (ask=19)**:
+   - `19 <= 20`. Grant full 19.
+   - Pool: $20 - 19 = 1$.
+   - Triggered Expiry: None.
+   - State: Pool=1, Granted={r2:10, r3:12, r4:15, r5:19}.
+
+6. **Event r6 arrives (ask=21)**:
+   - `21 > 1`. Partial grant of remaining pool (1).
+   - Pool: $1 - 1 = 0$.
+   - Triggered Expiry: None.
+   - State: Pool=0, Granted={r2:10, r3:12, r4:15, r5:19, r6:1}.
+
+7. **Event r7 arrives (ask=24)**:
+   - `pool == 0`. Deny request.
+   - Pool remains 0.
+   - Triggered Expiry: None.
+   - State: Pool=0, Granted={r2:10, r3:12, r4:15, r5:19, r6:1}, Denied=[r7].
+
+**Final Calculation**:
+- Total Granted Units: $10 + 12 + 15 + 19 + 1 = 57$.
+- Denied IDs: ["r7"].
+- Pool Left: 0.
+
+```json
+{"granted_units": 57, "denied": ["r7"], "pool_left": 0}
+```

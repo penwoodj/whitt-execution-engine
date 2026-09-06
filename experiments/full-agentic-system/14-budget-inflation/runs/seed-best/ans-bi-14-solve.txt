@@ -1,0 +1,70 @@
+### Phase 1 RULE SCAN
+
+The following rules govern the state changes during the event sequence. Each rule is listed on one line with its trigger condition.
+
+1.  **Initial Limit Rule**: Steps 1–5 allow an error rate up to 2.0%; steps 6–10 allow up to 1.0%. Trigger: Arrival of observation at specific step index.
+2.  **Breach Detection Rule**: If observed error > limit, the state transitions to a breach condition. Trigger: Comparison result of Observation vs Limit.
+3.  **First Breach Action (Rollback)**: Upon first breach, rollback exactly one step (decrement current step count), mark the breached observation as SPENT, and tighten limits for all *remaining* steps to 0.8%. Trigger: First occurrence of a breach event.
+4.  **Second Breach Action (Stop)**: Upon second breach, halt the rollout immediately, set status to STOPPED, freeze `rollout_pct` at current step value × 10, and set `stages_done` to observations consumed so far. Trigger: Second occurrence of a breach event.
+5.  **Completion Rule**: If no breaches occur after all steps (1–10) are processed, set status to DONE, `rollout_pct` = 10 × 10, and `stages_done` = 10. Trigger: End of sequence with zero breach count.
+
+---
+
+### Phase 2 LEDGER WALK
+
+Applying events in strict arrival order (Steps 1 through 10) with the rules above.
+
+**Step 1**: Observed 0.4 vs Limit 2.0 -> ok
+**Step 2**: Observed 1.9 vs Limit 2.0 -> ok
+**Step 3**: Observed 0.5 vs Limit 2.0 -> ok
+**Step 4**: Observed 2.2 vs Limit 2.0 -> breach (First Breach)
+   *Action*: Rollback to Step 3. Mark Step 4 observation SPENT. Tighten remaining limits (Steps 5–10) to 0.8%.
+**Step 5**: Observed 0.6 vs Limit 0.8 -> ok
+
+*Current State Check*: We are at Step 5. The climb resumes from the next available step after the rollback logic is applied? No, the rule says "climb resumes from the next observation". Since we rolled back to Step 3 (conceptually), but the sequence of *arrivals* continues.
+Let's re-read carefully: "a breach pauses the climb and rolls back to the previous step... the climb resumes from the next observation."
+Interpretation A: The system effectively goes back to testing Step N-1? No, it says "rolls back to the previous step". Usually in canary rollouts, this means you don't advance to N+1 yet. But the input is a list of observations *by step*.
+Let's look at the "Orientation" example for logic: "it rolled 0.2, 0.75, 2.5... third step breached... climb paused at 20 percent holding a pair of clean stages". This implies the system stops advancing the *step counter* until it can resume?
+However, the task says: "observed error rates by step, in order: ...". These are fixed inputs for Step 1, Step 2, etc.
+If I breach at Step 4, and roll back to Step 3... do I re-test Step 3? The rule says "the observation that breached is spent". It does not say the previous steps are re-tested or that we loop back.
+Standard interpretation for this specific prompt style ("ledger walk"): The sequence of *events* (observations) provided in the list happens once. If a breach occurs, the state updates (rollback flag), and we move to the next item in the list?
+Wait, "rolls back to the previous step". If I am at Step 4 and fail, do I go to Step 3? Or does it mean I effectively undo the progress of Step 4?
+Let's look at the "Orientation" text again: "climb paused at 20 percent holding a pair of clean stages... window closed before any resume observation arrived." This implies we stop.
+But here, we have a list of observations for Steps 1-10.
+Hypothesis 1: The list is sequential. Step 4 fails. We rollback (Step count becomes 3). We do NOT process the next item in the list as "Step 5" immediately? Or does the list represent potential steps, and we skip ahead?
+Re-reading: "climb resumes from the next observation". This usually means after a failure at Step N, you try Step N+1 again? But the input is fixed per step.
+Alternative Interpretation (Most likely for this puzzle): The "steps" are discrete stages of the rollout. If Stage 4 fails, we roll back to Stage 3. We do not proceed to Stage 5 immediately. We must re-evaluate or simply acknowledge that Stage 4 was a failure and we are now at Stage 3?
+BUT, the input gives us specific values for Step 1, Step 2... Step 10. If I am at Step 3 (after rollback), what is the observation for Step 3? It's already passed (0.5).
+Let's reconsider the "Orientation" logic: "it rolled 0.2, 0.75, 2.5". These are the values *observed*. If the third breached, we stop. We don't go back to the first and second again unless specified.
+The phrase "rolls back to the previous step" likely means: The current successful count decreases by 1. The system is now effectively at Step (N-1). But since the input list is static, does it mean we skip the rest? Or do we treat the next item in the list as the *next* attempt?
+Actually, looking at the strict "ledger walk" instruction: "apply the events one at a time". The events are the observations.
+Event 1 (Step 1): OK. Count = 1.
+Event 2 (Step 2): OK. Count = 2.
+Event 3 (Step 3): OK. Count = 3.
+Event 4 (Step 4): Breach.
+   Rule: "rolls back to the previous step". Current count becomes 3.
+   Rule: "climb resumes from the next observation". The next observation in the list is for Step 5? Or do we re-test Step 4?
+   If we re-test Step 4, we need a new value. We don't have one.
+   Therefore, the "next observation" must refer to the next item in the provided sequence (Step 5).
+   So: Breach at 4 -> Count resets to 3. Next event is Step 5.
+   Does Step 5 use its original limit or the new tight limit?
+   Rule: "after any rollback the limit tightens to 0.8 for every remaining step".
+   So Step 5 uses Limit 0.8.
+Event 5 (Step 5): Observed 0.6 vs Limit 0.8 -> OK. Count = 4? Or does it stay at 3?
+"Rolls back to the previous step". If I was defending Step 4, and failed, I am now effectively at Step 3. To advance again, I must pass a new check. The next observation (Step 5) is the candidate for advancement. If it passes, do we go to Step 4? Or does "rollback" mean we lose the gain of Step 4 entirely and start fresh from 3?
+Usually, "rollback" in canary means you revert the deployment level. So if you were at 25% (Step 4) and failed, you go back to 10% (Step 3). You do not immediately try 25% again with a new observation unless specified. But here we have a list of observations *by step*.
+This implies the "steps" are fixed checkpoints. If Step 4 fails, we cannot claim Step 4 is done. We must proceed to Step 5? Or does the sequence stop until we can retry?
+Let's look at the "Orientation" example again: "climb paused... holding a pair of clean stages". This implies the system stops advancing.
+However, the prompt says "the climb resumes from the next observation". This suggests continuity.
+If I am at Step 3 (after rollback), and the next observation is for Step 5... that skips Step 4? That doesn't make sense if Step 4 was the failure point.
+Maybe the "observations" are just a stream of data, and we don't map them strictly to step numbers *except* for the limit logic?
+No, "observed error rates by step, in order: ...". They are mapped.
+Let's try this interpretation: The "steps" represent the rollout percentage (10%, 20%, etc.).
+Step 1 = 10%. Step 4 = 40%.
+If Step 4 fails, we roll back to Step 3 (30%). We do not advance to Step 5 (50%) immediately. We must re-attempt the rollout at Step 4? But we don't have a new observation for Step 4.
+Unless... "the climb resumes from the next observation" means we take the *next available* observation in the list and apply it to the *current* state?
+If I am at Step 3, and the next observation is 0.6 (labeled Step 5), do I apply 0.6 to Step 4? Or does "Step 5" mean we are now trying to reach 50%?
+This is ambiguous. Let's look for a simpler reading: The list of observations corresponds to the sequence of *attempts*.
+Attempt 1 (Target 10%): Obs 0.4. OK.
+Attempt 2 (Target 20%): Obs 1.9. OK.
+Attempt 3 (Target 30%): Obs 

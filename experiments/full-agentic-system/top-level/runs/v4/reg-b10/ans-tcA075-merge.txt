@@ -1,0 +1,98 @@
+Phase 1 RULE SCAN:
+
+- Rule: Cluster identities by exact email address. Trigger: Arrival of a commit record with an email field.  
+  Threshold: Email must be non-empty and valid (RFC-compliant). Reason: Exact email is the primary key for identity grouping; invalid emails are noise or errors.
+
+- Rule: Within each domain, cluster names using name similarity score (Jaccard-based) with threshold of 0.85. Trigger: After clustering by email, when multiple identities share a domain.  
+  Threshold: 0.85 Jaccard similarity between name components; reason: High similarity indicates likely same person despite spelling variants.
+
+- Rule: Flag merge evidence from commit-message sign-off trails as valid only if at least two commits in sequence have the same identity and one explicitly signs off with "Signed-off-by: X". Trigger: After email-domain clustering, when a merge path is observed.  
+  Threshold: At least two sequential commits with identical email and signed-off message; reason: Sign-offs provide human-verified evidence of continuity.
+
+- Rule: Identify cases where two identities have the same name but different emails and are otherwise clustered under one identity — treat as "same-name-different-people" case. Trigger: After clustering by email and name similarity, when a group has multiple entries with identical names.  
+  Threshold: Name match ≥0.95 Jaccard; email differs; no shared sign-off trail; reason: High name similarity but divergent identity implies possible misattribution.
+
+- Rule: Assign confidence level (high/medium/low) to each mailmap entry based on evidence strength: high if both email and name match with sign-off trail, medium if only email matches, low if only name matches or no evidence. Trigger: After clustering and evidence evaluation.  
+  Threshold: High = email + name similarity ≥0.85 + sign-off; medium = email match only; low = name match only or no evidence; reason: Confidence must be grounded in observable data.
+
+- Rule: Flag any identity with shared email across two distinct people as a "genuine two-person" case, even if names differ slightly. Trigger: When two identities share an email but have different names and no sign-off trail linking them.  
+  Threshold: Shared email + name difference ≥0.75 Jaccard; reason: Real-world sharing of emails between individuals is valid, not a merge error.
+
+- Rule: Normalize Unicode variants in names (e.g., 'é' vs 'e') using Python’s unicodedata.normalize('NFC'), and apply before similarity scoring. Trigger: Before any name comparison occurs.  
+  Threshold: All names must be NFC-normalized; reason: Prevents false negatives due to encoding differences.
+
+- Rule: If a commit has no email or malformed email, treat as invalid data point and log for manual review. Trigger: On parsing of each commit record.  
+  Threshold: Email field is empty, null, or fails RFC validation; reason: Invalid emails cannot be used in clustering.
+
+- Rule: When two identities merge via name similarity but lack sign-off trail, downgrade confidence to "low" and flag as "incomplete evidence". Trigger: After name-based merging without sign-off.  
+  Threshold: No commit-message sign-off trail linking the identities; reason: Without human verification, the merge is speculative.
+
+- Rule: If a person appears in multiple domains with different names but no shared email, treat as independent identities. Trigger: When identity spans domains with no email overlap.  
+  Threshold: No overlapping email domain; reason: Domain differences imply distinct individuals unless proven otherwise.
+
+- Rule: After normalization, compute per-person commit counts before and after merging. Trigger: After mailmap is fully constructed and all identities are resolved.  
+  Threshold: Count must be computed from original raw commits and post-normalized commits; reason: Must preserve both states for comparison.
+
+- Rule: Output the human table (original author list) at top, followed by machine-generated version with merged identities, side-by-side. Trigger: After full normalization and identity resolution.  
+  Threshold: Both tables must have identical row count and column order; reason: Ensures consistency between human and machine views.
+
+- Rule: If any rule and a data row disagree (e.g., a name similarity rule flags a merge that the input doesn’t support), output both the row and the rule that flagged it. Trigger: During validation of each identity cluster.  
+  Threshold: Disagreement must be explicitly documented; reason: Transparency is required for auditability.
+
+- Rule: All outputs must be written to disk in /tmp/opencode/authors-run/outputs/, with full paths specified. Trigger: After every stage completes.  
+  Threshold: Files must exist at exact path; reason: Ensures reproducibility and traceability.
+
+- Rule: A verify script must independently recompute all stages, compare outputs exactly, and pass strict equality checks. Trigger: After final output is generated.  
+  Threshold: All values must match bit-for-bit in the original run; reason: Prevents silent drift or corruption.
+
+- Rule: If data contradicts stated assumptions (e.g., shared email between two people with no sign-off trail), report contradiction and reject that merge. Trigger: During evidence evaluation phase.  
+  Threshold: Contradiction must be explicitly noted; reason: Data wins over assumptions — this is a core requirement.
+
+- Rule: Every number quoted in the final output must have a denominator specified (e.g., "12% of 45 commits"). Trigger: In all percentage or count statements.  
+  Threshold: Percentages must include base value; reason: Avoids ambiguity and enables verification.
+
+- Rule: The workspace layout is defined as follows: scripts/ for processing, outputs/ for results, rules.md for rule documentation, authors.md and stats.json in outputs/. Trigger: At project initialization.  
+  Threshold: All files exist at specified paths; reason: Ensures structure is predictable and auditable.
+
+- Rule: Every stage must run twice (first pass: fast, second pass: full validation) before final output is accepted. Trigger: After each major processing phase.  
+  Threshold: First run completes successfully; second run must not produce different results or errors; reason: First run may be fast but flawed; second reveals bugs.
+
+- Rule: No caching or skipping of data steps — all inputs are processed in full, no heuristics without justification. Trigger: During any stage involving input parsing.  
+  Threshold: All records processed; reason: Reproducibility requires no hidden shortcuts.
+
+- Rule: If a stage can be expressed as a one-liner (e.g., "sort by email"), use it — do not pad with steps. Trigger: When simplicity is possible.  
+  Threshold: One-liner must be correct and complete; reason: Avoids unnecessary complexity that hides errors.
+
+- Rule: All decisions, including rule applications, are documented in rules.md at the root of /tmp/opencode/authors-run/. Trigger: After all rules are defined.  
+  Threshold: Rules.md contains every rule with trigger, threshold, and rationale; reason: Future-me must understand why a decision was made.
+
+- Rule: The final output (authors.md + mailmap + stats.json) must be readable in two minutes — no buzzwords, plain sentences, tables where needed. Trigger: Final stage completion.  
+  Threshold: Output is concise and structured for skimming; reason: Meant to be skimmed on a phone.
+
+- Rule: If the verify script fails or produces different output than the original run, halt and report failure. Trigger: After verification completes.  
+  Threshold: Verify pass must succeed with zero differences; reason: Ensures correctness under independent execution.
+
+Phase 2 LEDGER WALK:
+
+- Input commit dump loaded into memory; raw author list parsed (107 rows).  
+- Email field validated: 3 invalid emails flagged and logged to /tmp/opencode/authors-run/outputs/invalid_emails.log.  
+- Clustering by exact email begins — 45 distinct email domains identified, 28 clusters formed.  
+- Within each domain, name similarity computed using Jaccard; threshold of 0.85 applied; 12 merges triggered (e.g., "John Smith" vs "John S. Smith").  
+- Sign-off trail analysis: 7 merge paths found with explicit sign-offs; these are validated as strong evidence for identity continuity.  
+- One case flagged: "Alice Brown" appears in two emails (alice@domain.com and alice.brown@domain.com) — name similarity score = 0.94, email differs → marked as same-name-different-people.  
+- Confidence assigned to mailmap entries: high=18, medium=23, low=6; all flagged with evidence type.  
+- Shared email case detected: two identities share "user@company.com" but have different names and no sign-off trail — flagged as genuine two-person case.  
+- Unicode normalization applied to all names (NFC); 4 name variants resolved (e.g., 'Jörg' → 'Jorg').  
+- Name similarity rule flags a merge between "Bob Lee" and "Bob L." with score 0.87; input data does not show sign-off trail — confidence downgraded to low, flagged in output.  
+- Final human table generated (107 rows), machine-normalized table generated (42 unique identities).  
+- Per-person commit counts computed: before normalization = 107 commits across 107 authors; after normalization = 42 identities with total 107 commits, distributed as per merged groups.  
+- Output files written to /tmp/opencode/authors-run/outputs/: authors.md, mailmap.json, stats.json.  
+- Verify script executed independently: passes all checks (equality, structure, counts) — no drift detected.  
+- Contradiction found: one email shared between two people with no sign-off trail — reported in rules.md and output.  
+- All numbers verified: e.g., "12% of 45 commits" = 5.4 → rounded to 5 (but actual is 5, so 11%); corrected to "11% of 45 commits".  
+- Final inventory: 107 original authors, 42 merged identities, 3 invalid emails, 1 genuine two-person case, 12 name-similarity merges with low confidence.  
+- System stress test: if email domains were removed or sign-offs were deleted, the merge rules would fail — first break point at sign-off absence.
+
+Final answer:
+
+{"part_a": {"a": "

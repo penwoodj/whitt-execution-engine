@@ -1,0 +1,61 @@
+# Tier-A Case 043 — Bank Categorization (HEAVY)
+
+today it's bank categorization, and no, you don't get to improvise the scope. so build me a full working analysis pipeline, fully self contained in /tmp/opencode/bankcat-run, no network, no installs, standard library python or plain bash whichever you'd actually reach for, and everything deterministic or seeded so a rerun gives me the same universe bit for bit.
+
+background, and i'm giving you the details the way they actually occur: a year of bank statement rows, 1200 transactions, description, date, amount, then no categories exist, the task is building them, after that rule-based first, merchant names hide inside noisy descriptions, after that groceries vs dining boundary cases will exist, acknowledge them. the deliverables have two audiences, me skimming on a phone and a verifier grinding line by line, so every report needs the human table up top and the machine copy underneath, same numbers, no drift between them. the day those two disagree is the day i stop trusting the whole setup.
+
+and if you find something in the data that contradicts what i said above, the data wins, report the contradiction, don't quietly bend either one.
+
+percentages need denominators next to them always, twelve percent of what, because a percentage alone is half a number.
+
+error messages should say what failed and where, not just that something did, because 'an error occurred' has never helped anybody.
+
+keep the rules you invent in a rules.md next to the scripts, so when i come back in a week i know why the machine did what it did.
+
+the whole point of this exercise is that the working files and the checkable outputs exist on disk where i can poke at them, so every stage leaves real artifacts, and the artifacts are the deliverable, not the chat narration around them. if a step produces nothing i can open, it didn't happen.
+
+and a note on tone in the outputs: plain sentences, tables where tables belong, no buzzword garbage, i want to skim this in two minutes and know exactly what happened.
+
+if two stages could run in either order and it doesn't matter, pick one and move on, i don't need a committee meeting about it.
+
+anything you cache or skip for speed gets a note, because invisible shortcuts are how results stop being reproducible.
+
+logs per stage, one line each is plenty, i want to see where time went and where things broke without spelunking.
+
+and no leaving a to-do in a comment for later-me, later-me is you in ten minutes, finish the job.
+
+if a stage can honestly be a one-liner, let it be a one-liner, padding steps to look thorough is its own kind of lie.
+
+what i need done, in this order:
+
+first derive a category set from the data itself, 8 to 14 categories, defend the choice. actual numbers in the output, computed, not eyeballed, and traceable back to input rows.
+2. rule set in rules.md, regex or matching logic per category, applied deterministically. edge cases belong in the output, not in your head, list what you hit and what you did with each.
+3. categorize everything, unknown bucket allowed but under 5 percent or the rules are bad. and that one gets checked by the verifier too, it's not just a produce-and-hope step.
+first monthly spend per category table plus the top 5 merchants overall. and that one gets checked by the verifier too, it's not just a produce-and-hope step.
+5. categorized.csv plus categories.md plus monthly.json. and be precise about what counts as done for that one, because vague is where shortcuts hide.
+
+one more thing, every number you quote me at the end better come from an actual run you can point at, because should-be-roughly-nine is not a result, it's a vibe.
+
+and when i say documented i mean in a file on disk, not in the chat log where it scrolls away forever.
+
+timings, real ones, timestamps around each stage, a table at the end. not vibes.
+
+when a rule and a row disagree, both go in the output, the flagged row and the rule that flagged it, side by side.
+
+the workspace layout is yours to design but say it in the readme, so the structure is a decision not an accident.
+
+the data has problems, deliberately, and handling them is part of the job not an error condition: descriptions contain store numbers, dates, and reference codes mashed together, one merchant appears under four spellings, and twelve rows have a zero amount. i want each mess instance visible in the output somewhere, surfaced not absorbed, so i can audit the handling later. the decisions file gets one line per mess type saying how you dealt with it.
+
+if any rule you write down feels arbitrary, good, that means you noticed, write the threshold and the reason next to it so future-me can argue with it.
+
+everything gets a run twice test before you call it done, because the first run always works and the second one is where the state bugs live.
+
+i'd rather have an ugly table that's right than a beautiful chart that's approximate, so default to tables unless the data genuinely needs a picture.
+
+on outputs: every stage writes to its own subfolder under the workspace, naming is yours but be consistent, and the final report goes both human, markdown with actual tables, and machine, json with the same numbers. i'll be checking that the two agree, and i'll be unhappy if they don't.
+
+verification is a first-class deliverable here. independent recomputation from the raw files, its own code path, and a conservation check that everything entering the pipeline is accounted for at the end, kept, rejected, merged, flagged, the books have to balance. nonzero exit on failure, actual output shown in your report.
+
+no network, no installs, no llm calls, deterministic or seeded everywhere, and if any stage is slow relative to its work say so honestly instead of pretending it's fine. don't stop until the whole sequence is verified end to end. don't skip steps and don't tell me it's done until the verifier has passed and you've actually looked at the outputs yourself. and keep it dependency free, standard library only, this machine gets cranky.
+
+finish with the report pasted in chat so i can skim without opening files, plus paths and timings. one line on what surprised you.

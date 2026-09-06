@@ -1,0 +1,95 @@
+### Phase 1: Rule Scan (Part B - Residency)
+
+**Rules Identified for Part B:**
+1.  **Capacity & Eviction Policy:**
+    *   **Resident Sizes:** A=2GB, B=2GB, C=2GB, D=7GB.
+    *   **Pinned Model:** Model B is pinned and never evicted.
+    *   **Eviction Strategy:** Choose the least-recently-touched (LRU) unpinned model for eviction.
+    *   **Load Behavior:** A load that cannot fit evicts as many LRU unpinned models as needed. If only pinned models remain and it still does not fit, the load is deferred.
+    *   **Unload Behavior:** Unloads cost 10s (irrelevant to counts). Loads cost 30s (irrelevant to counts).
+    *   **Counting Definitions:**
+        *   `loads`: Counts every load command in tonight's stream that was actually executed (including those that later evicted something). Note: A deferred load is NOT counted here.
+        *   `evictions`: Every eviction actually performed counts, even if the load ends up deferred.
+        *   `deferrals`: Only occurs after evicting every unpinned resident still leaves too little room. The ID of the load is recorded.
+
+**Event Stream:**
+1.  Load A (2 GB)
+2.  Load B (2 GB)
+3.  Load C (2 GB)
+4.  Load D (7 GB)
+5.  Unload B (2 GB)
+
+---
+
+### Phase 2: Ledger Walk (Part B - Residency)
+
+**Initial State:** Empty pool. Capacity assumed sufficient to hold residents unless specified otherwise (standard LRU cache logic implies capacity is the sum of resident sizes or a fixed limit; however, the prompt defines specific "resident sizes" and eviction rules based on fitting. Let's assume a standard capacity where these fit individually, but combined might not).
+*Correction:* The prompt says "one 8GB card tonight". Total Capacity = 8GB.
+Current Used: 0GB. Available: 8GB.
+
+**Event 1: Load A (2 GB)**
+*   **Action:** Request 2GB for Model A.
+*   **Fit Check:** Current used 0GB + 2GB = 2GB <= 8GB. Fits.
+*   **Evictions:** None.
+*   **Execution:** Executed.
+*   **State Update:** Pool: {A:2}. Used: 2GB.
+
+**Event 2: Load B (2 GB)**
+*   **Action:** Request 2GB for Model B.
+*   **Fit Check:** Current used 2GB + 2GB = 4GB <= 8GB. Fits.
+*   **Evictions:** None.
+*   **Execution:** Executed.
+*   **State Update:** Pool: {A:2, B:2}. Used: 4GB. (B is now pinned).
+
+**Event 3: Load C (2 GB)**
+*   **Action:** Request 2GB for Model C.
+*   **Fit Check:** Current used 4GB + 2GB = 6GB <= 8GB. Fits.
+*   **Evictions:** None.
+*   **Execution:** Executed.
+*   **State Update:** Pool: {A:2, B:2, C:2}. Used: 6GB.
+
+**Event 4: Load D (7 GB)**
+*   **Action:** Request 7GB for Model D.
+*   **Fit Check:** Current used 6GB + 7GB = 13GB > 8GB. Does not fit.
+*   **Eviction Phase:** Need to free space. Required free: 13 - 8 = 5GB (or simply need to make room for D).
+    *   Available unpinned models: A (2GB), C (2GB). (B is pinned).
+    *   Evict LRU unpinned: Evict A (2GB). Pool: {C, B}. Used: 4GB. Free: 4GB.
+    *   Still need room for D (7GB). Current used 4GB + 7GB = 11GB > 8GB. Need more space.
+    *   Evict next LRU unpinned: Evict C (2GB). Pool: {B}. Used: 2GB. Free: 6GB.
+    *   Still need room for D (7GB). Current used 2GB + 7GB = 9GB > 8GB. Need more space.
+    *   Available unpinned models: None (Only B remains, which is pinned).
+*   **Deferral Check:** Only pinned models remain and it still does not fit. Load D cannot be loaded.
+*   **Execution:** Deferred.
+*   **Counts Update:**
+    *   `evictions`: 2 (A and C were evicted).
+    *   `deferrals`: 1 (Load D). ID: "D".
+    *   `loads`: Load D was attempted but deferred. The rule says "loads counts every load command... that was actually executed". Deferred loads are not executed. So count remains based on previous successful loads.
+
+**Event 5: Unload B (2 GB)**
+*   **Action:** Remove Model B.
+*   **Execution:** Executed (B is resident).
+*   **State Update:** Pool: {A was evicted, C was evicted, D deferred}. Only B remains? Wait, A and C were evicted in the previous step. So pool contains only B. Unloading B leaves the pool empty.
+*   **Counts Update:** No new loads or evictions triggered by this unload command itself (it's just a removal).
+
+**Final Totals Calculation:**
+*   `loads`: Count of executed load commands.
+    *   Load A: Executed.
+    *   Load B: Executed.
+    *   Load C: Executed.
+    *   Load D: Deferred (Not executed).
+    *   Total = 3.
+*   `evictions`: Count of actual eviction operations performed.
+    *   Evicted A.
+    *   Evicted C.
+    *   Total = 2.
+*   `deferrals`: Count of deferred loads.
+    *   Load D deferred.
+    *   Total = 1.
+*   `deferred`: List of IDs for deferred loads.
+    *   ["D"]
+
+### Final Output (Part B Only)
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

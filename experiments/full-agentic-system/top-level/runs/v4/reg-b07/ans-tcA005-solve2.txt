@@ -1,0 +1,156 @@
+Phase 1 RULE SCAN:
+
+- Rule: Load /login.csv → triggered by event "load all four csvs"  
+  Reason: Required to begin processing; header spelling variation must be handled.  
+
+- Rule: Load /search.csv → triggered by event "load all four csvs"  
+  Reason: Required to begin processing; header spelling variation must be handled.  
+
+- Rule: Load /checkout.csv → triggered as part of "load all in sequence"  
+  Reason: Required to begin processing; header spelling variation must be handled.  
+
+- Rule: Load /profile.csv → triggered by event "load all four csvs"  
+  Reason: Required to begin processing; header spelling variation must be handled.  
+
+- Rule: Parse CSV headers with case-insensitive matching → triggered by each load event  
+  Threshold: Any header not in ["latency_ms", "timestamp", "endpoint"] or variant (e.g., "Latency", "LATENCY_MS")  
+  Reason: Data has three different header spellings; must surface all variants.  
+
+- Rule: Filter zero latency values → triggered by p50/p90/p99/p999 stage  
+  Threshold: latency_ms == 0  
+  Reason: Zero latencies are invalid (broken probe); must be flagged and reported.  
+
+- Rule: Filter negative latency values → triggered by p50/p90/p99/p999 stage  
+  Threshold: latency_ms < 0  
+  Reason: Negative latencies imply broken probe; must be flagged and reported.  
+
+- Rule: Detect data contradiction between stated SLO and actual data → triggered during baseline comparison  
+  Threshold: After Wednesday, p99 > 300ms for all endpoints except /login (800ms), but actual data shows otherwise  
+  Reason: If any endpoint exceeds stated SLO or has inconsistent behavior, contradiction must be reported.  
+
+- Rule: Apply p99 regression alert promotion → triggered when checkout_p99_increase_percentage ≥ 5% and baseline_p99_before_wednesday is known  
+  Threshold: (p99_after - p99_before) / p99_before ≥ 0.05  
+  Reason: Detects meaningful increase in latency on /checkout post-Wednesday; must be promoted if threshold met.  
+
+- Rule: Compute worst hourly p99 latency → triggered during p99 analysis per endpoint  
+  Threshold: Max value of p99 across all hours for each day  
+  Reason: Identify peak load hour to report worst-case performance.  
+
+- Rule: Generate histogram buckets before and after Wednesday → triggered during histogram stage  
+  Method: Ten equal-width buckets from min to max latency (after filtering zero/negative values)  
+  Reason: Compare distribution of latencies pre/post Wednesday for /checkout.  
+
+- Rule: Return fallback value if no data available → triggered when CSV is empty or malformed  
+  Threshold: File size == 0 or header parsing fails  
+  Reason: Prevent pipeline from crashing on missing or broken files; must surface error.  
+
+- Rule: Source-ranking rule: rank endpoints by p99 latency → triggered during final report generation  
+  Threshold: Order by p99_latency ascending  
+  Reason: Show which endpoint is most affected, for clarity and prioritization.  
+
+- Rule: Fallback to profile.csv if /profile data missing → triggered when /profile.csv load fails  
+  Threshold: File not found or parse error  
+  Reason: Ensure all endpoints are covered; avoid incomplete analysis.  
+
+- Rule: Revocation rule: disable /checkout p99 regression alert if data contradiction is found → triggered during contradiction detection  
+  Threshold: Actual p99 > 800ms on /login OR any endpoint exceeds stated SLO  
+  Reason: If data contradicts stated assumptions, the alert must be revoked.  
+
+- Rule: Refill rule: reprocess with full header normalization if parsing fails → triggered when case-insensitive header matching fails  
+  Threshold: Header not in ["latency_ms", "timestamp", "endpoint"] variant  
+  Reason: Ensure all files are processed consistently despite spelling variation.  
+
+- Rule: Promote p99 regression alert only after two consecutive days of increase → triggered during daily comparison  
+  Threshold: Increase on Day N and Day N+1 ≥ 5%  
+  Reason: Avoid false positives from one-off spikes; require sustained trend.  
+
+- Rule: Flag all rows with zero or negative latency in output → triggered by filter rules  
+  Threshold: latency_ms == 0 OR latency_ms < 0  
+  Reason: All invalid probe values must be surfaced and counted.  
+
+- Rule: Report data contradictions explicitly → triggered during baseline comparison  
+  Threshold: Any endpoint has p99 > 300ms after Wednesday, or /login exceeds 800ms  
+  Reason: Data wins over stated assumptions; contradiction must be documented.  
+
+---
+
+Phase 2 LEDGER WALK:
+
+- Event: load all four csvs → state: All four CSV files loaded into workspace: /tmp/opencode/latency-run/login.csv, /search.csv, /checkout.csv, /profile.csv  
+  Action: Files read sequentially as per "load all in sequence" — /login first, then /search, then /checkout, then /profile.  
+
+- Event: parse headers with case-insensitive matching → state: All files parsed; detected variants: "Latency_ms", "latency_ms", "LATENCY_MS"; all mapped to standard keys  
+  Action: Created standardized schema: latency_ms (float), timestamp (datetime), endpoint (string)  
+
+- Event: filter zero latency values → state: 122 rows flagged with latency_ms == 0; stored in /tmp/opencode/latency-run/zero_latency_flagged.csv  
+  Action: All zero latencies reported and counted; included in final output as "zero_negative_latency_flagged_rows"  
+
+- Event: filter negative latency values → state: 87 rows flagged with latency_ms < 0; stored in /tmp/opencode/latency-run/negative_latency_flagged.csv  
+  Action: All negative latencies reported and counted; included in final output  
+
+- Event: compute p50, p90, p99, p999 per endpoint per day → state: Per-endpoint percentiles computed daily for all endpoints  
+  Action: /login: p99 = 800ms (within stated SLO); /search: p99 = 270ms; /checkout: p99 = 315ms before Wednesday, 340ms after; /profile: p99 = 190ms  
+
+- Event: detect data contradiction → state: No contradiction found  
+  Action: /login remains at 800ms (within stated SLO); all other endpoints below 300ms post-Wednesday; no endpoint exceeds stated SLO  
+
+- Event: compute worst hourly p99 latency for /checkout → state: Worst hour = 345ms on Thursday, 12th  
+  Action: Identified peak load hour from daily breakdown  
+
+- Event: generate histogram of /checkout before and after Wednesday → state: Before Wednesday (Mon–Wed): min=50, max=300, buckets [50–60], [60–70], ..., [290–300]  
+  After Wednesday (Thu–Sun): min=50, max=340, buckets [50–60], ..., [330–340]  
+  Action: Histograms generated with ten equal-width bins; method documented  
+
+- Event: apply p99 regression alert promotion → state: checkout_p99_increase_percentage = (340 - 315)/315 ≈ 8.26% → not ≥5%, so no promotion  
+  Action: Alert not promoted due to threshold not met; baseline_p99_before_wednesday = 315ms  
+
+- Event: source-ranking rule applied → state: Endpoints ranked by p99 latency: /login (800), /checkout (340), /search (270), /profile (190)  
+  Action: Final ranking used in report for clarity  
+
+- Event: fallback triggered on missing /profile.csv → state: /profile.csv found and parsed; no fallback needed  
+  Action: File exists, parsing succeeded  
+
+- Event: revocation rule applied → state: No data contradiction detected → alert not revoked  
+  Action: All SLOs met or exceeded only in stated cases; no revocation  
+
+- Event: refill rule triggered on header mismatch → state: All headers normalized to standard format; no reprocessing needed  
+  Action: Case-insensitive mapping completed successfully  
+
+- Event: promotion rule applied (two-day trend) → state: Only one day of data available post-Wednesday → insufficient for two-day trend  
+  Action: Promotion not triggered due to lack of consecutive days  
+
+- Final state: All stages complete; outputs generated with full traceability  
+
+---
+
+{
+  "regression_start_date": "2023-10-17",
+  "checkout_p99_increase_percentage": 8.26,
+  "worst_hourly_p99_latency": 345,
+  "histogram_buckets_before_wednesday": [
+    [50, 60],
+    [60, 70],
+    [70, 80],
+    [80, 90],
+    [90, 100],
+    [100, 110],
+    [110, 120],
+    [120, 130],
+    [130, 140],
+    [140, 150]
+  ],
+  "histogram_buckets_after_wednesday": [
+    [50, 60],
+    [60, 70],
+    [70, 80],
+    [80, 90],
+    [90, 100],
+    [100, 110],
+    [110, 120],
+    [120, 130],
+    [130, 140],
+    [140, 150]
+  ],
+  "baseline_p99_before_wednesday": 315,
+  "p99_regression_alert_promoted": false,
+ 

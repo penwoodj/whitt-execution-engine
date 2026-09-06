@@ -1,0 +1,83 @@
+The task requires a strict adherence to the provided rules and events for "tonight's" rotation, ignoring any narrative from the "orientation story" (the 5GB card example) as it explicitly belongs to a different night with different numbers. The output must be derived solely from walking the event list: `load A`, `load B`, `load C`, `load D`, `unload B`.
+
+**State Initialization:**
+- **Capacity:** 8 GB
+- **Current Usage:** 0 GB
+- **Resident Models:** []
+- **Pinned Models:** [] (Model B is pinned, but it is not resident yet).
+- **Deferred List:** []
+
+**Event Walkthrough:**
+
+1.  **Event: `load A` (2 GB)**
+    -   **Rule Check:** Can the load fit? Current usage (0) + Size (2) = 2 $\le$ 8. Yes.
+    -   **Action:** Load Model A.
+    -   **State Update:** Usage becomes 2 GB. Resident: [A]. Pinned: [].
+    -   **Result:** No eviction, no deferral.
+
+2.  **Event: `load B` (2 GB)**
+    -   **Rule Check:** Can the load fit? Current usage (2) + Size (2) = 4 $\le$ 8. Yes.
+    -   **Action:** Load Model B. Note: Model B is pinned upon loading.
+    -   **State Update:** Usage becomes 4 GB. Resident: [A, B]. Pinned: [B] (since B is resident and pinned).
+    -   **Result:** No eviction, no deferral.
+
+3.  **Event: `load C` (2 GB)**
+    -   **Rule Check:** Can the load fit? Current usage (4) + Size (2) = 6 $\le$ 8. Yes.
+    -   **Action:** Load Model C.
+    -   **State Update:** Usage becomes 6 GB. Resident: [A, B, C]. Pinned: [B].
+    -   **Result:** No eviction, no deferral.
+
+4.  **Event: `load D` (7 GB)**
+    -   **Rule Check:** Can the load fit? Current usage (6) + Size (7) = 13 > 8. No.
+    -   **Eviction Logic:** We need to free up at least $13 - 8 = 5$ GB of space.
+        -   Available unpinned models in resident set: [A, C] (B is pinned).
+        -   Sizes: A=2, C=2. Total unpinned size = 4 GB.
+        -   Even if we evict all unpinned models (A and C), the freed space is only 4 GB. New usage would be $6 - 4 + 7 = 9$ GB, which still exceeds capacity (8 GB).
+    -   **Action:** Evict A and C. Attempt to load D.
+        -   After evicting A and C: Usage becomes $6 - 2 - 2 = 2$ GB. Resident: [B]. Pinned: [B].
+        -   Try loading D (7 GB): New usage would be $2 + 7 = 9$ GB. Still > 8 GB.
+    -   **Deferral Logic:** The rule states "if only pinned models remain and it still does not fit it defers". Only B remains, and it is pinned. Therefore, the load cannot proceed.
+    -   **State Update:** Usage remains 6 GB (A and C were evicted to try, but failed). Resident: [B]. Pinned: [B]. D is added to the deferred list.
+        *Correction on State:* The prompt implies "evicts as many... as needed". Usually, in such systems, if a load fails due to capacity even after max eviction, the resident set reverts or stays as it was before the failed attempt? Or does it stay with evictions performed?
+        Let's re-read carefully: "a load that cannot fit evicts as many LRU unpinned models as needed". This implies the action of eviction happens. If the load *still* doesn't fit, we defer. Does the system revert the evictions?
+        Standard interpretation for "deferred" states in these logic puzzles (like the orientation story): The deferred item is queued. The resident set usually reflects the state *after* failed attempts if they were necessary to determine failure, OR it reverts if the load never happened. However, looking at the orientation story: "Q's 4GB evicted P and still did not fit... so Q deferred". In that story, P was evicted. The resident set changed.
+        Let's assume the evictions happen first to test capacity. If it fails, we defer. The state of the resident models (A and C) is now gone? Or do they come back?
+        Re-evaluating "evicts as many... as needed". If I need 5GB free, and A+C give 4GB, I evict them. Now I have 2GB free + B(2GB). Total 4GB. D needs 7GB. Gap is 3GB. Since only pinned remains, I defer.
+        Does the system restore A and C? The text says "evicts...". It doesn't say "reverts on failure". However, in many cache policies (like LRU), if a load fails, the state might be considered unchanged *unless* the eviction was permanent. But here, the constraint is strict: "if only pinned models remain and it still does not fit it defers".
+        Let's look at the counts requested: `loads`, `evictions`, `deferrals`.
+        If A and C are evicted, that counts as 2 evictions.
+        If D is deferred, that counts as 1 deferral.
+        What about the resident set for the final answer? The JSON only asks for counts and a list of deferred IDs. It does not ask for the current resident set or usage. This simplifies things significantly. I just need to count the events that resulted in a load success, an eviction event, or a deferral event.
+        
+        *Refined Counting:*
+        - Load A: Success. (Loads=1)
+        - Load B: Success. (Loads=2)
+        - Load C: Success. (Loads=3)
+        - Load D: Fails capacity check even after max eviction. Triggers evictions of A and C. Then triggers deferral.
+          - Evictions count += 2.
+          - Deferrals count += 1.
+          - Deferred list adds "D".
+        
+        Is there a `unload B` event? Yes, it is in the stream: `load A`, `load B`, `load C`, `load D`, `unload B`.
+        
+5.  **Event: `unload B` (2 GB)**
+    -   **Rule Check:** Is Model B resident? Yes.
+    -   **Action:** Unload Model B.
+    -   **State Update:** Usage becomes $6 - 2 = 4$ GB. Resident: []. Pinned: [].
+    -   **Result:** This is a successful unload. It does not count towards `loads`, `evictions`, or `deferrals`.
+
+**Final Tally:**
+-   **Loads:** A, B, C succeeded. D failed (deferred). Total = 3.
+-   **Evictions:** Occurred during the attempt to load D (A and C evicted). Total = 2.
+-   **Deferrals:** D was deferred. Total = 1.
+-   **Deferred List:** ["D"].
+
+The orientation story mentions "three loads, two evictions, one deferral" for its specific sequence. My count matches the structure of that logic applied to tonight's events (3 successful loads before the failure/deferral).
+
+**JSON Construction:**
+Keys: `loads`, `evictions`, `deferrals`, `deferred`.
+Values: 3, 2, 1, ["D"].
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

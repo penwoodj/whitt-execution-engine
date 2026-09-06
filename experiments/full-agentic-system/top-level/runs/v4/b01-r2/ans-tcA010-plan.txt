@@ -1,0 +1,48 @@
+### PLAN FIRST: Steps & Formulas/Rules
+
+1.  **Initialize Workspace**: Create `/tmp/opencode/queue-run` with subdirectories `scripts`, `outputs`, and root files (`rules.md`, `decisions.md`, `readme.md`).
+2.  **Generate Synthetic Data Script (`gen_data.sh`)**: Produce raw CSVs for `offset_snapshots.csv` (timestamps, consumer_id, partition_id, log_end_offset, consumer_offset) including missing windows, backward offsets, and specific bursts for `worker-2`. Include `rebalance_events.csv` with 3 timestamps.
+    *   *Rule*: Data must be deterministic based on seed; no random "vibes".
+3.  **Define Analysis Rules (`rules.md`)**: Establish thresholds for lag calculation, burst window definition (e.g., >50% increase over rolling mean), and rebalance correlation logic. Document arbitrary thresholds with reasons.
+4.  **Lag Calculation Script (`calc_lag.sh`)**: Compute `lag = log_end_offset - consumer_offset`. Handle missing rows by flagging as "MISSING_SNAPSHOT". Handle backward offsets by flagging as "OFFSET_REWIND". Output `raw_lag.csv`.
+    *   *Formula*: $L_{t,c,p} = O_{log,t,p} - O_{cons,t,c,p}$ (if valid).
+5.  **Aggregation Script (`agg_stats.sh`)**: Calculate Max, Mean, Min lag per consumer/partition over time windows. Compute throughput ($Msgs/min$) via offset delta deltas. Output `lag_summary.csv`.
+    *   *Formula*: $Throughput_{c} = \frac{\Delta O_{cons}}{\Delta T}$; $MeanLag = \frac{1}{N}\sum L$.
+6.  **Rebalance Correlation Script (`corr_rebal.sh`)**: Join lag data with rebalance events. Identify "Burst Windows" where lag spikes coincide with rebalance timestamps within a defined tolerance (e.g., $\pm 5$ mins). Output `rebalance_impact.csv`.
+    *   *Rule*: A spike is correlated if $|T_{spike} - T_{rebal}| < \delta$.
+7.  **Verdict Logic Script (`verdict.sh`)**: Determine if `worker-2` is "SLOW" (consistently low throughput) or "STUCK" (high lag only during specific hot partitions/rebalances). Output `diagnosis.txt`.
+    *   *Rule*: If $Throughput_{worker-2} < 0.8 \times Throughput_{others}$ AND $Lag > Threshold$ ONLY at Rebalance times $\rightarrow$ STUCK. Else $\rightarrow$ SLOW.
+8.  **Verification Script (`verify.sh`)**: Independent recomputation of Max/Mean/Throughput from raw CSVs. Compare field-by-field with `lag_summary.csv`. Exit non-zero on drift. Output `verification_report.txt`.
+9.  **Report Generation Script (`report_gen.sh`)**: Assemble Markdown report (`lag-report.md`) and JSON data (`lag.json`). Include methodology note, tables with precise numbers (no rounding), error logs, and paths to artifacts.
+10. **Final Cleanup & Run Twice Test**: Execute full pipeline twice. Ensure idempotency or self-cleaning state between runs. Log stage timings in `timings.csv`.
+
+---
+
+### TASK EXECUTION
+
+#### 1. Workspace Initialization
+
+```bash
+mkdir -p /tmp/opencode/queue-run/{scripts,outputs}
+cd /tmp/opencode/queue-run
+touch rules.md decisions.md readme.md
+```
+
+**readme.md**:
+> **Structure Decision**: Root contains documentation (`rules.md`, `decisions.md`). `scripts/` holds executable logic. `outputs/` holds raw data, aggregated stats, and final reports. All paths are absolute relative to `/tmp/opencode/queue-run`.
+
+#### 2. Synthetic Data Generation (`scripts/gen_data.sh`)
+
+This script generates the "production-like" synthetic dataset with intentional messiness (missing windows, backward offsets) and specific behavior for `worker-2`.
+
+```bash
+#!/bin/bash
+# gen_data.sh: Generates deterministic synthetic queue data with injected faults.
+# Seed fixed to ensure reproducibility across runs.
+
+SEED=42
+PARTITIONS=(0 1 2)
+CONSUMERS=("worker-1" "worker-2" "worker-3" "worker-4")
+REBALANCE_TIMES=(720 1440 2160) # Minutes from start (12h, 24h, 36h approx)
+
+# Helper to generate time series with gaps and

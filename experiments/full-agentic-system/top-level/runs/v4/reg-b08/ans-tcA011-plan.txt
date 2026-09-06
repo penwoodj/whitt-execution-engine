@@ -1,0 +1,31 @@
+1. Load raw event log from `/tmp/opencode/retry-run/raw.log` into memory as a list of dictionaries with keys: `request_id`, `timestamp`, `attempt_number`, `outcome`.  
+2. Filter out records where `attempt_number == 0` — treat such records as invalid or malformed and flag them explicitly in a separate table; log the count and list of such IDs.  
+3. Group all valid records by `request_id`, then compute the number of attempts per logical request using `len(grouped[request_id])`. For each group, record: `request_id`, `attempt_count`, and `max_attempt_number` (to verify sequence).  
+4. For each grouped request, determine if it exceeds 3 attempts (storm-adjacent) or 10 attempts (storm-core), using a rule-based threshold: any attempt count > 3 → storm-adjacent; > 10 → storm-core. Flag these with explicit labels and record the exact count per group.  
+5. For each request, extract outcome distribution: count of `timeout`, `5xx`, `refused` outcomes across all attempts. Aggregate by request ID to get per-request outcome counts. Then compute total counts and percentages (with denominators) for each outcome type.  
+6. Compute the storm window timeline per request that has ≥4 attempts: determine first timestamp, peak time (earliest time with max attempt count), and last timestamp (last attempt). Use actual timestamps from input to derive these values; if no such record exists, mark as "no storm".  
+7. Output a human-readable table of storm events in chronological order by `first_timestamp`, showing: request_id, first_attempt_time, peak_time, last_attempt_time, attempt_count, storm_type (adjacent/core), and outcome distribution.  
+8. Output machine-readable JSON file (`storm.json`) with the same structure as the human table but flattened into a list of objects, including all raw counts and timestamps.  
+9. Write `rules.md` adjacent to scripts that documents:  
+   - Rule for handling attempt zero (flagged as invalid)  
+   - Thresholds for storm-adjacent (3+) and storm-core (10+) with justification (e.g., "three attempts is the standard retry limit; ten exceeds it by 2.3x, indicating a storm")  
+   - Outcome classification: timeout vs 5xx vs refused — defined as per outcome string in input  
+   - Storm window logic: first/peak/last derived from sorted timestamps within each request group  
+10. Write `verify.sh` script that independently reprocesses the raw log using the same rules and outputs to `storm.json`, then compares it against the original `storm.json` with strict equality checks (using `diff -u`) and verifies all invariants:  
+   - Total number of records processed matches input count  
+   - Number of storm-adjacent requests equals computed value  
+   - Outcome counts sum to total attempts per request  
+   - All attempt-zero records are flagged and counted  
+11. Run the full pipeline twice: first run (for initial output), second run (with same inputs) for verification; log timestamps at each stage in a `timings.md` file with one line per stage, e.g., "Stage 3: group by request_id — 0.82s".  
+12. Log errors and failures explicitly: if any record fails to parse or rule applies inconsistently, write the raw input row and the rule that triggered it in `errors.md`.  
+13. If any stage is slower than expected (e.g., >5 seconds), note it with a comment like "Stage 6: storm window computation — 7.2s due to sorting 48k timestamps; acceptable for data size".  
+14. Ensure all outputs are deterministic and reproducible: use `python` with fixed seed (`random.seed(0)`) in any stage that uses randomness (though none needed here).  
+15. If the input contains a contradiction to stated rules (e.g., attempt zero appears after attempt one), report it directly in `errors.md` with the row and rule applied.  
+16. Final output structure:  
+    - `/tmp/opencode/retry-run/storm.md`: human-readable table of storm events  
+    - `/tmp/opencode/retry-run/storm.json`: machine-readable version of same data  
+    - `/tmp/opencode/retry-run/rules.md`: all rules with justifications  
+    - `/tmp/opencode/retry-run/timings.md`: stage-by-stage timing logs  
+    - `/tmp/opencode/retry-run/errors.md`: any row that violates rule or contradicts input  
+    - `/tmp/opencode/retry-run/verify.sh`: script to recompute and verify outputs  
+17. After full run, run `

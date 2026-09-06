@@ -1,0 +1,54 @@
+### Phase 1 Rule Scan (Part B Only)
+Based on the text "second matter... handled by a different crew", here are the rules governing Part B:
+1. **Capacity & Pinning**: Total capacity is 8GB. Model A=2, B=2, C=2, D=7. Model B is pinned (never evicted).
+2. **Eviction Policy**: Evictions target the Least-Recently-Touched (LRU) *unpinned* model.
+3. **Load Execution Logic**: Loads cost 30s execution time; Unloads cost 10s. A load that cannot fit evicts LRU unpinned models until it fits or only pinned remain. If only pinned remain and it still doesn't fit, the load is deferred.
+4. **Counting Definitions**: `loads` counts every executed load command (including those that trigger evictions). `evictions` counts every actual eviction performed. `deferrals` counts loads that end up deferred after exhausting unpinned space. `deferred` lists the IDs of deferred loads.
+
+### Phase 2 Ledger Walk (Part B Only)
+**Initial State**: Empty pool (0GB used). Residents: []. Evictions: 0. Loads: 0. Deferrals: 0. Deferred: [].
+
+**Event 1: load A (2 GB)**
+- Current Used: 0. Required: 2. Fits? Yes.
+- Action: Load A enters.
+- State Update: Residents [A]. Used 2GB. Loads=1. Evictions=0. Deferrals=0. Deferred=[].
+
+**Event 2: load B (2 GB)**
+- Current Used: 2. Required: 2. Fits? Yes.
+- Action: Load B enters.
+- State Update: Residents [A, B]. Used 4GB. Loads=2. Evictions=0. Deferrals=0. Deferred=[].
+
+**Event 3: load C (2 GB)**
+- Current Used: 4. Required: 2. Fits? Yes.
+- Action: Load C enters.
+- State Update: Residents [A, B, C]. Used 6GB. Loads=3. Evictions=0. Deferrals=0. Deferred=[].
+
+**Event 4: load D (7 GB)**
+- Current Used: 6. Required: 7. Fits? No (Need 1GB more).
+- Eviction Check: Target LRU unpinned model.
+    - Residents: A(2), B(2, Pinned), C(2).
+    - Unpinned candidates: A, C.
+    - LRU assumption in stream order: A arrived first (Event 1), then B, then C. So A is the Least Recently Touched unpinned model.
+- Action: Evict A (2GB). New Used = 6 - 2 + 7 = 11? No, capacity limit is 8GB.
+    - Wait, logic check: "A load that cannot fit evicts as many LRU unpinned models as needed".
+    - Current Used: 6GB. Capacity: 8GB. Available Space: 2GB. Needed: 7GB. Deficit: 5GB.
+    - Evict A (2GB). New Used = 4GB. Available Space = 4GB. Still need 3GB more? No, the load is 7GB. We need to make room for a 7GB block.
+    - Current Residents after evicting A: [B(2), C(2)]. Total Size 4GB. Free space 4GB.
+    - Can we fit D (7GB)? No. Need 3GB more free space.
+    - Eviction Check again: Unpinned candidates remaining: C. B is pinned.
+    - Evict C (2GB). New Used = 2GB. Free space = 6GB.
+    - Can we fit D (7GB)? No. Need 1GB more free space.
+    - Eviction Check again: Unpinned candidates remaining: None (A and C evicted, B is pinned).
+    - Condition Met: "if only pinned models remain and it still does not fit it defers".
+- Action: Load D cannot fit even after evicting all unpinned residents. Load D is deferred.
+- State Update: Residents [B]. Used 2GB. Loads=4 (D was attempted). Evictions=2 (A, C). Deferrals=1. Deferred=[D].
+
+**Event 5: unload B (2 GB)**
+- Current Resident: B(2). Requested Unload: B(2).
+- Action: Remove B.
+- State Update: Residents []. Used 0GB. Loads=4. Evictions=2. Deferrals=1. Deferred=[D].
+
+### Final Output (Part B Only)
+```json
+{"loads": 4, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

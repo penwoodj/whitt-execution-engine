@@ -1,0 +1,76 @@
+Based on the strict rules and events provided in the prompt, here is the step-by-step derivation of the state before freezing into the final JSON output.
+
+### Phase 1: Rule Analysis & Event Listing
+
+**Rules Applied:**
+1.  **Arrival Order:** Jobs arrive based on their start minute ($s$). A resumed job outranks a fresh one if they have the same $s$.
+2.  **Wait Queue Logic:** The core never idles while a LOW job is waiting. When a current job finishes or is preempted, the next waiting job starts in that exact minute.
+3.  **Checkpoint Banking:** A job banks a checkpoint every 2 completed minutes of running time (at absolute minutes $s+2$, $s+4$, etc.).
+4.  **Preemption Waste:** On preemption by HIGH, work past the last banked checkpoint is wasted and must be redone on resume.
+5.  **HIGH Execution:** When HIGH arrives, it preempts the current LOW job (if any) and runs for its duration with no other jobs running.
+6.  **Completion Order:** Determined by the absolute minute each LOW job finishes first.
+
+**Events Sequence (Tonight's Numbers):**
+*   **Start ($t=0$):** `LOW1` starts (Duration: 4 min). Queue: `[LOW1]`.
+*   **Start ($t=3$):** `LOW2` starts (Duration: 3 min). Queue: `[LOW1, LOW2]`.
+*   **Arrival ($t=5$):** `HIGH` arrives. Preempts `LOW1`. `HIGH` runs for 4 mins.
+
+---
+
+### Phase 2: Ledger Walk (Minute-by-Minute Simulation)
+
+**Minutes 0–4 (`LOW1` Execution):**
+*   **$t=0$:** `LOW1` starts. Banked at $0+2=2$.
+    *   State: `LOW1` running (Banked min: 2). Queue: `[LOW2]`.
+*   **$t=1$:** `LOW1` runs (Total run time: 1). No new bank.
+    *   State: `LOW1` running (Banked min: 2). Queue: `[LOW2]`.
+*   **$t=2$:** `LOW1` runs (Total run time: 2). Reaches first checkpoint. Banked at $0+4=4$.
+    *   State: `LOW1` running (Banked min: 2, 4). Queue: `[LOW2]`.
+*   **$t=3$:** `LOW2` starts in the queue. `LOW1` continues running (Total run time: 3). No new bank.
+    *   State: `LOW1` & `LOW2` active (`LOW1` runs, `LOW2` waits/queued). `LOW1` Banked min: 2, 4. Queue effectively managed as `LOW1` is running. Note: The rule says "resumed LOW outranks a fresh one", but here we are just queuing up.
+    *   State Update: At $t=3$, `LOW2` enters the waiting pool. Current runner: `LOW1`.
+*   **$t=4$:** `LOW1` runs (Total run time: 4). Reaches second checkpoint ($0+6=6$ is next bank, not yet reached). Wait, banks are at $s+2$, then every 2 mins. So banks at $t=2$ and $t=4$.
+    *   State: `LOW1` running (Banked min: 2, 4). Queue: `[LOW2]`.
+
+**Minute 5 (`HIGH` Arrival & Preemption):**
+*   **$t=5$:** `HIGH` arrives.
+    *   Action: Preempt `LOW1`.
+    *   Waste Calculation: Last bank was at $t=4$. Current run time is 5 mins (minutes 0, 1, 2, 3, 4 completed). Wait, "runs 4 minutes starting at minute 0".
+        *   Minute 0 (run 1) -> Bank at 2.
+        *   Minute 1 (run 2) -> Bank at 2? No. Banks are absolute minutes.
+        *   Let's re-read banking: "banks a checkpoint at minute s+2 and again every 2 running minutes after".
+        *   Start $s=0$. First bank at $t=2$. Next bank at $t=4$ (after 2 running mins passed since last bank).
+        *   So at $t=5$, `LOW1` has completed minutes: 0, 1, 2, 3, 4. Total run time = 5 mins? No, it runs for 4 minutes total. It finishes the 4th minute of work at the end of minute 4.
+        *   So at $t=5$ (start of minute 5), `LOW1` has completed exactly 4 minutes of work (minutes 0, 1, 2, 3). Wait, if it runs 4 mins starting at 0:
+            *   Minute 0 completes at end of min 0. (Run count = 1)
+            *   Minute 1 completes at end of min 1. (Run count = 2) -> Bank at $t=2$? No, bank is absolute time.
+            *   Let's trace banks strictly: "banks a checkpoint at minute s+2". $s=0 \rightarrow t=2$.
+            *   "again every 2 running minutes after". After reaching $t=2$, need 2 more mins to run to reach next bank. Run count was 1 (min 0). Need 1 more min (count 2) to reach absolute time where next bank lands? Or is it based on duration?
+            *   Text: "a resumed LOW outranks a fresh one... a LOW whose start minute arrives while the core is busy simply waits."
+            *   Let's look at the example logic provided in the prompt for calibration: "LOW1 runs 7 minutes starting at minute 0... banked a checkpoint at minute 2, and its 3rd minute was unbanked when the swap came".
+                *   Example: Start 0. Run 1 (min 0), Run 2 (min 1). Bank lands at min 2. Run 3 (min 2) is "unbanked" meaning it didn't complete a bank cycle? Or that the checkpoint wasn't hit yet?
+                *   Example says: "its 3rd minute was unbanked". This implies at $t=3$ (start of min 2), only 2 mins completed. The bank is at $t=2$. So when preemption happens, we check how much is past the last bank.
+                *   In tonight's case: `LOW1` runs 4 minutes starting at 0.
+                    *   Min 0 completes ($t=1$). Total run = 1.
+                    *   Min 1 completes ($t=2$). Total run = 2. Bank lands at absolute $t=2$. (Since $s+2 = 2$).
+                    *   Min 2 completes ($t=3$). Total run = 3.
+                    *   Min 3 completes ($t=4$). Total run = 4. Next bank would be at $t=4$? "again every 2 running minutes after". After the first bank (at total run 2 mins), we need another 2 mins to run to hit the next bank.
+                    *   So Bank 1 at Total Run = 2 ($t=2$).
+                    *   Bank 2 at Total Run = 4 ($t=4$).
+                *   At $t=5$, `LOW1` is preempted. It has completed minutes 0, 1, 2, 3 (Total run time = 4).
+                *   Wait, if it runs 4 minutes starting at 0:
+                    *   End of min 0: Run count 1.
+                    *   End of min 1: Run count 2. **Bank Hit.** (Absolute $t=2$).
+                    *   End of min 2: Run count 3.
+                    *   End of min 3: Run count 4. **Bank Hit?** ("again every 2 running minutes after"). Yes, run count 4 is 2 mins past run count 2. So Bank 2 hits at absolute $t=4$.
+                *   Preemption happens at start of minute 5 ($t=5$). `LOW1` has completed exactly 4 minutes (min 0, 1, 2, 3).
+                *   Last bank was at run count 4 (absolute $t=4$).
+                *   Work past last checkpoint: None? Or is the "current minute" considered partially done?
+                *   Rule: "a job that starts or resumes at minute s banks a checkpoint at minute s+2".
+                *   If `LOW1` completed exactly 4 minutes, it hit both banks. Waste = 0?
+                *   Let's re-read the example carefully: "LOW1 runs 7 minutes starting at minute 0... banked a checkpoint at minute 2, and its 3rd minute was unbanked when the swap came".
+                    *   Start 0. Bank at $t=2$.
+                    *   If preemption comes at $t=3$ (start of min 2), run count is 2. It hit bank 1. Waste = 0?
+                    *   But example says "1 minute wasted".
+                    *   Why? Maybe the bank logic is: Bank lands at absolute time $T$. If preemption happens, any work done in the current minute (the one being interrupted) that hasn't been "banked" is lost.
+                    *   In example: Preemption at $t=3$ (start of min 2). `

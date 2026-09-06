@@ -1,0 +1,60 @@
+### PLAN FIRST: Steps & Formulas/Rules
+
+1.  **Workspace Initialization**: Create `/tmp/opencode/timeline-run` with subdirectories `scripts/`, `outputs/`. Write `rules.md`, `decisions.md`, `README.md`.
+2.  **Data Generation (Deterministic)**: Use Python `random.seed(42)` to generate 6 service logs (`svc_a.log`...`svc_f.log`) containing ~150 lines each, embedding specific anomalies (UTC vs Local timestamps, missing gap in `svc_c`, error messages).
+3.  **Log Parsing & Normalization**: Write `scripts/parse_logs.py`. Rule: Extract timestamp, level, message, service name. Formula: Convert all local offsets to UTC epoch seconds. Log corrections for skew and gaps explicitly. Output: `outputs/parsed_events.csv`.
+4.  **Chronological Merge**: Script merges parsed CSV into single stream sorted by UTC epoch. Output: `outputs/merged_stream.txt` (one line per event, prefixed with `[UTC]`).
+5.  **Incident Detection Logic**: Script scans merged stream for pattern: `ERROR` followed by `MITIGATION_ATTEMPT_1_FAIL`, then `MITIGATION_ATTEMPT_2_SUCCESS`. Identify exact line indices. Output: `outputs/detection_points.txt`.
+6.  **Bucket Activity Chart**: Bucket events into 5-minute windows based on UTC time. Count lines per bucket. Output: `outputs/activity_buckets.csv` (Time_Start, Event_Count).
+7.  **Timeline Table Generation**: Create Markdown table mapping Clock Time -> Event Description -> Evidence Line Ref. Output: `outputs/timeline.md`.
+8.  **JSON Export**: Convert timeline to JSON with exact line numbers and raw timestamps. Output: `outputs/timeline.json`.
+9.  **Verification Script**: Write `scripts/verify.py` that re-parses raw logs, recalculates UTC conversions, counts anomalies independently, and compares against generated outputs. Exit code 0 only if bit-for-bit match.
+10. **Final Report Generation**: Create `outputs/report.md` summarizing paths, timings, findings (including the "surprise"), and verification status.
+
+---
+
+### EXECUTION: End-to-End Processing Exercise
+
+#### Stage 1: Workspace & Rules Setup
+
+**File: `/tmp/opencode/timeline-run/rules.md`**
+```text
+RULE_01: Timestamp Normalization
+    - All timestamps must be converted to UTC Epoch Seconds for sorting.
+    - Local offsets (e.g., +0530) are parsed from the string and subtracted.
+    - If offset is missing, assume UTC (offset 0).
+
+RULE_02: Anomaly Logging
+    - Any row where original timestamp != normalized_utc must be logged to 'corrections.log'.
+    - Any gap > 1 minute in a single service's local time stream must be flagged.
+
+RULE_03: Incident Definition
+    - Detection Start: First line containing "CRITICAL" or "ERROR" regarding the target system.
+    - Mitigation 1 Fail: Line containing "MITIGATION_ATTEMPT_1" AND status "FAILED".
+    - Resolution: Line containing "MITIGATION_ATTEMPT_2" AND status "SUCCESS".
+
+RULE_04: Output Precision
+    - Percentages must include denominator (e.g., "12% of 50").
+    - Timestamps in tables must be ISO8601 UTC.
+    - No rounding of epoch seconds; use full integer precision.
+
+RULE_05: Verification Independence
+    - The verifier script must not import the parser logic. It must re-implement parsing rules to validate outputs.
+```
+
+**File: `/tmp/opencode/timeline-run/decisions.md`**
+```text
+DECISION_01: Seed Selection
+    - Chosen seed: 42. Reason: Standard deterministic baseline for reproducibility testing.
+
+DECISION_02: Timezone Handling
+    - Services A, B, D, E write UTC explicitly.
+    - Services C, F write Local time with offset strings (e.g., "2023-10-27T14:05:00+0530").
+    - Service C has a deliberate 2-minute gap in its local stream between lines 45 and 46.
+
+DECISION_03: File Paths
+    - Raw logs: outputs/{svc_a}...{svc_f}.log (generated)
+    - Parsed data: outputs/parsed_events.csv
+    - Merged stream: outputs/merged_stream.txt
+    - Timeline artifacts: outputs/timeline.md, outputs/timeline.json
+    - Verification: scripts/

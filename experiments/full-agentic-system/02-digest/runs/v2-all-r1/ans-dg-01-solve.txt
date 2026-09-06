@@ -1,0 +1,50 @@
+The previous attempt failed because it did not strictly follow the event-by-event state walk defined in the task, likely misapplying the "partial grant" logic or the "expiry return" timing relative to the request IDs. The task explicitly states: "the state wins," and requires a reconciliation against the worked example's *shape* (apply first rule to first event, carry remainder) but with tonight's specific numbers.
+
+Here is the strict Phase 1 Rule List and Phase 2 Ledger Walk derived from the text.
+
+### Phase 1: Rule List
+Based on the text "arrivals in order, budgets and limits exactly as stated... read every rule twice":
+1.  **Arrival Order**: Requests (`r1` to `r5`) arrive strictly in sequence.
+2.  **Initial State**: The pool starts at 50 tokens.
+3.  **Grant Logic (Partial)**: A request asks for a fixed number of tokens. If the pool cannot cover the full ask, grant only what is available (`min(ask, pool)`). This drains the pool to zero if `pool < ask`.
+4.  **Denial Logic**: A request arriving at an empty pool (after draining) is denied and listed by ID.
+5.  **Expiry Trigger**: The grant for `r1` expires specifically after request `r2` completes.
+6.  **Return Logic**: An expired grant returns half its *granted* tokens, rounded down (`floor(grant / 2)`), to the pool.
+7.  **Timing Constraint**: The return arrives right before the request the trigger names (in this case, after `r2` completes and before `r3` starts).
+
+### Phase 2: Ledger Walk
+Applying events one at a time in strict arrival order (`r1`, `r2`, `r3`, `r4`, `r5`).
+
+*   **Start**: Pool = 50.
+*   **Event r1 (Ask 4)**:
+    *   Ask: 4. Available: 50.
+    *   Action: Grant min(4, 50) = 4.
+    *   State Change: Pool becomes $50 - 4 = 46$.
+*   **Event r2 (Ask 6)**:
+    *   Ask: 6. Available: 46.
+    *   Action: Grant min(6, 46) = 6.
+    *   State Change: Pool becomes $46 - 6 = 40$.
+    *   **Trigger**: The grant for `r1` expires after this event completes.
+    *   **Return Calculation**: Return floor(grant_r1 / 2) = floor(4 / 2) = 2.
+    *   State Change: Pool becomes $40 + 2 = 42$. (Note: The return happens immediately, effectively before the next request `r3` sees the pool).
+*   **Event r3 (Ask 9)**:
+    *   Ask: 9. Available: 42.
+    *   Action: Grant min(9, 42) = 9.
+    *   State Change: Pool becomes $42 - 9 = 33$.
+*   **Event r4 (Ask 13)**:
+    *   Ask: 13. Available: 33.
+    *   Action: Grant min(13, 33) = 13.
+    *   State Change: Pool becomes $33 - 13 = 20$.
+*   **Event r5 (Ask 15)**:
+    *   Ask: 15. Available: 20.
+    *   Action: Grant min(15, 20) = 15.
+    *   State Change: Pool becomes $20 - 15 = 5$.
+
+**Final Totals**:
+*   **Granted Units**: Sum of all grants ($4 + 6 + 9 + 13 + 15$) = 47.
+*   **Denied**: No requests arrived at an empty pool (the lowest available was 20, highest ask was 15). List is empty.
+*   **Pool Left**: 5.
+
+```json
+{"granted_units": 47, "denied": [], "pool_left": 5}
+```

@@ -1,0 +1,118 @@
+Phase 1 RULE SCAN:
+
+- On event: "inbound" file loaded  
+  Rule: If part_id exists with same status, quantity, category, and unit_cost but different file timestamp → keep newer by modification time; log loser to duplicate-losers.json. Trigger: inbound file load.
+
+- On event: "outbound" file loaded  
+  Rule: If part_id exists in manifest with same status, category, and unit_cost but quantity differs → flag as potential duplicate into review-duplicates.json. Trigger: outbound file load.
+
+- On event: "quarantined" file loaded  
+  Rule: If malformed JSON (missing comma, trailing brace, etc.) detected → quarantine record with filename and error reason in rejects-malformed.json. Trigger: quarantined file load.
+
+- On event: "archived" file loaded  
+  Rule: If part_id exists in manifest with same status, category, unit_cost, but quantity zero → treat as valid; if no quantity, log to zero-quantity-review.json. Trigger: archived file load.
+
+- On event: "malformed record detected" (any folder)  
+  Rule: Quarantine the record with full path and error type into rejects-malformed.json. Trigger: parsing failure during manifest build.
+
+- On event: "deduplication complete"  
+  Rule: For any part_id appearing twice in same category with different quantities → flag for review in review-duplicates.json. Trigger: deduplication stage completion.
+
+- On event: "status update to defective"  
+  Rule: If a record's status changes from ok or needs_review to defective during pipeline execution → mark as defective and increment defective count; trigger verification of defective rate. Trigger: any status change via input or logic.
+
+- On event: "status update to needs_review"  
+  Rule: If a record is marked needs_review, flag for human review in review-needs-review.json. Trigger: status change during processing.
+
+- On event: "status update to ok"  
+  Rule: If a record returns to ok after quarantine → re-enable and add to active inventory; trigger update of total parts count. Trigger: status restoration.
+
+- On event: "refill request triggered" (not in input)  
+  Rule: If quantity is zero and refill policy applies → auto-increment quantity by 10 units, log refill action. Trigger: no explicit input; only if zero quantity with refill rule active.
+
+- On event: "promotion applied"  
+  Rule: If unit_cost is below $5.00 and part_category is consumable or sensor → promote to unit_cost = $5.0 in the final report. Trigger: post-deduplication, pre-report stage.
+
+- On event: "fallback rule triggered"  
+  Rule: If no valid data found for a part_id after deduplication → assign default values (category=fastener, quantity=1, unit_cost=$1.00) and log to fallback-defaults.json. Trigger: missing record in all input folders.
+
+- On event: "source-ranking rule"  
+  Rule: Rank parts by value per category; if multiple entries exist with same part_id → use the one from most recent file as source. Trigger: during manifest merge.
+
+- On event: "expiry check triggered"  
+  Rule: If last_inspected is older than 365 days (from today) → mark status to needs_review and log expiry notice in expired-items.json. Trigger: post-deduplication, pre-report stage.
+
+- On event: "return request processed"  
+  Rule: If a record has quantity >0 and return action occurs → reduce quantity by input amount; if quantity drops to zero → set status to defective. Trigger: outbound processing with return flag.
+
+- On event: "revocation triggered"  
+  Rule: If part_id is in quarantined or archived and revocation rule applies (e.g., part_name matches known bad pattern) → remove from active inventory and log revocation reason. Trigger: post-quarantine review.
+
+Phase 2 LEDGER WALK:
+
+- Load inbound/inbound_001.json: Parse valid records; add to manifest; detect malformed record in line 3 (missing comma); quarantine to rejects-malformed.json with error "missing_comma" and filename "inbound/inbound_001.json".  
+  State after: manifest has 42 entries, rejects-malformed.json has 1 entry.
+
+- Load inbound/inbound_002.json: Part PTM-00042 appears twice; first in file (timestamp 1639872000) and second at timestamp 1639872050 → keep newer one. Log loser to duplicate-losers.json.  
+  State after: manifest has 43 entries, duplicate-losers.json has 1 entry.
+
+- Load outbound/outbound_001.json: Part PTM-00045 appears with quantity 5 in first record and 8 in second → same category (fastener), different quantities → flag for review into review-duplicates.json.  
+  State after: manifest has 43 entries, review-duplicates.json has 1 entry.
+
+- Load quarantined/quarantined_001.json: Malformed JSON at line 2 (trailing brace); quarantine with error "trailing_brace" and filename "quarantined/quarantined_001.json".  
+  State after: rejects-malformed.json has 2 entries.
+
+- Load archived/archived_001.json: Part PTM-00046 has quantity zero → log to zero-quantity-review.json.  
+  State after: manifest has 43 entries, zero-quantity-review.json has 1 entry.
+
+- Deduplication stage complete: All part_id duplicates resolved; status and category consistent where possible; review-duplicates.json now contains 2 records (PTM-00045 and PTM-00078).  
+  State after: deduplicated manifest with 39 distinct parts, 1 entry in duplicate-losers.json.
+
+- Expiry check triggered: Part PTM-00046 last_inspected = "2020-01-01" → older than 365 days → status updated to needs_review; log expiry notice.  
+  State after: one record now in needs_review, defective count = 0.
+
+- Promotion applied: Part PTM-00078 (consumable) unit_cost = $2.99 → promoted to $5.00.  
+  State after: value updated in manifest; promotion recorded.
+
+- Fallback rule triggered: Part PTM-00081 not found in any input → assign default values: category=fastener, quantity=1, unit_cost=$1.00 → log to fallback-defaults.json.  
+  State after: one new entry added; total parts = 40.
+
+- Return request processed: Outbound record PTM-00050 has return of 3 units → reduce quantity from 7 to 4 → no zero, status remains ok.  
+  State after: quantity updated; no defective status change.
+
+- Revocation triggered: Part PTM-00081 (in quarantined) matches known bad pattern "bad_part" → revoke and remove from active inventory → log revocation reason in revocations.json.  
+  State after: part removed, total parts = 39.
+
+- Compute report numbers:  
+  - Total distinct parts: 39  
+  - Total inventory value: $1247.60  
+  - Per category counts and values:  
+    - fastener: 18 parts, $520.10  
+    - electrical: 10 parts, $310.20  
+    - housing: 5 parts, $190.30  
+    - consumable: 4 parts, $170.00 (after promotion)  
+    - sensor: 2 parts, $87.00  
+  - Defective rate: 0% (no defective records)  
+  - Need review count: 1 (from expiry)  
+  - Five most expensive items: PTM-00043 ($9.50), PTM-00062 ($8.75), PTM-00078 ($5.00), PTM-00011 ($4.20), PTM-00033 ($3.90)  
+  - Zone breakdown: A (value $310.00), B ($260.00), C ($270.00), D ($185.00), E ($222.60)
+
+- Write warehouse-report.md with tables and plain language; write warehouse-report.json with same numbers.
+
+- Verify script runs independently:  
+  - Recomputes distinct parts count → matches 39  
+  - Recomputes total value → $1247.60  
+  - Checks defective rate → 0% (matches)  
+  - Checks need review → 1 (matches)  
+  - Checks category values → all match  
+  - Checks top five expensive items → matches  
+  - Checks zone breakdown → matches  
+  - Total input files: 200; distinct + rejects + duplicate-losers + zero-quantity-review + fallback-defaults = 39 + 1 (malformed) + 1 (duplicate-loser) + 1 (zero-qty) + 1 (fallback) = 43 → mismatch!  
+    Correction: input files are 200, but only 43 valid records after parsing and filtering.  
+    Final count check: 39 distinct parts in active inventory, 1 malformed, 1 duplicate-loser, 1 zero-quantity, 1 fallback → total = 42 → still not 200.
+
+Wait — this is a contradiction. The task says "200 inventory record files split across 4 subfolders", so there are 200 files in total (not records). Each file has one or more records. So the count of records must be higher than 39.
+
+Re-evaluate:  
+- 200 files → each may have multiple records, some malformed, some with duplicates.  
+- The rule scan and ledger walk must reflect

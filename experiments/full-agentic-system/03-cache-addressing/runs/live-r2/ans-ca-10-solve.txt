@@ -1,0 +1,79 @@
+The state is calculated by walking the events in strict arrival order for "tonight" (Pool start 45, Requests: r1=3, r2=5, r3=8, r4=12, r5=14). The orientation story numbers are ignored as per instructions.
+
+**Phase 1 Rule List & Triggers:**
+1. **Arrival/Grant Rule**: On each request arrival ($R_{id}$), grant $\min(\text{Pool}, \text{Ask})$. Trigger: All requests (r1, r2, r3, r4, r5).
+   - Effect: Pool decreases by grant amount; Granted Units increases.
+2. **Expiry/Return Rule**: After request $R_{id}$ completes, the grant for $R_{id-1}$ (if it exists and is marked for expiry) returns $\lfloor \text{Granted}_{id-1} / 2 \rfloor$. Trigger: Completion of r3 causes return from r2.
+   - Note: The text specifies "the grant for r2 expires after request r3 completes". This is a specific trigger event, not automatic on every step.
+3. **Denial Rule**: If Pool < Ask and no partial grant occurs (or if logic dictates full ask required), the request is denied. Trigger: Request arriving at an empty pool or when conditions prevent granting? The text says "grant what is there... a request arriving at an empty pool is denied". Partial grants are allowed ("grants are partial"). So denial only happens if Pool=0 and Ask > 0 (and we assume the rule implies no grant happens to an empty pool).
+
+**Phase 2 Ledger Walk (Tonight's Data):**
+*Initial State*: `Pool = 45`, `Granted = 0`.
+
+1. **Event r1**: Ask = 3.
+   - Grant = $\min(45, 3) = 3$.
+   - Pool becomes $45 - 3 = 42$.
+   - Granted Units = $0 + 3 = 3$.
+   - State: `Pool=42`, `Granted=3`.
+
+2. **Event r2**: Ask = 5.
+   - Grant = $\min(42, 5) = 5$.
+   - Pool becomes $42 - 5 = 37$.
+   - Granted Units = $3 + 5 = 8$.
+   - State: `Pool=37`, `Granted=8`.
+
+3. **Event r3**: Ask = 8.
+   - Grant = $\min(37, 8) = 8$.
+   - Pool becomes $37 - 8 = 29$.
+   - Granted Units = $8 + 8 = 16$.
+   - *Trigger Check*: "the grant for r2 expires after request r3 completes".
+   - Return from r2: $\lfloor \text{Granted}_{r2} / 2 \rfloor = \lfloor 5 / 2 \rfloor = 2$.
+   - Pool becomes $29 + 2 = 31$.
+   - State: `Pool=31`, `Granted=16` (Note: Granted units usually accumulate total granted, but if "denied" list is separate, we track total successful grants. The prompt asks for `granted_units`. Let's assume this is the sum of all tokens successfully added to the system history).
+   - State Check: `Pool=31`, `TotalGranted=16` (from r1+r2). Wait, did the return reset the grant counter? No, "grant what is there...". The variable `granted_units` in the final JSON likely refers to the sum of tokens that were granted and never returned *or* total tokens flowing through. However, standard ledger problems usually track `pool_left` and `denied`. If a token returns, it wasn't permanently granted? Or was it? "Grant what is there... return half its granted tokens". The `granted_units` field likely represents the sum of all successful grants *before* any returns, or the net. Let's look at the orientation story: "that night closed with 30 granted". In the story: Start 25 -> r1(11) -> Pool 14 -> r2(7) -> Pool 7 -> Return 5 (from r1? Text says "first grant expired"). Wait, text says "third ask of 13 landed against only 12... took partial".
+   Let's re-read the orientation math to deduce `granted_units` definition.
+   Story: Start 25.
+   - r1 asks 11. Grant 11. Pool 14. Total Granted so far = 11.
+   - r2 asks 7. Grant 7. Pool 7. Total Granted = 18? Or is `granted_units` the sum of all grants ever made? "closed with 30 granted".
+   - Then return happens: $\lfloor 11/2 \rfloor = 5$. Pool becomes $7+5=12$.
+   - r3 asks 13. Grant $\min(12, 13) = 12$. Pool 0. Total Granted = $18 + 12 = 30$? Or was the return subtracted from the "granted" count? If `granted_units` is cumulative sum of successful grants: $11+7+12=30$. This matches "30 granted".
+   - So `granted_units` = Sum of all successful grant operations. Returns do not un-grant previous units, they just add to the pool.
+
+   Back to **Tonight**:
+   - r1 Grant 3. (Sum=3)
+   - r2 Grant 5. (Sum=8)
+   - r3 Grant 8. (Sum=16). Return from r2: $\lfloor 5/2 \rfloor = 2$. Pool $29+2=31$. Sum remains 16? Or does "granted" mean net? The story example sums them ($11+7+12=30$) even though a return happened later. So `granted_units` is the sum of all successful grants.
+   - Current State: `Pool=31`, `Granted_Sum=16`.
+
+4. **Event r4**: Ask = 12.
+   - Grant = $\min(31, 12) = 12$.
+   - Pool becomes $31 - 12 = 19$.
+   - Granted Sum = $16 + 12 = 28$.
+   - State: `Pool=19`, `Granted_Sum=28`.
+
+5. **Event r5**: Ask = 14.
+   - Grant = $\min(19, 14) = 14$.
+   - Pool becomes $19 - 14 = 5$.
+   - Granted Sum = $28 + 14 = 42$.
+   - State: `Pool=5`, `Granted_Sum=42`.
+
+**Final Calculation Check:**
+- Start: 45.
+- r1 (+3): 42 used, 3 granted.
+- r2 (+5): 37 used, 8 granted.
+- r3 (+8): 29 used, 16 granted. Return from r2 (5->2): Pool +2 = 31.
+- r4 (+12): 19 used, 28 granted.
+- r5 (+14): 5 used, 42 granted.
+- Final Pool: 5.
+- Denied: [] (No request arrived at an empty pool or was denied).
+
+JSON Output Format: `{"granted_units": N, "denied": [ids], "pool_left": N}`
+Values: `granted_units`: 42, `denied`: [], `pool_left`: 5.
+
+```json
+{
+"granted_units": 42,
+"denied": [],
+"pool_left": 5
+}
+```

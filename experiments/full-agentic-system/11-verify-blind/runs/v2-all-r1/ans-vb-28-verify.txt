@@ -1,0 +1,84 @@
+**Fact Bullets:**
+- LOW1: duration 4 min, start minute 0.
+- LOW2: duration 3 min, start minute 3.
+- HIGH: arrival minute 3, duration 6 min (preempts core).
+
+**Minute-by-Minute Table:**
+
+| Minute | Core Status | Event Details | Bank Checkpoint (Absolute Min) | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| **0** | LOW1 | Start LOW1. Runs 4 min. Occupies [0, 1, 2, 3]. | None yet. | Finish minute = 4. |
+| **1** | LOW1 | Running. | - | |
+| **2** | LOW1 | Running. | Bank @ 2 (LOW1 has run 2 min). | Checkpoint reached. |
+| **3** | HIGH | Preempted by HIGH arrival. | None for this minute's bank. | LOW1 was running [0..3], so it finished exactly at 4? No, occupies minutes 0,1,2,3. It finishes AT minute 4. At minute 3, it is still running (occupying the slot). Wait: "occupies minutes s .. s+n-1". Start 0, dur 4 -> occupies 0,1,2,3. Finishes at 4. So at minute 3, core is busy with LOW1. HIGH arrives at minute 3. Does it preempt? Yes. But does it interrupt the *running* time for checkpoint purposes? The prompt says: "bank landing on exact minute HIGH arrives still counts". This implies if a bank happens exactly when HIGH arrives, no waste. However, LOW1's bank is at absolute min 2. It hasn't reached its next bank (which would be at 4) yet. So preemption occurs. |
+| **3** (cont.) | HIGH | Preempted. Core switches to HIGH. | - | LOW1 interrupted. |
+| **4** | HIGH | Running. Occupies [4, 5, 6, 7, 8, 9]. | None. | Finish minute = 9. |
+| **5** | HIGH | Running. | - | |
+| **6** | HIGH | Running. | - | |
+| **7** | HIGH | Running. | - | |
+| **8** | HIGH | Running. | - | |
+| **9** | HIGH | Running. | - | |
+| **10**| LOW2 | Start LOW2 (waiting since min 3). Runs 3 min. Occupies [10, 11, 12]. | None yet. | Finish minute = 12. |
+| **11**| LOW2 | Running. | - | |
+| **12**| LOW2 | Running. | Bank @ 12 (LOW2 has run 3 min? No, bank every 2 running mins). Wait: "bank checkpoint at start-or-resume +2". Start 10. Bank at 10+2=12. Yes. | Checkpoint reached. |
+
+**Re-evaluating Preemption Logic & Waste:**
+- **LOW1**: Starts min 0, runs 4 mins. Occupies minutes 0, 1, 2, 3. Finishes AT minute 4.
+- **HIGH**: Arrives min 3. Prompt: "bank landing on exact minute HIGH arrives still counts". This usually applies if the job *just* hit a checkpoint. LOW1's checkpoints are at absolute mins 2, 4, 6... At minute 3, it has run 3 minutes (minutes 0, 1, 2). It is currently occupying minute 3. Has it reached a checkpoint? No, next is at 4.
+- **Conflict**: HIGH arrives at min 3. LOW1 is running on core during min 3. Does HIGH preempt immediately upon arrival? Yes ("instantly preempting").
+- **Waste Calculation**: LOW1 ran minutes 0, 1, 2 (3 mins). It was interrupted before finishing minute 3.
+    - Checkpoint rule: "LOW jobs checkpoint every 2 completed minutes of running time".
+    - Completed minutes at interruption: Minutes 0 and 1 are fully done. Minute 2 is partially done? No, the core occupies minute 3. The job runs *during* minute 3. If preempted at start of minute 3 (arrival), it has completed minutes 0 and 1. That is 2 completed minutes.
+    - "bank landing on exact minute HIGH arrives still counts". This suggests if a bank occurs exactly then, no waste. But the bank for LOW1 is at absolute min 4 (start 0 + 2). It hasn't reached it yet.
+    - Wait, let's re-read carefully: "LOW jobs checkpoint every 2 completed minutes... on preemption work past last checkpoint is wasted".
+    - At minute 3 arrival: LOW1 has completed minutes 0 and 1. Total = 2 mins. Last checkpoint was at absolute min 2 (after completing min 1).
+    - Work done since last checkpoint: Completed min 2? No, the job runs *during* minute 2 to finish it. Then it enters minute 3. If preempted at start of minute 3, has it completed minute 2? Yes. So it has completed minutes 0, 1, 2. Total = 3 mins.
+    - Checkpoints: Every 2 completed mins.
+        - After min 1 (total 2): Bank @ abs 2.
+        - After min 3 (total 4): Bank @ abs 4.
+    - At arrival of HIGH (min 3), LOW1 has just finished minute 2? Or is it running minute 3?
+    - "occupies minutes s .. s+n-1". Start 0, dur 4 -> occupies 0, 1, 2, 3.
+    - This means the job is active during minute 3. It finishes at the end of minute 3 (time = 4).
+    - HIGH arrives at min 3. Does it preempt *during* minute 3 or at the start? "Arrives at minute 3". Usually implies time $t=3$. The core is busy with LOW1 during interval $(2, 3)$ and $(3, 4)$.
+    - If HIGH preempts at $t=3$, LOW1 has completed minutes 0 and 1. It is in the middle of minute 2? No, it occupies minute 2 (interval 2-3). Then it occupies minute 3 (interval 3-4).
+    - So at $t=3$, LOW1 has completed minutes 0 and 1. It is starting minute 2? No, sequence: Min 0 (0-1), Min 1 (1-2), Min 2 (2-3), Min 3 (3-4).
+    - At $t=3$, it has finished Min 0, Min 1, and Min 2. It is starting Min 3.
+    - Completed count = 3 minutes.
+    - Checkpoints: Every 2 completed mins.
+        - CP1 at 2 completed mins (end of min 1). Absolute time $t=2$.
+        - CP2 at 4 completed mins (end of min 3). Absolute time $t=4$.
+    - At $t=3$, LOW1 has 3 completed minutes. It is between CP1 ($t=2$) and CP2 ($t=4$).
+    - Work since last checkpoint: Completed minute 2 (which happened in interval 2-3? No, min 2 is interval 2-3. Wait. Min 0 is 0-1. Min 1 is 1-2. Min 2 is 2-3. Min 3 is 3-4).
+    - At $t=3$, it has finished Min 0, Min 1, Min 2. Total 3 mins.
+    - Last checkpoint was at 2 completed mins (end of Min 1, $t=2$).
+    - Work since last checkpoint: Completed Min 2? Yes. So 1 minute of work since last checkpoint.
+    - Is there a bank exactly at arrival? No, next bank is at $t=4$.
+    - Therefore, waste = minutes past last checkpoint = 1 minute (Min 2).
+    - **Correction**: Re-read "bank landing on exact minute HIGH arrives still counts". This implies if the job hits a checkpoint exactly when HIGH arrives, no waste. But here it hasn't hit the next checkpoint yet ($t=4$). It is at $t=3$. So there IS waste.
+    - Wait, let's re-parse "occupies minutes s .. s+n-1". Start 0, dur 4 -> occupies 0, 1, 2, 3. This means the job runs *during* minute 3. If HIGH arrives at min 3, does it interrupt the run of minute 3? Yes.
+    - So LOW1 ran minutes 0, 1, 2 (fully) and started minute 3.
+    - Completed = 3 mins.
+    - Checkpoints: 2 completed -> Bank @ $t=2$. 4 completed -> Bank @ $t=4$.
+    - At $t=3$, it is between banks. Work since last bank ($t=2$) = Completed minute 2? Yes. So 1 min wasted.
+    - **Wait**, maybe "arrives at minute 3" means the job starts running HIGH at minute 3, effectively cutting off LOW1's minute 3 run immediately? Or does it cut off after LOW1 finishes its current unit?
+    - Standard interpretation: Preemption happens instantly. LOW1 loses progress on minute 3.
+    - Progress lost = 1 minute (the entirety of minute 3 if preempted at start, or partial). But since checkpoints are discrete "every 2 completed minutes", we look at the state relative to the last checkpoint.
+    - Last checkpoint: $t=2$ (after completing min 1).
+    - Current time: $t=3$.
+    - Completed units: Min 0, Min 1, Min 2. Total 3.
+    - Work since last checkpoint ($t=2$): The completion of Min 2 occurred at $t=3$. So at the instant of preemption (start of min 3? or end?), we need to know if Min 2 was completed.
+    - If HIGH arrives at minute 3, and LOW1 occupies minute 3 (interval 3-4), then at $t=3$, LOW1 has just finished Min 2. So it has 3 completed minutes.
+    - The next checkpoint is at 4 completed minutes ($t=4$).
+    - Work since last checkpoint ($t=2$): It completed Min 2 (which took place in interval 2-3, finishing at $t=3$). Wait. If it finishes Min 2 at $t=3$, then at the moment of preemption (start of min 3?), has it finished Min 2?
+    - Let's assume "arrives at minute 3" means time $t=3$. The job occupies interval $(2,3)$ [Min 2] and $(3,4)$ [Min 3].
+    - At $t=3$, the job has just completed Min 2. It is about to start Min 3.
+    - So completed count = 3.
+    - Last checkpoint was at count=2 ($t=2$).
+    - Work since last checkpoint: The completion of Min 2 happened exactly at $t=3$. So the work "since" the last checkpoint is the completion of Min 2? Or is it the run *during* Min 3?
+    - If the job completes Min 2 at $t=3$, then at $t=3$ (instant), it has reached a state of 3 completed minutes. The next checkpoint is at 4.
+    - Is there waste? "work past last checkpoint". Last checkpoint was at count=2. Current count=3. Work = 1 minute (Min 2).
+    - BUT, the prompt says: "bank landing on exact minute HIGH arrives still counts". This implies if a bank happens exactly then, no waste. Here, the bank is at $t=4$. It does not happen at $t=3$. So there IS waste of 1 minute (Min 2).
+    - **Alternative interpretation**: Maybe "arrives at minute 3" means the job starts HIGH at minute 3, and LOW1's run on minute 3 is cut short? No, if it occupies minute 3, it runs during that minute. If preempted at start of minute 3 (time $t=3$), then Min 2 was fully completed in interval $(2,3)$. So count=3.
+    - Wait, if Min 2 is completed at $t=3$, and the next checkpoint is at $t=4$, then the work since last checkpoint ($t=2$) includes the completion of Min 2? Yes. So 1 minute wasted.
+    - **However**, let's reconsider the "bank landing on exact minute" clause. Maybe it implies that if a bank occurs *at* the arrival time, no waste. But here the bank is at $t=4$. Arrival is $t=3$. No match.
+    - Is it possible Min 2 was NOT completed? If LOW1 occupies minutes 0, 1, 2, 3... does "minute 2" mean interval $(2,3)$

@@ -1,0 +1,790 @@
+workflow_id: harness_v7_hb-01
+name: "Harness v7 - hb-01"
+description: "TABLE->GATE->AGGREGATE->JUDGE-V2->LEAK-AUDIT. Case: hb-01 hops=3 route=light"
+version: "7.0.0"
+author: "Experiment"
+tags: [harness, agentic, v7, routing, snapshot, meter, audit]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  m_light:
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  m_heavy:
+    name: "Qwen3-5-9B-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  m_judge:
+    name: "Hermes-2-Pro-Mistral-7B.Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  timing:
+    cooldown_after_unload_secs: 0
+    min_tmp_space_mb: 50
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+  steps:
+    s00_screen:
+      generative_entity: "${models.m_light}"
+      prompt: "pre-flight"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/screen-validate.py /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-01.yml"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - skip_step: true
+
+    s01_solve:
+      generative_entity: "${models.m_light}"
+      prompt: |
+        ROLE: on-call operator. Precise. Zero fluff.
+
+                It is 6:47 in the morning, and you are the outgoing night-shift owner for the
+        payments platform, writing the handover note before you hand the pager to
+        the day crew at 7:00. The night was messier than usual, and the new paging
+        policy that took effect last week has its own opinions about who gets woken
+        up and when, so you want the handover to state exactly what the pager
+        actually did overnight, not what people assume it did.
+        
+        The paging policy, as ratified by the on-call working group, reads like
+        this. Every alert that fires is assigned a severity by the alerting rules:
+        SEV1 for customer-facing outages, SEV2 for degraded-but-functioning
+        systems, and SEV3 for informational noise that should be looked at during
+        business hours. Only alerts at SEV2 or higher generate pages; a SEV3 alert
+        never pages anyone, at any hour, under any circumstance. During the
+        designated quiet window, which runs from 02:00 to 06:00, SEV3 alerts are
+        additionally marked as deferred, meaning they are collected into the
+        morning review queue rather than acted upon immediately — although, as
+        stated, they would not have paged anyone anyway. SEV2 and SEV1 alerts are
+        emphatically NOT deferred during the quiet window; the quiet window mutes
+        informational noise only, never real incidents. When a SEV1 alert fires and
+        pages the primary on-call, the system waits ten minutes for an
+        acknowledgment; if the primary has not acknowledged within that window, the
+        page escalates to the backup on-call exactly once. There is no further
+        escalation tier after the backup. Each delivered page counts as one page,
+        so a SEV1 that goes unacknowledged by the primary and reaches the backup
+        has generated two pages in total for that single alert.
+        
+        Now, the night itself. Four alerts fired, in this order.
+        
+        The first alert, which the ticketing system labels alert W, arrived at
+        03:10. It was a SEV3: the log-compaction job on the reporting replica had
+        finished twelve minutes later than its usual slot, which is interesting to
+        exactly nobody at three in the morning. Under the policy, this alert
+        occurred inside the quiet window and carried a severity that never pages.
+        It therefore generated no pages whatsoever and was swept into the deferred
+        pile for the day team to glance at after standup.
+        
+        The second alert, alert X, arrived at 23:40, before the quiet window even
+        began. This one was a SEV2: the currency-exchange rate cache was serving
+        rates up to nine minutes stale, which means customers saw slightly old
+        prices but nothing was down. The pager fired a single page to you as
+        primary on-call. You were still awake, glanced at the dashboard, flushed
+        the cache, and acknowledged the page four minutes after it arrived. Because
+        you acknowledged well inside the ten-minute escalation window, and because
+        SEV2 alerts do not escalate on acknowledgment timing in any case — the
+        unacknowledged-escalation rule applies to SEV1 only — no backup was ever
+        contacted for alert X.
+        
+        The third alert, alert Y, is the one that ruined your sleep. It arrived at
+        01:20 as a SEV1: card authorizations in the EU region were failing outright
+        for about nineteen percent of attempts. The pager paged you as primary. You
+        slept through it. The system waited the full ten minutes, received no
+        acknowledgment from you, and escalated exactly once to the backup on-call,
+        who answered, acknowledged, and started the failover to the secondary
+        processor while you were still unconscious. By the time you woke at 01:52
+        the incident was mitigated, which is a sentence you never enjoy writing in
+        a handover. For counting purposes: alert Y generated a page to you and a
+        page to the backup, two pages total for that one alert.
+        
+        The fourth and final alert, alert Z, arrived at 04:50, inside the quiet
+        window. It was a SEV2: a batch reconciliation job had retried past its
+        budget and paused itself, leaving a work queue that would need draining in
+        the morning. The severity is the important part here — a colleague once
+        insisted that everything during quiet hours gets deferred, but the policy
+        defers SEV3 only, and a SEV2 alert pages regardless of the clock. So alert
+        Z paged you, the primary, once. You acknowledged it in six minutes from
+        your laptop without fully getting out of bed, noted the paused job, and
+        went back to sleep. No backup involvement, no escalation.
+        
+        Two more things for completeness, neither of which affects paging counts.
+        First, the facility's overnight security desk runs its own heartbeat
+        monitoring and calls a building manager if the office loses power; you do
+        not manage the security desk and its call is not a page under your policy.
+        Second, a scheduled maintenance notification for the CDN was posted at
+        05:15 announcing a harmless cache purge; maintenance notices are not alerts
+        with severities, never enter the paging system, and exist in this note only
+        because the day team will see it in the inbox and wonder.
+        
+        As you close the shift, you want the handover to carry two numbers the day
+        lead asked for: how many pages the paging system actually delivered over
+        the whole night across all four alerts, and how many alerts ended up
+        deferred into the morning review queue. Count a deferred alert as one that
+        generated zero pages and was marked deferred under the quiet-window rule.
+        Report per-alert page counts as well: for each of alert W, alert X, alert
+        Y, and alert Z, the number of pages that alert generated. Then combine
+        them.
+        
+        The escalation rota has not always run this smoothly, and the current
+        handbook is a direct scar tissue from the winter outage two years back.
+        On that night a green coordinator, faced with three simultaneous alerts,
+        tried to page every on-call at once on the theory that more eyes meant
+        faster resolution. The result was nine engineers half-awake stumbling
+        over each other in the same incident channel, two of them starting
+        duplicate mitigations that conflicted, and a bridge call that took twenty
+        minutes just to sort out who was actually driving. The postmortem was
+        brutal in its simplicity — parallel noise had cost more time than the
+        original fault — and out of it came the precedence ladder now printed on
+        the first page of the rota binder. Severity gates came from the same
+        postmortem's second finding, that low-severity pages had trained everyone
+        to ignore their phones, so only true customer-facing fires earn the
+        after-hours buzz tonight.
+        
+        Your own evening began at the handoff meeting, where the outgoing
+        coordinator walked you through the board state channel by channel, the
+        way every shift change runs. You countersigned the log, checked that the
+        paging gateway had credited your phone, and accepted the board. Since
+        then you have been triaging as the alerts arrived, applying the ladder
+        mechanically — customer-facing before internal, higher severity before
+        lower, and within the same tier the one that woke people first. Each
+        decision you made was noted in the coordination log with a timestamp and
+        a one-line rationale, because tomorrow's day-shift lead reads that log
+        over coffee and expects to reconstruct your night decision by decision
+        without needing to wake anybody.
+        
+        The rota also keeps a small apparatus around the edges of the night that
+        is worth knowing about even though none of it changes page counts. There
+        is an automated status page that flips colors on its own whenever
+        customer-visible errors tick upward, and marketing sometimes asks for
+        the page's history after incidents even though it drives nothing. There
+        is a standing bridge line that stays open all night whether anyone uses
+        it or not, its dial-in pinned to the top of the incident channel. And
+        once a quarter the rota runs a game-day drill where a simulated alert
+        cascade lets new coordinators practice the ladder safely; the drill
+        logs are stored separately and never mix into production page counts.
+        None of that machinery sends a page tonight — the counts you report come
+        solely from your triage of the actual alerts against the handbook
+        rules.
+        
+        In the final hour before you close the log, the discipline that matters
+        most is re-verification. You re-read each alert's timeline against the
+        page you actually sent, not the one you remember sending, because memory
+        under sleep pressure invents comfortable summaries. You double-check that
+        every deferred alert carries a reason code — deferred-by-precedence is
+        the code tonight's backlog understands, and a deferred line without one
+        gets flagged in the morning review as an unexplained gap. You confirm the
+        escalation contacts you inherited at handoff are still correct, since a
+        page sent to a rotated-out phone is a page that never happened as far as
+        the handbook is concerned. Only when the log's story reads cleanly from
+        first alert to last do you draft the summary the day-shift lead will read
+        over coffee — the same summary whose counts you are about to report, and
+        the last thing standing between your night and the record.
+
+        METHOD: for EACH entity below, derive its answer from the rules.
+        Track state step by step in plain text. Entities you do not manage
+        NEVER count. Check deadline/budget rules BEFORE finalizing.
+
+        Entities (one line each, id then question):
+        - pages_w: pages generated by alert W (SEV3 inside quiet window, deferred) [answer format: a whole number]
+        - pages_x: pages generated by alert X (SEV2 acked by primary, no escalation) [answer format: a whole number]
+        - pages_y: pages generated by alert Y (SEV1 unacked 10 min, backup escalated once) [answer format: a whole number]
+        - pages_z: pages generated by alert Z (SEV2 during quiet window still pages) [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 4 lines,
+        one per entity above, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines. No JSON. No explanations.
+      model_overrides: { temperature: 0.1, max_tokens: 1280 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-01.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s02_fix_1
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json check ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-01"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.solve.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage solve --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-01"
+              working_dir: "."
+              fail_on_error: false
+
+    s02_fix_1:
+      generative_entity: "${models.m_light}"
+      prompt: |
+        ROLE: correction specialist. Entity table failed checks. Fix rows.
+
+        Original task:
+                It is 6:47 in the morning, and you are the outgoing night-shift owner for the
+        payments platform, writing the handover note before you hand the pager to
+        the day crew at 7:00. The night was messier than usual, and the new paging
+        policy that took effect last week has its own opinions about who gets woken
+        up and when, so you want the handover to state exactly what the pager
+        actually did overnight, not what people assume it did.
+        
+        The paging policy, as ratified by the on-call working group, reads like
+        this. Every alert that fires is assigned a severity by the alerting rules:
+        SEV1 for customer-facing outages, SEV2 for degraded-but-functioning
+        systems, and SEV3 for informational noise that should be looked at during
+        business hours. Only alerts at SEV2 or higher generate pages; a SEV3 alert
+        never pages anyone, at any hour, under any circumstance. During the
+        designated quiet window, which runs from 02:00 to 06:00, SEV3 alerts are
+        additionally marked as deferred, meaning they are collected into the
+        morning review queue rather than acted upon immediately — although, as
+        stated, they would not have paged anyone anyway. SEV2 and SEV1 alerts are
+        emphatically NOT deferred during the quiet window; the quiet window mutes
+        informational noise only, never real incidents. When a SEV1 alert fires and
+        pages the primary on-call, the system waits ten minutes for an
+        acknowledgment; if the primary has not acknowledged within that window, the
+        page escalates to the backup on-call exactly once. There is no further
+        escalation tier after the backup. Each delivered page counts as one page,
+        so a SEV1 that goes unacknowledged by the primary and reaches the backup
+        has generated two pages in total for that single alert.
+        
+        Now, the night itself. Four alerts fired, in this order.
+        
+        The first alert, which the ticketing system labels alert W, arrived at
+        03:10. It was a SEV3: the log-compaction job on the reporting replica had
+        finished twelve minutes later than its usual slot, which is interesting to
+        exactly nobody at three in the morning. Under the policy, this alert
+        occurred inside the quiet window and carried a severity that never pages.
+        It therefore generated no pages whatsoever and was swept into the deferred
+        pile for the day team to glance at after standup.
+        
+        The second alert, alert X, arrived at 23:40, before the quiet window even
+        began. This one was a SEV2: the currency-exchange rate cache was serving
+        rates up to nine minutes stale, which means customers saw slightly old
+        prices but nothing was down. The pager fired a single page to you as
+        primary on-call. You were still awake, glanced at the dashboard, flushed
+        the cache, and acknowledged the page four minutes after it arrived. Because
+        you acknowledged well inside the ten-minute escalation window, and because
+        SEV2 alerts do not escalate on acknowledgment timing in any case — the
+        unacknowledged-escalation rule applies to SEV1 only — no backup was ever
+        contacted for alert X.
+        
+        The third alert, alert Y, is the one that ruined your sleep. It arrived at
+        01:20 as a SEV1: card authorizations in the EU region were failing outright
+        for about nineteen percent of attempts. The pager paged you as primary. You
+        slept through it. The system waited the full ten minutes, received no
+        acknowledgment from you, and escalated exactly once to the backup on-call,
+        who answered, acknowledged, and started the failover to the secondary
+        processor while you were still unconscious. By the time you woke at 01:52
+        the incident was mitigated, which is a sentence you never enjoy writing in
+        a handover. For counting purposes: alert Y generated a page to you and a
+        page to the backup, two pages total for that one alert.
+        
+        The fourth and final alert, alert Z, arrived at 04:50, inside the quiet
+        window. It was a SEV2: a batch reconciliation job had retried past its
+        budget and paused itself, leaving a work queue that would need draining in
+        the morning. The severity is the important part here — a colleague once
+        insisted that everything during quiet hours gets deferred, but the policy
+        defers SEV3 only, and a SEV2 alert pages regardless of the clock. So alert
+        Z paged you, the primary, once. You acknowledged it in six minutes from
+        your laptop without fully getting out of bed, noted the paused job, and
+        went back to sleep. No backup involvement, no escalation.
+        
+        Two more things for completeness, neither of which affects paging counts.
+        First, the facility's overnight security desk runs its own heartbeat
+        monitoring and calls a building manager if the office loses power; you do
+        not manage the security desk and its call is not a page under your policy.
+        Second, a scheduled maintenance notification for the CDN was posted at
+        05:15 announcing a harmless cache purge; maintenance notices are not alerts
+        with severities, never enter the paging system, and exist in this note only
+        because the day team will see it in the inbox and wonder.
+        
+        As you close the shift, you want the handover to carry two numbers the day
+        lead asked for: how many pages the paging system actually delivered over
+        the whole night across all four alerts, and how many alerts ended up
+        deferred into the morning review queue. Count a deferred alert as one that
+        generated zero pages and was marked deferred under the quiet-window rule.
+        Report per-alert page counts as well: for each of alert W, alert X, alert
+        Y, and alert Z, the number of pages that alert generated. Then combine
+        them.
+        
+        The escalation rota has not always run this smoothly, and the current
+        handbook is a direct scar tissue from the winter outage two years back.
+        On that night a green coordinator, faced with three simultaneous alerts,
+        tried to page every on-call at once on the theory that more eyes meant
+        faster resolution. The result was nine engineers half-awake stumbling
+        over each other in the same incident channel, two of them starting
+        duplicate mitigations that conflicted, and a bridge call that took twenty
+        minutes just to sort out who was actually driving. The postmortem was
+        brutal in its simplicity — parallel noise had cost more time than the
+        original fault — and out of it came the precedence ladder now printed on
+        the first page of the rota binder. Severity gates came from the same
+        postmortem's second finding, that low-severity pages had trained everyone
+        to ignore their phones, so only true customer-facing fires earn the
+        after-hours buzz tonight.
+        
+        Your own evening began at the handoff meeting, where the outgoing
+        coordinator walked you through the board state channel by channel, the
+        way every shift change runs. You countersigned the log, checked that the
+        paging gateway had credited your phone, and accepted the board. Since
+        then you have been triaging as the alerts arrived, applying the ladder
+        mechanically — customer-facing before internal, higher severity before
+        lower, and within the same tier the one that woke people first. Each
+        decision you made was noted in the coordination log with a timestamp and
+        a one-line rationale, because tomorrow's day-shift lead reads that log
+        over coffee and expects to reconstruct your night decision by decision
+        without needing to wake anybody.
+        
+        The rota also keeps a small apparatus around the edges of the night that
+        is worth knowing about even though none of it changes page counts. There
+        is an automated status page that flips colors on its own whenever
+        customer-visible errors tick upward, and marketing sometimes asks for
+        the page's history after incidents even though it drives nothing. There
+        is a standing bridge line that stays open all night whether anyone uses
+        it or not, its dial-in pinned to the top of the incident channel. And
+        once a quarter the rota runs a game-day drill where a simulated alert
+        cascade lets new coordinators practice the ladder safely; the drill
+        logs are stored separately and never mix into production page counts.
+        None of that machinery sends a page tonight — the counts you report come
+        solely from your triage of the actual alerts against the handbook
+        rules.
+        
+        In the final hour before you close the log, the discipline that matters
+        most is re-verification. You re-read each alert's timeline against the
+        page you actually sent, not the one you remember sending, because memory
+        under sleep pressure invents comfortable summaries. You double-check that
+        every deferred alert carries a reason code — deferred-by-precedence is
+        the code tonight's backlog understands, and a deferred line without one
+        gets flagged in the morning review as an unexplained gap. You confirm the
+        escalation contacts you inherited at handoff are still correct, since a
+        page sent to a rotated-out phone is a page that never happened as far as
+        the handbook is concerned. Only when the log's story reads cleanly from
+        first alert to last do you draft the summary the day-shift lead will read
+        over coffee — the same summary whose counts you are about to report, and
+        the last thing standing between your night and the record.
+
+        Failed cells (id + your observed value, correct values withheld):
+        {{bookmarks.cell_feedback}}
+
+        Prior table:
+        {{bookmarks.table}}
+
+        METHOD: re-read the task rules above, then re-derive each failed
+        entity. Use these exact entity ids:
+
+        - pages_w: pages generated by alert W (SEV3 inside quiet window, deferred) [answer format: a whole number]
+        - pages_x: pages generated by alert X (SEV2 acked by primary, no escalation) [answer format: a whole number]
+        - pages_y: pages generated by alert Y (SEV1 unacked 10 min, backup escalated once) [answer format: a whole number]
+        - pages_z: pages generated by alert Z (SEV2 during quiet window still pages) [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 4 lines,
+        one per entity, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines.
+      model_overrides: { temperature: 0.0, max_tokens: 1600 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/table-feedback.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-01.yml"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$cell_feedback"
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-01.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s03_fix_2
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json fix_1 ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-01"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.fix_1.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage fix_1 --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-01"
+              working_dir: "."
+              fail_on_error: false
+
+    s03_fix_2:
+      generative_entity: "${models.m_heavy}"
+      prompt: |
+        ROLE: escalation solver. Two attempts wrong. Rebuild table from scratch.
+
+        Original task:
+                It is 6:47 in the morning, and you are the outgoing night-shift owner for the
+        payments platform, writing the handover note before you hand the pager to
+        the day crew at 7:00. The night was messier than usual, and the new paging
+        policy that took effect last week has its own opinions about who gets woken
+        up and when, so you want the handover to state exactly what the pager
+        actually did overnight, not what people assume it did.
+        
+        The paging policy, as ratified by the on-call working group, reads like
+        this. Every alert that fires is assigned a severity by the alerting rules:
+        SEV1 for customer-facing outages, SEV2 for degraded-but-functioning
+        systems, and SEV3 for informational noise that should be looked at during
+        business hours. Only alerts at SEV2 or higher generate pages; a SEV3 alert
+        never pages anyone, at any hour, under any circumstance. During the
+        designated quiet window, which runs from 02:00 to 06:00, SEV3 alerts are
+        additionally marked as deferred, meaning they are collected into the
+        morning review queue rather than acted upon immediately — although, as
+        stated, they would not have paged anyone anyway. SEV2 and SEV1 alerts are
+        emphatically NOT deferred during the quiet window; the quiet window mutes
+        informational noise only, never real incidents. When a SEV1 alert fires and
+        pages the primary on-call, the system waits ten minutes for an
+        acknowledgment; if the primary has not acknowledged within that window, the
+        page escalates to the backup on-call exactly once. There is no further
+        escalation tier after the backup. Each delivered page counts as one page,
+        so a SEV1 that goes unacknowledged by the primary and reaches the backup
+        has generated two pages in total for that single alert.
+        
+        Now, the night itself. Four alerts fired, in this order.
+        
+        The first alert, which the ticketing system labels alert W, arrived at
+        03:10. It was a SEV3: the log-compaction job on the reporting replica had
+        finished twelve minutes later than its usual slot, which is interesting to
+        exactly nobody at three in the morning. Under the policy, this alert
+        occurred inside the quiet window and carried a severity that never pages.
+        It therefore generated no pages whatsoever and was swept into the deferred
+        pile for the day team to glance at after standup.
+        
+        The second alert, alert X, arrived at 23:40, before the quiet window even
+        began. This one was a SEV2: the currency-exchange rate cache was serving
+        rates up to nine minutes stale, which means customers saw slightly old
+        prices but nothing was down. The pager fired a single page to you as
+        primary on-call. You were still awake, glanced at the dashboard, flushed
+        the cache, and acknowledged the page four minutes after it arrived. Because
+        you acknowledged well inside the ten-minute escalation window, and because
+        SEV2 alerts do not escalate on acknowledgment timing in any case — the
+        unacknowledged-escalation rule applies to SEV1 only — no backup was ever
+        contacted for alert X.
+        
+        The third alert, alert Y, is the one that ruined your sleep. It arrived at
+        01:20 as a SEV1: card authorizations in the EU region were failing outright
+        for about nineteen percent of attempts. The pager paged you as primary. You
+        slept through it. The system waited the full ten minutes, received no
+        acknowledgment from you, and escalated exactly once to the backup on-call,
+        who answered, acknowledged, and started the failover to the secondary
+        processor while you were still unconscious. By the time you woke at 01:52
+        the incident was mitigated, which is a sentence you never enjoy writing in
+        a handover. For counting purposes: alert Y generated a page to you and a
+        page to the backup, two pages total for that one alert.
+        
+        The fourth and final alert, alert Z, arrived at 04:50, inside the quiet
+        window. It was a SEV2: a batch reconciliation job had retried past its
+        budget and paused itself, leaving a work queue that would need draining in
+        the morning. The severity is the important part here — a colleague once
+        insisted that everything during quiet hours gets deferred, but the policy
+        defers SEV3 only, and a SEV2 alert pages regardless of the clock. So alert
+        Z paged you, the primary, once. You acknowledged it in six minutes from
+        your laptop without fully getting out of bed, noted the paused job, and
+        went back to sleep. No backup involvement, no escalation.
+        
+        Two more things for completeness, neither of which affects paging counts.
+        First, the facility's overnight security desk runs its own heartbeat
+        monitoring and calls a building manager if the office loses power; you do
+        not manage the security desk and its call is not a page under your policy.
+        Second, a scheduled maintenance notification for the CDN was posted at
+        05:15 announcing a harmless cache purge; maintenance notices are not alerts
+        with severities, never enter the paging system, and exist in this note only
+        because the day team will see it in the inbox and wonder.
+        
+        As you close the shift, you want the handover to carry two numbers the day
+        lead asked for: how many pages the paging system actually delivered over
+        the whole night across all four alerts, and how many alerts ended up
+        deferred into the morning review queue. Count a deferred alert as one that
+        generated zero pages and was marked deferred under the quiet-window rule.
+        Report per-alert page counts as well: for each of alert W, alert X, alert
+        Y, and alert Z, the number of pages that alert generated. Then combine
+        them.
+        
+        The escalation rota has not always run this smoothly, and the current
+        handbook is a direct scar tissue from the winter outage two years back.
+        On that night a green coordinator, faced with three simultaneous alerts,
+        tried to page every on-call at once on the theory that more eyes meant
+        faster resolution. The result was nine engineers half-awake stumbling
+        over each other in the same incident channel, two of them starting
+        duplicate mitigations that conflicted, and a bridge call that took twenty
+        minutes just to sort out who was actually driving. The postmortem was
+        brutal in its simplicity — parallel noise had cost more time than the
+        original fault — and out of it came the precedence ladder now printed on
+        the first page of the rota binder. Severity gates came from the same
+        postmortem's second finding, that low-severity pages had trained everyone
+        to ignore their phones, so only true customer-facing fires earn the
+        after-hours buzz tonight.
+        
+        Your own evening began at the handoff meeting, where the outgoing
+        coordinator walked you through the board state channel by channel, the
+        way every shift change runs. You countersigned the log, checked that the
+        paging gateway had credited your phone, and accepted the board. Since
+        then you have been triaging as the alerts arrived, applying the ladder
+        mechanically — customer-facing before internal, higher severity before
+        lower, and within the same tier the one that woke people first. Each
+        decision you made was noted in the coordination log with a timestamp and
+        a one-line rationale, because tomorrow's day-shift lead reads that log
+        over coffee and expects to reconstruct your night decision by decision
+        without needing to wake anybody.
+        
+        The rota also keeps a small apparatus around the edges of the night that
+        is worth knowing about even though none of it changes page counts. There
+        is an automated status page that flips colors on its own whenever
+        customer-visible errors tick upward, and marketing sometimes asks for
+        the page's history after incidents even though it drives nothing. There
+        is a standing bridge line that stays open all night whether anyone uses
+        it or not, its dial-in pinned to the top of the incident channel. And
+        once a quarter the rota runs a game-day drill where a simulated alert
+        cascade lets new coordinators practice the ladder safely; the drill
+        logs are stored separately and never mix into production page counts.
+        None of that machinery sends a page tonight — the counts you report come
+        solely from your triage of the actual alerts against the handbook
+        rules.
+        
+        In the final hour before you close the log, the discipline that matters
+        most is re-verification. You re-read each alert's timeline against the
+        page you actually sent, not the one you remember sending, because memory
+        under sleep pressure invents comfortable summaries. You double-check that
+        every deferred alert carries a reason code — deferred-by-precedence is
+        the code tonight's backlog understands, and a deferred line without one
+        gets flagged in the morning review as an unexplained gap. You confirm the
+        escalation contacts you inherited at handoff are still correct, since a
+        page sent to a rotated-out phone is a page that never happened as far as
+        the handbook is concerned. Only when the log's story reads cleanly from
+        first alert to last do you draft the summary the day-shift lead will read
+        over coffee — the same summary whose counts you are about to report, and
+        the last thing standing between your night and the record.
+
+        Failed cells (id + observed, withheld correct):
+        {{bookmarks.cell_feedback}}
+
+        METHOD: discard prior attempts. Re-derive EVERY entity answer from
+        the rules. Use these exact entity ids:
+
+        - pages_w: pages generated by alert W (SEV3 inside quiet window, deferred) [answer format: a whole number]
+        - pages_x: pages generated by alert X (SEV2 acked by primary, no escalation) [answer format: a whole number]
+        - pages_y: pages generated by alert Y (SEV1 unacked 10 min, backup escalated once) [answer format: a whole number]
+        - pages_z: pages generated by alert Z (SEV2 during quiet window still pages) [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 4 lines,
+        one per entity, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines. No prose summaries.
+      model_overrides: { temperature: 0.0, max_tokens: 1600 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/table-feedback.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-01.yml"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$cell_feedback"
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-01.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json fix_2 ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-01"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.fix_2.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage fix_2 --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-01"
+              working_dir: "."
+              fail_on_error: false
+
+    s04_aggregate:
+      generative_entity: "${models.m_light}"
+      prompt: "deterministic-aggregate-noop"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/aggregate.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-01.yml --table-result ./docs/benchmarks/outputs/output/ha-table-result.json --out ./docs/benchmarks/outputs/output/ha-final.json"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-deterministic.py --artifact ./docs/benchmarks/outputs/output/ha-final.json --criteria /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-01.yml --out ./docs/benchmarks/outputs/output/ha-final-check.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s05_judge
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-final-check.json final ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-01"
+              working_dir: "."
+              fail_on_error: false
+          - skip_step: true
+
+    s05_judge:
+      generative_entity: "${models.m_judge}"
+      prompt: |
+        ROLE: blind auditor. See only task + result. No author knowledge.
+
+        Task objective: Apply severity and quiet-window paging policy to count pages and deferrals.
+        Result: {{bookmarks.final_json}}
+
+        Answer EXACTLY 6 lines, nothing else:
+        KEYS: yes or no
+        VALUES: yes or no
+        FORMAT: yes or no
+        VERDICT: PASS or FAIL
+        REASON: one sentence
+        SCORE: 1-10
+
+        VERDICT must be PASS only if all three of KEYS, VALUES, FORMAT are yes.
+      model_overrides: { temperature: 0.0, max_tokens: 160 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/output/ha-final.json"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$final_json"
+        after_step_succeeds:
+          - save_to:
+              - "$verdict"
+              - "./docs/benchmarks/outputs/output/ha-verdict.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-judge.py ./docs/benchmarks/outputs/output/ha-verdict.txt ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-01"
+              working_dir: "."
+              fail_on_error: false
+
+    s06_end_fail:
+      generative_entity: "${models.m_light}"
+      prompt: "FAIL"
+      model_overrides: { temperature: 0.0, max_tokens: 8 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/failflag.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --final-check ./docs/benchmarks/outputs/output/ha-final-check.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s07_fail_trace
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s08_audit
+          - skip_step: true
+
+    s07_fail_trace:
+      generative_entity: "${models.m_light}"
+      prompt: "trace-only"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl end_fail fail case=hb-01"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s08_audit
+
+    s08_audit:
+      generative_entity: "${models.m_light}"
+      prompt: "leak-audit-noop"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/leak-audit.py --run-dir ./docs/benchmarks/outputs/output --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-01.yml"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s09_audit_pass
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s10_audit_leak
+          - skip_step: true
+
+    s09_audit_pass:
+      generative_entity: "${models.m_light}"
+      prompt: "audit-pass-trace"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl audit pass case=hb-01"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s_end
+
+    s10_audit_leak:
+      generative_entity: "${models.m_light}"
+      prompt: "audit-leak-trace"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl audit fail leak=true case=hb-01"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s_end
+
+    s_end:
+      generative_entity: "${models.m_light}"
+      prompt: "term"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - skip_step: true

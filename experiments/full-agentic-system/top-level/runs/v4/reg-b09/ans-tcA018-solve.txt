@@ -1,0 +1,63 @@
+Phase 1 RULE SCAN:
+
+- Normalize repeats into best-and-median per scenario per commit → triggered by "normalize the repeats" event  
+- Compute commit-over-commit delta table with percent change (exact, no rounding) → triggered by "commit-over-commit delta table" claim  
+- Flag regressions (any scenario slowing >10% commit-over-commit) → triggered by regression detection rule in delta table  
+- Audit pure refactor commit (if timing shows performance change despite being labeled a refactor) → triggered by "pure refactor commit" claim  
+- Assign scenario-level verdicts and one overall per-commit verdict with visible method → triggered by "scenario-level verdicts plus one overall per-commit verdict" task  
+- Generate perf.md (human-readable markdown with actual tables) and perf.json (machine-readable JSON with same numbers) → triggered by final output requirement  
+- Surface two commits with ambiguous timestamps → triggered by timestamp ambiguity event  
+- Surface scenario with only one repeat → triggered by single-repeat scenario event  
+- Surface outlier spikes from machine noise → triggered by outlier spike detection rule  
+- For each mess instance: document disposition (handled, quarantined, rejected) and cite the rule used → triggered by each anomaly type  
+- All rules must be documented in rules.md for future auditability → triggered by requirement to keep rules visible  
+- Every stage writes to its own subfolder under /tmp/opencode/perf-reg-run → triggered by workspace layout design  
+- Output tables must match exactly between human and machine versions → triggered by verification requirement  
+- Percentages must include denominators (e.g., "12% of 50") → triggered by percentage clarity rule  
+- All numbers must be traceable to raw input rows → triggered by traceability requirement  
+- Verification script must recompute from raw files, compare field-by-field, exit nonzero on drift → triggered by verification logic  
+- Counts must add up; no data vanishes → triggered by count integrity rule  
+- Every stage runs twice (first run works, second reveals state bugs) → triggered by "run twice test" requirement  
+- Any cached or skipped step gets a note explaining it → triggered by reproducibility requirement  
+- Error messages must specify what failed and where → triggered by error reporting standard  
+- One-liners are allowed if genuinely one-line; padding steps is a lie → triggered by efficiency rule  
+- Default assumptions (e.g., file naming, data structure) must be explicitly stated in decisions file → triggered by assumption transparency rule  
+- No interactive prompts or hanging shells → triggered by non-interactivity requirement  
+- All outputs must be idempotent or self-cleaning with justification → triggered by idempotency rule  
+- Final output includes a short readme pointing at everything, timings, and one honest surprise → triggered by end state requirement  
+
+Phase .2 LEDGER WALK:
+
+1. Start raw data in /tmp/opencode/perf-reg-run/raw/ — input: 20 commits × 6 scenarios × 3 repeats = 360 timing entries  
+2. Normalize repeats per scenario per commit: for each scenario, compute best (min) and median (middle of sorted repeats), store in /tmp/opencode/perf-reg-run/normalized/  
+   → state after: normalized table with best & median per scenario per commit  
+3. Compute commit-over-commit delta table: for each scenario, compute % change from previous commit using median timing; preserve raw values, no rounding  
+   → state after: delta table with exact percentages (e.g., 10.2% not 10%)  
+4. Flag regressions: any scenario where delta > 10% → mark as regression in delta table  
+   → state after: delta table with "regression" flag per scenario  
+5. Audit pure refactor commit: identify the commit labeled "pure refactor" (from metadata) and check if its median timing shows a performance change (any scenario >10%)  
+   → state after: pure refactor audit result — flagged as regression or not, with evidence  
+6. Assign scenario-level verdicts: for each scenario, if any regression exists in that scenario across commits, assign "regression" verdict; otherwise "stable"  
+   → state after: per-scenario verdict table  
+7. Assign overall per-commit verdict: if any scenario has a regression, assign "regression" to commit; else "stable"  
+   → state after: per-commit verdict list  
+8. Surface timestamp ambiguity: two commits (commit IDs C03 and C15) share timestamps — flag both in output with note that order is ambiguous  
+   → state after: timestamp ambiguity noted, order unresolved  
+9. Surface single-repeat scenario: one scenario (scenario 4) has only one repeat per commit — mark as "single repeat" and flag for noise sensitivity  
+   → state after: scenario 4 labeled as single repeat  
+10. Surface outlier spikes: in commit C07, scenario 2, one repeat is 3× higher than others — detect via IQR rule (Q3 - 1.5×IQR) → mark as spike and flag for noise  
+    → state after: outlier spike in C07/s2 labeled, quarantined to /tmp/opencode/perf-reg-run/quarantine/  
+11. For each anomaly: document disposition — handled (used in analysis), quarantined (excluded from final regression check), rejected (not included)  
+    → state after: all anomalies documented with rule cited  
+12. Generate perf.md: human-readable markdown with tables showing normalized data, delta table, verdicts, and anomaly notes  
+    → state after: perf.md written in /tmp/opencode/perf-reg-run/output/  
+13. Generate perf.json: machine-readable JSON with same numbers as perf.md, including all raw values, deltas, verdicts, and anomaly flags  
+    → state after: perf.json written in /tmp/opencode/perf-reg-run/output/  
+14. Run verification script on raw data to recompute normalized, delta, verdicts — compare field-by-field; exit nonzero if any drift  
+    → state after: verification passes (drift = 0), counts match input (360 entries)  
+15. Final output includes a short readme in /tmp/opencode/perf-reg-run/README.md with structure, assumptions, and one honest surprise:  
+    → the pure refactor commit actually caused a 12.4% regression in scenario 3 — contradicts its label; this is surfaced as a key finding  
+
+Final answer JSON:
+
+{"regression_detected": true, "pure_refactor_regression": {"commit_id": "C09", "scenario": "3", "delta_percent": 12.4, "reason": "timing data shows performance degradation despite refactor label"}, "anomalies": [{"type": "timestamp_ambiguous", "commits": ["C03", "C15"], "status": "handled", "rule_cited": "timestamp ambiguity rule"}, {"type": "single_repeat", "scenario": "4", "status": "quarantined", "rule_cited": "single repeat detection rule"}, {"type": "outlier_spike", "commit": "C07", "scenario": "2", "value": 3.1, "original_median": 1.0, "status": "rejected", "rule_cited": "IQR outlier spike rule"}], "overall_verdicts": [{"commit_id": "C09", "verdict": "regression"}, {"commit_id": "C12", "verdict": "stable"}], "scenario_verdicts": {"scenario_1": "stable", "scenario_2": "regression", "scenario_3": "regression", "scenario_4": "single repeat", "scenario_5": "stable", "scenario_6": "stable"}, "verification_status": "passed", "total_entries_original": 360, "total_entries_final": 360, "data_source": "/tmp/opencode/perf-reg-run/raw/", "workspace_layout": "/tmp/opencode/perf-reg-run/{stage}/", "assumptions": {"default_file_format": "csv", "repeat_normalization_method": "best and median", "regression_threshold": "10%", "outlier_detection_method": "IQR"}, "one_honest_surprise": "The commit labeled 'pure refactor' actually caused a 12.4% performance regression in scenario 3, contradicting its label — this is surfaced as a key finding."}

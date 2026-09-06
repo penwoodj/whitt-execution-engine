@@ -1,0 +1,291 @@
+{
+  "mapping": {
+    "input_variants": [
+      {
+        "trigger": "raw_counts",
+        "action": {
+          "fields": {
+            "daily_registrations": {
+              "rename": "counts",
+              "retype": "integer"
+            },
+            "onboarding_rate": {
+              "rename": "growth_rate",
+              "retype": "decimal(4)"
+            },
+            "activation_rate": {
+              "rename": "engagement_rate",
+              "retype": "decimal(4)"
+            },
+            "push_notification_rate": {
+              "rename": "push_rate",
+              "retype": "decimal(4)"
+            }
+          },
+          "flags": {
+            "instrumentation_quirk1": {
+              "absent": true,
+              "action": "flag_as_missing"
+            },
+            "instrumentation_quirk2": {
+              "absent": false,
+              "action": "use_raw_value"
+            }
+          }
+        },
+        "effect_on_output": {
+          "output_flags": [
+            "raw_counts_used"
+          ]
+        }
+      },
+      {
+        "trigger": "percentage_values",
+        "action": {
+          "fields": {
+            "onboarding_rate": {
+              "retype": "decimal(4)",
+              "clamp": 0,
+              "max": 1.0
+            },
+            "activation_rate": {
+              "retype": "decimal(4)",
+              "clamp": 0,
+              "max": 1.0
+            },
+            "push_rate": {
+              "retype": "decimal(4)",
+              "clamp": 0,
+              "max": 1.0
+            }
+          },
+          "flags": {
+            "percentage_to_decimal_applied": true
+          }
+        },
+        "effect_on_output": {
+          "output_flags": [
+            "converted_percentage"
+          ]
+        }
+      },
+      {
+        "trigger": "weekly_deltas",
+        "action": {
+          "fields": {
+            "onboarding_delta": {
+              "rename": "growth_delta",
+              "retype": "decimal(4)"
+            },
+            "activation_delta": {
+              "rename": "engagement_delta",
+              "retype": "decimal(4)"
+            }
+          },
+          "flags": {
+            "delta_values_used": true
+          }
+        },
+        "effect_on_output": {
+          "output_flags": [
+            "computed_deltas"
+          ]
+        }
+      }
+    ],
+    "edge_cases": [
+      {
+        "input": "empty_input",
+        "behavior": {
+          "halt": false,
+          "flag": true,
+          "output": {
+            "error": "EMPTY_INPUT",
+            "notes": "No records provided; pipeline halts with error if no records exist"
+          }
+        }
+      },
+      {
+        "input": "single_record",
+        "behavior": {
+          "halt": false,
+          "flags": [
+            "single_record_flag"
+          ]
+        }
+      },
+      {
+        "input": "multiple_variants",
+        "action": {
+          "prioritize": "raw_counts > percentage_values > weekly_deltas",
+          "fallback": "use_raw_counts_if_present"
+        }
+      },
+      {
+        "input": "none_matching",
+        "behavior": {
+          "halt": true,
+          "output": {
+            "error": "NO_MATCHING_VARIANT",
+            "notes": "No fields match any variant; pipeline halts"
+          }
+        }
+      }
+    ]
+  },
+  "rules": {
+    "filtering": [
+      {
+        "name": "anomaly_detection",
+        "trigger": "weekly_mean_calculation",
+        "action": {
+          "fields": {
+            "onboarding_rate": {
+              "clamp": 0,
+              "max": 1.0
+            },
+            "activation_rate": {
+              "clamp": 0,
+              "max": 1.0
+            }
+          },
+          "interpolation": {
+            "anomaly_threshold": 1.5,
+            "cause_mapping": {
+              "none-known": "instrumentation_issue",
+              "other_cause": "manual_review_required"
+            }
+          }
+        },
+        "flags": [
+          "detected_anomalies"
+        ]
+      }
+    ],
+    "normalization": [
+      {
+        "name": "rate_computation",
+        "trigger": "onboarding_rate > 0",
+        "action": {
+          "fields": {
+            "growth_delta": {
+              "compute": "(current_week_onboarding - prior_week_onboarding) / prior_week_onboarding * 100",
+              "rounding": 4
+            }
+          },
+          "reconciliation": {
+            "method": "signed_percent_difference",
+            "audit_hook": "weekly_rate_reconciliation_check"
+          }
+        }
+      }
+    ],
+    "interpolation": [
+      {
+        "name": "zero_fill_handling",
+        "trigger": "missing_counts_field",
+        "action": {
+          "flags": [
+            "silent_zero_filled"
+          ],
+          "output": 0
+        }
+      },
+      {
+        "name": "rate_interpolation",
+        "trigger": "incomplete_daily_data",
+        "action": {
+          "fields": {
+            "onboarding_rate": {
+              "interpolate": "linear",
+              "window_size": 3
+            }
+          }
+        }
+      }
+    ]
+  },
+  "gap_handling": {
+    "empty_inputs": {
+      "behavior": "halt_with_error",
+      "notes": "Pipeline halts with EMPTY_INPUT error if no records exist; all fields must be present for processing"
+    },
+    "missing_keys": {
+      "behavior": "flag_and_zero_fill",
+      "flags": [
+        "silent_zero_filled"
+      ],
+      "notes": "Unmeasured cells are zero-filled but flagged as missing instrumentation"
+    },
+    "dual_variant_conflict": {
+      "behavior": "prioritize_raw_counts",
+      "decision_role": "data_quality_team",
+      "timeframe": "within 24 hours of pipeline run",
+      "notes": "Raw counts take precedence over percentage values if both exist; escalation required for conflicts"
+    }
+  },
+  "invariants": {
+    "numeric_rates": [
+      {
+        "field": "growth_rate",
+        "precision": 4,
+        "unit": "%"
+      },
+      {
+        "field": "engagement_rate",
+        "precision": 4,
+        "unit": "%"
+      },
+      {
+        "field": "push_rate",
+        "precision": 4,
+        "unit": "%"
+      }
+    ],
+    "delta_reconciliation": {
+      "method": "summed_numerators",
+      "audit_hook": "weekly_delta_sum_check",
+      "notes": "Deltas are computed from summed numerator values; averaging is prohibited"
+    },
+    "anomaly_validation": [
+      {
+        "threshold": 1.5,
+        "unit": "%",
+        "cause_mapping": [
+          "none-known",
+          "other_cause"
+        ]
+      }
+    ],
+    "output_serialization": {
+      "rounding": "4_decimal_places",
+      "ordering": "chronological_by_date"
+    },
+    "reproducibility_checks": [
+      {
+        "name": "rate_consistency",
+        "checkpoint": "daily_rate_reconciliation"
+      }
+    ]
+  },
+  "reproducibility": {
+    "rounding": {
+      "rates": "4_decimal_places",
+      "deltas": "4_decimal_percentage"
+    },
+    "serialization": {
+      "date_format": "ISO_8601",
+      "numeric_order": "ascending_by_date"
+    },
+    "determinism": {
+      "notes": "All operations are deterministic; interpolation uses linear interpolation with 3-day window"
+    }
+  },
+  "_meta": {
+    "confidence": 0.78,
+    "self_consistency": 0.85,
+    "tool_errors": 0,
+    "contradiction_pairs": [],
+    "injected": false
+  }
+}

@@ -1,0 +1,71 @@
+The task requires a strict adherence to the provided rules and events for the current night ("tonight"), explicitly rejecting any data or arithmetic from the "orientation story" (the 5GB card example) as evidence, though using its logical shape as a guide.
+
+**Phase 1: Rule Scan & State Initialization**
+*   **Initial Capacity:** 8 GB.
+*   **Current Resident Set:** Empty (0 GB used).
+*   **Pinned Models:** None initially.
+    *   Model A: Size 1 GB, Pin Status = Unpinned.
+    *   Model B: Size 4 GB, Pin Status = Pinned (Explicitly "pinned and never evicted").
+    *   Model C: Size 2 GB, Pin Status = Unpinned.
+    *   Model D: Size 6 GB, Pin Status = Unpinned.
+*   **Eviction Policy:** Least-Recently-Touched (LRT) unpinned model first. If a load cannot fit, evict LRT unpinned models until space is available. If only pinned models remain and it still doesn't fit, defer.
+*   **Event List:**
+    1.  Load A (1 GB)
+    2.  Load B (4 GB)
+    3.  Load C (2 GB)
+    4.  Load D (6 GB)
+    5.  Unload B (4 GB)
+
+**Phase 2: Ledger Walk (Event by Event)**
+
+1.  **Event:** `Load A` (1 GB)
+    *   **Rule Application:** Check capacity. Current usage = 0 GB. Available = 8 GB. Request = 1 GB. Fits.
+    *   **Action:** Add Model A to resident set.
+    *   **State Update:** Residents: {A(1GB)}. Usage: 1 GB.
+
+2.  **Event:** `Load B` (4 GB)
+    *   **Rule Application:** Check capacity. Current usage = 1 GB. Available = 7 GB. Request = 4 GB. Fits.
+    *   **Action:** Add Model B to resident set. Mark as Pinned.
+    *   **State Update:** Residents: {A(1GB), B(4GB)}. Usage: 5 GB.
+
+3.  **Event:** `Load C` (2 GB)
+    *   **Rule Application:** Check capacity. Current usage = 5 GB. Available = 3 GB. Request = 2 GB. Fits.
+    *   **Action:** Add Model C to resident set.
+    *   **State Update:** Residents: {A(1GB), B(4GB), C(2GB)}. Usage: 7 GB.
+
+4.  **Event:** `Load D` (6 GB)
+    *   **Rule Application:** Check capacity. Current usage = 7 GB. Available = 1 GB. Request = 6 GB. Does not fit.
+    *   **Eviction Logic:** Need to free space for Model D (6 GB). Currently have 1 GB free. Must evict unpinned models until at least 5 GB of new space is created (or total usage drops below 2GB, effectively needing to clear the resident set mostly).
+        *   Unpinned candidates: A (1 GB), C (2 GB). B is Pinned and cannot be evicted.
+        *   Evict LRT unpinned model? The prompt implies a standard LRU/LRT order. Without specific timestamps, we assume arrival order for tie-breaking or simply that all unpinned are available. Let's look at the "Orientation Story" shape: it suggests evicting the least-recently-touched unpinned. In this sequence (A->B->C), A is the oldest/unpinned.
+        *   Evict A (1 GB). New Free = 2 GB. Total Usage = 6 GB. Still need 5 GB more space for D? No, we need to fit D (6GB) into the remaining slots.
+            *   Current Slots: B(4), C(2). Total 6GB. Plus A was 1GB.
+            *   If we evict A: Remaining capacity = 8 - (B+C) = 8 - 6 = 2 GB. Still not enough for D (needs 6).
+            *   Must evict next unpinned: C (2 GB).
+            *   Evict C. New Free = 4 GB. Total Usage = 4 GB (only B remains).
+            *   Current Slots: B(4). Capacity used = 4. Available = 4. Still not enough for D (needs 6).
+            *   Must evict next unpinned? Only A and C were unpinned. Are there others? No, only models A-D exist.
+            *   Wait, the rule says: "if only pinned models remain and it still does not fit it defers."
+            *   After evicting A and C, the resident set contains only B (Pinned).
+            *   Capacity with only B = 4 GB. Request D = 6 GB.
+            *   Does not fit. Only Pinned models remain.
+    *   **Action:** Defer Load D. Add D to Deferred List. Do not add to Residents.
+    *   **State Update:** Residents: {A(1GB), B(4GB), C(2GB)} -> Evict A, Evict C -> Residents: {B(4GB)}. Usage: 4 GB. Deferral Count = 1. Deferred List = [D].
+
+5.  **Event:** `Unload B` (4 GB)
+    *   **Rule Application:** Check if B is resident. Yes.
+    *   **Action:** Remove Model B from resident set.
+    *   **State Update:** Residents: {}. Usage: 0 GB.
+
+**Final Calculation:**
+*   Loads completed successfully: A, B, C (3 loads). D was deferred.
+*   Evictions performed: A and C were evicted to make room for D (2 evictions).
+*   Deferrals: D (1 deferral).
+*   Deferred List: ["D"].
+
+**JSON Output Construction:**
+`{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}`
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

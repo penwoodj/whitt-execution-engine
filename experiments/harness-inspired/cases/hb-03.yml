@@ -1,0 +1,336 @@
+case_id: hb-03
+category: natural-ops
+difficulty: light
+hops: 3
+archetype: incident-dedupe
+provenance: cache source fired 2 alerts 2 min apart (00.04, 00.06) both sev2 -> within 5-min window -> 1 incident, severity max = 2; db source fired 3 alerts (00.01 sev1, 00.20 sev3, 00.23 sev2) -> 00.01
+  is 19 min from 00.20 so separate incident sev1; 00.20 and 00.23 are 3 min apart -> merged incident, severity max = 3; so db -> 2 incidents (sev1 + sev3); edge fired 1 alert sev1 -> 1 incident sev1; totals.
+  cache 1 + db 2 + edge 1 = 4 incidents; sev3 incidents = 1, sev2 = 1, sev1 = 2
+prompt: 'You are the incident coordinator who closed out last night''s shift at the
+
+  monitoring desk, and the morning reliability review starts in twenty
+
+  minutes. Your job before that meeting is to convert the raw alert firehose
+
+  from the night into the official incident count, because the raw number of
+
+  alerts — twenty-one pages of scrolling noise in the console — is not the
+
+  number anyone cares about. Incidents are what the review tracks, and
+
+  incidents are built from alerts by a deduplication rule that the team
+
+  agreed on after the great alert-storm of last spring.
+
+
+  The deduplication rule works like this. Alerts arrive from monitored
+
+  sources, and each alert carries the source it came from, a timestamp, and a
+
+  severity. Two alerts from the SAME source that fire within five minutes of
+
+  each other — meaning the gap between their timestamps is five minutes or
+
+  less — belong to the same incident; they are one problem flaring, not two
+
+  problems. Chains merge transitively: if alert one and alert two are within
+
+  five minutes, and alert two and alert three are within five minutes, then
+
+  all three are one incident even if alert one and alert three are more than
+
+  five minutes apart. Alerts from DIFFERENT sources never merge with each
+
+  other, no matter how close in time they fire or how similar their symptoms
+
+  look — a cache problem and a database problem are different incidents even
+
+  if they scream simultaneously. Once a group of alerts has been merged into
+
+  an incident, the incident''s severity is the maximum severity among its
+
+  member alerts. An alert that fired with no same-source neighbor within five
+
+  minutes in either direction is simply an incident of one, carrying its own
+
+  severity.
+
+
+  Last night, exactly three sources produced alerts worth counting, and here
+
+  is the complete timeline, reconstructed from the console export with the
+
+  noise filters already applied.
+
+
+  The cache service was first. At 00:04 the shared session cache tripped its
+
+  eviction-rate monitor at SEV2. At 00:06, two minutes later, the same cache
+
+  service tripped the same monitor again at SEV2 when the rate briefly
+
+  climbed higher. Those two alerts are from one source with a two-minute gap,
+
+  comfortably inside the five-minute window, so they merge into a single
+
+  incident, and the incident''s severity is the max of the two — both were
+
+  SEV2, so the cache incident is a SEV2.
+
+
+  The database was louder. At 00:01 the replication lag monitor on the
+
+  primary database fired at SEV1, because for eleven glorious minutes the
+
+  replicas were falling behind during a bulk import. That alert recovered on
+
+  its own and the monitor went quiet. Then at 00:20 the same database''s
+
+  connection-pool saturation monitor fired at SEV3 — connections piled up
+
+  after a misconfigured client started leaking them. At 00:23, three minutes
+
+  later, the pool was still saturated and the monitor re-fired at SEV2 as
+
+  the situation degraded. Working the rule: the 00:01 alert is nineteen
+
+  minutes away from the 00:20 alert, far outside five minutes, so it can
+
+  never merge with anything — it stands alone as its own incident, a SEV1
+
+  incident by its lone severity. The 00:20 and 00:23 alerts are three minutes
+
+  apart, same source, inside the window, so they merge into one incident,
+
+  and the severity of that incident is the maximum of SEV3 and SEV2, which
+
+  is SEV3. The database therefore contributed two separate incidents
+
+  overnight: one SEV1 and one SEV3.
+
+
+  The edge proxy fired exactly once: at 02:47 its certificate-expiry warning
+
+  triggered at SEV1 because someone had let a staging certificate reach its
+
+  final forty-eight hours. No other edge alert occurred all night, so this
+
+  lone alert is an incident of one at SEV1.
+
+
+  For completeness, three things that must NOT be counted, each of which
+
+  fooled a different intern at one point. First, the synthetic canary suite
+
+  runs checks every minute and logs the results, but canary checks are not
+
+  alerts — they are measurements, and you do not manage the canary suite
+
+  anyway. Second, a scheduled maintenance window opened at 03:00 for the
+
+  search cluster, which suppressed that cluster''s alerts entirely for an
+
+  hour; nothing from search appears in the export, and suppressed alerts are
+
+  not incidents. Third, an upstream status page for a third-party email
+
+  provider reported degradation overnight; that is their incident, on their
+
+  console, and it never entered your monitoring at all.
+
+
+  The review wants the official tallies: how many incidents came out of the
+
+  cache source, the database source, and the edge source respectively, and
+
+  then the totals — how many incidents at SEV1, how many at SEV2, how many
+
+  at SEV3, and the overall incident count.
+
+
+  The deduplication discipline this rotation follows was paid for in an
+
+  uncomfortable way. Fourteen months ago the fledgling pipeline saw a flapping
+
+  health check generate eleven distinct incidents in forty minutes, and the
+
+  on-call of that night dutifully treated each as its own fire — eleven
+
+  channels, eleven timelines, eleven postmortem threads that all turned out
+
+  to describe one degraded network switch. The retrospective counted the
+
+  waste in engineer-hours and in trust, because leadership reading the
+
+  incident report initially believed the platform had suffered eleven
+
+  separate failures in under an hour. Out of that embarrassment came the
+
+  three-source rule now in force — each source gets exactly one chance to
+
+  speak per event, and the pipeline trusts the noisiest source, the live
+
+  alert stream, above the quieter ones.
+
+
+  Your shift begins the way every shift begins here, with a handoff read of
+
+  the open-incident board and a check that the correlation engine finished
+
+  its overnight grouping run. The engine''s output is a suggestion, never a
+
+  verdict — it clusters raw events by service and time window and hands you
+
+  the clusters as a starting draft. From there the work is judgment —
+
+  reading each cluster''s member events, deciding which represent the same
+
+  underlying fault, merging what belongs together, and splitting what the
+
+  engine glued too eagerly. Every merge and split writes an audit line, so
+
+  that the morning review can see not just what you concluded but how you
+
+  got there, one decision at a time.
+
+
+  The observability stack around this pipeline is busier than the pipeline
+
+  itself, and almost none of it touches incident counts. A capacity
+
+  forecasting job you do not manage ingests the same raw events to predict
+
+  next quarter''s hardware needs, and its reports circulate in a planning
+
+  channel. A vendor demo running in a sandbox tenant generates realistic-
+
+  looking alerts on a schedule, safely quarantined from production by a
+
+  filter that drops everything from that tenant. And the documentation bot
+
+  watches for recurring keywords across incidents to propose runbook
+
+  updates — a helpful spectator, but a spectator all the same, and its
+
+  annotations never create or merge incidents in the ledger you are
+
+  closing tonight.
+
+
+  In the final hour before the rotation''s ledger closes, the discipline
+
+  that matters most is re-verification of the merge trail. You re-read
+
+  each cluster you touched against the incident records it produced, not
+
+  the ones you remember producing, because memory under alert fatigue
+
+  conflates adjacent events into tidy stories. You double-check that every
+
+  merged cluster carries its justification line — same-service same-window
+
+  is the standing rationale, and a merge without one gets flagged by the
+
+  morning review as an unexplained consolidation. You confirm that the
+
+  severity assignments you inherited at handoff still match the impact
+
+  descriptions, since a severity copied forward from a stale read is a
+
+  severity the postmortem will distrust. Only when the ledger reads
+
+  cleanly from first event to last do you draft the handoff notes for the
+
+  next rotation — the same notes whose counts you are about to report,
+
+  and the last thing standing between your shift and the record.
+
+
+  The severity ladder itself has a history worth respecting as you assign
+
+  tonight''s levels. Severity one was once reserved for anything that woke
+
+  anyone up, which is how a cosmetic typo on an internal dashboard once
+
+  outranked a failing backup job in the quarterly report — the ladder has
+
+  since been anchored to customer impact and blast radius instead of
+
+  adrenaline. Severity two covers degraded-but-standing conditions, the
+
+  degradation visible without threatening collapse. Severity three is the
+
+  catch-all for everything that is wrong yet tolerable, the bucket most
+
+  prone to abuse and therefore the one the morning review audits most
+
+  closely. Tonight''s assignments follow the current definitions strictly,
+
+  and any instinct to bump a severity for visibility''s sake is one you
+
+  note in the margin and decline to act on.
+
+
+  A note on the edge event before you close the ledger, because edges are
+
+  where counting discipline is tested. The event that arrived with no
+
+  duplicates had a predecessor two rotations ago that also arrived alone,
+
+  and the morning review at the time debated whether a lone event
+
+  deserved its own incident or should wait a day in case company showed
+
+  up. The ruling then, which stands tonight, was that the pipeline speaks
+
+  when it speaks — an event with no duplicate signal from any source is
+
+  one incident, full stop, and the ledger does not hold seats open for
+
+  corroboration that may never come. That ruling cost a small argument
+
+  and settled a large principle, and it is the principle you applied
+
+  without ceremony when the lone event crossed your board earlier this
+
+  evening.
+
+
+  Output ONLY this JSON with
+
+  exactly these keys: {"cache_incidents": N, "db_incidents": N,
+
+  "edge_incidents": N, "sev1_total": N, "sev2_total": N, "sev3_total": N,
+
+  "incidents_total": N}.'
+objective: Group raw alerts into incidents via same-source five-minute deduplication and max severity.
+auxiliary: All facts needed are in the prompt itself.
+success_criteria:
+  deterministic_checks:
+    json_exact: '{"cache_incidents": 1, "db_incidents": 2, "edge_incidents": 1, "sev1_total": 2, "sev2_total": 1, "sev3_total": 1, "incidents_total": 4}'
+    forbidden_phrases:
+    - I cannot
+    - sorry
+v6:
+  entities:
+  - id: cache_incidents
+    question: incidents from cache source (2 alerts, 2 min apart, same source)
+    answer: 1
+  - id: db_incidents
+    question: 'incidents from db source (3 alerts: 00:01 isolated, 00:20+00:23 merged)'
+    answer: 2
+  - id: edge_incidents
+    question: The edge source fired exactly one alert with no duplicates — each source's events cluster into incidents per the 5-minute same-source window, and a lone alert stands as one incident; how many
+      incidents from the edge source?
+    answer: 1
+  - id: sev1_total
+    question: A merged incident carries the maximum severity of its members — count incidents whose final severity is SEV1 (the isolated db SEV1 alert and the lone edge SEV1); how many?
+    answer: 2
+  - id: sev2_total
+    question: Count incidents whose final severity is SEV2 (the cache pair, both SEV2, merged into one incident at max severity 2); how many?
+    answer: 1
+  - id: sev3_total
+    question: Count incidents whose final severity is SEV3 (the db 00:20 SEV3 merged with 00:23 SEV2 takes the max, which is 3); how many?
+    answer: 1
+  aggregate: '{"cache_incidents": a(cache_incidents), "db_incidents": a(db_incidents), "edge_incidents": a(edge_incidents), "sev1_total": a(sev1_total), "sev2_total": a(sev2_total), "sev3_total": a(sev3_total),
+    "incidents_total": a(cache_incidents) + a(db_incidents) + a(edge_incidents)}'

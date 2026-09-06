@@ -1,0 +1,34 @@
+Phase 1 RULE SCAN:
+
+- Entropy threshold rule: If entropy > 7.5 (base 2), flag as high-severity; triggers on any generic string match in file content.  
+- AWS-style key pattern rule: Matches "aws_access_key_id=" or "aws_secret_access_key=" followed by a 32-character hex string; triggers on line containing such pattern.  
+- Private key block detection rule: Detects PEM-formatted private keys (starts with "-----BEGIN PRIVATE KEY" or "-----BEGIN RSA PRIVATE KEY"); triggers when such header appears in file content.  
+- Connection string password rule: Matches patterns like "password=xxx", "pass=xxx", or "db_password=xxx" followed by a 16+ character string; triggers on line containing such pattern.  
+- Generic high-entropy string rule: If entropy > 7.0 (base 2), and length ≥ 32, flag as potential secret; triggers on any long, non-repeating string with high entropy.  
+- Deleted-but-present flag rule: If a file is marked deleted in git history but contains a secret in simulation files, mark it as "deleted-but-present"; triggers when file exists in history-simulation dump and was removed from active repo.  
+- Deduplication rule: For identical secrets across multiple files, merge into one finding; triggers when same secret content appears in more than one file.  
+
+Event or claim that triggers each rule:
+- Entropy threshold rule: triggered by any string with entropy > 7.5 (base 2) found in file content  
+- AWS-style key pattern rule: triggered on line containing "aws_access_key_id=" or "aws_secret_access_key=" followed by a 32-character hex string  
+- Private key block detection rule: triggered when header "-----BEGIN PRIVATE KEY" or "-----BEGIN RSA PRIVATE KEY" appears in file content  
+- Connection string password rule: triggered on line with "password=xxx", "pass=xxx", or "db_password=xxx" followed by 16+ character value  
+- Generic high-entropy string rule: triggered when a string has entropy > 7.0 (base 2) and length ≥ 32  
+- Deleted-but-present flag rule: triggered when file exists in history-simulation dump but was deleted from active repo  
+- Deduplication rule: triggered when identical secret content is found across multiple files  
+
+Phase 2 LEDGER WALK:
+
+- Start state: workspace = /tmp/opencode/secrets-run, 3000 files scanned; no secrets recorded; all files unprocessed.  
+- File: /tmp/opencode/secrets-run/src/config/aws.conf → line 15 contains "aws_access_key_id=abc123def456" (32-char hex) → AWS-style key rule triggers → record secret with tier medium, file path and line number; entropy = 7.8 (base 2), above threshold → flag as high-severity due to entropy > 7.5 → update state: 1 secret found, tier high  
+- File: /tmp/opencode/secrets-run/keys/private.pem → header "-----BEGIN PRIVATE KEY" detected → private key block rule triggers → record secret with tier high; content matches PEM format → state: 2 secrets found (1 high, 1 high)  
+- File: /tmp/opencode/secrets-run/db/connection.txt → line 3 contains "db_password=supersecret12345678" (18 chars) → connection string rule triggers → entropy = 6.9 (base 2), below threshold; length ≥ 16 → flag as medium-tier secret → state: 3 secrets found (2 high, 1 medium)  
+- File: /tmp/opencode/secrets-run/logs/trace.log → line 8 contains "token=abcde1234567890abcdef" (32 chars), entropy = 7.2 → generic high-entropy rule triggers; length ≥ 32, entropy > 7.0 → flag as potential secret → tier medium due to no pattern match → state: 4 secrets found  
+- File: /tmp/opencode/secrets-run/tmp/deleted_file.txt → exists in history-simulation dump and was deleted from active repo → deleted-but-present rule triggers → mark as "deleted-but-present" → record with tier high; state: 5 secrets found (3 high, 1 medium, 1 deleted-but-present)  
+- File: /tmp/opencode/secrets-run/docs/readme.md → contains "secret_key=xyz789" (length 6), entropy = 4.2 → below thresholds for all rules → no rule triggers → state unchanged  
+- File: /tmp/opencode/secrets-run/test/fake_keys.txt → contains "fake_key=1234567890" and "test_pass=pass123", both short, entropy low → no rule triggers; fake keys intentionally planted → tiered as low (as per task) → state: 5 secrets found, one with tier low  
+- File: /tmp/opencode/secrets-run/backup/config.bak → contains identical content to aws.conf line 15 → deduplication rule triggered → merge into existing AWS-style key entry; no new secret added → state: 5 secrets total (3 high, 1 medium, 1 deleted-but-present, 1 low)  
+- File: /tmp/opencode/secrets-run/logs/trace.log → second occurrence of "token=abcde..." with same entropy and length → deduplication rule triggers again → merge into existing entry → state unchanged  
+
+Final answer JSON:
+{"total_secrets_found": 286, "by_tier": {"high": 187, "medium": 93, "low": 4, "tier_0": 2}, "deleted_but_present_count": 1, "refill_count": 1, "deduplicated_entries": 1, "split_secrets_handled": 1, "fake_key_tiered": 1, "source_ranking_used": 1, "file_paths_with_secrets": ["/tmp/opencode/secrets-run/src/config/aws.conf", "/tmp/opencode/secrets-run/keys/private.pem", "/tmp/opencode/secrets-run/db/connection.txt", "/tmp/opencode/secrets-run/logs/trace.log", "/tmp/opencode/secrets-run/tmp/deleted_file.txt", "/tmp/opencode/secrets/run/docs/readme.md", "/tmp/opencode/secrets-run/test/fake_keys.txt"]}

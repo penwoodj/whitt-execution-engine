@@ -1,0 +1,144 @@
+```json
+{
+  "mapping": {
+    "input_variants": [
+      {
+        "name": "ClinicCalendarExport",
+        "fields": [
+          { "source": "clinic_id",   "target": "facility_id" },
+          { "source": "appointment_id", "target": "patient_encounter_id" },
+          { "source": "start_time",    "target": "scheduled_start", "type": "datetime" },
+          { "source": "end_time",      "target": "scheduled_end",   "type": "datetime" },
+          { "source": "conflict_flag", "target": "calendar_conflict", "clamp": true, "default": false },
+          { "source": "channel_type",  "target": "communication_channel", "enum": ["email", "sms", "phone"] }
+        ],
+        "renames": {
+          "start_time": "scheduled_start",
+          "end_time":   "scheduled_end"
+        },
+        "absences": ["priority_level", "notification_sent"]
+      },
+      {
+        "name": "PracticeManagementExport",
+        "fields": [
+          { "source": "patient_id",     "target": "patient_encounter_id" },
+          { "source": "double_booked",  "trigger": true, "action": "flag_as_conflict", "effect": ["invariants/conflict_flag"] }
+        ],
+        "branches": [
+          {
+            "condition": "double_booked === true",
+            "action": "mark as calendar_conflict=true",
+            "output_flags": ["invariants/conflict_flag"]
+          }
+        ]
+      },
+      {
+        "name": "TemplateFamilyMetadata",
+        "fields": [
+          { "source": "template_id",    "target": "message_template_id" },
+          { "source": "language_code",  "target": "locale" },
+          { "source": "max_retries",     "target": "retry_policy.max_attempts" }
+        ]
+      }
+    ],
+    "edge_cases": {
+      "empty_input": {
+        "action": "halt",
+        "output": null,
+        "flags": ["gap_handling/empty_input"]
+      },
+      "single_record": {
+        "action": "process as-is"
+      },
+      "multiple_variants": {
+        "action": "prioritize ClinicCalendarExport over PracticeManagementExport",
+        "fallback": "PracticeManagementExport if no conflict flag exists"
+      }
+    }
+  },
+
+  "rules": {
+    "filtering": [
+      { "name": "conflict_rate_validation", "trigger": "calendar_conflict_rate > 2.3%", "action": "flag_as_review" },
+      { "name": "channel_semantics",       "enum": ["email", "sms", "phone"], "default": "email" }
+    ],
+    "normalization": [
+      {
+        "name": "datetime_clamping",
+        "fields": ["scheduled_start", "scheduled_end"],
+        "clamp": { "min": "09:00:00", "max": "17:00:00" },
+        "rounding": "nearest_minute"
+      }
+    ],
+    "interpolation": [
+      {
+        "name": "conflict_flag_resolution",
+        "trigger": ["calendar_conflict", "double_booked"],
+        "action": "set conflict_flag=true if either exists",
+        "output_flags": ["invariants/conflict_flag"]
+      }
+    ]
+  },
+
+  "gap_handling": {
+    "unsupported_variants": [
+      { "name": "legacy_patient_export", "reason": "deprecated channel_type handling" },
+      { "name": "manual_entry_sheet",   "reason": "no structured time fields" }
+    ],
+    "empty_input": {
+      "action": "return empty array",
+      "flags": ["gap_handling/empty_input"]
+    },
+    "unclassified_record": {
+      "action": "halt with error: 'UNSUPPORTED_INPUT_TYPE'",
+      "diagnostic": "Raw input did not match any variant"
+    }
+  },
+
+  "invariants": [
+    {
+      "name": "conflict_flag_consistency",
+      "check": "All records must have conflict_flag=true if they originate from PracticeManagementExport",
+      "audit_hook": "Review tooling: 'conflict_flag_mismatch' check"
+    },
+    {
+      "name": "total_conflicts_reconciliation",
+      "basis": "2.3% of 4,100 = 94.86 ≈ 95 conflicts (rounded)",
+      "reconciliation": "Sum of flagged records must equal 95"
+    },
+    {
+      "name": "identifier_scrubbing",
+      "pattern": "[A-Za-z0-9]{8}-[A-Za-z0-9]{4}-[A-Za-z0-9]{12}",
+      "audit_hook": "Pattern validation: 'scrubbed_id_check' in scrubber pipeline"
+    }
+  ],
+
+  "reproducibility": {
+    "ordering": [
+      { "name": "time_stable",   "sort_by": "scheduled_start" },
+      { "name": "facility_stable", "sort_by": "facility_id" }
+    ],
+    "rounding": [
+      { "name": "datetime_precision", "units": "minutes" },
+      { "name": "numeric_precision",  "digits": 2 }
+    ],
+    "serialization": [
+      { "name": "date_format",   "format": "YYYY-MM-DDTHH:mm:ssZ" },
+      { "name": "string_encoding", "charset": "UTF-8" }
+    ]
+  },
+
+  "notes": {
+    "evidence_basis": {
+      "conflict_rate": "2.3% of 4,100 = 95 conflicts (rounded)",
+      "double_booked_defect": "Clinic X's practice-management export explicitly marked as double-booked"
+    },
+    "assumptions": [
+      { "name": "template_families", "count": 6, "basis": "Supplied material" }
+    ],
+    "discovery_items": {
+      "channel_semantics": "3 channel types with different failure semantics (email: retry=3, SMS: retry=1, phone: retry=0)"
+    }
+  }
+}
+```

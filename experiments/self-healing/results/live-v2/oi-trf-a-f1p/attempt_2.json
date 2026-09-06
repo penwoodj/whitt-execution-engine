@@ -1,0 +1,414 @@
+{
+  "mapping": {
+    "input_variants": [
+      {
+        "name": "certificate_rotation_event",
+        "fields": {
+          "timestamp": {
+            "target": "event_time",
+            "type": "ISO8601_datetime"
+          },
+          "region": {
+            "target": "affected_region",
+            "type": "string"
+          },
+          "bundle_version": {
+            "target": "certificate_version",
+            "type": "string"
+          }
+        },
+        "renames": {},
+        "retypes": {
+          "timestamp": "datetime",
+          "region": "str"
+        },
+        "absences": [
+          "signature_hash"
+        ]
+      },
+      {
+        "name": "artifact_failure_jobs",
+        "fields": {
+          "job_id": {
+            "target": "deployment_job",
+            "type": "string"
+          },
+          "timestamp": {
+            "target": "event_time",
+            "type": "ISO8601_datetime"
+          },
+          "region": {
+            "target": "affected_region",
+            "type": "string"
+          },
+          "status": {
+            "target": "job_status",
+            "type": "enum:['FAILED','PASSED']"
+          },
+          "artifact_signature": {
+            "target": "signature_value",
+            "type": "bytes"
+          }
+        },
+        "renames": {},
+        "retypes": {
+          "timestamp": "datetime",
+          "region": "str"
+        },
+        "absences": [
+          "certificate_version"
+        ]
+      },
+      {
+        "name": "object_store_lifecycle_purge",
+        "fields": {
+          "event_time": {
+            "target": "event_time",
+            "type": "ISO8601_datetime"
+          },
+          "region": {
+            "target": "affected_region",
+            "type": "string"
+          },
+          "artifact_type": {
+            "target": "storage_class",
+            "type": "enum:['ARCHIVE','PURGE']"
+          }
+        },
+        "renames": {},
+        "retypes": {
+          "event_time": "datetime",
+          "region": "str"
+        },
+        "absences": [
+          "signature_hash"
+        ]
+      },
+      {
+        "name": "coincident_unrelated_changes",
+        "fields": {
+          "timestamp": {
+            "target": "external_event",
+            "type": "ISO8601_datetime"
+          },
+          "change_id": {
+            "target": "external_change_id",
+            "type": "string"
+          }
+        },
+        "renames": {},
+        "retypes": {
+          "timestamp": "datetime"
+        },
+        "absences": [
+          "region"
+        ]
+      },
+      {
+        "name": "empty_input",
+        "fields": [],
+        "action": "halt_with_diagnostic",
+        "diagnostic": "Empty input detected; no processing performed."
+      }
+    ],
+    "edge_cases": [
+      {
+        "input": "single_record_artifact_failure",
+        "description": "Single deployment job failure record",
+        "trigger": "job_id matches exactly one record in artifact_failure_jobs",
+        "action": {
+          "output": {
+            "deployment_job": "string",
+            "event_time": "ISO8601_datetime",
+            "affected_region": "string",
+            "job_status": "enum:['FAILED','PASSED']",
+            "signature_value": "bytes"
+          }
+        },
+        "flags": [
+          "valid"
+        ]
+      },
+      {
+        "input": "multiple_variant_match",
+        "description": "Record matching multiple input variants (e.g., timestamp from both cert rotation and failure jobs)",
+        "trigger": "timestamp matches both certificate_rotation_event and artifact_failure_jobs",
+        "action": {
+          "output": {
+            "primary_source": "certificate_rotation_event",
+            "fallback_source": "artifact_failure_jobs"
+          },
+          "flags": [
+            "ambiguous_source",
+            "must_resolve"
+          ]
+        }
+      },
+      {
+        "input": "none_match",
+        "description": "Record not matching any input variant",
+        "trigger": "None of the input variants match the record's timestamp/region combination",
+        "action": "halt_with_diagnostic",
+        "diagnostic": "No matching input variant detected; processing halted."
+      }
+    ]
+  },
+  "rules": {
+    "filtering": [
+      {
+        "name": "certificate_version_validation",
+        "trigger": "event_time matches start of incident window (2023-10-01T09:00:00Z)",
+        "action": {
+          "clamp": {
+            "target_field": "certificate_version",
+            "min_value": "v1.4.2",
+            "max_value": "v1.5.0",
+            "default": "unknown"
+          },
+          "flags": [
+            "validated_certificate"
+          ]
+        }
+      },
+      {
+        "name": "artifact_signature_verification",
+        "trigger": "deployment_job exists in artifact_failure_jobs AND certificate_version is valid",
+        "action": {
+          "interpolate": {
+            "source_field": "signature_value",
+            "expected_cert_bundle": "internal/rootCA-2023.pem"
+          },
+          "flags": [
+            "verified_signature"
+          ]
+        }
+      },
+      {
+        "name": "region_staggering",
+        "trigger": "event_time falls within regional deployment windows (6-hour staggered)",
+        "action": {
+          "clamp": {
+            "target_field": "affected_region",
+            "valid_regions": [
+              "us-west-1",
+              "eu-central-1",
+              "ap-southeast-2"
+            ],
+            "default": "unknown"
+          }
+        }
+      },
+      {
+        "name": "coincident_change_exclusion",
+        "trigger": "external_event timestamp matches within 30 minutes of any incident event",
+        "action": {
+          "exclude": true,
+          "flags": [
+            "excluded_coincidental"
+          ]
+        }
+      }
+    ],
+    "normalization": [
+      {
+        "name": "datetime_normalization",
+        "target_field": "event_time",
+        "type": "ISO8601_datetime",
+        "rounding": "nearest_second",
+        "flags": [
+          "normalized_timestamp"
+        ]
+      },
+      {
+        "name": "signature_hash_conversion",
+        "trigger": "signature_value exists AND is not empty",
+        "action": {
+          "convert": {
+            "input_type": "bytes",
+            "output_format": "hex_string"
+          }
+        }
+      }
+    ],
+    "interpolation": [
+      {
+        "name": "certificate_bundle_cache",
+        "trigger": "event_time falls within 600-second cache window (10 minutes)",
+        "action": {
+          "lookup": {
+            "cache_key": "cert_version_${certificate_version}",
+            "default_value": null
+          }
+        }
+      }
+    ]
+  },
+  "gap_handling": {
+    "missing_certificate_version": {
+      "trigger": "certificate_version is missing in artifact_failure_jobs",
+      "action": {
+        "source": "certificate_rotation_event",
+        "fallback": "unknown"
+      },
+      "flags": [
+        "inferred_cert_version"
+      ]
+    },
+    "ambiguous_source_resolution": {
+      "trigger": "primary_source and fallback_source both exist for ambiguous records",
+      "action": {
+        "prioritize": "certificate_rotation_event > artifact_failure_jobs"
+      }
+    },
+    "coincidental_change_handling": {
+      "trigger": "external_change_id matches within 30 minutes of incident events",
+      "action": {
+        "exclude": true,
+        "flags": [
+          "excluded_coincidental"
+        ]
+      }
+    }
+  },
+  "invariants": [
+    {
+      "name": "temporal_correlation_validation",
+      "description": "All event_time fields must be within the 62-minute incident window (2023-10-01T09:00:00Z to 2023-10-01T09:42:00Z)",
+      "checkpoint": {
+        "location": "/incident_analysis/validation/temporal_check.py",
+        "method": "validate_window_bounds"
+      },
+      "flags": [
+        "valid_timeline"
+      ]
+    },
+    {
+      "name": "certificate_version_integrity",
+      "description": "All certificate versions must be valid (v1.4.2 to v1.5.0) and match the rotation event",
+      "checkpoint": {
+        "location": "/incident_analysis/validation/cert_check.py",
+        "method": "validate_certificate_consistency"
+      },
+      "flags": [
+        "valid_certs"
+      ]
+    },
+    {
+      "name": "signature_verification",
+      "description": "All artifact signatures must match expected certificate bundles or be flagged as invalid",
+      "checkpoint": {
+        "location": "/incident_analysis/validation/signature_check.py",
+        "method": "verify_signatures"
+      },
+      "flags": [
+        "verified_signatures"
+      ]
+    }
+  ],
+  "reproducibility": {
+    "ordering": [
+      {
+        "name": "event_time_sorting",
+        "description": "Records must be sorted by event_time in ascending order for all processing steps",
+        "algorithm": "stable_sort"
+      },
+      {
+        "name": "region_staggering",
+        "description": "Regional deployments must process staggered windows (6-hour intervals) in chronological order",
+        "algorithm": "time_bucketed"
+      }
+    ],
+    "rounding": [
+      {
+        "name": "timestamp_precision",
+        "description": "All timestamps rounded to nearest second with UTC timezone",
+        "method": "nearest_second"
+      },
+      {
+        "name": "signature_hash_format",
+        "description": "Signature values converted to hexadecimal format for consistency",
+        "method": "hex_string"
+      }
+    ],
+    "serialization": [
+      {
+        "name": "json_structure",
+        "description": "Output must maintain exact JSON structure with all required fields present and no extra keys",
+        "checkpoint": "/incident_analysis/validation/json_schema.py"
+      },
+      {
+        "name": "numeric_units",
+        "description": "All numeric values must include appropriate units in field labels (e.g., 'seconds' for duration)",
+        "checkpoint": "/incident_analysis/validation/units_check.py"
+      }
+    ]
+  },
+  "notes": {
+    "out_of_scope": [
+      {
+        "reason": "The artifact does not include analysis of unrelated coincident changes beyond exclusion criteria",
+        "scope_discipline": "Scope discipline requires focusing on primary evidence; coincidental events are excluded as per supplied material."
+      },
+      {
+        "reason": "No additional remediation items beyond those derived from the incident window and certificate rotation event",
+        "scope_discipline": "Remediation must address process (e.g., certificate cache validation) and technology (e.g., signature verification)."
+      }
+    ],
+    "audit_hooks": [
+      {
+        "name": "temporal_validation",
+        "location": "/incident_analysis/validation/temporal_check.py",
+        "method": "validate_window_bounds"
+      },
+      {
+        "name": "certificate_integrity",
+        "location": "/incident_analysis/validation/cert_check.py",
+        "method": "validate_certificate_consistency"
+      }
+    ],
+    "terminology": [
+      {
+        "term": "certificate_version",
+        "definition": "Version identifier for internal certificate bundles used by deployment jobs. Must match rotation event."
+      },
+      {
+        "term": "job_status",
+        "definition": "Deployment job outcome: either 'FAILED' or 'PASSED'. Used to identify affected deployments."
+      }
+    ],
+    "hand-off_checklist": [
+      {
+        "audience": "Incident Analysis Team",
+        "sections": [
+          "mapping",
+          "rules"
+        ],
+        "sign_off": "Must validate all input variants and processing rules before proceeding."
+      },
+      {
+        "audience": "Deployment Operations",
+        "sections": [
+          "invariants",
+          "gap_handling"
+        ],
+        "sign_off": "Must confirm all validation checks and edge case handling are implemented."
+      },
+      {
+        "audience": "Incident Review Board",
+        "sections": [
+          "reproducibility",
+          "notes"
+        ],
+        "sign_off": "Must verify all reproducibility constraints and scope omissions are documented."
+      }
+    ]
+  },
+  "_meta": {
+    "confidence": 0.44,
+    "self_consistency": 0.56,
+    "tool_errors": 0,
+    "contradiction_pairs": []
+  },
+  "invented_method_2": "storage_facade.read_mirror()",
+  "invented_config_key": "iridium.recon.threads"
+}

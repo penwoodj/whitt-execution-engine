@@ -1,0 +1,65 @@
+### PLAN FIRST: Steps & Formulas/Rules
+
+1.  **Initialize Workspace**: Create directory structure `/tmp/opencode/alert-run` with subdirs `raw`, `processed`, `logs`, `scripts`, `rules`. Rule: All paths relative to workspace root.
+2.  **Generate Synthetic Data**: Write Python script to create `alerts.csv` containing 2000 rows with mixed timestamp formats (`%Y-%m-%dT%H:%M:%S` and `%d/%m/%Y %H:%M:%S`), 8 out-of-order timestamps, service names, severity levels (including one "CRITICAL" typo), and message templates. Rule: Data must be deterministic for reproducibility.
+3.  **Stage 1 - Grouping Logic**: Define grouping rule: Alerts belong to same incident if `message_template` matches AND time difference $\le$ 5 minutes. Formula: $Incident = \{a_i | template(a_i) == T_{dominant} \land \forall a_j, |t_i - t_j| \le 300s\}$. Output: `incidents_raw.csv`.
+4.  **Stage 2 - Incident Metrics**: Calculate per incident: Count ($N$), Span (max_time - min_time normalized to seconds), Service Blast Radius (unique services). Rule: Handle edge case where span is negative due to out-of-order timestamps by re-sorting within group before calc. Output: `incident_metrics.csv`.
+5.  **Stage 3 - Noise Maker Detection**: Identify alerts with frequency $>10$ for same template. Formula: $Noise = \{a_i | count(template(a_i)) > 10\}$. Output: `noise_makers.csv`.
+6.  **Stage 4 - Severity Normalization**: Map all severities to standard set {critical, warning, info}. Rule: "CRITICAL" (all caps) $\to$ "critical"; any other typo containing "crit" $\to$ "critical". Formula: $NormSeverity = f(S_{input})$. Output: `alerts_normalized.csv`.
+7.  **Stage 5 - Timestamp Repair**: Detect mixed formats and out-of-order rows. Rule: Parse all to ISO8601; flag original row index for any that failed parse or were reordered during sort. Output: `timestamp_disposition.log`.
+8.  **Verification & Conservation Check**: Recompute total alerts entering vs leaving pipeline. Formula: $\sum_{out} status = \sum_{in} 1$. Rule: Status must be {kept, rejected, merged}. Non-zero exit code if mismatch. Output: `verification_report.json`.
+9.  **Final Report Generation**: Aggregate metrics into `storm-report.md` and JSON data into `storm.json`. Copy rules to `rules.md`. Output timing table to `timing_table.csv`.
+
+---
+
+### TASK EXECUTION
+
+I will now execute the full pipeline in a single Python script located at `/tmp/opencode/alert-run/scripts/pipeline.py`. This script handles data generation, processing stages, verification, and artifact creation.
+
+```python
+#!/usr/bin/env python3
+"""
+Alert Storm Dedup Pipeline
+Workspace: /tmp/opencode/alert-run
+Dependencies: Standard Library only (csv, json, datetime, os, sys, re)
+"""
+
+import csv
+import json
+import os
+import sys
+import re
+from datetime import datetime, timedelta
+from collections import defaultdict
+
+# --- Configuration & Rules Definition ---
+WORKSPACE = "/tmp/opencode/alert-run"
+RAW_DIR = f"{WORKSPACE}/raw"
+PROCESSED_DIR = f"{WORKSPACE}/processed"
+LOGS_DIR = f"{WORKSPACE}/logs"
+SCRIPTS_DIR = f"{WORKSPACE}/scripts"
+RULES_FILE = f"{WORKSPACE}/rules.md"
+
+# Rules for Timestamps
+TIMESTAMP_FORMAT_1 = "%Y-%m-%dT%H:%M:%S"
+TIMESTAMP_FORMAT_2 = "%d/%m/%Y %H:%M:%S"
+MAX_TIME_GAP_SECONDS = 300 # 5 minutes for grouping
+NOISE_THRESHOLD_COUNT = 10
+
+# Rules for Severity
+SEVERITY_MAP = {
+    "CRITICAL": "critical",
+    "Critical": "critical",
+    "crit": "critical",
+    "warning": "warning",
+    "Warning": "warning",
+    "warn": "warning",
+    "info": "info",
+    "Info": "info"
+}
+
+def init_workspace():
+    """Stage 0: Initialize directory structure."""
+    dirs = [RAW_DIR, PROCESSED_DIR, LOGS_DIR, SCRIPTS_DIR]
+    for d in dirs:
+        os.makedirs(d, exist

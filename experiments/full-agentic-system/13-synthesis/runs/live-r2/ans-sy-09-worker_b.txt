@@ -1,0 +1,63 @@
+### Phase 1 Rule Scan (Second Half Only)
+Based on the text describing the "flaky upstream" and retry logic for `part_b`:
+
+1.  **Wait Doubling Rule**: After each failed attempt, the wait time doubles ($3s \to 6s$).
+2.  **Cost Accumulation Rule**: Every attempt costs 3 tokens; every second of waiting costs 1 token. Total spend = (Attempts $\times$ 3) + (Total Wait Seconds $\times$ 1).
+3.  **Budget Check & Suppression Rule**: If total spend exceeds the initial budget (20), the job is suppressed, and the budget doubles exactly once for re-checking. `budget_after` is calculated against this doubled budget ($Doubled - Spend$). `suppressed` is true if spend > doubled budget after doubling; otherwise false.
+4.  **Success Condition Rule**: The job succeeds on the 3rd attempt (after 2 failures).
+
+### Phase 2 Ledger Walk (Second Half Only)
+Applying events in strict arrival order:
+
+*   **Event 1 (Attempt 1)**:
+    *   Action: Run attempt.
+    *   Cost: 3 tokens.
+    *   Result: Fail.
+    *   Wait: 3 seconds.
+    *   Wait Cost: $3 \times 1 = 3$ tokens.
+    *   Total Spend so far: $3 + 3 = 6$.
+    *   State: Pending next wait.
+
+*   **Event 2 (Wait after Attempt 1)**:
+    *   Action: Apply wait time.
+    *   Wait Duration: 3 seconds.
+    *   Cost: 3 tokens.
+    *   Total Spend so far: $6 + 3 = 9$.
+    *   State: Ready for Attempt 2.
+
+*   **Event 3 (Attempt 2)**:
+    *   Action: Run attempt.
+    *   Cost: 3 tokens.
+    *   Result: Fail.
+    *   Wait Rule Apply: Next wait doubles from 3 to 6 seconds.
+    *   State: Pending next wait.
+
+*   **Event 4 (Wait after Attempt 2)**:
+    *   Action: Apply wait time.
+    *   Wait Duration: 6 seconds.
+    *   Cost: $6 \times 1 = 6$ tokens.
+    *   Total Spend so far: $9 + 3 (\text{attempt}) + 6 (\text{wait}) = 18$.
+    *   State: Ready for Attempt 3.
+
+*   **Event 5 (Attempt 3)**:
+    *   Action: Run attempt.
+    *   Cost: 3 tokens.
+    *   Result: Success (Job needs 2 failed attempts before 3rd succeeds).
+    *   Total Spend Calculation: $18 (\text{previous}) + 3 (\text{attempt}) = 21$.
+    *   Budget Check: Initial Budget = 20. Current Spend (21) > 20.
+    *   Trigger: Budget Doubles Rule fires. New Budget = $20 \times 2 = 40$.
+    *   Re-check Condition: Is Spend (21) > New Budget (40)? No ($21 < 40$).
+    *   Final Verdict: Not Suppressed (`suppressed`: false).
+    *   `budget_after` Calculation: $New Budget - Total Spend = 40 - 21 = 19$.
+
+*   **Final Aggregates**:
+    *   `attempts`: 3 (Attempt 1, Attempt 2, Attempt 3).
+    *   `wait_s`: Sum of wait seconds spent ($3 + 6$) = 9.
+    *   `budget_after`: 19.
+    *   `suppressed`: false.
+
+### Final Output (Second Half Only)
+
+```json
+{"attempts": 3, "wait_s": 9, "budget_after": 19, "suppressed": false}
+```

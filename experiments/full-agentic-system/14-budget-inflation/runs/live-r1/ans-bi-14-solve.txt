@@ -1,0 +1,59 @@
+The morning report reads JSON because we are strict about shape, keys in the exact set named by the contract, values from the menus where menus exist, lists where lists are asked for, numbers as numbers, and nothing else on the line. The night is thin; we cannot afford deep retries or mid-chain reworking. We walk the event list one more time, each event against its rule, then check the totals off the final state, not off memory.
+
+**Phase 1: Rule Scan (Logic)**
+1.  **Budget Limit Check**: If observed error rate > limit for current step $\rightarrow$ Trigger Breach.
+2.  **Breach Consequence A**: Pause climb, Rollback to previous step ($N-1$), Mark breached observation spent.
+3.  **Tightening Rule**: After any rollback, new limit for *remaining* steps becomes $0.8$.
+4.  **Second Breach Rule**: If a breach occurs while already rolled back (or if the logic implies a second event triggers a state where limits are exhausted), Stop everything. *Correction based on "Second breach stops everything"*: A second breach event leads to status STOPPED holding current step.
+5.  **Completion Rule**: No breaches $\rightarrow$ Status DONE.
+
+**Phase 2: Ledger Walk (Execution)**
+*Initial State*: Step = 1, Limit(1) = 2.0, Limit(2..5) = 2.0, Limit(6..10) = 1.0. Previous Step = None.
+
+*Event 1*: Step 1, Obs=0.4%.
+- Check: $0.4 \le 2.0$. Pass.
+- State: Step 1 OK.
+
+*Event 2*: Step 2, Obs=1.9%.
+- Check: $1.9 \le 2.0$. Pass.
+- State: Step 2 OK.
+
+*Event 3*: Step 3, Obs=0.5%.
+- Check: $0.5 \le 2.0$. Pass.
+- State: Step 3 OK.
+
+*Event 4*: Step 4, Obs=2.2%.
+- Check: Current Limit for Step 4 is 2.0. $2.2 > 2.0$. **Breached**.
+- Apply Rule A: Rollback to Previous Step (Step 3). Climb pauses at Step 3.
+- Apply Rule B (Tightening): New limit for remaining steps becomes 0.8.
+- State: Paused at Step 3.
+
+*Event 5*: Step 5, Obs=0.6%.
+- *Interpretation of "Climb resumes from the next observation"* vs "Paused": The prompt says "a breach pauses the climb and rolls back... the climb resumes from the next observation." This implies we attempt to continue the rollout sequence (Step 4 then Step 5) but with new limits. However, strictly speaking, if it rolled *back* to Step 3, does "next observation" mean Step 4? Yes.
+- *Limit Check*: The prompt says "after any rollback the limit tightens to 0.8 for every remaining step."
+- We attempt Step 4 again (since we rolled back from there) with new limit 0.8.
+- Observed rate provided for this event is 0.6%. Is this the rate *at* Step 5 or the rate *attempted* at the resumed step? The input list is "observed error rates by step, in order: ...". This usually maps to the intended steps (1..5). If we are resuming from Step 4 (the breached one), do we get a new observation for Step 4 or do we move to Step 5 immediately?
+- *Re-evaluating "Climb resumes from the next observation"*: The breach happened at Step 4. We roll back to Step 3. The "next observation" in the sequence is Step 4. But wait, the input list has exactly 5 items for steps 1 through 5. If we fail at Step 4 (Item 4), and then try again? Or do the inputs represent the *attempts*?
+- Let's look at the "Orientation Story" logic: "it rolled 0.2, 0.75, 2.5... third step breached". It processed items sequentially. If an item breaches, it triggers a state change. The next item in the list is the *next event*.
+- If Event 4 (Step 4) breaches $\rightarrow$ Rollback to Step 3. Limit tightens to 0.8.
+- Does "Climb resumes" mean we retry Step 4? Or do we skip the failed step and go to Step 5? "Roll back to previous step... climb resumes from next observation". If I am at Step 3 (after rollback), the next observation is for Step 4. But usually, in these problems, if you breach Step $N$, you fail to complete Step $N$. You are stuck at $N-1$? No, "roll back to previous step" means you go back to $N-1$. Then "climb resumes from next observation" implies you try $N$ again?
+- *Alternative Interpretation*: The inputs are fixed attempts. Attempt 4 failed. We rolled back. Now we look at Attempt 5 (Step 5). But the limit applies to "every remaining step". Step 5 is remaining. Limit = 0.8. Obs = 0.6%. $0.6 \le 0.8$. Pass?
+- *Wait, check the "Second Breach" rule*: "a second breach stops everything... holding the step you were defending". We had one breach (Step 4). If Step 5 passes, we are at Step 5. Then we try Step 6? But input only goes to 5.
+- *Let's reconsider the "Rollback"*: "rolls back to previous step". Previous to 4 is 3. So we are effectively at 3. The next thing in the list (Item 5) corresponds to Step 5? Or does it correspond to retrying Step 4?
+- If the input list represents *steps*, then Item 1=Step 1, Item 2=Step 2... Item 5=Step 5.
+- Sequence:
+  - Try Step 1 (0.4) -> OK.
+  - Try Step 2 (1.9) -> OK.
+  - Try Step 3 (0.5) -> OK.
+  - Try Step 4 (2.2) -> Fail (Limit 2.0). **BREACH #1**. Action: Rollback to Step 3. Limit becomes 0.8 for remaining steps (Step 5, Step 6...). Status is PAUSED.
+  - Try Step 5 (0.6)? Or Retry Step 4? The text says "climb resumes from the next observation". If we rolled back to Step 3, the next step in the climb is Step 4. But if the input list is strictly ordered by *step number*, then Item 5 belongs to Step 5.
+  - *Crucial Distinction*: Does the observer provide a rate for the retry of Step 4? Or does the list just give rates for Steps 1-5 regardless of retries? "observed error rates by step, in order". This implies Rate[$i$] is for Step $i$.
+  - If we breached Step 4, did we *complete* Step 3? Yes. So we are at Step 3. We need to do Step 4 again. But there is no "Rate for retry of Step 4" in the list (unless Item 5 is it?). No, Item 5 is labeled Step 5.
+  - Hypothesis: The breach at Step 4 prevents us from ever reaching Step 5? Or does "resume from next observation" mean we skip to the next *available* step in the sequence which might be Step 5 if we consider the list as a stream of events where Event 4 was the failure event, and Event 5 is the next valid attempt?
+  - Let's look at the "Orientation Story": "rolled 0.2, 0.75, 2.5... third step breached". It stopped there. "window closed before any resume observation arrived". This suggests if you breach, you don't get a retry in the same batch unless explicitly provided?
+  - BUT the instruction says: "climb resumes from the next observation". This implies we *do* continue. If Item 4 is Step 4 and it fails, do we use Item 5 for Step 5? That would mean we skipped Step 4 entirely. Is that allowed? "Roll back to previous step". If I am at Step 3, and I try Step 4 (which failed), I fail again?
+  - *Re-reading carefully*: "a breach pauses the climb and rolls back to the previous step... the observation that breached is spent, the climb resumes from the next observation."
+    - "observation that breached" = Item 4. It is spent. We cannot use it again? Or does "spent" mean we don't count it towards success?
+    - "climb resumes from the next observation". The next observation in the stream is Item 5. This suggests we move to Step 5 directly, skipping the retry of Step 4. Why? Because maybe "previous step" means previous *successful* step (Step 3), and "next observation" means the next item in the list (Item 5, which corresponds to Step 5).
+    - If this logic holds: We are at Step 3 (success). Item 4 was a failure for Step 4. It is spent. We move to Item 5 (Step 5).
+    - Check Limit for Step 5: "after any rollback the limit tightens to 0.8 for every remaining step". Remaining steps = {6, 7, ...}. What about Step 5? Was it a "remaining" step? Yes, it's ahead of us. So Limit(Step 5) = 0

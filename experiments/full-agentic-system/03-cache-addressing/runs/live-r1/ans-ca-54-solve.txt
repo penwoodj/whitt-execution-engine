@@ -1,0 +1,99 @@
+The task requires simulating a scheduling scenario with specific rules for job execution, preemption, checkpointing, and state management. The input describes two LOW jobs (LOW1, LOW2) and one HIGH job arriving at minute 2.
+
+**Rules Analysis:**
+1.  **Arrival Order & Core Allocation:** Jobs take the core in order of their start minutes. A resumed job outranks a fresh one at any tie. If the core is busy when a job's start minute arrives, it waits. The core never idles while waiting; the next waiting job starts immediately upon preemption or completion.
+2.  **Preemption:** HIGH arrives at minute 2 and runs for 9 minutes (until minute 11). It instantly preempts whatever LOW job is running. While HIGH runs, nothing else runs.
+3.  **Checkpointing:** LOW jobs checkpoint every 2 completed minutes of *running* time. On preemption, work past the last checkpoint is wasted and redone after resume. A bank lands on the exact minute HIGH arrives still counts (no waste). After resume, a job redoes every minute past its last bank.
+4.  **Job Details:**
+    *   LOW1: Starts at minute 0, duration 5 minutes.
+    *   LOW2: Starts at minute 2, duration 7 minutes.
+    *   HIGH: Arrives at minute 2, duration 9 minutes (runs until minute 11).
+
+**Simulation Walkthrough:**
+
+*   **Minute 0:** LOW1 starts. Running time = 1 min.
+*   **Minute 1:** LOW1 continues. Running time = 2 mins. **Checkpoint 1 reached.**
+*   **Minute 2:** HIGH arrives at minute 2. It preempts LOW1 immediately.
+    *   LOW1 has run for 2 minutes (0, 1). The checkpoint was reached exactly at the end of minute 1/start of minute 2? No, "checkpoint every 2 completed minutes".
+        *   Minute 0: Run 1 min.
+        *   Minute 1: Run 2 mins total. Checkpoint reached.
+        *   Minute 2 starts. LOW1 is preempted at the very beginning of this minute (or effectively before it can run).
+    *   Does LOW1 have a bank? "A job that starts or resumes at minute s banks a checkpoint at minute s+2".
+        *   LOW1 starts at $s=0$. Banks at $0+2 = 2$.
+        *   The rule says: "a bank landing on the exact minute HIGH arrives still counts and nothing is wasted".
+        *   HIGH arrives at minute 2. LOW1 has a bank scheduled for minute 2. Therefore, **0 minutes are wasted** for LOW1 upon preemption.
+    *   State after Minute 2 event: HIGH starts running. LOW1 is suspended (needs to redo from checkpoint).
+
+*   **Minutes 3 through 10:** HIGH runs continuously.
+    *   Duration of HIGH = 9 minutes. Starts minute 2, ends minute $2+9=11$.
+    *   So HIGH occupies the core for minutes: 2, 3, 4, 5, 6, 7, 8, 9, 10. (Total 9 minutes).
+    *   At the end of minute 10, HIGH finishes.
+
+*   **Minute 11:** HIGH completes. Core becomes free.
+    *   Waiting jobs: LOW1 (suspended), LOW2 (started at minute 2 but never ran because core was busy with HIGH? Wait, let's re-read "LOW jobs take the core in order of their start minutes").
+    *   Re-evaluating LOW2 status:
+        *   LOW2 starts at minute 2.
+        *   At minute 2, HIGH arrives and preempts LOW1. The rule says "while HIGH runs nothing else runs".
+        *   Does LOW2 get a chance to start?
+        *   "LOW jobs take the core in order of their start minutes... a resumed LOW outranks a fresh one at any tie".
+        *   At minute 2, we have:
+            1.  LOW1 (Fresh, started min 0). Preempted. Needs to resume. Has checkpoint at min 2. Remaining work = $5 - 2 = 3$ mins? Or does it need to redo? "On preemption the work past the last checkpoint is wasted and redone". Since bank was hit, no waste. So remaining = 3 mins.
+            2.  LOW2 (Fresh, started min 2). Remaining work = 7 mins.
+        *   Tie-breaker: Resumed vs Fresh. LOW1 is "resumed" (even if just suspended), LOW2 is "fresh". LOW1 outranks LOW2.
+    *   So at minute 11, the core goes to LOW1 first.
+
+*   **Resuming LOW1:**
+    *   LOW1 needs to run its remaining 3 minutes.
+    *   Starts running at minute 11.
+    *   Minute 11: Run 1 min (Total 3).
+    *   Minute 12: Run 2 mins (Total 4). **Checkpoint reached?** Checkpoints are every 2 running minutes. Since it resumed, does the counter reset? "LOW jobs checkpoint every 2 completed minutes of running time". Usually implies continuous accumulation or resetting per session. However, the text says "after resume a job redoes every minute past its last bank". This implies the checkpoint logic is tied to the *running* duration since the last valid state.
+    *   Let's assume standard behavior: Checkpoints occur at $t=2, 4, ...$ of running time.
+        *   Session 1 (0-2): Reached checkpoint at 2 mins.
+        *   Resume starts at min 11.
+        *   Minute 11: Run 1 min.
+        *   Minute 12: Run 2 mins. Checkpoint reached.
+    *   Wait, LOW1 total duration is 5 minutes. It ran 0-2 (2 mins). Needs to run 3 more.
+    *   If it runs 3 minutes starting at 11:
+        *   Min 11: Run 1.
+        *   Min 12: Run 2. (Total 4? No, total running time = $2 + 1 + 1 = 4$).
+        *   Min 13: Run 1. (Total 5). **Job Complete.**
+    *   So LOW1 finishes at the end of minute 13.
+
+*   **Running LOW2:**
+    *   After LOW1 finishes at min 13, core goes to LOW2.
+    *   LOW2 started at min 2 but never ran (core busy with HIGH). It is "fresh".
+    *   Duration: 7 minutes.
+    *   Starts running at minute 14.
+    *   Minute 14: Run 1.
+    *   Minute 15: Run 2. Checkpoint? (Not needed for completion, but good to track).
+    *   ...
+    *   Runs until duration 7 is complete. $14 + 7 = 21$.
+    *   LOW2 finishes at the end of minute 20? Or 21?
+        *   Start min 14.
+        *   End of min 14: 1 min done.
+        *   ...
+        *   End of min 20: $20 - 14 + 1 = 7$ mins done.
+    *   LOW2 finishes at end of minute 20.
+
+*   **Completion Order:**
+    1.  LOW1 (Finished end of min 13).
+    2.  LOW2 (Finished end of min 20).
+    *   Order: ["LOW1", "LOW2"].
+
+*   **Wasted Minutes:**
+    *   LOW1 preemption at min 2: Bank hit at min 2. Wasted = 0.
+    *   Any other waste? No interruptions after resume.
+    *   Total wasted = 0.
+
+*   **Makespan:**
+    *   Starts counting from the first start (Minute 0).
+    *   Last finish is end of Minute 20.
+    *   Makespan = $20 - 0 + 1$? Or just the time elapsed? "makespan counts from the the last finish". Usually makespan is duration. If starts at 0 and ends at 20, duration is 21 minutes (covering intervals [0,1]...[20,21]).
+    *   Let's check the example logic: "LOW1 runs 7 mins starting min 0... finishes first... LOW2... finished second. Completion order LOW1 then LOW2, 1 wasted minute, makespan 13 minutes from the first start."
+        *   Example: Start 0. End 13. Duration = 14? Or is "minute 13" the label for the interval ending at 13?
+        *   In the example: LOW1 (7 mins) + HIGH (2 mins) + LOW1 resume (5 mins) + LOW2 (3 mins).
+            *   Wait, example calculation in prompt: "LOW1 held core minutes 0, 1 and 2... swap came... wasted 1 min. HIGH ran minutes 3 to 5. Both waiting... core went to LOW1... resumed owing 5, ran them minutes 5 to 10... finished first. LOW2 then owed its whole 3, ran minutes 10 to 13".
+            *   Example timeline:
+                *   Min 0-2: LOW1 (3 mins).
+                *   Min 3-5: HIGH (3 mins).
+                *   Min 5-10: LOW1 resume (6 mins? Prompt says "ran them minutes 5 to 10".

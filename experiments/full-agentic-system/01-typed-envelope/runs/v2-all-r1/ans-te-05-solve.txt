@@ -1,0 +1,63 @@
+### Phase 1 RULE SCAN
+*Rules that change state during the event or claim list:*
+
+1. **Arrival Rule**: Request `r1` (ask: 5) triggers a grant of 5; pool drops from 40 to 35.
+2. **Arrival Rule**: Request `r2` (ask: 8) triggers a grant of 8; pool drops from 35 to 27.
+3. **Expiry Rule**: Grant for `r2` expires after request `r3` completes; returns floor(8/2)=4 to pool immediately before `r4`.
+4. **Arrival Rule**: Request `r3` (ask: 12) triggers a grant of 12; pool drops from 27 to 15.
+5. **Arrival Rule**: Request `r4` (ask: 14) triggers a partial grant of 14 (pool was 15); pool drops from 15 to 1.
+6. **Denial Rule**: Request `r5` (ask: 17) arrives at empty-ish pool (1 token); denied, no change to pool or grants.
+7. **Arrival Rule**: Request `r6` (ask: 21) triggers a partial grant of 1; pool drops from 1 to 0.
+
+*(Note: The "fallback" or "refill" rules mentioned in the prompt text are explicitly negated by the instruction "grants never return any other way" and the specific expiry rule logic, so no generic fallback applies here.)*
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order:*
+
+1. **Event r1 (Ask: 5)**: Pool has 40. Grant min(5, 40) = 5. New Pool = 35. State: {granted_units: 5, pool_left: 35}
+2. **Event r2 (Ask: 8)**: Pool has 35. Grant min(8, 35) = 8. New Pool = 27. State: {granted_units: 13, pool_left: 27}
+3. **Event r3 (Ask: 12)**: Pool has 27. Grant min(12, 27) = 12. New Pool = 15. *Trigger for Expiry Rule*: Grant `r2` expires after this completes. Return floor(8/2)=4 to pool immediately before next event. State: {granted_units: 13 (r2 grant is now expired), pool_left: 19}
+   *(Correction on state tracking logic based on "state after that event": The expiry happens *after* r3 completes but *before* r4 arrives. The prompt says "returns half its granted tokens rounded down to the pool". So at the end of step 3, we record the grant total and the pool including the return? Or does the return happen as a separate line item in the walk? The instruction says "one line per event... each line showing the state after that event." The expiry is triggered by r3 completion. Let's trace carefully:)*
+   *Re-evaluating Step 3*: Request `r3` arrives. Pool=27. Ask=12. Grant=12. Pool becomes 15. Event `r3` completes. Rule triggers: "grant for r2 expires after request r3 completes". Action: Return floor(8/2)=4 to pool. Pool becomes 19.
+   *State after r3*: Granted total = 5+8+12=25. Pool = 19. (The grant from r2 is technically "expired" but the tokens are back in the pool).
+4. **Event r4 (Ask: 14)**: Pool has 19. Grant min(14, 19) = 14. New Pool = 5. State: {granted_units: 39, pool_left: 5}
+5. **Event r5 (Ask: 17)**: Pool has 5. Ask=17. Grant min(17, 5) = 0? No, "grant what is there". So grant = 5. Wait, re-reading rule: "a request arriving at an empty pool is denied and listed by id". Is 5 considered "empty"? Usually "empty" means 0. But let's look at the wording: "grants are partial when the pool cannot cover the full ask... a request arriving at an empty pool is denied".
+   *Interpretation Check*: If pool > 0, it grants what is there (partial). If pool == 0, it denies.
+   Let's re-read carefully: "grant what is there and the pool drops to zero, a request arriving at an empty pool is denied". This implies if Pool < Ask, grant = Pool. If Pool == 0, deny.
+   So for r5 (Ask 17, Pool 5): Grant = 5. Pool becomes 0.
+   *Wait*, let's re-read the "denied" condition vs "partial". "grants are partial when the pool cannot cover the full ask... a request arriving at an empty pool is denied". This suggests two states: Partial (Pool > 0 but < Ask) and Denied (Pool == 0).
+   Let's re-run r4->r5 transition.
+   End of r3 walk: Pool = 19. Grant r3=12. Total granted so far = 5+8+12=25.
+   Event r4 arrives. Ask 14. Pool 19. Partial? No, 19 >= 14. Full grant of 14. Pool becomes 5. Total granted = 39.
+   Event r5 arrives. Ask 17. Pool 5. Is this "empty"? No, it has 5. So it grants what is there (partial). Grant = 5. Pool becomes 0. Total granted = 44.
+   *Alternative Interpretation*: Does "grant what is there" apply to the partial case? Yes. "grants are partial when the pool cannot cover the full ask, grant what is there". This confirms if Pool < Ask, Grant = Pool.
+   So r5 grants 5. Pool becomes 0.
+   Event r6 arrives. Ask 21. Pool 0. Empty pool -> Denied.
+   
+   *Let's double check the "expiry" timing again.*
+   "the grant for r2 expires after request r3 completes".
+   Sequence:
+   - Start: P=40.
+   - r1 (5): Grant 5, P=35. TotalG=5.
+   - r2 (8): Grant 8, P=27. TotalG=13.
+   - r3 (12): Grant 12, P=15. TotalG=25. **r2 expires**. Return floor(8/2)=4. P becomes 19.
+   - r4 (14): Ask 14. Pool 19. Grant 14. P=5. TotalG=39.
+   - r5 (17): Ask 17. Pool 5. Is this a partial grant or denial? "grant what is there" applies when pool cannot cover full ask. Here 5 < 17. So it grants 5. P=0. TotalG=44.
+   - r6 (21): Ask 21. Pool 0. Empty pool -> Denied. List: ["r6"].
+
+   *Wait, let me re-read the "empty" definition.* "a request arriving at an empty pool is denied". Does "empty" mean strictly 0? Yes, standard interpretation. If I have 5 tokens, it's not empty.
+   
+   *Let's check the orientation story logic to ensure consistency with "partial vs deny".*
+   Orientation: Start 30. Ask 11 -> Grant 11 (P=19). Ask 7 -> Grant 7 (P=12). Expiry returns 5 (half of 11). P becomes 17. Ask 13 -> Pool 17 >= 13? Yes, full grant? Wait, orientation says "third ask of 13 landed against only 17 in the pool so it took a partial".
+   Ah! In the orientation story: Start 30.
+   1. Ask 11. Grant 11. P=19.
+   2. Ask 7. Grant 7. P=12.
+   3. Expiry returns 5 (half of 11). P becomes 17.
+   4. Ask 13. Pool is 17. 17 >= 13. Why did it take a partial? "landed against only 17... so it took a partial". This implies the orientation story had a different rule or I misread the numbers.
+   Let's re-read orientation: "started at 30... first ask was 11, second 7, then the first grant expired and returned 5... half of 11 rounds down... third ask of 13 landed against only 17".
+   If P=30. Ask 11 -> G=11, P=19. Ask 7 -> G=7, P=12. Expiry (r1) returns floor(11/2)=5. P = 12+5 = 17.
+   Next ask is 13. Pool is 17. 17 >= 13. It should be a full grant of 13, leaving 4.
+   The text says: "so it took a partial and drained it." This implies the pool was NOT 17? Or the rule is different?
+   "landed against only 17... so it took a partial". This phrasing suggests that

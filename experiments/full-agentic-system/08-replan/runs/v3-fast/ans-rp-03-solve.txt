@@ -1,0 +1,71 @@
+### Phase 1 RULE SCAN
+
+Based on the task description, here are the rules that change state during the event or claim list:
+
+1.  **Arrival Rule**: Requests land in strict arrival order; each asks for a fixed number of tokens.
+2.  **Grant Rule (Full)**: If the pool covers the full ask, grant the full amount and subtract from the pool.
+3.  **Grant Rule (Partial)**: If the pool cannot cover the full ask but has tokens, grant what is there (partial), subtract that amount from the pool, and mark as granted (never denied).
+4.  **Denial Rule**: A request arriving at an empty pool (pool == 0) is denied and listed by id; a pool with tokens never denies anyone.
+5.  **Expiry Trigger Rule**: The grant for `r1` expires after request `r2` completes.
+6.  **Return Rule**: An expired grant returns half its granted tokens rounded down to the pool immediately before the trigger event's processing concludes (effectively adding back to the pool available for subsequent events).
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:** Pool = 60, Granted = 0, Denied = [].
+
+*   **Event r1 arrives (Ask: 6)**
+    *   Rule Applied: Grant Rule (Full)
+    *   Action: Grant 6. Pool becomes $60 - 6 = 54$.
+    *   State: Pool=54, Granted=[r1(6)]
+
+*   **Event r2 arrives (Ask: 10)**
+    *   Rule Applied: Grant Rule (Full)
+    *   Action: Grant 10. Pool becomes $54 - 10 = 44$.
+    *   State: Pool=44, Granted=[r1(6), r2(10)]
+
+*   **Event r3 arrives (Ask: 12)**
+    *   Rule Applied: Grant Rule (Full)
+    *   Action: Grant 12. Pool becomes $44 - 12 = 32$.
+    *   State: Pool=32, Granted=[r1(6), r2(10), r3(12)]
+
+*   **Event r4 arrives (Ask: 15)**
+    *   Rule Applied: Grant Rule (Full)
+    *   Action: Grant 15. Pool becomes $32 - 15 = 17$.
+    *   State: Pool=17, Granted=[r1(6), r2(10), r3(12), r4(15)]
+
+*   **Event r5 arrives (Ask: 19)**
+    *   Rule Applied: Grant Rule (Partial)
+    *   Action: Ask is 19, Pool has 17. Grant 17. Pool becomes $17 - 17 = 0$.
+    *   State: Pool=0, Granted=[r1(6), r2(10), r3(12), r4(15), r5(17)]
+
+*   **Event r6 arrives (Ask: 21)**
+    *   Rule Applied: Denial Rule
+    *   Action: Pool is 0. Request denied.
+    *   State: Pool=0, Granted=[r1(6), r2(10), r3(12), r4(15), r5(17)], Denied=[r6]
+
+*   **Event r7 arrives (Ask: 24)**
+    *   Rule Applied: Denial Rule
+    *   Action: Pool is 0. Request denied.
+    *   State: Pool=0, Granted=[r1(6), r2(10), r3(12), r4(15), r5(17)], Denied=[r6, r7]
+
+*   **Expiry Trigger (After r2 completes)**
+    *   Rule Applied: Expiry/Return Rule
+    *   Action: Grant `r1` expires. Return = $\lfloor 6 / 2 \rfloor = 3$. Add to pool. Pool becomes $0 + 3 = 3$.
+    *   State: Pool=3, Granted=[r2(10), r3(12), r4(15), r5(17)], Denied=[r6, r7] (Note: r1 is removed from active grants).
+
+*   **Final Reconciliation Check**
+    *   Total Asked by Grants: $6+10+12+15+17 = 60$.
+    *   Total Returned: $3$.
+    *   Net Consumed: $60 - 3 = 57$.
+    *   Initial Pool: $60$.
+    *   Final Pool Calculation: $60 - 57 = 3$. Matches ledger walk.
+
+---
+
+### Final Answer JSON
+
+```json
+{"granted_units": 60, "denied": ["r6", "r7"], "pool_left": 3}
+```

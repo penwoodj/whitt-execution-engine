@@ -1,0 +1,179 @@
+{
+  "phases": {
+    "phase_1": {
+      "entry_criteria": "Raw daily cohort data from the latest weekly extract is available and validated against the schema defined in the instrumentation notes; all 7 cohorts are within the 16k–25k registration range; onboarding, activation, and push rates are confirmed as decimal values to four places.",
+      "exit_criteria": "Daily cohort raw counts have been parsed into a normalized table with unit labels (e.g., registrations, activations) and validated against the provided instrumentation quirks. All rate fields are in decimal form (0.0000–1.0000).",
+      "workstreams": [
+        {
+          "name": "Raw Data Parsing & Validation",
+          "owner": "Data Engineer - Analytics Pipeline",
+          "artifacts": [
+            "raw_daily_cohorts_v2.json",
+            "instrumentation_quirks_mapping.txt"
+          ],
+          "dependencies": [
+            "weekly_extract_2024_wk45.csv"
+          ],
+          "coverage": "All 7 daily cohorts from the weekly extract, covering registration to activation and push events."
+        }
+      ],
+      "blocks": [
+        "Missing keys in raw data (e.g., missing 'registration_count' or 'activation_count')",
+        "Silent zero-fills in unmeasured cells"
+      ],
+      "blocked_by": [
+        "Instrumentation quirks not yet mapped to raw fields"
+      ]
+    },
+    "phase_2": {
+      "entry_criteria": "Normalized daily cohort data is complete and has been validated against the instrumentation notes; all deltas are computed from summed numerators using weekly totals, with no averaging of daily rates.",
+      "exit_criteria": "Weekly delta metrics (onboarding, activation, push) are computed as signed percentages derived from numerator sums and prior-week totals. All values are expressed in decimal form to four places.",
+      "workstreams": [
+        {
+          "name": "Delta Computation Engine",
+          "owner": "Analytics Lead - Growth Metrics",
+          "artifacts": [
+            "weekly_deltas_computed_v1.csv",
+            "delta_calculation_rules.md"
+          ],
+          "dependencies": [
+            "raw_daily_cohorts_v2.json"
+          ],
+          "coverage": "Onboarding, activation, and push deltas for all 7 cohorts using prior-week totals."
+        }
+      ],
+      "blocks": [
+        "Missing prior-week totals in the weekly extract",
+        "Incorrect use of daily averages to compute deltas"
+      ],
+      "blocked_by": [
+        "Phase_1 output not fully validated against instrumentation quirks"
+      ]
+    },
+    "phase_3": {
+      "entry_criteria": "Delta metrics are computed and validated as signed percentages from summed numerators; all anomalies exceed 1.5 percentage points from the weekly mean.",
+      "exit_criteria": "Anomaly list is generated with explicit causes or 'none-known' for each deviation beyond 1.5 pp, and all anomaly records are tied to instrumentation notes or absence thereof.",
+      "workstreams": [
+        {
+          "name": "Anomaly Detection & Root Cause Assignment",
+          "owner": "Growth Analyst - Quality Assurance",
+          "artifacts": [
+            "anomalies_report_v1.json",
+            "anomaly_causes_mapping.xlsx"
+          ],
+          "dependencies": [
+            "weekly_deltas_computed_v1.csv"
+          ],
+          "coverage": "All cohorts with deltas exceeding 1.5 percentage points from weekly mean."
+        }
+      ],
+      "blocks": [
+        "No prior-week totals available for delta computation",
+        "Anomaly thresholds not defined in absolute terms (e.g., 1.5 pp)"
+      ],
+      "blocked_by": [
+        "Phase_2 output fails validation due to missing prior-week data"
+      ]
+    },
+    "phase_4": {
+      "entry_criteria": "All anomaly causes are assigned or marked as 'none-known'; the final pipeline outputs are formatted for consumption by the dashboard parser.",
+      "exit_criteria": "Final output is a JSON-formatted report with all fields named explicitly, units labeled (e.g., registrations), and every rate in decimal form to four places. The dashboard parser can ingest it without hard-fail or silent zero-fill.",
+      "workstreams": [
+        {
+          "name": "Dashboard Parser Compatibility Layer",
+          "owner": "Frontend Engineer - Analytics UI",
+          "artifacts": [
+            "aurora_pipeline_output_v1.json",
+            "dashboard_parser_validation_test_cases.txt"
+          ],
+          "dependencies": [
+            "anomalies_report_v1.json"
+          ],
+          "coverage": "All fields in the final output conform to dashboard parser schema."
+        }
+      ],
+      "blocks": [
+        "Missing instrumentation notes for any field in raw data",
+        "Dashboard parser fails on zero-fills or missing keys"
+      ],
+      "blocked_by": [
+        "Phase_3 anomalies not grounded in instrumentation notes"
+      ]
+    }
+  },
+  "critical_path": [
+    {
+      "dependency": "raw_daily_cohorts_v2.json must be generated before weekly_deltas_computed_v1.csv",
+      "type": "hard",
+      "description": "Delta computation requires raw counts; no delta can be computed without valid daily cohort data."
+    },
+    {
+      "dependency": "weekly_deltas_computed_v1.csv must be generated before anomalies_report_v1.json",
+      "type": "hard",
+      "description": "Anomaly detection depends on accurate deltas derived from summed numerators, not averages."
+    },
+    {
+      "dependency": "anomalies_report_v1.json must be generated before aurora_pipeline_output_v1.json",
+      "type": "hard",
+      "description": "Final output requires anomaly causes to be assigned or marked as 'none-known'."
+    },
+    {
+      "dependency": "aurora_pipeline_output_v1.json must pass dashboard_parser_validation_test_cases.txt",
+      "type": "soft",
+      "description": "Validation is required but not blocking; failure triggers rework, not halt."
+    }
+  ],
+  "risk_register": [
+    {
+      "risk": "Missing prior-week totals in the weekly extract prevent delta computation.",
+      "scale": "high",
+      "owner": "Analytics Lead - Growth Metrics",
+      "mitigation": "Verify that prior-week totals exist in the provided weekly extract; if not, flag as data gap and halt phase_2 until resolved.",
+      "early_warning_indicator": "Phase_2 entry criteria fails validation due to missing prior-week totals."
+    },
+    {
+      "risk": "Anomaly thresholds are misapplied (e.g., using 1.5% instead of 1.5 pp).",
+      "scale": "medium",
+      "owner": "Growth Analyst - Quality Assurance",
+      "mitigation": "All anomaly checks must be defined in percentage points, not percentages; use the weekly mean as baseline and compute deviations in absolute terms.",
+      "early_warning_indicator": "Anomalies are flagged at 1.5% instead of 1.5 pp in anomalies_report_v1.json."
+    },
+    {
+      "risk": "Dashboard parser fails on silent zero-fills or missing keys due to unmeasured cells.",
+      "scale": "high",
+      "owner": "Frontend Engineer - Analytics UI",
+      "mitigation": "All unmeasured fields must be explicitly marked as absent in raw data; no zero-fill allowed unless instrumented and documented.",
+      "early_warning_indicator": "Dashboard parser hard-fails on input with missing keys or silent zero-fills."
+    },
+    {
+      "risk": "Instrumentation quirks are not properly mapped to raw fields, leading to incorrect rate computation.",
+      "scale": "high",
+      "owner": "Data Engineer - Analytics Pipeline",
+      "mitigation": "All quirks must be cross-referenced with raw field names in the instrumentation_quirks_mapping.txt; any mismatch triggers rework of phase_1.",
+      "early_warning_indicator": "Raw data parsing fails validation due to unaligned field mapping."
+    }
+  ],
+  "decision_log": [
+    {
+      "date": "2024-07-05T10:00:00Z",
+      "decision": "Delta computation must use summed numerators from prior-week totals, not daily averages. This is mandated by the binding constraint.",
+      "basis": "Binding constraint: 'deltas are signed percentages computed from summed numerators, never from averaging daily rates.'"
+    },
+    {
+      "date": "2024-07-05T10:15:00Z",
+      "decision": "Anomalies must be defined as deviations beyond 1.5 percentage points (pp) from the weekly mean, not in absolute or relative terms.",
+      "basis": "Binding constraint: 'anomalies are deviations beyond 1.5 percentage points from the weekly mean'."
+    },
+    {
+      "date": "2024-07-05T10:30:00Z",
+      "decision": "All rate fields must be expressed as decimals to four places (e.g., 0.8600, not 86%). This is non-negotiable.",
+      "basis": "Binding constraint: 'rates are decimals to four places'."
+    },
+    {
+      "date": "2024-07-05T10:45:00Z",
+      "decision": "Any unmeasured cell must be explicitly marked as absent in raw data; zero-fills are prohibited.",
+      "basis": "Dashboard parser hard-fails on silent zero-fills and missing keys. This is a process discipline requirement."
+    }
+  ],
+  "notes": "All numeric columns carry unit labels (e.g., registrations, activations). Rounding occurs only at final output stage and is to four decimal places. Repeated execution of this plan will converge due to deterministic parsing and validation rules. The critical path is derived from hard dependencies; if any hard dependency slips by more than 2 days, the entire path must be recomputed. Anomalies with no cause are labeled 'none-known' as per binding constraint."
+}

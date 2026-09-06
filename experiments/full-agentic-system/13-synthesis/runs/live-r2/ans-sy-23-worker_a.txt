@@ -1,0 +1,142 @@
+### Phase 1 RULE SCAN (First Half Only)
+*Rules governing the core scheduling, checkpointing, and preemption logic for LOW jobs.*
+
+1. **Preemption Rule**: `HIGH` arrival instantly stops any running `LOW` job; while `HIGH` runs, no other work executes.
+2. **Queue Discipline Rule**: `LOW` jobs are selected from the waiting queue strictly by their absolute start minute (earliest first); a resumed `LOW` outranks a fresh one at ties.
+3. **Idle Prevention Rule**: The core never idles while a `LOW` job is waiting; the next waiting `LOW` starts immediately in the same minute as the previous finishes or is preempted.
+4. **Checkpointing Rule**: A `LOW` job checkpoints every 2 completed minutes of running time (absolute minutes $s+2, s+4, \dots$).
+5. **Waste Rule**: On preemption, work past the last checkpoint is wasted and must be redone upon resume.
+6. **Completion Order Rule**: The order lists `LOW` jobs by the minute they finish; a `LOW` finishing before `HIGH` arrives is always first in the list.
+
+### Phase 2 LEDGER WALK (First Half Only)
+*Applying events to the state: Minute-by-minute simulation.*
+
+**Initial State:**
+- Waiting Queue: `[LOW1 (start=0), LOW2 (start=2)]`
+- Core Status: Idle at $t=0$.
+
+**Minute 0:**
+- Event: `LOW1` starts.
+- Action: Core runs `LOW1`. Checkpoint banked at $t=2$.
+- State: Running `LOW1` (elapsed 0/5). Queue: `[LOW2]`.
+
+**Minute 1:**
+- Event: Time passes.
+- Action: Core continues `LOW1`.
+- State: Running `LOW1` (elapsed 1/5). Checkpoint banked at $t=2$.
+
+**Minute 2:**
+- Event: `HIGH` arrives ($t=2$) and `LOW2` start minute arrives.
+- Action: Preemption occurs. `LOW1` is stopped immediately. Work done so far (0 to 2 mins) is checked against checkpoint at $t=2$. Since the job reached exactly $t=2$, it is fully banked. No work wasted yet, but progress stops. Core becomes free for `HIGH`.
+- State: Running `HIGH` (elapsed 0/9). Queue: `[LOW2]`. `LOW1` paused at checkpoint $t=2$.
+
+**Minute 3:**
+- Event: Time passes under `HIGH`.
+- Action: Core runs `HIGH`.
+- State: Running `HIGH` (elapsed 1/9).
+
+**Minute 4:**
+- Event: Time passes.
+- Action: Core runs `HIGH`.
+- State: Running `HIGH` (elapsed 2/9).
+
+**Minute 5:**
+- Event: Time passes.
+- Action: Core runs `HIGH`.
+- State: Running `HIGH` (elapsed 3/9).
+
+**Minute 6:**
+- Event: Time passes.
+- Action: Core runs `HIGH`.
+- State: Running `HIGH` (elapsed 4/9).
+
+**Minute 7:**
+- Event: Time passes.
+- Action: Core runs `HIGH`.
+- State: Running `HIGH` (elapsed 5/9).
+
+**Minute 8:**
+- Event: Time passes.
+- Action: Core runs `HIGH`.
+- State: Running `HIGH` (elapsed 6/9).
+
+**Minute 9:**
+- Event: Time passes.
+- Action: Core runs `HIGH`.
+- State: Running `HIGH` (elapsed 7/9).
+
+**Minute 10:**
+- Event: `HIGH` finishes ($t=10$). Queue check: `LOW2` is waiting (start minute 2 < current time).
+- Action: `LOW2` starts immediately. Core runs `LOW2`.
+- State: Running `LOW2` (elapsed 0/7).
+
+**Minute 11:**
+- Event: Time passes.
+- Action: Core runs `LOW2`. Checkpoint banked at $t=4$ ($11+? \to$ wait, start is 2. Checkpoints at $2+2=4$, then every 2 mins). Current elapsed for `LOW2` is 3 (mins 10, 11, 12?). Let's re-calc absolute time vs running time.
+- Re-eval Minute 11: `LOW2` started at $t=10$. Elapsed running time = 1 min. Checkpoint needed at elapsed 2 mins ($t=12$).
+- State: Running `LOW2` (elapsed 1/7).
+
+**Minute 12:**
+- Event: Time passes.
+- Action: Core runs `LOW2`. Elapsed running time = 2 mins. Checkpoint banked at $t=12$.
+- State: Running `LOW2` (elapsed 2/7).
+
+**Minute 13:**
+- Event: Time passes.
+- Action: Core runs `LOW2`. Elapsed running time = 3 mins.
+- State: Running `LOW2` (elapsed 3/7).
+
+**Minute 14:**
+- Event: Time passes.
+- Action: Core runs `LOW2`. Elapsed running time = 4 mins.
+- State: Running `LOW2` (elapsed 4/7).
+
+**Minute 15:**
+- Event: Time passes.
+- Action: Core runs `LOW2`. Elapsed running time = 5 mins.
+- State: Running `LOW2` (elapsed 5/7).
+
+**Minute 16:**
+- Event: Time passes.
+- Action: Core runs `LOW2`. Elapsed running time = 6 mins. Checkpoint banked at $t=14$? No, start was 2. Checkpoints at absolute times $s+2k$. For `LOW2`, start $s=2$. Banks at $4, 6, 8...$ Wait, the rule says "bank a checkpoint at minute s+2 and again every 2 running minutes after". This implies banks are tied to *running* time intervals of 2.
+- Let's re-read carefully: "A job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after".
+    - Interpretation A: Absolute time $s+2$, then absolute time $(s+2)+2$, etc? No, "every 2 running minutes after" suggests relative to the job's progress.
+    - Standard interpretation in such problems: Checkpoints occur when `running_time` % 2 == 0.
+    - Let's trace `LOW1`: Start $t=0$. Runs until $t=2$ (preempted). Running time = 2 mins. Bank at $t=2$. Correct.
+    - Trace `LOW2`: Starts $t=10$. Needs to run 7 mins total.
+        - Minute 10: Run 1 min.
+        - Minute 11: Run 2 mins. (Checkpoint 1).
+        - Minute 12: Run 3 mins.
+        - Minute 13: Run 4 mins. (Checkpoint 2).
+        - Minute 14: Run 5 mins.
+        - Minute 15: Run 6 mins. (Checkpoint 3).
+        - Minute 16: Run 7 mins. Finish.
+- Back to Minute 16: `LOW2` finishes at $t=16$.
+- State: `LOW2` Finished. Queue empty.
+
+**Minute 17:**
+- Event: Core idle? No, queue was `[LOW1]`. When did `LOW1` get added back?
+- Rule: "a resumed LOW outranks a fresh one". `LOW1` is waiting (resumed). `LOW2` just finished.
+- Action: Resume `LOW1`. It needs to redo work past checkpoint $t=2$. Total duration 5 mins. Banked 2 mins. Needs to run 3 more minutes.
+- State: Running `LOW1` (redoing, elapsed 0/3).
+
+**Minute 18:**
+- Event: Time passes.
+- Action: Core runs `LOW1`. Elapsed running time = 1 min.
+- State: Running `LOW1` (elapsed 1/3).
+
+**Minute 19:**
+- Event: Time passes.
+- Action: Core runs `LOW1`. Elapsed running time = 2 mins. Checkpoint banked at $t=18$? No, relative to resume start ($t=16$). Resume start is effectively a new "s" for the redo phase? Or does it keep absolute banks?
+- Rule: "after resume a job redoes every minute past its last bank". This implies we track running time from the point of resume.
+- Checkpoint at $t=2$ (absolute) was valid. Resume happens at $t=16$. We need to run 3 mins.
+    - Minute 17: Run 1 min.
+    - Minute 18: Run 2 mins. (Checkpoint).
+    - Minute 19: Run 3 mins. Finish.
+- State: `LOW1` Finished at $t=19$.
+
+**Final Calculation:**
+- **Makespan**: Last finish time = 19.
+- **Wasted Minutes**:
+    - `LOW1`: Preempted at $t=2$ (banked). Resume at $t=16$. Ran 3 mins to finish. Total needed 5. Banked 2. Wasted = $5 - 2 = 3$? Or is it the time spent running that was lost?
+    - Rule: "on preemption the work past the last checkpoint is wasted". Work done in minutes 0,1,2 (total 2 mins)

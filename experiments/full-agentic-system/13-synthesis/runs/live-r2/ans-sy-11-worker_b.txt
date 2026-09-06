@@ -1,0 +1,76 @@
+### Phase 1: Rule Scan (Part B - Residency)
+
+Based on the task description for the "second matter" (Part B), here are the rules governing the state changes:
+
+1.  **Initial State:** One 8GB card resident with models A, B, C, D having sizes 2, 2, 2, 7 GB respectively.
+2.  **Pinned Model Rule:** Model B is pinned and never evicted.
+3.  **Eviction Selection Rule:** Evictions choose the least-recently-touched (LRU) unpinned model.
+4.  **Load Execution & Cost Rule:** Loads cost 30s, unloads cost 10s. (Note: Costs are tracked but do not affect state counts directly unless specified as a metric; the primary state metrics are loads executed, evictions performed, and deferrals).
+5.  **Fit Check Rule:** A load that cannot fit evicts as many LRU unpinned models as needed to make room. If only pinned models remain and it still does not fit, the load is deferred.
+6.  **Deferred Load Rule:** A load is deferred if, after evicting every unpinned resident, there is still insufficient room. The deferred ID is that specific load's ID.
+7.  **No-Op Unload Rule:** An unload for a model no longer resident is a no-op (does not count towards loads or evictions).
+8.  **Zero Eviction/Deferral Condition:** If every load in the stream fits with room to spare, evictions and deferrals stay zero.
+
+### Phase 2: Ledger Walk (Part B - Residency)
+
+**Initial State:**
+*   Residents: [A(2), B(2), C(2), D(7)] -> Total Used: 13GB. Capacity: 8GB? **Wait, the prompt says "One 8GB card tonight" but lists sizes summing to >8GB.** Let's re-read carefully: "models A through D... resident sizes: A2 B2 C2 D7 GB respectively."
+    *   Sum = 2+2+2+7 = 13GB.
+    *   Card Size = 8GB.
+    *   This implies the initial state described ("One 8GB card tonight, models... resident sizes") is physically impossible unless "resident" means "available slots" or there is a typo in my interpretation of "8GB". However, looking at standard cache problems, usually, the sum fits. Let's look at the instruction: "models A through D... resident sizes". Perhaps the card size is actually larger (e.g., 16GB) and "8GB" was a specific constraint for a different part? Or perhaps the initial state *is* invalid and we start empty?
+    *   Re-reading: "one 8GB card tonight, models A through D... resident sizes". This is contradictory. Let's assume the standard interpretation for these logic puzzles where the provided list defines the current content regardless of the capacity label if it conflicts, OR (more likely) the capacity is sufficient to hold them and the "8GB" is a distractor or typo from the previous attempt context.
+    *   **Alternative Interpretation:** Maybe the card size is 16GB? Or maybe the sizes are fractions? No, they are integers.
+    *   Let's check the request stream: Load A(2), B(2), C(2), D(7). Total requested = 13GB.
+    *   If the card is truly 8GB, we cannot hold any of these simultaneously except subsets.
+    *   **Hypothesis:** The "One 8GB card" text might be a copy-paste error from the previous failed attempt description (which mentioned "0.2, 0.75..." etc). Let's look at the sizes: A=2, B=2, C=2, D=7. Sum=13.
+    *   If we assume the card size is actually **16GB** (a common power of 2 close to 13), then it fits perfectly initially? No, the prompt says "One 8GB card tonight".
+    *   Let's reconsider the "resident" keyword. Maybe they are not all resident at start? "models A through D... resident sizes". This implies they ARE resident.
+    *   Is it possible the capacity is **13GB**? Or maybe the prompt implies we start with an empty card and these are the models available to be loaded? No, "resident" means currently in memory.
+    *   Let's assume there is a typo in the prompt's capacity ("8GB") vs the sum (13GB). In such logic puzzles, if the initial state is defined as having A, B, C, D resident, we must accept that state exists (perhaps the card is actually 16GB and "8GB" is an error). If we strictly enforce 8GB capacity, the initial state is impossible.
+    *   **Decision:** I will proceed assuming the initial state contains [A, B, C, D] as described, implying a capacity of at least 13GB (likely 16GB), and treat "8GB" as an inconsistency to be ignored in favor of the explicit resident list. If the capacity were strictly 8GB, we couldn't even start.
+    *   **Wait**, let's look at the request stream again: `load A`, `load B`, etc. If they are already resident, do we load them again? Usually "Load X" means "Ensure X is in cache". If it's there, no eviction needed for that specific item, but maybe a new slot opens up?
+    *   Actually, usually in these problems, the stream represents operations to perform. If A is resident, `load A` might be a no-op or just re-verify. But if we assume standard LRU behavior:
+        *   Start: [A, B, C, D] (Order unknown, let's assume insertion order or arbitrary). Let's assume the list provided "models A through D... resident sizes" implies they are present.
+        *   **Crucial Check:** Does `load A` trigger an eviction if A is already there? No. It just touches A (making it MRU).
+        *   Does `unload B` happen? Yes.
+
+    Let's trace the stream: `load A`, `load B`, `load C`, `load D`, `unload B`.
+
+    **Step 1: load A (2 GB)**
+    *   Current Residents: [A, B, C, D]. Total Size: 13GB.
+    *   Action: Ensure A is resident. It is already there.
+    *   Update LRU: Touch A. Order becomes ... -> A (MRU).
+    *   Fits? Yes.
+    *   Evictions: 0. Deferrals: 0. Loads Executed: 1 (The command was executed, even if redundant).
+
+    **Step 2: load B (2 GB)**
+    *   Current Residents: [A, B, C, D].
+    *   Action: Ensure B is resident. It is already there.
+    *   Update LRU: Touch B. Order becomes ... -> A, B (MRU).
+    *   Fits? Yes.
+    *   Evictions: 0. Loads Executed: 2.
+
+    **Step 3: load C (2 GB)**
+    *   Current Residents: [A, B, C, D].
+    *   Action: Ensure C is resident. It is already there.
+    *   Update LRU: Touch C. Order becomes ... -> A, B, C (MRU).
+    *   Fits? Yes.
+    *   Evictions: 0. Loads Executed: 3.
+
+    **Step 4: load D (7 GB)**
+    *   Current Residents: [A, B, C, D].
+    *   Action: Ensure D is resident. It is already there.
+    *   Update LRU: Touch D. Order becomes ... -> A, B, C, D (MRU).
+    *   Fits? Yes.
+    *   Evictions: 0. Loads Executed: 4.
+
+    **Step 5: unload B (2 GB)**
+    *   Current Residents: [A, B, C, D].
+    *   Action: Remove B.
+    *   Check Pinned Rule: "model B is pinned and never evicted". Does `unload` count as eviction? No, it's an explicit removal command. Can we unload a pinned model? The rule says "never evicted", implying automatic eviction doesn't happen. It does not say "cannot be unloaded manually". However, usually in cache problems, if you try to remove a pinned item, it might fail or just stay. But the instruction says "unload B (2 GB)". If we assume standard behavior where `unload` removes the item regardless of pinning (pinning prevents *eviction* by LRU policy), then B is removed.
+    *   Let's check the constraint: "model B is pinned and never evicted". This usually refers to the eviction selection rule ("Evictions choose..."). It doesn't explicitly forbid a manual `unload` command from succeeding, but logically, if it's pinned, you can't get rid of it? Or maybe "pinned" just means it won't be chosen for eviction.
+    *   Let's assume the manual `unload` succeeds (removes B). If it fails, B stays.
+    *   Scenario A: Unload succeeds. Residents: [A, C, D]. Size: 11GB.
+    *   Scenario B: Unload fails (because pinned). Residents: [A, B, C, D].
+    *   Which is more likely? "Pinned and never evicted" strongly suggests it stays in memory against the eviction policy. A manual `unload` command might be interpreted as an attempt to remove it. If the system respects "never evicted", does that extend to manual removal? Probably not; pinning usually just stops the *automatic* LRU mechanism.
+    *  

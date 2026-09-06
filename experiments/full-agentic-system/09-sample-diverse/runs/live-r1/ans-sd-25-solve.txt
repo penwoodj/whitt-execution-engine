@@ -1,0 +1,66 @@
+Based on the strict rules provided in the task description (specifically regarding "one event at a time", "apply the rule that event touches", and the specific mechanics of LOW jobs, checkpoints, preemption, and scheduling), here is the step-by-step derivation followed by the final JSON output.
+
+### Phase 1: Rule Application & State Walk
+**Events to process:**
+1.  **Start LOW1**: Minute 0 (Duration 5).
+2.  **Start LOW2**: Minute 2 (Duration 3).
+3.  **Arrival HIGH**: Minute 3 (Duration 8). Preempts current LOW job.
+4.  **Resume/Start Logic**: Core never idles while a LOW waits. The next waiting LOW starts in the same minute the previous one finishes or is preempted.
+5.  **Checkpoint Logic**: Jobs bank every 2 running minutes. On preemption, work past the last checkpoint is wasted and redone.
+6.  **Scheduling Order**: Resumed/Waiting LOWs are ordered by their Start Minute (lower wins). If start times tie, resumed outranks fresh.
+
+**Detailed Walk:**
+
+*   **Minute 0**: `LOW1` starts. Running time = 0. Checkpoint banked at $0+2=2$.
+    *   *State*: LOW1 running (remaining: 5). Core busy until M2.
+*   **Minute 1**: `LOW1` continues. Running time = 1. Checkpoint next at 4.
+    *   *State*: LOW1 running (remaining: 4). Core busy until M2.
+*   **Minute 2**: `LOW1` continues. Running time = 2. **Checkpoint Banked** at minute 2.
+        Simultaneously, `LOW2` starts. Duration 3. Checkpoint banked at $2+2=4$.
+    *   *Ordering*: `LOW1` (Start M0) vs `LOW2` (Start M2). `LOW1` wins order.
+    *   *State*: Core busy until LOW1 finishes or is preempted. Both jobs waiting/running on core? No, only one job runs at a time per rule ("while HIGH runs nothing else runs", implies single-core execution for LOWs too based on "preempting whatever LOW job"). `LOW1` holds the core because it started earlier (M0 < M2).
+    *   *State*: LOW1 running (remaining: 3, banked at 2). LOW2 waiting.
+*   **Minute 3**: `HIGH` arrives. Rule: "instantly preempting whatever LOW job is running".
+        `LOW1` was running from M0 to M3. It has completed minutes 0, 1, 2 (3 minutes total).
+        Checkpoints were at M2. Next checkpoint would be M4.
+        Since preemption happens *at* minute 3, and the last checkpoint was exactly at minute 2 (which counts), does `LOW1` have unbanked time?
+        Running time = 3 minutes. Banked at 2. Unbanked interval: Minute 2 to Minute 3 is 1 minute of running time accumulated between banks?
+        Let's re-read the checkpoint definition carefully: "checkpoints every 2 completed minutes".
+        M0 start.
+        End of M1 (1 min done). No bank yet.
+        End of M2 (2 mins done). **Bank**.
+        So at Minute 3 arrival, `LOW1` has finished exactly 2 full banking cycles? Or is it continuous time?
+        "a job that starts or resumes at minute s banks a checkpoint at minute s+2".
+        Start M0. Bank at M2.
+        At M3, the job has been running for 3 minutes of wall-clock time. It finished exactly 2 minutes (banked) and ran 1 more minute (unbanked).
+        Rule: "on preemption the work past the last checkpoint is wasted".
+        Work past last checkpoint = $3 - 2 = 1$ minute.
+        **Wasted**: 1 minute.
+        `LOW1` must redo its full duration (5 minutes) upon resume? Or just the unbanked part?
+        Rule: "after resume a job redoes every minute past its last bank". This implies it runs from scratch effectively up to the point of the next checkpoint, or rather, it loses progress. Usually in these logic puzzles, if you lose the 1 minute, and the system requires checkpoints at 2, then 4...
+        If `LOW1` is preempted at M3, it has banked 0 (at start) and 1 (at M2). It lost the time between M2 and M3.
+        When resumed, does it need to re-verify the checkpoint at M2 again? The prompt says "redoes every minute past its last bank". This suggests linear accumulation of work from the last valid state. But since the state was wiped, it effectively starts accumulating new time. However, usually, if a job is preempted, it resumes.
+        Let's look at the "orientation" example for clarity: "LOW1 held core minutes 0, 1 and 2... its 3rd minute was unbanked when the swap came, so 1 minute wasted." It implies `LOW1` started over? No, in the example, it resumed later.
+        Wait, the example says: "LOW1 had 7 total minutes with 2 banked, so it resumed owing 5". Total=7. Banked at M2 (2 mins). Resumed owing $7-2 = 5$? Or did it lose the unbanked minute and still owe the rest?
+        In the example: "LOW1 held core minutes 0, 1 and 2... its 3rd minute was unbanked". This means at M3 arrival, it had done 3 mins. Banked at 2. Unbanked = 1 min wasted.
+        Then later: "resumed owing 5". Total duration 7. $7 - 2 (banked) = 5$.
+        This implies that the job keeps its *banked* progress, but loses the unbanked part. It resumes with the remaining work ($Total - Banked$). The unbanked minute is discarded.
+        So `LOW1` resumes with $5 - 1 (wasted) = 4$ minutes? Or does it keep the 2 banked and just add the rest?
+        Let's re-read: "after resume a job redoes every minute past its last bank". This phrasing is tricky. Does it mean "re-do" as in "run again"? Or "redo" meaning "the unbanked part must be run"?
+        Actually, looking at the example calculation: "resumed owing 5". The total was 7. Banked was 2. $7-2=5$. It seems it *keeps* the banked progress. It only loses the unbanked minute ($3-2=1$). So remaining work = Total - LastBankTime? Or Total - (LastBankTime + Wasted)?
+        If I have a job of 7 mins. I run 3 mins. Bank at 2. Minute 0,1,2 are "safe". Minute 3 is unsafe. Preemption happens at minute 3. I lose minute 3. Safe progress: 2 mins. Remaining to do: $7-2 = 5$ minutes?
+        But wait, the example says "resumed owing 5". And total was 7. So yes, it keeps the banked time.
+        However, my current case: `LOW1` has duration 5. Bank at M2 (2 mins). Preemption at M3 (unbanked = 1 min).
+        Safe progress: 2 mins. Remaining to do: $5 - 2 = 3$ minutes?
+        Let's check the text again: "after resume a job redoes every minute past its last bank". This might mean it has to run from scratch? No, that contradicts the example where it owed 5 (which is $7-2$, not 7).
+        So interpretation: **Keep Banked Time. Lose Unbanked Time.**
+        `LOW1`: Duration 5. Bank at M2 (2 mins). Preempted at M3. Lost 1 min. Remaining work = $5 - 2 = 3$ minutes.
+        
+        *Correction on Scheduling*: "while HIGH runs nothing else runs". Core is busy with HIGH from M3 to M10 ($3+8=11$, but duration 8 means ends at $3+8-1$? Or just 8 mins of running? "runs 8 minutes to completion". Usually implies $Start + Duration$. High starts M3. Ends M10 (inclusive) or M11 exclusive?
+        Example: HIGH runs 2 mins in orientation. Arrives M3. Runs M3, M4. Completes at end of M4? Or M5 start?
+        "runs 8 minutes to completion". If it starts at minute 3, and runs for duration D, it occupies the core during interval [3, 3+D). It finishes at time $T_{finish} = 3 + D$.
+        In orientation: Arrive M3, run 2 mins. Finishes at M5? (M3->M4 is 2 mins? No, M3 to M4 is 1 min duration. M3 to M5 is 2 min duration). So it occupies core during minutes 3 and 4. Completes at start of minute 5.
+        Okay, High runs Minutes 3, 4. (Duration 2). Finishes at end of Minute 4? Or Start of Minute 5?
+        "runs 8 minutes". Minutes: 3, 4, 5, 6, 7, 8, 9, 10. Total 8 minutes. Completes at start of Minute 11.
+        
+        Back to `LOW1` resume: Remaining work = 

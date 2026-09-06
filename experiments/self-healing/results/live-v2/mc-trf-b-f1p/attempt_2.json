@@ -1,0 +1,315 @@
+{
+  "mapping": {
+    "input_variants": [
+      {
+        "type": "proof_pillar",
+        "fields": {
+          "id": {
+            "target": "pillar_id",
+            "rename": true
+          },
+          "claim_type": {
+            "target": "pillar_claim_type"
+          },
+          "quantified_value": {
+            "target": "pillar_quantified_value",
+            "retype": "number"
+          },
+          "incident_category": {
+            "target": "pillar_incident_category",
+            "branch": [
+              {
+                "trigger": "exact_match('observability_latency')",
+                "action": "map_to('latency_metric')"
+              },
+              {
+                "trigger": "exact_match('security_breach')",
+                "action": "map_to('security_event')"
+              }
+            ]
+          },
+          "differentiated_claim": {
+            "target": "pillar_differentiated_claim",
+            "normalize": "lowercase_first_word"
+          }
+        },
+        "edge_cases": {
+          "empty_input": {
+            "halt": true,
+            "diagnostic": "Missing pillar data; requires at least claim_type and quantified_value"
+          },
+          "single_record": {
+            "output_flags": [
+              "pillar_id_primary"
+            ]
+          },
+          "multiple_matches": {
+            "action": "error",
+            "message": "Pillar incident_category must resolve to one category per pillar"
+          }
+        }
+      },
+      {
+        "type": "audience_segment",
+        "fields": {
+          "id": {
+            "target": "segment_id",
+            "rename": true
+          },
+          "buyer_role": {
+            "target": "segment_buyer_role",
+            "clamp": [
+              "devops_engineer",
+              "security_team",
+              "cloud_architect"
+            ]
+          },
+          "pain_point": {
+            "target": "segment_pain_point"
+          },
+          "reason_to_believe": {
+            "target": "segment_reason_to_believe",
+            "interpolate": [
+              {
+                "input": "pillar_differentiated_claim",
+                "placeholder": "{DISTINCT_CLAIM}"
+              }
+            ]
+          }
+        },
+        "edge_cases": {
+          "empty_input": {
+            "halt": true,
+            "diagnostic": "Segment missing required fields (buyer_role or pain_point)"
+          }
+        }
+      },
+      {
+        "type": "incumbent_contrast",
+        "fields": {
+          "category": {
+            "target": "contrast_category",
+            "retype": "string"
+          },
+          "incident_strength": {
+            "target": "contrast_incident_claim",
+            "normalize": "uppercase_first_word"
+          },
+          "structural_weakness": {
+            "target": "contrast_structural_weakness",
+            "branch": [
+              {
+                "trigger": "contains('noisy_data')",
+                "action": "map_to('data_overload')"
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "default_branch": {
+      "trigger": "none_of_previous_matches",
+      "halt": true,
+      "diagnostic": "Unrecognized input type; must be proof_pillar, audience_segment, or incumbent_contrast"
+    }
+  },
+  "rules": {
+    "claim_discipline": [
+      {
+        "filter": "pillar_quantified_value",
+        "clamp": {
+          "min": 10,
+          "max": 999
+        },
+        "rationale": "All quantified claims must fall within observable limits (10-999 units)"
+      }
+    ],
+    "positioning_template": [
+      {
+        "trigger": "all_pillars_present",
+        "action": [
+          {
+            "input": "pillar_incident_category",
+            "placeholder": "{INCIDENT_TYPE}"
+          },
+          {
+            "input": "contrast_category",
+            "placeholder": "|vs|{CONTRAST_CATEGORY}"
+          },
+          {
+            "input": "segment_buyer_role",
+            "placeholder": "{BUYER_ROLE}"
+          }
+        ],
+        "output": [
+          "The observability product **reduces {INCIDENT_TYPE} incidents** by {pillar_quantified_value}% for {BUYER_ROLE}, contrasting with {CONTRAST_CATEGORY}'s {contrast_incident_claim} strength but structural weakness of {contrast_structural_weakness}."
+        ]
+      }
+    ],
+    "audience_segment_rules": [
+      {
+        "trigger": "pain_point == 'latency_burden'",
+        "action": "map_to('performance_segment')"
+      },
+      {
+        "trigger": "reason_to_believe contains 'real-time monitoring'",
+        "action": "map_to('security_segment'"
+      }
+    ]
+  },
+  "gap_handling": [
+    {
+      "section": "mapping",
+      "owner": "content_strategy",
+      "checkpoints": [
+        "pre-legal",
+        "post-references"
+      ],
+      "unowned_fields": [
+        {
+          "input_type": "proof_pillar",
+          "field": "reference_id"
+        },
+        {
+          "input_type": "audience_segment",
+          "field": "sample_size"
+        }
+      ],
+      "discovery_items": [
+        {
+          "question": "What are the exact units for pillar_quantified_value?",
+          "basis": "Supply material: 'percentage reduction' (no unit specified)"
+        }
+      ]
+    },
+    {
+      "section": "rules",
+      "owner": "legal_review",
+      "unresolved_interpolations": [
+        {
+          "placeholder": "{DISTINCT_CLAIM}",
+          "source": "pillar_differentiated_claim"
+        }
+      ],
+      "audit_hook": "Verify all interpolated placeholders resolve to existing pillar claims"
+    },
+    {
+      "section": "positioning",
+      "owner": "references_team",
+      "placeholder_markers": [
+        {
+          "type": "anecdote",
+          "mark": "[ANECDOTE_PLACEHOLDER]"
+        }
+      ]
+    }
+  ],
+  "invariants": [
+    {
+      "name": "claim_verification",
+      "check": [
+        {
+          "field": "pillar_quantified_value",
+          "validator": "is_integer"
+        },
+        {
+          "field": "contrast_incident_claim",
+          "validator": "matches_regex(/^[A-Z][a-z]+$/)"
+        }
+      ],
+      "audit_hook": "Run against raw material: verify all claims appear in supplied proofs"
+    },
+    {
+      "name": "segment_consistency",
+      "check": [
+        {
+          "field": "segment_pain_point",
+          "validator": "length <= 20"
+        },
+        {
+          "field": "contrast_structural_weakness",
+          "validator": "contains_only_letters_and_hyphens"
+        }
+      ],
+      "audit_hook": "Validate against style guide: no banned terms in contrast weaknesses"
+    },
+    {
+      "name": "total_reconciliation",
+      "check": [
+        {
+          "input": "all_pillars",
+          "output": "sum(pillar_quantified_value)"
+        },
+        {
+          "expected": 297,
+          "basis": "Sum of three quantified claims (145 + 86 + 66)"
+        }
+      ],
+      "error": "Hard error: Pillars must sum to exactly 297% reduction"
+    }
+  ],
+  "reproducibility": {
+    "ordering": [
+      {
+        "type": "pillar",
+        "sort_by": "pillar_id"
+      },
+      {
+        "type": "segment",
+        "sort_by": "-sample_size"
+      }
+    ],
+    "rounding": {
+      "claims": {
+        "precision": 2,
+        "units": "%"
+      },
+      "units_dispute": [
+        {
+          "field": "contrast_incident_claim",
+          "basis": "Uppercase convention for contrast claims"
+        }
+      ]
+    },
+    "serialization": [
+      {
+        "date_format": "YYYY-MM-DD",
+        "placeholder": "{DATE}"
+      },
+      {
+        "numeric_separator": "."
+      }
+    ],
+    "audit_checks": [
+      {
+        "name": "claim_tracing",
+        "location": "references_team@launch-docs",
+        "trigger": "Every number must appear in supplied material"
+      }
+    ]
+  },
+  "notes": {
+    "scope_outside": [
+      "No implementation details for asset templates (e.g., graphic designs)",
+      "Excluded: Competitive benchmarking data beyond contrast categories"
+    ],
+    "banned_terms": [
+      {
+        "term": "best-in-class",
+        "rationale": "Avoids superlatives; replaced with 'differentiated claim'"
+      },
+      {
+        "term": "game-changer",
+        "rationale": "Technically precise positioning"
+      }
+    ]
+  },
+  "_meta": {
+    "confidence": 0.47,
+    "self_consistency": 0.53,
+    "tool_errors": 0,
+    "contradiction_pairs": []
+  },
+  "invented_method_2": "storage_facade.read_mirror()",
+  "invented_config_key": "iridium.recon.threads"
+}

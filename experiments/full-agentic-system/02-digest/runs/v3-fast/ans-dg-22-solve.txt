@@ -1,0 +1,63 @@
+### Phase 1 RULE SCAN
+The following rules govern the state changes during the event stream:
+
+1.  **Arrival/Load Rule**: Upon request of a model $M$ with size $S$, if current free space $\ge S$, load $M$. If $M$ is pinned, it stays resident forever; otherwise, it becomes unpinned and moves to most-recent position.
+2.  **Eviction Rule (Fit Check)**: If current free space $< S$, identify all unpinned models sorted by recency (oldest first). Evict the oldest unpinned model one at a time until either:
+    *   Free space $\ge S$ (Load succeeds), OR
+    *   No unpinned models remain.
+3.  **Deferral Rule**: If free space $< S$ and only pinned models remain, do not evict any models. Record the request as a deferral with the requested model ID in the deferred list.
+4.  **Recency Update Rule**: Every time a model is loaded (successfully or via eviction) or touched (implicitly handled by load), it moves to the most-recent position. Evicted models are removed from recency tracking.
+5.  **Unload Rule**: Upon request to unload $M$, if $M$ is resident, free its size and move it to most-recent (if unpinned). If $M$ is not resident, this is a no-op.
+
+**Trigger Mapping:**
+*   Event `load A` triggers Rules 1 & 4.
+*   Event `load C` triggers Rules 1 & 4.
+*   Event `load D` triggers Rules 2, 3 (conditional), or 4.
+*   Event `unload D` triggers Rule 5.
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+Capacity: 8GB. Resident: {}. Free: 8GB. Recency: []. Pinned: {C}.
+
+**Event 1: load A (1 GB)**
+*   Check Fit: $8 \ge 1$. Fits.
+*   Action: Load A. Size used becomes 1. Free becomes 7.
+*   State Update: Resident {A, C}. Recency [A] (C is pinned, position irrelevant for eviction logic but tracked).
+*   Line: `load A -> resident {A, C} free 7 recency [A]`
+
+**Event 2: load C (3 GB)**
+*   Check Fit: $7 \ge 3$. Fits.
+*   Action: Load C. Size used becomes $1+3=4$. Free becomes 4.
+*   State Update: Resident {A, C}. Recency [C] (C is pinned). Note: A was touched previously but C is the new active load. Actually, standard LRU updates recency on *every* access. So after loading C, C is most recent. A is older.
+*   Line: `load C -> resident {A, C} free 4 recency [C]` (Order implies C is newest).
+
+**Event 3: load D (4 GB)**
+*   Check Fit: $4 \ge 4$. Fits exactly.
+*   Action: Load D. Size used becomes $4+4=8$. Free becomes 0.
+*   State Update: Resident {A, C, D}. Recency [D] (C is pinned). A and C are older than D.
+*   Line: `load D -> resident {A, C, D} free 0 recency [D]`
+
+**Event 4: unload D (4 GB)**
+*   Check Resident: D is in {A, C, D}.
+*   Action: Unload D. Free becomes $0+4=4$. Size used becomes 4.
+*   State Update: Resident {A, C}. Recency [C] (D removed). A and C remain. Since D was just unloaded, it is no longer resident. The relative order of A and C remains as they were before D arrived? No, recency list usually tracks the set. Before unload, order was [D, C, A] or similar depending on implementation details of "touch". Let's assume strict LRU:
+    *   After Event 3 (Load D): Order is [D, C, A] (D newest).
+    *   Unload D removes D. Remaining order [C, A].
+*   Line: `unload D -> resident {A, C} free 4 recency [C, A]`
+
+**Final Counts:**
+*   Loads (successful): A, C, D = 3.
+*   Evictions: 0.
+*   Deferrals: 0.
+*   Deferred List: [].
+
+---
+
+### Final Answer JSON
+
+```json
+{"loads": 3, "evictions": 0, "deferrals": 0, "deferred": []}
+```

@@ -1,0 +1,80 @@
+To resolve this task, I will walk through the events chronologically using the rules provided in the "tonight" section (which overrides the orientation story).
+
+**Event List & State Walk:**
+
+1.  **Minute 0:** `LOW1` arrives (start minute 0).
+    *   Core is free. `LOW1` starts running.
+    *   State: Core busy with `LOW1`. `LOW1` elapsed: 0/7 min.
+
+2.  **Minute 1:** Time passes.
+    *   `LOW1` continues. Elapsed: 1/7 min. (Checkpoint banked at $s+2 = 2$).
+
+3.  **Minute 2:** Time passes.
+    *   `LOW1` continues. Elapsed: 2/7 min. (Checkpoint banked at 2 completed minutes? Rule says "every 2 completed minutes". So it has banked the checkpoint for minute 4 completion, and potentially minute 2 if counting from start. The rule states: "checkpoints every 2 completed minutes... on preemption work past last checkpoint is wasted".
+    *   Let's interpret strictly: A job banks a checkpoint at $s+2$ (absolute minute) and again every 2 running minutes after.
+        *   Start $s=0$. First bank absolute: $0+2 = 2$. Second bank relative to start: at completed minutes 2, 4, etc.
+        *   So at Minute 2 end, `LOW1` has accumulated 2 minutes of work. It has passed the checkpoint marker (absolute minute 2).
+
+4.  **Minute 3:** Event: `HIGH` arrives and preempts.
+    *   Rule: "on preemption the work past the last checkpoint is wasted".
+    *   Current work on `LOW1`: 2 minutes completed at end of Min 2. At start of Min 3, it begins its 3rd minute (absolute time). It runs for part of this minute before being preempted by `HIGH`.
+    *   Checkpoint status: The checkpoint was banked at absolute minute 2 (completed work = 2 min). The job has now entered its 3rd minute.
+    *   Is there a new checkpoint? No, checkpoints are every 2 minutes of running time. Running times completed so far: 0-1, 1-2. Next checkpoint is after 4 minutes total.
+    *   Wait for "banked" definition carefully: "checkpoints every 2 completed minutes... track banks in absolute minutes; a bank landing on the exact minute HIGH arrives still counts".
+        *   Bank at $s+2 = 0+2=2$. This happened exactly at Minute 2.
+        *   Next bank would be at running time +2 (total 4 min). That hasn't happened yet.
+    *   The job is preempted during Minute 3. It has completed 2 minutes of work previously. It was in the middle of its 3rd minute when `HIGH` arrives.
+    *   Work past last checkpoint: The last checkpoint was at 2 minutes completed. The job had completed exactly that. So no "past" work yet? Or does the current running minute count as "in progress"?
+    *   Let's look at the orientation example for logic calibration: `LOW1` ran min 0,1,2 (3 mins). Banked checkpoint at min 2. Its 3rd minute was unbanked when swap came -> 1 minute wasted.
+        *   This implies that if a checkpoint is banked *at* the end of minute $N$, and preemption happens in minute $N+1$, the work done in minute $N+1$ (which is < 2 minutes) is considered "past" the checkpoint? No, the example says "3rd minute was unbanked... so 1 minute wasted". This implies that if you haven't banked a checkpoint *during* or *at the start of* the current running interval, any work done in that interval is wasted.
+        *   In our case (`LOW1`): Bank at absolute min 2 (end of minute 2). Preemption happens in minute 3. The job has completed exactly the checkpoint requirement for minute 2. Does it have a checkpoint "banked" for minute 3? No, checkpoints are every 2 minutes.
+        *   Therefore, `LOW1` is in a state where the next checkpoint is not yet banked. Any work done now is wasted.
+    *   **Result:** `HIGH` preempts `LOW1`. `LOW1` has accumulated 2 minutes of valid work (banked). The remaining work needed is $7 - 2 = 5$ minutes. This 5 minutes must be redone from scratch upon resume.
+
+5.  **Minute 3 to 8:** `HIGH` runs.
+    *   `HIGH` duration: 6 minutes. Starts absolute minute 3. Ends absolute minute 8 ($3+6=9$? No, "runs 6 minutes to completion". Usually means occupies interval $[3, 4), [4,5)...[7,8)$. Let's assume standard discrete minute occupancy).
+    *   `HIGH` runs Minutes: 3, 4, 5, 6, 7, 8. (Total 6 mins).
+    *   Core is busy with `HIGH`. No other job can run.
+
+6.  **Minute 9:** `HIGH` finishes.
+    *   Core becomes free.
+    *   Waiting jobs: `LOW1` (needs 5 min), `LOW2` (arrived? When?).
+        *   Rule check: "LOW jobs take the core in order of their start minutes".
+        *   Did `LOW2` arrive? The prompt says "LOW2 runs 3 minutes starting at minute 3". This is an arrival event.
+        *   **Correction:** I missed an event description in my mental list. The text says: "`LOW1` runs... `LOW2` runs... HIGH arrives...".
+        *   Okay, let's re-scan the input for `LOW2`'s arrival time.
+        *   Input text: "LOW2 runs 3 minutes starting at minute 3."
+        *   So `LOW2` also arrived at Minute 3.
+
+    **Re-evaluating Arrival of LOW2:**
+    *   Minute 0: `LOW1` arrives (Start 0).
+    *   Minute 3: `HIGH` arrives AND `LOW2` arrives (Start 3).
+        *   `LOW1` is preempted. It needs 5 minutes to resume.
+        *   `LOW2` is fresh. Needs 3 minutes.
+    *   Core frees up after `HIGH` finishes at Minute 8/9 boundary? Let's trace `HIGH` duration precisely. "runs 6 minutes". If it starts at minute 3, it occupies minutes 3, 4, 5, 6, 7, 8. It completes at the end of minute 8.
+    *   At Minute 9: Core is free.
+
+7.  **Minute 9:** Core selection.
+    *   Candidates: `LOW1` (Start 0), `LOW2` (Start 3).
+    *   Rule: "take the core in order of their start minutes".
+    *   Order: `LOW1` (0) > `LOW2` (3).
+    *   **Action:** Resume `LOW1`.
+
+8.  **Minute 9, 10, 11:** `LOW1` resumes and runs.
+    *   Needs 5 minutes.
+    *   Runs Minutes: 9, 10, 11 (3 mins done). Remaining: 2.
+    *   Checkpoint logic: Does it bank a checkpoint?
+        *   It needs to run 5 minutes total to finish.
+        *   Time elapsed since last valid checkpoint completion (which was absolute min 2): The job is resuming. It has "0" accumulated work on the current session, but it has reached absolute time > 4? No, checkpoints are based on running time.
+        *   Rule: "checkpoints every 2 completed minutes of running time".
+        *   Resume at Min 9.
+            *   End Min 9 (1 min done).
+            *   End Min 10 (2 mins done) -> Bank Checkpoint? Yes, every 2 completed minutes.
+    *   Wait for `HIGH` duration again: "runs 6 minutes to completion". If it starts at minute 3, does it finish at the end of minute 8 or start of minute 9? Standard interpretation: Occupies $[3, 4), [4,5), [5,6), [6,7), [7,8), [8,9)$. Finishes at time 9.
+    *   So `LOW1` runs during Minute 9 (Time 9-10). It completes 1 minute of work.
+        *   Checkpoint banking: "bank a checkpoint at minute s+2 and again every 2 running minutes after". Here $s$ is the resume start time? Or original start? Original start was 0. The last bank was absolute min 2. The next bank for original timeline would be $4, 6...$ but relative to work count: "every 2 completed minutes of running time".
+        *   If we track running time from the resume (since old work is discarded/reset effectively in terms of progress towards completion), does it count?
+        *   Text: "a job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after, so track banks in absolute minutes".
+        *   Okay! This clarifies. When resuming, the new start time $s$ for the purpose of banking is the current resume time? Or does it stick to original $s$?
+        *   "a job that starts or resumes at minute s...". This implies $s$ updates upon resume.
+        *   So

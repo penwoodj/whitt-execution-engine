@@ -1,0 +1,121 @@
+### Phase 1 RULE SCAN
+The following rules govern state changes during the event sequence. Each rule is listed on one line with its trigger condition.
+
+1. **Arrival Rule**: Triggered by every request ID arriving in strict order; updates the pool state based on the ask amount and current balance (grant full, partial, or deny).
+2. **Expiry Rule**: Triggered immediately after a specific named request completes (as defined by the expiry sentence); returns half of the tokens *actually granted* to that request (rounded down) to the pool before the next event processes.
+
+### Phase 2 LEDGER WALK
+Applying events one at a time in strict arrival order, showing state after each step.
+
+**Initial State**: Pool = 60. Grants: None. Expiry Triggers: None active yet.
+
+1. **Event r1 arrives (Ask: 6)**
+   - Rule Applied: Arrival Rule.
+   - Logic: Pool (60) >= Ask (6). Grant full amount.
+   - Action: Pool drops by 6. Grant created for r1 = 6.
+   - State After: Pool = 54. Granted Units = 6.
+
+2. **Event r2 arrives (Ask: 10)**
+   - Rule Applied: Arrival Rule.
+   - Logic: Pool (54) >= Ask (10). Grant full amount.
+   - Action: Pool drops by 10. Grant created for r2 = 10.
+   - State After: Pool = 44. Granted Units = 16.
+
+3. **Event r3 arrives (Ask: 12)**
+   - Rule Applied: Arrival Rule.
+   - Logic: Pool (44) >= Ask (12). Grant full amount.
+   - Action: Pool drops by 12. Grant created for r3 = 12.
+   - State After: Pool = 32. Granted Units = 28.
+
+4. **Event r4 arrives (Ask: 15)**
+   - Rule Applied: Arrival Rule.
+   - Logic: Pool (32) >= Ask (15). Grant full amount.
+   - Action: Pool drops by 15. Grant created for r4 = 15.
+   - State After: Pool = 17. Granted Units = 43.
+
+5. **Event r5 arrives (Ask: 19)**
+   - Rule Applied: Arrival Rule.
+   - Logic: Pool (17) < Ask (19). Grant partial amount (all available).
+   - Action: Pool drops by 17 to 0. Grant created for r5 = 17.
+   - State After: Pool = 0. Granted Units = 60.
+
+6. **Event r6 arrives (Ask: 21)**
+   - Rule Applied: Arrival Rule.
+   - Logic: Pool is exactly 0. Request arrives at empty pool.
+   - Action: Deny request. No tokens moved.
+   - State After: Pool = 0. Granted Units = 60. Denied List = [r6].
+
+7. **Event r7 arrives (Ask: 24)**
+   - Rule Applied: Arrival Rule.
+   - Logic: Pool is exactly 0. Request arrives at empty pool.
+   - Action: Deny request. No tokens moved.
+   - State After: Pool = 0. Granted Units = 60. Denied List = [r6, r7].
+
+8. **Expiry Trigger for r3** (Triggered after r3 completes)
+   - Rule Applied: Expiry Rule.
+   - Logic: Grant for r3 was 12. Return amount = floor(12 / 2) = 6.
+   - Timing: Returns to pool *before* the next request is processed. The "next" event in the sequence relative to this trigger is r4 (which already happened in step 4), but strictly speaking, the return happens immediately upon completion of r3. However, looking at the flow: r1->r2->r3(r3 completes)->Expiry(r3).
+   - *Correction on Timing based on "Return lands right before the request the trigger names"*: The prompt says "the expiry sentence names exactly one request id so only that one grant ever returns... return arrives right before the request the trigger names". This implies a specific ordering where an expiry might happen between requests. But here, r3 is fully granted (12). It completes. Then it expires.
+   - Let's re-read carefully: "the grant for r2 expires after request r3 completes". Wait, looking at the text: "**an expired grant returns half its granted tokens**... **the expiry sentence names exactly one request id so only that one grant ever returns**". The specific instruction in the task says: "**the grant for r2 expires after request r3 completes**".
+   - *Re-evaluating Step 8*: The text explicitly states "the grant for r2 expires after request r3 completes".
+   - Logic: Grant for r2 was 10. Return amount = floor(10 / 2) = 5.
+   - Timing: This return happens immediately after r3 finishes and before r4 starts? No, the text says "after request r3 completes". In my walk above, I processed r4 (step 4) while r2 was still active. The expiry rule triggers *now*.
+   - Action: Add 5 to pool. Pool becomes 17 + 5 = 22.
+   - State After Expiry: Pool = 22. Granted Units = 60.
+
+9. **Re-processing the sequence with the specific Expiry Trigger location**:
+   The prompt says "the grant for r2 expires after request r3 completes". This is a specific event insertion.
+   
+   Let's restart the walk strictly adhering to the "arrival order" of requests, but inserting the expiry event where specified.
+   
+   **Start**: Pool = 60.
+   
+   - **r1 (Ask 6)**: Grant 6. Pool -> 54.
+   - **r2 (Ask 10)**: Grant 10. Pool -> 44.
+   - **r3 (Ask 12)**: Grant 12. Pool -> 32.
+     - *Event Insertion*: "grant for r2 expires after request r3 completes".
+     - Trigger: r2 expiry.
+     - Calculation: Granted to r2 was 10. Return = floor(10/2) = 5.
+     - Action: Pool += 5. Pool -> 37.
+   - **r4 (Ask 15)**: Grant 15. Pool -> 22.
+   - **r5 (Ask 19)**: Grant partial (all available). Ask 19, Pool 22. Grant 19? No, wait.
+     - Current Pool is 22. Ask is 19. 22 >= 19. So grant full 19.
+     - Action: Pool -> 3.
+   - **r6 (Ask 21)**: Pool is 3. Ask 21. Grant partial (all available).
+     - Action: Pool -> 0. Grant 3.
+   - **r7 (Ask 24)**: Pool is 0. Ask 24. Deny.
+   
+   *Wait, let me re-read the "partial" rule carefully*: "a request arriving at an empty pool is denied... a pool that still holds tokens never denies anyone, not even a request larger than what remains".
+   
+   Let's re-run the numbers with the Expiry insertion correctly placed.
+   
+   **Start**: 60.
+   1. **r1 (6)**: Grant 6. Pool = 54.
+   2. **r2 (10)**: Grant 10. Pool = 44.
+   3. **r3 (12)**: Grant 12. Pool = 32.
+      - **Expiry Event**: "grant for r2 expires after request r3 completes".
+      - Return from r2 (granted 10) -> floor(5).
+      - Pool becomes 32 + 5 = 37.
+   4. **r4 (15)**: Grant 15. Pool = 22.
+   5. **r5 (19)**: Ask 19, Pool 22. Grant full 19? Yes, "pool that still holds tokens never denies anyone".
+      - Pool becomes 3.
+   6. **r6 (21)**: Ask 21, Pool 3. Grant partial 3.
+      - Pool becomes 0.
+   7. **r7 (24)**: Ask 24, Pool 0. Deny.
+   
+   Total Granted: 6 + 10 + 12 + 15 + 19 + 3 = 65?
+   Wait, the initial pool was 60. How can granted be 65? Because of the return.
+   Start: 60.
+   Out: 6+10+12+15+19+3 = 65.
+   In (Return): 5.
+   Net Change: -60 + 5 = -55.
+   Final Pool: 60 - 55 = 5?
+   
+   Let's check the math on r7 again.
+   After r6, pool is 0.
+   r7 arrives at empty pool -> Denied.
+   
+   Is there any other expiry? "the grant for r2 expires after request r3 completes". Only one mentioned in the specific task text ("an expired grant returns..."). The orientation story mentions an expiry for the first ask, but the task says "nothing carries over from the orientation story". So only r2 expires.
+   
+   Let's re-verify the "partial" logic on r6.
+  

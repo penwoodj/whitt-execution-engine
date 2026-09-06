@@ -1,0 +1,38 @@
+### PLAN FIRST (Steps & Formulas/Rules)
+
+1.  **Workspace Setup**: Create `/tmp/opencode/perf-reg-run` with subfolders `raw`, `norm`, `delta`, `audit`, `report`, `logs`, `scripts`. Rule: All paths relative to workspace root; no external dependencies beyond standard POSIX tools (`awk`, `sort`, `cut`, `date`).
+2.  **Data Ingestion & Normalization**: Read raw timing files (assumed CSV: `commit_id,scenario,repeat,time_ms`); compute `best_time = MIN(time)` and `median_time = MEDIAN(time)` per `(commit, scenario)`. Rule: If only one repeat exists, `best == median`; flag single-repeat rows in `audit/flags.txt`.
+3.  **Delta Calculation**: Compute `delta_pct = ((current_best - prev_best) / prev_best) * 100` for each commit relative to the previous commit (handling ambiguous timestamps via commit ID sort order). Rule: Do not round intermediate values; output full precision (e.g., `-12.3456789`).
+4.  **Regression Flagging**: Mark rows where `delta_pct > 10`. Audit specific "pure refactor" commit for any positive delta. Rule: If data contradicts prompt claim (e.g., refactor has regression), flag contradiction in `audit/contradictions.txt` and do not suppress.
+5.  **Verdict Generation**: Assign scenario verdicts (`REGRESSED`, `STABLE`, `IMPROVED`) based on thresholds; assign overall commit verdict (`FAIL` if any regression, else `PASS`). Method: Visible logic in JSON keys (e.g., `verdict_method: "any_positive_delta"`).
+6.  **Output Formatting**: Generate `perf.md` with human-readable tables (Markdown syntax) and `perf.json` with identical numeric values. Rule: No drift between files; if manual edit occurs, re-run generation script.
+7.  **Mess Handling**: Surface ambiguous timestamps, single repeats, and outlier spikes in `audit/messes.txt` with disposition (`HANDLED`, `QUARANTINED`, `REJECTED`) citing specific rules from `rules.md`.
+8.  **Rules Documentation**: Write `rules.md` defining all thresholds (e.g., `10% regression limit`), sorting logic, and outlier handling policies. Rule: Every invented rule must have a "reason" field.
+9.  **Verification Script**: Create `verify.sh` that recomputes metrics from raw files using independent logic, compares against `perf.json`, and exits non-zero on any mismatch. Rule: Counts must sum; no silent drops.
+10. **Idempotency & Logging**: Ensure all scripts are self-cleaning (remove old outputs before writing) or explicitly idempotent. Log one line per stage to `logs/stage_N.log`. Rule: Errors must include file path and specific failure reason.
+11. **Final Report Assembly**: Combine human table (`perf.md`) and machine data (`perf.json`), append timing logs, and generate `README.md` pointing to all artifacts.
+12. **Double Run Test**: Execute full pipeline twice; compare outputs of run 1 and run 2. Rule: If files differ, investigate state bugs; if identical, mark as verified.
+
+---
+
+### TASK EXECUTION
+
+#### 0. Workspace Initialization & Decisions Log
+**File**: `decisions.md`
+```markdown
+# Decisions Log for perf-reg-run
+
+## File Naming Convention
+- **Input Assumption**: Raw data files named `raw/commit_XXXX.csv`. If missing, script halts with loud error citing specific filename expected.
+- **Output Structure**: 
+  - `norm/`: Normalized times (`best`, `median`).
+  - `delta/`: Commit-over-commit deltas (full precision).
+  - `audit/`: Flags for messes, contradictions, and single repeats.
+  - `report/perf.md`: Human-readable Markdown table.
+  - `report/perf.json`: Machine-readable JSON with identical numbers.
+- **Sorting Logic**: Commits sorted by ID string if timestamps are ambiguous (e.g., "20231001" vs "20231002"). Timestamps logged but not used for primary sort unless IDs match exactly.
+
+## Thresholds & Rules
+- **Regression Limit**: Strictly > 10%. Formula: `(curr - prev) / prev * 100`.
+- **Rounding**: None on intermediate steps; final JSON retains full float precision (e.g., `-12.3456789`). Markdown tables truncate to 4 decimals for readability but source remains exact.
+-

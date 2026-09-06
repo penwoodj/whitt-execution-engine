@@ -1,0 +1,74 @@
+Based on the source material provided, here is the step-by-step derivation of the job execution, waste, and final order.
+
+**1. Execution Timeline Analysis:**
+
+*   **Minute 0 - 2:** `LOW1` runs (Starts at min 0). Total run time: 2 mins.
+    *   Status: Completed 2 minutes. Banked checkpoint exists.
+    *   Active Job: `LOW1`.
+
+*   **Minute 3:** `LOW2` starts (Starts at min 3).
+    *   Note: The core is currently busy with `LOW1`. Per rules, a job arriving while the core is busy simply waits.
+    *   Status: `LOW1` resumes/continues running. `LOW2` is waiting in queue.
+    *   Active Job: `LOW1`.
+
+*   **Minute 3 - 4:** `LOW1` runs (Total run time becomes 3 mins).
+    *   Status: Completed 3 minutes. No checkpoint since the last one at min 2? The rule says "checkpoint every 2 completed minutes". Min 0-2 was a checkpoint. Min 2-4 is another 2 minutes. So `LOW1` has accumulated 3 minutes of running time in this single block (0, 1, 2, 3).
+    *   Wait, let's re-read the "Banking Rule": "banks a checkpoint at minute s+2". For `LOW1`, start $s=0$. Bank at min 2. Then every 2 running minutes after. So banks at min 4 as well? Or is it based on total running time?
+    *   Let's look at the source text constraint: "job with 5 total minutes and 2 banked resumes with 3 minutes left." This implies checkpoints are tracked by absolute time or specific intervals.
+    *   Let's assume standard checkpoint logic from the text: `LOW1` has a checkpoint at min 2 (absolute). It continues running through min 3 and finishes min 4? No, wait.
+
+Let's re-evaluate the timeline based strictly on "Absolute Minutes" as per the Banking Rule description ("track banks in absolute minutes").
+*   **Start Min:** `LOW1` starts at $t=0$. Checkpoints at $t=2, t=4, ...$
+    *   At $t=3$, `LOW2` arrives. Core busy with `LOW1`. `LOW2` waits.
+    *   At $t=5$, `HIGH` arrives. Preemption occurs.
+
+*   **The Critical Moment ($t=5$):**
+    *   `HIGH` arrives at minute 5 and runs 4 minutes (until min 9).
+    *   What is the state of `LOW1`? It started at 0. By absolute time $t=5$, it has been running for 5 minutes (since no other job ran on this core except `LOW1`).
+    *   Where are its checkpoints?
+        *   Start $s=0$. Checkpoint at $s+2 = 2$.
+        *   Every 2 running minutes after. Since it is continuous, does "running minutes" reset or accumulate? The text says "every 2 completed minutes of running time". If it ran continuously from 0 to 5, that is 5 completed minutes.
+        *   Checkpoints at total run times: 2 mins and 4 mins.
+    *   So at $t=5$, `LOW1` has completed 2 checkpoints (at run-time 2 and 4). The work done in the interval from run-time 4 to 5 is the "wasted" part if preempted.
+    *   Wait, the Banking Rule says: "track banks in absolute minutes". And "bank landing on exact minute HIGH arrives still counts".
+        *   Bank at $t=2$ (Absolute).
+        *   Next bank at $t=4$ (Absolute) because it runs continuously? Or is there a gap? The text implies continuous run. If `LOW1` ran 0-5, checkpoints are at absolute times 2 and 4.
+    *   So at $t=5$, `LOW1` has banked work up to absolute time 4? No, the checkpoint covers the *duration* before it.
+        *   Checkpoint at $t=2$ saves work for duration [0, 2].
+        *   Checkpoint at $t=4$ saves work for duration [2, 4].
+        *   Work done in [4, 5] is currently running. This is the part that will be wasted upon preemption by `HIGH`.
+
+*   **Preemption ($t=5$):**
+    *   `HIGH` starts. Preempts `LOW1`.
+    *   `LOW1` work from absolute time 4 to 5 (1 minute) is wasted.
+    *   `LOW2` was waiting. Does it start now? No, `HIGH` runs "nothing else runs".
+
+*   **Completion of HIGH ($t=9$):**
+    *   `HIGH` finishes. Core becomes free at $t=9$.
+    *   Queue: `LOW1` (needs resume) and `LOW2` (fresh start).
+    *   Rule: "resumed LOW outranks a fresh one at any tie". Since both are waiting, the resumed `LOW1` goes first.
+
+*   **Resume of LOW1:**
+    *   Starts running immediately after `HIGH`. $t=9$.
+    *   It must redo the wasted work (run-time 4 to 5) plus continue? Or does it just pick up from where it left off logically but physically redoes the interval?
+    *   The rule says: "After resume job redoes every minute past its last bank". Last bank was at $t=4$. It needs to redo [4, 5] (1 min) and then continue.
+    *   However, let's look at the total remaining time for `LOW1`. Total required = 5 mins. Banked = 2 intervals? Or does "bank" mean saved checkpoints?
+        *   Text example: "job with 5 total minutes and 2 banked resumes with 3 minutes left." This suggests if you have 2 valid checkpoints, the remaining work is $Total - (Checkpoints \times ?)$. Usually, a checkpoint saves the state. If you have checkpoints at run-time 2 and 4, you are safe to restart from state "run-time 4".
+        *   But the text says "redoes every minute past its last bank". This implies the work done since the last checkpoint is lost/wasted if not completed? No, "wasted" usually means "work done but lost because it wasn't finished before crash/preemption". If you have a checkpoint at run-time 4, and you crash at run-time 5, you lose the 1 minute of progress. You must restart from state 4.
+        *   So `LOW1` needs to run: [0..2] (done), [2..4] (done), [4..5] (wasted, redone).
+        *   Wait, if it's preempted at $t=5$, and the last checkpoint was at $t=4$ (absolute time 4 corresponds to run-time 4 because it started at 0), then yes, it lost the interval [4, 5]. It must restart from scratch effectively? Or just resume the process.
+        *   The text says "redoes every minute past its last bank". This confirms it loses the [4, 5] interval and must run it again.
+    *   So `LOW1` resumes at $t=9$. It runs for:
+        *   Redoing [4, 5]: 1 min.
+        *   Completing remaining original work? Original total = 5 mins. Banked intervals covered up to run-time 4?
+            *   If checkpoints are at run-times 2 and 4, then the state "run-time 4" is saved. The interval [0, 4] is valid.
+            *   The interval [4, 5] was running but not completed (preempted). So it must be redone.
+            *   Does `LOW1` need to run [0..2] again? No, that's already done and checkpointed. It resumes from the state at run-time 4.
+            *   So `LOW1` needs to run: (Redo [4..5]) + (Original remaining [4..5]? No).
+            *   Let's trace total minutes needed: 5 mins.
+            *   Work done and saved: Run-time 0-2, Run-time 2-4. Total 4 mins saved.
+            *   Work lost/running: Run-time 4-5 (1 min).
+            *   To finish `LOW1`, we need to complete the full 5 minutes of work. Since 4 minutes are checkpointed/saved, and 1 minute is lost/wasted, we must re-run that 1 minute plus... wait. If you have a checkpoint at run-time 4, do you start from 0 again? No, you resume from state 4.
+            *   But the rule "redoes every minute past its last bank" implies the [4..5] is not just "lost", it's "wasted and redone". So effectively, `LOW1` starts at $t=9$ with a deficit of 1 minute (the wasted part) that must be done *before* it can consider itself complete?
+            *   Actually, usually in these problems: Total Work = 5 mins. Checkpoints allow skipping the start. If you crash at 5, and checkpoint was at 4, you have effectively lost the progress from 4 to 5. You must run [0..2] (already done), [2..4] (already done), then [4..5] (redo).
+            *   But wait, if [0..2] and [2..4] are checkpointed, why redo them? They are "bank

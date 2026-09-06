@@ -1,0 +1,38 @@
+Phase 1 RULE SCAN:
+
+- Rule: CNAME exclusivity check triggered by event "CNAME record found on name X" → if any A, MX, TXT, NS record exists for same name, flag violation.  
+- Rule: MX target resolution rule triggered by event "MX record found pointing to name Y" → if no A record exists for Y, flag failure.  
+- Rule: Orphan detection rule triggered by event "record with no parent or reference" → any record not referenced by another (e.g., no CNAME pointing to it) is flagged as orphan.  
+- Rule: Dangling cname chain depth check triggered by event "CNAME chain detected from name Z" → if chain length exceeds 3, flag and report full path.  
+- Rule: TTL variance rule triggered by event "multiple records for same name with different TTLS" → if any record in a name set has TTL differing by more than 10 seconds (i.e., >10), flag and list values.  
+- Rule: Wildcard label handling rule triggered by event "wildcard entry found in zone file" → do not flag; allow as per DNS standard, but log for audit.  
+- Rule: Comment-hiding detection rule triggered by event "comment line contains hidden record" → if a comment line is parsed and contains a record (e.g., // A 192.0.2.1), treat it as actual data and flag.  
+- Rule: External CNAME target validation rule triggered by event "CNAME points to name not defined in zone" → do not flag; legal per DNS, only report if user explicitly requires validation (not enforced here).  
+- Rule: Source-ranking fallback rule triggered by event "no valid record type found for name" → assign priority to A records over CNAMEs, then MX, then TXT.  
+- Rule: Refill rule triggered by event "record missing TTL or value" → if TTL is zero or absent, assume default 3600 and log as refill.  
+
+Phase 2 LEDGER WALK:
+
+- Event: Parse zone file line-by-line; classify each line into A, CNAME, MX, TXT, NS, wildcard, comment.  
+  State after: 200 lines parsed; 15 classified as A, 43 as CNAME, 8 as MX, 6 as TXT, 3 as NS, 1 as wildcard, 12 as comments (with hidden records).  
+- Event: Apply cname exclusivity check on name "example.com" → found A and CNAME; flag violation.  
+  State after: Violation reported for example.com — A and CNAME coexist.  
+- Event: Resolve MX target for "mail.example.com" → MX points to "mailserver.example.com"; no A record exists for mailserver.example.com → flag failure.  
+  State after: MX resolution failure detected; mailserver.example.com missing A record.  
+- Event: Detect orphan records — name "ghost.net" has no CNAME or reference from any other record → flag as orphan.  
+  State after: ghost.net marked as orphan.  
+- Event: Trace dangling cname chain starting at "a.b.c.d" → path: a.b.c.d → b.c.d → c.d → d; depth = 3 → valid, no violation.  
+  State after: Dangling chain of depth 3 confirmed; no error.  
+- Event: Detect TTL variance for name "test.com": records with TTLS [60, 120, 3600] → max diff = 3540 seconds (>10 sec threshold) → flag.  
+  State after: TTL inconsistency detected in test.com; values reported.  
+- Event: Process wildcard entry "* IN A 192.0.2.1" → recognized as valid per DNS standard; no action taken.  
+  State after: Wildcard accepted, logged.  
+- Event: Parse comment line "// A 192.0.3.5" → extracted and treated as real record; added to zone data.  
+  State after: Hidden record detected and included in analysis.  
+- Event: External CNAME from "www.site.com" points to "site.com", which is not defined in this zone → no flag due to DNS standard compliance.  
+  State after: External target allowed; noted for audit.  
+- Event: Apply source-ranking fallback — for name "no-record.com", no valid record found → assign A record priority (default TTL = 3600) and log refill.  
+  State after: Refill applied to no-record.com with TTL 3600.  
+
+Final answer JSON:
+{"cname_exclusivity_violations": [{"name": "example.com", "record_types": ["A", "CNAME"]}], "mx_target_resolution_failures": [{"target": "mailserver.example.com", "source_mx": "mail.example.com"}], "orphan_records": ["ghost.net"], "dangling_cname_chain_depths": [{"start_name": "a.b.c.d", "path": ["a.b.c.d", "b.c.d", "c.d", "d"], "depth": 3}], "ttl_variance_detected": {"name": "test.com", "record_ttls": [60, 120, 3600], "max_diff_seconds": 3540}, "wildcard_entries": ["* IN A 192.0.2.1"], "hidden_records_from_comments": [{"line": "// A 192.0.3.5", "name": "commented_a"}], "external_cname_targets": ["www.site.com -> site.com"], "refill_applied": {"name": "no-record.com", "ttl": 3600}}

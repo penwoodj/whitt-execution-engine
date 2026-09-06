@@ -50,6 +50,102 @@ workflow_execution_strategy:
     }
 
     #[test]
+    fn parse_resource_admission_contract() {
+        let yaml = r#"
+workflow_id: resource-admission
+name: "Resource Admission"
+workflow_execution_strategy:
+  resource_admission:
+    enforcement_policy: block
+    minimum_available:
+      ram: 6GiB
+      vram: 6GiB
+      swap_free: 4GiB
+    model_estimate:
+      kv_cache: 2.1GiB
+      compute_buffer: 512MiB
+      host_runtime: 700MiB
+      expected_runtime_secs: 900
+    telemetry:
+      write_profile: true
+"#;
+        let workflow: WorkflowFile = serde_saphyr::from_str(yaml).expect("parse");
+        let admission = workflow
+            .workflow_execution_strategy
+            .expect("execution strategy")
+            .resource_admission
+            .expect("resource admission");
+        assert_eq!(admission.minimum_available.ram, "6GiB");
+        assert_eq!(admission.minimum_available.vram, "6GiB");
+        assert_eq!(admission.minimum_available.swap_free, "4GiB");
+        assert_eq!(admission.model_estimate.kv_cache, "2.1GiB");
+        assert_eq!(admission.model_estimate.expected_runtime_secs, 900);
+        assert!(admission.telemetry.write_profile);
+    }
+
+    #[test]
+    fn validate_rejects_invalid_resource_admission_values() {
+        for (field, value) in [("ram", "0GiB"), ("vram", "6G"), ("expected_runtime_secs", "0")] {
+            let minimum_available = match field {
+                "ram" => format!("ram: {value}\n      vram: 6GiB\n      swap_free: 4GiB"),
+                "vram" => format!("ram: 6GiB\n      vram: {value}\n      swap_free: 4GiB"),
+                _ => "ram: 6GiB\n      vram: 6GiB\n      swap_free: 4GiB".to_string(),
+            };
+            let runtime = if field == "expected_runtime_secs" { value } else { "900" };
+            let yaml = format!(r#"
+workflow_id: invalid-resource-admission
+name: "Invalid Resource Admission"
+workflow_execution_strategy:
+  resource_admission:
+    enforcement_policy: block
+    minimum_available:
+      {minimum_available}
+    model_estimate:
+      kv_cache: 2.1GiB
+      compute_buffer: 512MiB
+      host_runtime: 700MiB
+      expected_runtime_secs: {runtime}
+    telemetry:
+      write_profile: true
+"#);
+            assert!(
+                WorkflowFile::from_yaml(&yaml).is_err(),
+                "{field}={value} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_rejects_resource_admission_model_without_source_path() {
+        let yaml = r#"
+workflow_id: missing-resource-source
+name: "Missing Resource Source"
+models:
+  worker:
+    name: "model-a.gguf"
+workflow_execution_strategy:
+  resource_admission:
+    enforcement_policy: block
+    minimum_available:
+      ram: 6GiB
+      vram: 6GiB
+      swap_free: 4GiB
+    model_estimate:
+      kv_cache: 288MiB
+      compute_buffer: 512MiB
+      host_runtime: 700MiB
+      expected_runtime_secs: 60
+    telemetry:
+      write_profile: true
+"#;
+
+        assert!(
+            WorkflowFile::from_yaml(yaml).is_err(),
+            "resource admission must require a host-stattable model source"
+        );
+    }
+
+    #[test]
     fn parse_log_levels() {
         let levels = ["debug", "info", "warning", "error", "critical"];
         for level in levels {
@@ -836,6 +932,18 @@ workflow_execution_strategy:
         let path = Path::new("docs/benchmarks/workflows/benchmark-50-models.yml");
         let result = WorkflowFile::from_file(path);
         assert!(result.is_ok(), "benchmark-50-models.yml should be schema-compliant: {:?}", result.err());
+    }
+
+    #[test]
+    fn resource_admission_workspace_fixtures_parse() {
+        for path in [
+            "docs/benchmarks/workflows/resource-admission-reject.yml",
+            "docs/benchmarks/workflows/resource-admission-simple.yml",
+            "docs/benchmarks/workflows/resource-admission-long.yml",
+        ] {
+            let result = WorkflowFile::from_file(std::path::Path::new(path));
+            assert!(result.is_ok(), "{path} should be schema-compliant: {:?}", result.err());
+        }
     }
 
     // ── Exhaustive validation tests for WorkflowFile::from_yaml ──────────────

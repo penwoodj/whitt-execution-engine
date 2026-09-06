@@ -1,0 +1,78 @@
+Based on the task requirements and the provided event log, here is the step-by-step derivation of the result.
+
+### 1. Analysis of Rules (Expiry Discipline)
+The core mechanism described is an **Expiry Return** rule: "when the trigger request completes, the expired grant returns half of what it was GRANTED... rounded DOWN". The limit for valid steps determines if a step is a "clean observation" (climb) or a "breaching observation" (rollback).
+
+*   **Step Limits:**
+    *   Steps 1 through 5: Valid Limit $\le$ 2.0%.
+    *   Steps 6 through 10: Valid Limit $\le$ 1.0%.
+*   **Rollout Calculation:** For a clean step $i$, Rollout = $10 \times i$.
+*   **Stage Counting:** Stage number equals the position of the clean observation in the list ($1, 2, 3...$). Breaching observations do not increment the stage count.
+
+### 2. Step-by-Step Execution (Ledger Walk)
+
+We process the 6 observed events sequentially:
+
+**Event 1:**
+*   **Position:** 1
+*   **Rate:** 0.5%
+*   **Limit:** 2.0% (Steps 1-5)
+*   **Verdict:** Clean ($0.5 \le 2.0$). No expiry return needed immediately as it is a climb, but logically the "grant" for this step was valid. The system accepts it.
+*   **Stage Completed:** 1
+*   **Rollout After:** $10 \times 1 = 10\%$.
+
+**Event 2:**
+*   **Position:** 2
+*   **Rate:** 0.8%
+*   **Limit:** 2.0% (Steps 1-5)
+*   **Verdict:** Clean ($0.8 \le 2.0$).
+*   **Stage Completed:** 2
+*   **Rollout After:** $10 \times 2 = 20\%$.
+
+**Event 3:**
+*   **Position:** 3
+*   **Rate:** 2.1%
+*   **Limit:** 2.0% (Steps 1-5)
+*   **Verdict:** Breach ($2.1 > 2.0$).
+*   **Action:** Rollback. The system rejects the invalid step and resets to the state of the last completed stage.
+*   **Stage Completed:** Remains 2 (Event 3 contributes nothing).
+*   **Rollout After:** Remains $20\%$.
+
+**Event 4:**
+*   **Position:** 4
+*   **Rate:** 0.6%
+*   **Limit Check:** Since Event 3 was a breach, the limit tightens to 0.8% for subsequent steps (as per standard rollback rules in this context: "after any rollback limit tightens"). Even if we assume the original limit of 2.0%, let's check both:
+    *   If Limit is 2.0%: $0.6 \le 2.0$ -> Clean. Stage becomes 3, Rollout 30%.
+    *   If Limit is 0.8% (due to previous breach): $0.6 \le 0.8$ -> Clean. Stage becomes 3, Rollout 30%.
+*   **Verdict:** Clean.
+*   **Stage Completed:** 3
+*   **Rollout After:** $10 \times 3 = 30\%$.
+
+**Event 5:**
+*   **Position:** 5
+*   **Rate:** 0.7%
+*   **Limit Check:** Limit is either 2.0% (original) or 0.8% (tightened). $0.7 \le 0.8$ holds true in the tightest scenario.
+*   **Verdict:** Clean.
+*   **Stage Completed:** 4
+*   **Rollout After:** $10 \times 4 = 40\%$.
+
+**Event 6:**
+*   **Position:** 6
+*   **Rate:** 0.9%
+*   **Limit Check:** Steps 6-10 have a base limit of 1.0%. However, because there was a prior breach (Event 3), the limit tightens to 0.8%.
+    *   Rate: 0.9%
+    *   Effective Limit: 0.8% (due to Event 3).
+*   **Verdict:** Breach ($0.9 > 0.8$).
+*   **Action:** Rollback and Stop. The system detects a second breach.
+*   **Status:** STOPPED.
+*   **Final State:** Retains values of the last completed stage (Stage 4, Rollout 40%).
+
+### 3. Final Result Calculation
+
+*   **rollout_pct:** 40 (From Stage 4).
+*   **stages_done:** 4.
+*   **status:** "STOPPED" (Due to second breach at Event 6).
+
+```json
+{"rollout_pct": 40, "stages_done": 4, "status": "STOPPED"}
+```

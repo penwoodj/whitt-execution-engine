@@ -1,0 +1,137 @@
+Phase 1 RULE SCAN:
+
+- Aging bump rule: Triggers when a job waits for 10 minutes (600 seconds) in the queue; increases its priority by one level. Triggered by arrival time and duration of jobs.
+- Preemption rule: A higher-priority job preempts a lower-priority job if it arrives before or at the same time as the lower-priority job, regardless of waiting time. Triggered when a new high-priority job enters the queue.
+- Resume rule: When a preempted job is resumed, its state is restored to the point of interruption; no restart occurs. Triggered upon completion of a higher-priority job that was preempted.
+- Refill rule: If a job has been waiting longer than 15 minutes (900 seconds), it is refilled with a new duration of 20% more than original, only if its priority is low. Triggered when wait time exceeds 900 seconds and priority is "low".
+- Fairness check rule: Monitors whether any low-priority job has waited beyond 30 minutes (1800 seconds) without being scheduled; flags such jobs as starving. Triggered during each scheduling decision.
+- Expiry rule: Jobs that have been in the queue for more than 20 minutes (1200 seconds) are removed from the system and marked expired. Triggered when a job's wait time exceeds 1200 seconds.
+- Source-ranking rule: Assigns jobs to scheduler slots based on arrival order, with ties broken by priority level; if two jobs have identical arrival times, the one with higher priority is scheduled first. Triggered at every scheduling decision.
+
+Phase 2 LEDGER WALK:
+
+Initial state: 60 jobs in queue, priorities high (30%), medium (50%), low (20%). Arrival times and durations provided. All jobs start in "waiting" state.
+
+t=00:00:00 — Job A1 arrives at priority high, duration 45 minutes → queued; waiting time = 0.
+t=00:00:01 — Job B2 arrives at priority medium, duration 30 minutes → queued; waiting time = 0.
+t=00:00:02 — Job C3 arrives at priority low, duration 60 minutes → queued; waiting time = 0.
+t=00:00:05 — Job D4 arrives at priority high, duration 15 minutes → queued; waiting time = 0.
+t=00:00:08 — Job E5 arrives at priority medium, duration 20 minutes → queued; waiting time = 0.
+t=00:00:10 — Job F6 arrives at priority low, duration 40 minutes → queued; waiting time = 0.
+
+t=00:00:15 — Job A1 starts execution (priority high); runs for 45 min → completes at t=00:00:45.
+t=00:00:20 — Job B2 enters queue, now waits; waiting time = 0 → no aging yet.
+t=00:00:30 — Job C3 starts execution (priority low); runs for 60 min → completes at t=00:01:30.
+
+t=00:00:45 — Job A2 arrives at priority high, duration 30 minutes → queued; waiting time = 0.
+t=00:00:50 — Job D4 starts execution (priority high); runs for 15 min → completes at t=00:01:05.
+
+t=00:01:05 — Job E5 enters queue, now waits; waiting time = 0.
+t=00:01:30 — Job C3 completes execution (priority low); resumes from interruption point (no interruption) → no resume event.
+
+t=00:02:00 — Job F6 starts execution (priority low); runs for 40 min → completes at t=00:04:00.
+
+t=00:03:00 — Aging bump triggered on Job B2: waited 180 seconds → priority increased from medium to high.
+t=00:05:00 — Aging bump triggered on Job E5: waited 300 seconds → priority increased from medium to high.
+
+t=00:06:00 — Preemption event: Job A2 (priority high) arrives and preempts Job D4 (priority high), which was waiting. Job D4 is now in "preempted" state; Job A2 starts execution.
+t=00:07:30 — Job E5 completes execution (now priority high); resumes from interruption point → no prior interruption.
+
+t=00:10:00 — Expiry rule triggered on Job C3: waited 1800 seconds (30 minutes) → expired and removed.
+t=00:12:00 — Refill rule triggered on Job F6: waited 1500 seconds (25 minutes), priority low → duration increased to 48 minutes.
+
+t=00:15:00 — Fairness check: Job B2 has waited 900 seconds (15 minutes) without being scheduled; flagged as starving.
+t=00:16:00 — Fairness check: Job E5 has waited 1200 seconds (20 minutes); flagged as starving.
+
+t=00:20:00 — Aging bump triggered on Job A2: waited 1200 seconds → priority increased from high to medium.
+t=00:25:00 — Preemption event: Job B2 (now priority high) arrives and preempts Job A2 (priority medium); Job A2 is now in "preempted" state.
+
+t=00:30:00 — Job F6 completes execution; duration updated to 48 minutes → finishes at t=00:34:00.
+t=00:35:00 — Fairness check: No low-priority job has waited beyond 1800 seconds → starvation absence confirmed.
+
+Final state:
+- Jobs scheduled: A1, D4 (preempted), C3 (expired), F6 (refilled).
+- Preempted jobs: D4 (preempted by A2), A2 (preempted by B2).
+- Aging bumps: Job B2 (+1), Job E5 (+1), Job A2 (+1).
+- Starvation events: Job B2, Job E5.
+- Refill event: Job F6 → duration 48 minutes.
+
+{
+  "part_a": {
+    "aging_bumps": [
+      {
+        "job_id": "B2",
+        "wait_time_seconds": 180,
+        "new_priority": "high"
+      },
+      {
+        "job_id": "E5",
+        "wait_time_seconds": 300,
+        "new_priority": "high"
+      },
+      {
+        "job_id": "A2",
+        "wait_time_seconds": 1200,
+        "new_priority": "medium"
+      }
+    ],
+    "starvation_events": [
+      {
+        "job_id": "B2",
+        "wait_time_seconds": 900,
+        "status": "starved"
+      },
+      {
+        "job_id": "E5",
+        "wait_time_seconds": 1200,
+        "status": "starved"
+      }
+    ],
+    "refill_event": {
+      "job_id": "F6",
+      "original_duration_minutes": 40,
+      "new_duration_minutes": 48
+    },
+    "preemption_events": [
+      {
+        "preemptor_job": "A2",
+        "preempted_job": "D4",
+        "reason": "higher priority"
+      },
+      {
+        "preemptor_job": "B2",
+        "preempted_job": "A2",
+        "reason": "higher priority"
+      }
+    ],
+    "expiry_events": [
+      {
+        "job_id": "C3",
+        "wait_time_seconds": 1800,
+        "status": "expired"
+      }
+    ],
+    "fairness_check_results": [
+      {
+        "job_id": "B2",
+        "wait_time_seconds": 900,
+        "is_starved": true
+      },
+      {
+        "job_id": "E5",
+        "wait_time_seconds": 1200,
+        "is_starved": true
+      }
+    ],
+    "total_jobs": 60,
+    "priority_distribution": {
+      "high": 30,
+      "medium": 50,
+      "low": 20
+    },
+    "aging_rule_threshold_seconds": 600,
+    "expiry_rule_threshold_seconds": 1200,
+    "refill_rule_threshold_seconds": 900,
+    "source_ranking_tie_breaker": "higher priority"
+  }
+}

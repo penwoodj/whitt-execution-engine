@@ -1,0 +1,96 @@
+The user wants me to solve a scheduling problem based on specific rules provided in the text, ignoring any previous failed attempts or narrative fluff. The core task is to calculate the `makespan`, total `wasted` minutes due to checkpoints, and the `order` of completion for the LOW jobs.
+
+**1. Parse the Rules and Events:**
+*   **Events:**
+    *   Start `LOW1`: Minute 0, Duration 5 min.
+    *   Start `LOW2`: Minute 2, Duration 3 min.
+    *   Arrival `HIGH`: Minute 3, Duration 8 min (preempts whatever is running).
+*   **Core Logic:**
+    *   LOW jobs take the core in order of their start minutes. If a job resumes or starts at the same minute, resumed outranks fresh? The text says: "a resumed LOW outranks a fresh one at any tie". But here they have different start times (0 vs 2), so `LOW1` is strictly ahead based on start time.
+    *   Checkpoints: Every 2 completed minutes of running time.
+        *   Start/Resume at minute $s$. Banks checkpoint at $s+2$, then every 2 mins after.
+        *   If preemption happens, work past the last banked checkpoint is wasted.
+        *   "Wasted" = Total Duration - Banked Time (at moment of interruption/resume).
+    *   Wait logic: The core never idles while a LOW job is waiting. When the current task finishes/preempted, the next waiting LOW starts in that same minute.
+
+**2. Simulation Walk-through:**
+
+*   **Minute 0:**
+    *   `LOW1` (Starts at 0) arrives. Queue: `[LOW1]`.
+    *   Core runs `LOW1`.
+    *   State: Running `LOW1`. Time elapsed for `LOW1`: 0 -> 1.
+
+*   **Minute 1:**
+    *   Core continues `LOW1`.
+    *   State: Running `LOW1`. Time elapsed: 1 -> 2.
+    *   Checkpoint? Yes, every 2 minutes. At end of Minute 1 (start of Minute 2), it has completed 1 minute? No, checkpoints are "every 2 completed minutes".
+        *   Let's re-read carefully: "LOW jobs checkpoint every 2 completed minutes... banks a checkpoint at minute s+2 and again every 2 running minutes after".
+        *   Start at $s=0$. Banks at $0+2=2$? Or does it bank *at the end* of the 2nd minute?
+        *   Example text: "LOW1 held core minutes 0, 1 and 2, banked a checkpoint at minute 2". This implies banking happens when total running time reaches 2.
+        *   So after Minute 1 (total time = 1), no checkpoint. After Minute 2 (total time = 2), checkpoint is banked.
+
+*   **Minute 2:**
+    *   Core continues `LOW1`. Now total time for `LOW1` reaches 2 minutes. Checkpoint Banked at $t=2$.
+    *   Event: Start `LOW2` (Starts at 2). Queue becomes `[LOW1, LOW2]`.
+    *   Rule: "LOW jobs take the core in order of their start minutes". `LOW1` started at 0. `LOW2` started at 2. `LOW1` is ahead.
+    *   Core continues `LOW1`. Total time for `LOW1`: 2 -> 3.
+
+*   **Minute 3:**
+    *   Event: Arrival `HIGH`. Runs 8 minutes. Preempts current task (`LOW1`).
+    *   Rule application: "on preemption the work past the last checkpoint is wasted".
+        *   Last checkpoint was at $t=2$. Current time $t=3$. Work done since checkpoint = 1 minute.
+        *   Wasted for `LOW1` so far: 1 min.
+    *   Core switches to `HIGH`.
+    *   State: Running `HIGH`.
+
+*   **Minutes 4, 5, ..., 10:** (8 minutes of HIGH execution)
+    *   `HIGH` runs continuously from $t=3$ to $t=11$.
+    *   Wait, let's trace the timeline precisely.
+    *   Start `HIGH`: Minute 3. Ends when? "runs 8 minutes". So it occupies intervals [3,4], [4,5], ..., [10,11]. Finishes at end of minute 10? Or finishes after running for 8 mins starting min 3 -> finishes at $t=11$.
+    *   Let's count:
+        *   Min 3 (1st)
+        *   Min 4 (2nd)
+        *   Min 5 (3rd)
+        *   Min 6 (4th)
+        *   Min 7 (5th)
+        *   Min 8 (6th)
+        *   Min 9 (7th)
+        *   Min 10 (8th).
+    *   So `HIGH` finishes at the end of Minute 10. Next available minute is 11.
+
+*   **Minute 11:** (`HIGH` finished)
+    *   Queue status: `LOW2` was started at Minute 2 and has been waiting since. `LOW1` was preempted.
+    *   Rule: "LOW jobs take the core in order of their start minutes".
+        *   `LOW1` Start Time = 0.
+        *   `LOW2` Start Time = 2.
+    *   Order: `LOW1` is first (Start 0 < Start 2).
+    *   Core resumes `LOW1`.
+    *   State of `LOW1`: It had completed 3 minutes before interruption? No, it ran Min 0, 1, 2. Interrupted at start of Min 3? Or end of Min 2?
+        *   Re-eval "Minute 2": Core ran `LOW1`. At end of Min 2, `LOW1` time = 2. Checkpoint banked.
+        *   Minute 3: Core runs `LOW1`. Time goes to 3. Then HIGH arrives.
+        *   Does HIGH arrive at start or end of minute? "HIGH arrives at minute 3". Usually implies instant interrupt at $t=3$.
+        *   If HIGH interrupts at $t=3$, `LOW1` ran for exactly 2 minutes (0-1, 1-2). Wait, if it runs min 3, that's the 3rd minute. So time = 3.
+        *   Let's check the example logic again: "LOW1 held core minutes 0, 1 and 2... 3rd minute was unbanked when swap came". This implies running time 0, 1, 2 are bankable (checkpoint at 2). The 3rd minute (running time 2-3) is unbanked.
+        *   So `LOW1` ran Min 0, 1, 2. Total time = 3? Or does "minutes 0, 1, 2" mean intervals [0,1], [1,2], [2,3]? Yes.
+        *   Checkpoint banks at $t=2$ (end of interval [1,2]).
+        *   Interval [2,3] is running. Total time = 3.
+        *   Interrupted by HIGH. Work past checkpoint ($t=2$) is wasted. Wasted amount = Current Time - Last Checkpoint = $3 - 2 = 1$.
+    *   Resume `LOW1`. Remaining work = Total Duration (5) - Banked (2) = 3 minutes? Or Total (5) - Completed-Banked (2)?
+        *   Text: "a job that starts... banks a checkpoint at minute s+2... resume with 3 minutes left". Example: "job with 5 total minutes and 2 banked resumes with 3 minutes left".
+        *   So `LOW1` has 3 minutes remaining.
+    *   Core runs `LOW1`. Remaining time needed: 3 mins.
+    *   Intervals for `LOW1`: Min 11, Min 12, Min 13?
+        *   Wait, need to check if there are other jobs waiting. Only `LOW2` is in queue (started at 2). But `LOW1` start time (0) < `LOW2` start time (2). So `LOW1` goes first.
+
+*   **Minutes 11-13:**
+    *   Core runs `LOW1`.
+    *   Min 11: Runs 1 min. Total elapsed for resume = 1. Bank? No, needs 2 mins to bank next checkpoint. But duration is only 5 total, already banked 2. Remaining 3. It doesn't need to reach a specific time to finish, just complete the remaining work.
+    *   Min 12: Runs 1 min. Total resume = 2. Bank? Yes, every 2 mins of running. But since we only care about wasted minutes and completion order, let's focus on duration.
+        *   Actually, does `LOW1` need to bank another checkpoint before finishing? No, it finishes when work is done.
+    *   Min 13: Runs 1 min. Work complete for `LOW1`.
+    *   Wait, is that correct?
+        *   Original plan: Run 5 mins total.
+        *   Banked at $t=2$ (end of 2nd minute). Work done = 2.
+        *   Interrupted at $t=3$. Wasted = 1.
+        *   Resume with 3 minutes left.
+        *   Run Min 11, 12, 13 (3 minutes). Done

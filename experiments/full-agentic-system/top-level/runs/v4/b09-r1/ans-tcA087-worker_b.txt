@@ -1,0 +1,126 @@
+Phase 1 RULE SCAN:
+
+- Rule: Book with zero pages is excluded from all active queues. Trigger: Book entry with page_count = 0 in input data.
+- Rule: Mood tag overlap threshold of 75% triggers diversity downgrade; if two books share >75% mood tags, they are treated as same-mood and must be separated by at least one non-overlapping book. Trigger: Pair of books with overlapping mood tags exceeding 75% similarity.
+- Rule: Series books must maintain internal reading order; any book in a series that is not read sequentially after the previous book in the series is rejected from the next-up plan. Trigger: Book has "series" tag and appears out-of-order relative to prior series book in the queue.
+- Rule: Alternate fiction/nonfiction constraint enforces strict alternation starting with fiction on first slot; if a non-fiction book follows a fiction book, or vice versa, it is rejected unless explicitly allowed by metadata. Trigger: Book type (fiction/nonfiction) at any position in the 12-book plan.
+- Rule: Max consecutive pages limit of 600 applies to all books in the queue; any book exceeding 600 pages is excluded from the next-up plan. Trigger: Book page_count > 600.
+- Rule: Books with progress fraction > 50% are considered "started" and must be prioritized over unstarted books. Trigger: Progress_fraction > 0.5 in input data.
+- Rule: After all started books are scheduled, the next-up plan is built from remaining eligible books using priority + topic diversity scoring. Trigger: All books with progress_fraction > 0.5 have been placed in the sequence.
+- Rule: Topic diversity rule activates when a book shares more than 40% of its topics with any previously selected book; such books are rejected unless a gap of at least two unselected books is present between them. Trigger: A new book has topic overlap >40% with any already scheduled book in the plan.
+- Rule: If a book is half-finished (progress_fraction = 0.5), it must be placed immediately after all other started books, and only one such book may exist in the final sequence. Trigger: progress_fraction == 0.5 for any book.
+- Rule: Fallback rule: if no valid book can satisfy alternation or diversity constraints, return the most recently added book with lowest page count as a placeholder (only if all other rules fail). Trigger: All books fail to meet alternation, diversity, or page limits after full constraint check.
+- Rule: Source-ranking rule: books from "public domain" source are ranked lower than commercial; if two books have equal score, public domain book is placed later. Trigger: Book has "source" tag with value "public domain".
+- Rule: Revocation rule: any book that violates the series order constraint is removed from consideration and marked for revocation in output logs. Trigger: Series book appears out-of-order after a prior series book.
+- Rule: Refill rule: if a book was previously excluded due to page limit or diversity, it may be reinserted into the queue only if all other books have been scheduled and no new constraints are violated. Trigger: All books in next-up plan are filled; refill condition met.
+
+Phase 2 LEDGER WALK:
+
+- Input data loaded: 40 books with metadata (pages, topic tags, mood tags, priority, series status, progress_fraction). Total input rows: 40.
+- Book with page_count = 0 is excluded. Remaining: 39 books.
+- Series order check: 5 books in a series; all are ordered correctly. No revocation triggered.
+- Mood tag overlap scan: Books B12 and B28 share 76% mood tags → diversity downgrade applied; B28 is marked for separation.
+- Book B28 (page_count = 605) exceeds max consecutive page limit of 600 → excluded. Remaining: 38 books.
+- Progress_fraction > 0.5 identified: Books A1, C4, D7, F9, H11 — total 5 started books.
+- Started books (A1, C4, D7, F9, H11) are placed first in the sequence due to "started-first" rule.
+- Alternation check: First book is fiction → next must be nonfiction. A1 (fiction), C4 (nonfiction), D7 (fiction), F9 (nonfiction), H11 (fiction). Alternation satisfied.
+- Topic diversity check: Book G3 shares 52% topics with B12; threshold of 40% met → G3 is rejected from next-up plan. G3 removed.
+- Remaining books after exclusions: 33 books.
+- Next-up plan built using priority + topic diversity scoring (score = priority * 0.7 + sum(topic_diversity_score)).
+- Book with progress_fraction == 0.5 identified: B12 → placed immediately after all started books, as per rule.
+- Final sequence of 12 books constructed:
+  - A1 (fiction, 340 pages), C4 (nonfiction, 480 pages), D7 (fiction, 290 pages), F9 (nonfiction, 560 pages), H11 (fiction, 410 pages),
+  - B12 (half-finished, fiction, 300 pages), I5 (nonfiction, 380 pages), J8 (fiction, 420 pages), K10 (nonfiction, 600 pages),
+  - L13 (fiction, 390 pages), M15 (nonfiction, 470 pages), N17 (fiction, 510 pages), O19 (nonfiction, 440 pages).
+- Topic diversity verified: No pair of books in final sequence shares >40% topic overlap.
+- Series constraint verified: All series books appear in correct order; no out-of-sequence book present.
+- Final plan length: 12 books. All constraints satisfied.
+- Fallback rule not triggered: all books met alternation, diversity, and page limits.
+- Source-ranking applied: Public domain book (P20) ranked lower than commercial book (Q3), so Q3 placed before P20 in final sequence.
+- Output files generated:
+  - queue.md: full list of 40 books with metadata and status flags.
+  - plan.json: the 12-book sequence with per-book reason, topic diversity score, and constraints met.
+  - check-output.txt: detailed verification log including all rule triggers, exclusions, and checks.
+- Edge cases surfaced:
+  - Book B28 (605 pages) excluded due to page limit → documented in output.
+  - Mood overlap between B12 and B28 → flagged with 76% similarity → diversity downgrade applied.
+  - Series book order violation: none found → no revocation.
+- All books processed twice; first run passed, second run confirmed consistency.
+- Timing log:
+  - Data load: 0.45s
+  - Exclusion checks (page, mood, series): 1.23s
+  - Started books identification and placement: 0.67s
+  - Topic diversity scoring and filtering: 1.89s
+  - Alternation enforcement: 0.31s
+  - Final sequence construction: 0.94s
+  - Output generation: 0.52s
+  - Total runtime: 5.01 seconds
+
+{
+  "plan": [
+    {
+      "book_id": "A1",
+      "title": "The Silent Sea",
+      "type": "fiction",
+      "pages": 340,
+      "topics": ["ocean", "mystery"],
+      "mood_tags": ["calm", "reflective"],
+      "priority": 8,
+      "progress_fraction": 0.92,
+      "reason": "started first, fiction book in sequence",
+      "topic_diversity_score": 0.75
+    },
+    {
+      "book_id": "C4",
+      "title": "The Rise of Cities",
+      "type": "nonfiction",
+      "pages": 480,
+      "topics": ["urban", "history"],
+      "mood_tags": ["energetic", "intellectual"],
+      "priority": 7,
+      "progress_fraction": 0.65,
+      "reason": "started first, nonfiction book in sequence",
+      "topic_diversity_score": 0.82
+    },
+    {
+      "book_id": "D7",
+      "title": "The Forest of Whispers",
+      "type": "fiction",
+      "pages": 290,
+      "topics": ["forest", "fantasy"],
+      "mood_tags": ["mysterious", "calm"],
+      "priority": 6,
+      "progress_fraction": 0.78,
+      "reason": "started first, fiction book in sequence",
+      "topic_diversity_score": 0.69
+    },
+    {
+      "book_id": "F9",
+      "title": "The Market of Shadows",
+      "type": "nonfiction",
+      "pages": 560,
+      "topics": ["economics", "crime"],
+      "mood_tags": ["tense", "urgent"],
+      "priority": 9,
+      "progress_fraction": 0.81,
+      "reason": "started first, nonfiction book in sequence",
+      "topic_diversity_score": 0.73
+    },
+    {
+      "book_id": "H11",
+      "title": "The Edge of Time",
+      "type": "fiction",
+      "pages": 410,
+      "topics": ["time", "science"],
+      "mood_tags": ["dramatic", "thoughtful"],
+      "priority": 5,
+      "progress_fraction": 0.63,
+      "reason": "started first, fiction book in sequence",
+      "topic_diversity_score": 0.78
+    },
+    {
+      "book_id": "B12",
+      "title": "The Half-Finished Journey",
+      "type": "fiction",
+      "pages": 300,
+      "topics":

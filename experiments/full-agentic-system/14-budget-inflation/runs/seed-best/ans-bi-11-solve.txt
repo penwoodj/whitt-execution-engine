@@ -1,0 +1,83 @@
+### Phase 1 RULE SCAN
+
+Based on the text provided, here are the rules that change state during the event sequence, listed in order of precedence (higher list = higher priority):
+
+1.  **Retry Wait Rule**: After a failed attempt, wait time doubles for the next attempt. (Trigger: Failed Attempt)
+2.  **Attempt Cost Rule**: Every attempt costs 3 tokens. (Trigger: Attempt Start/End)
+3.  **Wait Cost Rule**: Every second of waiting costs 1 token. (Trigger: Wait Period End)
+4.  **Budget Suppression Rule**: If spend exceeds budget, job is suppressed and budget doubles exactly once; re-checked after doubling; suppressed only if still over. (Trigger: Spend Check)
+5.  **Expiry Return Rule**: When a trigger request completes for an expired grant, it returns half of what was GRANTED (the partial amount actually given), rounded DOWN. (Trigger: Expiry Event)
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   `budget`: 30
+*   `spend`: 0
+*   `attempts`: 0
+*   `wait_s`: 0
+*   `suppressed`: false
+
+**Event 1: Attempt 1 Start**
+*   Rule Applied: Attempt Cost Rule.
+*   Action: Deduct cost of attempt (3).
+*   State Change: `spend` = 0 + 3 = 3.
+*   Result: Success? No (Job needs 2 failed before 3rd succeeds).
+
+**Event 1b: Wait Period 1 End**
+*   Rule Applied: Retry Wait Rule & Wait Cost Rule.
+*   Action: Wait observed is 3s. Deduct cost of wait (3 * 1 = 3).
+*   State Change: `spend` = 3 + 3 = 6.
+
+**Event 2: Attempt 2 Start**
+*   Rule Applied: Attempt Cost Rule.
+*   Action: Deduct cost of attempt (3).
+*   State Change: `spend` = 6 + 3 = 9.
+*   Result: Success? No (This is the first failure).
+
+**Event 2b: Wait Period 2 End**
+*   Rule Applied: Retry Wait Rule & Wait Cost Rule.
+*   Action: Next wait doubles (3s -> 6s). Observed wait is 6s. Deduct cost of wait (6 * 1 = 6).
+*   State Change: `spend` = 9 + 6 = 15.
+
+**Event 3: Attempt 3 Start**
+*   Rule Applied: Attempt Cost Rule.
+*   Action: Deduct cost of attempt (3).
+*   State Change: `spend` = 15 + 3 = 18.
+*   Result: Success? Yes ("the 3th succeeds").
+
+**Event 4: Budget Check & Suppression Logic**
+*   Rule Applied: Budget Suppression Rule.
+*   Action: Compare total spend (18) against budget (30).
+*   Condition: Is `spend` > `budget`? No (18 <= 30).
+*   State Change: No suppression triggered.
+
+**Final Ledger State:**
+*   `attempts`: 3 (One successful, two failed prior to success).
+*   `wait_s`: 9 (Sum of observed waits: 3 + 6).
+*   `budget_after`: 30 (No budget consumed by suppression logic as it wasn't exceeded; costs were deducted from the initial pool but the variable `budget` in the output context usually refers to the remaining capacity or the limit state. However, looking at the "spend" calculation: The prompt says "every attempt costs 3 and every wait second costs 1". Total cost = 18. Initial budget = 30. Remaining budget = 12? Or does `budget_after` refer to the limit value if not suppressed?
+    *   Re-reading the contract keys requested: `{"attempts": N, "wait_s": N, "budget_after": N, "suppressed": true|false}`.
+    *   In similar ledger problems of this type (often derived from specific coding challenges), `budget_after` typically represents the remaining budget capacity if costs are deducted from a pool, OR it remains the limit if the logic is purely threshold-based without a mutable "pool" variable distinct from the limit.
+    *   Let's re-evaluate the "spend" definition. "the attempt budget is 30 tokens where every attempt costs 3 and every wait second costs 1". This implies a pool of 30.
+    *   Total Cost = (Attempt 1: 3) + (Wait 1: 3) + (Attempt 2: 3) + (Wait 2: 6) + (Attempt 3: 3) = 18 tokens spent.
+    *   Remaining Budget = 30 - 18 = 12.
+    *   Is `budget_after` the remaining amount or the limit? The key name "budget_after" strongly implies the state of the budget variable after operations. If it were a limit, it would likely be named "limit". Given the instruction "if the spend exceeds the budget", the budget is treated as a resource.
+    *   Therefore: `budget_after` = 12.
+
+*   `suppressed`: false (Since 18 <= 30).
+
+**Verification against Orientation Story Shape:**
+*   Orientation: Spend 30, Budget 39 -> Under it -> No suppression.
+*   Tonight: Spend 18, Budget 30 -> Under it -> No suppression.
+*   The shape matches (Under budget = no suppression).
+
+**Final Check of Values:**
+*   Attempts: 3 (The sequence was Fail, Wait, Fail, Wait, Success).
+*   Wait_s: 9 (3 + 6).
+*   Budget_after: 12 (30 - 18).
+*   Suppressed: false.
+
+```json
+{"attempts": 3, "wait_s": 9, "budget_after": 12, "suppressed": false}
+```

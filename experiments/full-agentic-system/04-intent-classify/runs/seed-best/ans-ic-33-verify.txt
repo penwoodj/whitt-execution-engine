@@ -1,0 +1,130 @@
+minute | core | event
+0 | start LOW1 | Bank @ 2
+1 | run LOW1 (rem:4) | 
+2 | HIGH arrives | Preempt LOW1 (wasted:0), Start HIGH, Resume LOW2 (Bank @ 4)
+3 | run HIGH (rem:6) | 
+4 | run HIGH (rem:5) | Bank LOW2 @ 6
+5 | run HIGH (rem:4) | 
+6 | run HIGH (rem:3) | 
+7 | run HIGH (rem:2) | 
+8 | run HIGH (rem:1) | 
+9 | finish HIGH, Start LOW1 (Bank @ 11), Resume LOW2 (Bank @ 13)
+10 | run LOW1 (rem:4) | Bank LOW1 @ 11
+11 | run LOW1 (rem:3) | Bank LOW2 @ 15
+12 | run LOW1 (rem:2) | 
+13 | finish LOW1, Start LOW2 (Bank @ 17), Resume LOW2 (Bank @ 19)
+14 | run LOW2 (rem:6) | Bank LOW2 @ 17
+15 | run LOW2 (rem:5) | Bank LOW2 @ 19
+16 | finish LOW2, Start LOW2 (fresh? No, resumed) -> Wait, logic check.
+
+Let's re-evaluate the "Resume" vs "Fresh" and the specific checkpoint math carefully based on the prompt's explicit examples.
+
+**Re-calculation with strict adherence to Prompt Examples:**
+
+1.  **LOW1**: Starts min 0. Runs 5 mins.
+    *   Banks at $0+2=2$.
+    *   Min 3: Still running (rem 4). Banked 2.
+    *   Min 9: HIGH finishes. LOW1 resumes.
+        *   Wait, did LOW1 finish? No, it was preempted at min 2. It ran for $0 \to 2$ (2 mins).
+        *   At min 9, it resumes. Banked amount = 2.
+    *   Min 9: Start LOW1 (resumed). Runs.
+    *   Banks at $9+2=11$.
+    *   Min 10: Running (rem 3). Banked 2.
+    *   Min 11: Running (rem 2). Banked 4? No, bank is absolute time.
+        *   Absolute times for LOW1 banks: $9+2=11$, then $11+2=13$.
+    *   Min 12: Running (rem 1).
+    *   Min 13: Finish LOW1. Total run = 5 mins.
+
+2.  **LOW2**: Starts min 2 (after HIGH preempt). Runs 7 mins.
+    *   Banks at $2+2=4$.
+    *   Min 9: HIGH finishes. LOW2 resumes.
+        *   Did it finish? No, ran $2 \to 9$ (7 mins). Wait, $9-2=7$. It finished exactly when HIGH finished?
+        *   Prompt says "HIGH arrives at minute 2 and runs 9 minutes to completion". So HIGH finishes at min $2+9=11$.
+        *   LOW2 starts at min 2. Runs until... ? The prompt implies LOW jobs run on the core. If HIGH preempts, LOW waits. When HIGH finishes (min 11), does LOW2 resume? Yes.
+        *   How much did LOW2 run before HIGH finished? It was preempted immediately at min 2. So it ran 0 mins.
+        *   Wait, the prompt says "Resume LOW outranks fresh one". This implies there might be a scenario where both are waiting. Here only LOW2 is waiting (fresh).
+        *   Let's re-read: "LOW1 runs 5 minutes starting at minute 0... HIGH arrives at minute 2 and runs 9 minutes to completion, instantly preempting whatever LOW job is running".
+        *   So LOW1 ran $0 \to 2$ (2 mins). Preempted.
+        *   LOW2 starts at min 2? "LOW jobs take core in order of their start minutes... resumed LOW outranks fresh one". This implies the queue has LOW1 (waiting) and LOW2 (fresh, waiting?). Or does LOW2 start immediately when HIGH preempts?
+        *   Usually, if a job is preempted, it goes to wait. If another job is in the queue, it starts. The prompt says "LOW jobs take core in order of their start minutes". This suggests LOW1 (start 0) and LOW2 (start 2).
+        *   At min 2: HIGH preempts LOW1. Core becomes free? No, HIGH takes core.
+        *   So at min 2, LOW1 is preempted. LOW2 is "fresh". Does it start immediately? The prompt says "Resume LOW outranks fresh one". This implies a comparison. If only one exists, it starts. But maybe the queue order matters for when they start if there's contention?
+        *   Let's assume standard scheduling: When HIGH finishes (min 11), the core is free. Waiting jobs are LOW1 and LOW2.
+        *   Order of waiting: LOW1 (start 0) vs LOW2 (start 2). "Take core in order of their start minutes". So LOW1 goes first.
+        *   **Correction**: The prompt says "Resume LOW outranks fresh one at any tie". This implies if they have the same priority, resume wins. But here priorities are defined by start time? Or is it a FIFO queue where position matters?
+        *   Let's look at the example logic provided in the text: "after resume job redoes every minute past its last bank... so job with 5 total minutes and 2 banked resumes with 3 minutes left." This confirms LOW1 had 2 mins run, 2 banked. Resumes with 3 left.
+        *   What about LOW2? It starts at min 2 (fresh). Does it start immediately or wait for HIGH to finish? "HIGH... runs 9 minutes to completion". So HIGH occupies core $2 \to 11$.
+        *   So LOW2 cannot run until min 11. At min 11, LOW2 is fresh. It starts.
+        *   Does it bank at $11+2=13$? Yes.
+        *   Runs for 7 mins. Finishes at $11+7=18$.
+
+**Let's re-read the "Resume vs Fresh" nuance.**
+"Resume LOW outranks fresh one at any tie". This suggests a scenario where both are waiting. At min 11, LOW1 (resumed) and LOW2 (fresh) are waiting.
+Priority: Start minutes? "LOW jobs take core in order of their start minutes".
+Start times: LOW1=0, LOW2=2.
+So LOW1 has higher priority (earlier start).
+Therefore, at min 11, LOW1 starts first.
+LOW1 resumes with 3 mins left (from $5-2$). Runs $11 \to 14$. Finishes at 14.
+Then LOW2 starts (fresh). Runs $14 \to 21$. Finishes at 21.
+
+**Wait, let's check the "Bank" logic for LOW2.**
+If LOW2 is fresh starting at min 14. Banks at $14+2=16$.
+Runs 7 mins. Finishes at 21.
+Wasted? No preemption after min 11.
+
+**Let's re-evaluate the "Resume" status of LOW1.**
+LOW1 ran $0 \to 2$ (2 mins). Banked at 2.
+Preempted by HIGH ($2 \to 11$).
+At min 11, resumes.
+Total needed: 5. Banked: 2. Remaining: 3.
+Runs $11 \to 14$. Finishes.
+
+**Let's re-evaluate LOW2.**
+Starts at min 2 (fresh)? Or waits?
+If it starts immediately at min 2, then HIGH preempts it too? "instantly preempting whatever LOW job is running". If LOW2 starts, it runs $0$ mins before HIGH takes over.
+So LOW2 effectively starts at min 11 (when HIGH finishes).
+Is it fresh or resumed? It never ran. So Fresh.
+Starts at min 11. Banks at $13$. Runs $7$ mins. Finishes at $18$.
+
+**Conflict Resolution:**
+Which one runs first at min 11? LOW1 (resumed) vs LOW2 (fresh).
+Rule: "Resume LOW outranks fresh one".
+So LOW1 runs first ($11 \to 14$). Then LOW2 ($14 \to 21$).
+
+**Let's check the Wasted calculation.**
+LOW1: Banked at 2. Preempted at 2. No wasted (bank landed exactly on arrival? "Bank landing on exact minute HIGH arrives still counts").
+HIGH runs $2 \to 11$.
+At min 11, LOW1 resumes. Runs $3$ mins ($14-11$). Finishes.
+LOW2 starts at 14. Runs $7$ mins. Finishes at 21.
+
+**Makespan**: 21.
+**Wasted**: 0?
+Wait, the prompt example says "job with 5 total minutes and 2 banked resumes with 3 minutes left". This matches my LOW1 calc.
+Does LOW2 have any wasted? No preemption after start.
+So Wasted = 0.
+
+**Order**: ["LOW1", "LOW2"].
+
+**Let's double check the "Start" time of LOW2.**
+Prompt: "LOW jobs take core in order of their start minutes".
+If LOW2 starts at min 2 (fresh), and HIGH preempts it immediately, then at min 11 it is still fresh.
+So at min 11, we have LOW1 (resumed) and LOW2 (fresh).
+Resume wins. LOW1 runs first.
+
+**Is there any wasted time?**
+"minutes past the last bank are wasted".
+LOW1: Banked at 2. Preempted at 2. Minutes run = 0? Or did it run $0 \to 2$? It ran 2 minutes. Bank landed at 2. So no wasted.
+HIGH runs $2 \to 11$.
+At min 11, LOW1 resumes. Runs $3$ mins. Finishes.
+LOW2 starts. Runs $7$ mins. Finishes.
+
+**Wait, what if LOW2 started at min 2 and ran for some time?**
+"HIGH arrives at minute 2... instantly preempting whatever LOW job is running".
+If LOW2 was in the queue, it would start immediately? Or wait?
+Usually, preemption happens on the core. If a new job starts, it runs until preempted or finishes.
+But HIGH takes the core *instantly*. So any job starting at min 2 gets 0 runtime before HIGH takes over.
+So LOW2 is effectively fresh with 0 runtime.
+
+**Final Check:**
+Makespan: 21.
+Wasted

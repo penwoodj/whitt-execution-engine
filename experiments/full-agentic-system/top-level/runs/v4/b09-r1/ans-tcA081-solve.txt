@@ -1,0 +1,81 @@
+Phase 1 RULE SCAN:
+
+- Rule: Cumulative size must be computed as sum of prior layer sizes. Triggered by every layer entry after index 0.  
+  Reason: Size is cumulative in raw dump; this rule ensures correct aggregation, with threshold at index=0 to avoid double-counting.
+
+- Rule: Flag "install-without-clean" if a layer contains apt-get install and no subsequent layer removes it or cleans up. Triggered when command includes "apt-get install" and no later layer has "rm -rf /var/lib/apt/lists/*" or equivalent cleanup.  
+  Threshold: Must have at least one layer with "apt-get install" AND no later layer with cleanup command; if any such layer exists, flag it.
+
+- Rule: Flag "duplicated data adds" when a layer contains identical content (via hash comparison) to a prior layer. Triggered by comparing layer hashes (simulated via size and command similarity); threshold: 90%+ similarity in command and size, with same file paths or known duplicates.  
+  Reason: Duplicates indicate redundant storage; this rule is based on observed data patterns from real Docker image dumps.
+
+- Rule: Flag "secrets-in-layer" if a layer contains any string matching 'password', 'secret', 'key', or 'token' in command or content. Triggered when such strings appear in the command field or within layer text (simulated via command parsing).  
+  Threshold: Any occurrence of these keywords; reason: security risk, even if not used.
+
+- Rule: Detect "add-then-remove" pairs where a layer adds weight and is later removed by a subsequent layer. Triggered when a layer has non-zero size and a later layer has a command that removes files from the same path or directory (e.g., "rm -rf /path").  
+  Threshold: The removal must occur in a layer with index > added layer index; net weight change is zero, but history remains.
+
+- Rule: Compute slim rebuild estimate by summing all layers that are either removed via add-then-remove or flagged as install-without-clean. Triggered after completion of stages 2 and 3.  
+  Projection: Saving = total size of removed layers (from add-then-remove) + size of cleaned apt-get installs.  
+  Uncertainty: ±10% due to missing metadata in layer content; reason: some files are not fully tracked by command logs.
+
+- Rule: Flag zero-size layers that perform metadata-only work (e.g., layer with no commands, only metadata). Triggered when size == 0 and command is empty or contains only metadata keywords.  
+  Threshold: Size = 0 AND command contains "metadata", "config", or "json"; reason: such layers are not executable but still consume space in image history.
+
+- Rule: Detect cumulative size inconsistency in raw dump where layer sizes appear to grow beyond prior sum. Triggered when current size > (sum of all previous sizes).  
+  Threshold: If size > cumulative_sum, flag and log; reason: data corruption or mislabeling in input dump.
+
+- Rule: Handle truncated command with ellipsis ("...") by treating it as incomplete and marking the row for manual review. Triggered when command ends with "...".  
+  Threshold: Any layer where command contains "..." — count such entries and log them.
+
+- Rule: Apply fallback rule if no cleanup is found after install, assuming that all apt-get installs without explicit removal are wasteful. Triggered when an install-without-clean layer exists and no later layer has a cleanup command.  
+  Reason: Default assumption based on Docker image bloat patterns; threshold: at least one such layer.
+
+- Rule: Apply source-ranking rule to prioritize layers by size and index, assigning rank = (index + size) for ordering in slim rebuild estimate. Triggered during slim rebuild estimation phase.  
+  Threshold: Rank must be computed per layer; reason: higher-ranked layers are more likely to contain bloat.
+
+- Rule: Revocation rule: if a layer is removed via "rm -rf" or equivalent, its size is subtracted from cumulative total and marked as revoked. Triggered when a removal command appears in any layer after an add-layer.  
+  Threshold: Removal must occur in a later layer; reason: actual deletion of files.
+
+- Rule: Refill rule: if a layer is added back after being removed (e.g., via "add" after "rm"), it is flagged as a refill and its size is not subtracted from total. Triggered when a layer appears after a removal with identical content or command.  
+  Threshold: Command matches prior layer; reason: indicates redundant re-addition.
+
+- Rule: Fallback rule for slim rebuild estimate if no clear patterns exist — assume 10% of total size is wasteful and project saving accordingly. Triggered when all other rules fail to identify bloat.  
+  Reason: Conservative baseline; threshold: only used when no install-without-clean or add-then-remove pairs are found.
+
+- Rule: Source-ranking rule for layer importance: rank = (index + size) / 100, with higher ranks indicating more critical layers. Triggered during slim rebuild estimation.  
+  Threshold: Used to prioritize which layers to keep in final image; reason: early layers often contain base OS and are less likely to be bloat.
+
+- Rule: Expiry rule: if a layer is not referenced by any later layer (i.e., no command depends on it), it expires and its size is subtracted from total. Triggered when no subsequent layer references the layer’s path or content.  
+  Threshold: No dependency found in any later layer; reason: layers with no downstream use are dead weight.
+
+- Rule: Return rule: if a layer is referenced by a later layer but then removed, it returns to active state and its size remains. Triggered when a layer is used and then deleted.  
+  Threshold: Used before deletion; reason: prevents double-counting of bloat.
+
+Phase 2 LEDGER WALK:
+
+[timestamp=2024-04-15T08:30:00Z] Layer table generated with index, command, size, cumulative size.  
+→ Index: 0, Command: "RUN mkdir /tmp", Size: 1024, Cumulative: 1024  
+→ Index: 1, Command: "RUN apt-get update", Size: 512, Cumulative: 1536  
+→ Index: 2, Command: "RUN apt-get install curl", Size: 896, Cumulative: 2432  
+→ Index: 3, Command: "RUN mkdir /data", Size: 2048, Cumulative: 4480  
+→ Index: 4, Command: "RUN echo 'secret' > /tmp/secret", Size: 1024, Cumulative: 5504  
+→ Index: 5, Command: "...", Size: 0, Cumulative: 5504 → Truncated command flagged (count=1)  
+→ Index: 6, Command: "RUN rm -rf /tmp/secret", Size: 1024, Cumulative: 6528 → Flags "add-then-remove" pair with layer 4  
+→ Index: 7, Command: "RUN apt-get install nginx", Size: 3072, Cumulative: 9599  
+→ Index: 8, Command: "RUN rm -rf /var/lib/apt/lists/*", Size: 1536, Cumulative: 11135 → Flags "install-without-clean" (layer 7) and cleanup (layer 8)  
+→ Index: 9, Command: "RUN mkdir /app", Size: 2048, Cumulative: 13183  
+→ Index: 10, Command: "RUN echo 'password' > /app/config", Size: 512, Cumulative: 13695 → Flags "secrets-in-layer" (layer 10)  
+→ Index: 11, Command: "RUN rm -rf /app", Size: 2048, Cumulative: 15743 → Flags "add-then-remove" pair with layer 9  
+→ Index: 12, Command: "RUN apt-get install python", Size: 1024, Cumulative: 16767  
+→ Index: 13, Command: "RUN rm -rf /var/lib/apt/lists/*", Size: 512, Cumulative: 17279 → Flags "install-without-clean" (layer 12) and cleanup (layer 13)  
+→ Index: 14, Command: "RUN mkdir /logs", Size: 1024, Cumulative: 18303  
+→ Index: 15, Command: "RUN echo 'key' > /logs/key.txt", Size: 512, Cumulative: 18815 → Flags "secrets-in-layer" (layer 15)  
+→ Index: 16, Command: "RUN rm -rf /logs", Size: 1024, Cumulative: 19839 → Flags "add-then-remove" pair with layer 14  
+→ Index: 17, Command: "RUN apt-get install vim", Size: 768, Cumulative: 20607  
+→ Index: 18, Command: "RUN rm -rf /var/lib/apt/lists/*", Size: 384, Cumulative: 20991 → Flags "install-without-clean" (layer 17) and cleanup (layer 18)  
+→ Index: 19, Command: "RUN mkdir /backup", Size: 512, Cumulative: 21503  
+→ Index: 20, Command: "RUN echo 'token' > /backup/token.txt", Size: 512, Cumulative: 22015 → Flags "secrets-in-layer" (layer 20)  
+→ Index: 21, Command: "RUN rm -rf /backup", Size: 512, Cumulative: 22527 → Flags "add-then-remove" pair with layer 19  
+
+[timestamp=2

@@ -1,0 +1,86 @@
+### Step 1: Create Workspace Structure
+```bash
+mkdir -p /tmp/opencode/timeline-run/{scripts,outputs}
+cd /tmp/opencode/timeline-run
+```
+
+### Step 2: Generate Deterministic Raw Log Data (Python)
+*Rule:* Use `random.seed(42)` for reproducibility. Simulate 6 services (`auth`, `api`, `db`, `cache`, `worker`, `ingest`). Inject specific anomalies: 2 UTC timestamps, 4 local offsets (+0530), a 2-minute gap in `db` logs, and mixed error levels.
+*Formula:* `log_line = f"{timestamp}|{level}|{message}"` where timestamp logic varies by service config.
+
+```python
+# scripts/generate_logs.py
+import random
+from datetime import datetime, timedelta
+
+random.seed(42)
+
+services = ['auth', 'api', 'db', 'cache', 'worker', 'ingest']
+start_time = datetime(2023, 10, 27, 10, 0, 0)
+duration_minutes = 90
+
+# Config: 2 services UTC, 4 local (+0530)
+utc_services = ['auth', 'api']
+local_services = ['db', 'cache', 'worker', 'ingest']
+
+def get_timestamp(service):
+    if service in utc_services:
+        return start_time + timedelta(seconds=random.randint(0, duration_minutes*60))
+    else:
+        # Local time offset simulation (store as UTC internally but formatted with offset)
+        base = start_time + timedelta(seconds=random.randint(0, duration_minutes*60))
+        # Add 5 hours 30 mins to the hour component for display logic in raw string
+        return f"{base.strftime('%Y-%m-%d %H:%M:%S')}+05:30"
+
+def get_level(service):
+    # Incident arc: Normal -> Detection (auth) -> Mitigation1 Fail (api/db) -> Mitigation2 Success (cache/worker)
+    t = start_time + timedelta(seconds=random.randint(0, duration_minutes*60))
+    
+    # Hardcoded incident window logic for reproducibility based on seed
+    if service == 'auth' and 45 <= t.minute < 50: return "WARN" # Detection
+    elif service in ['api', 'db'] and 50 <= t.minute < 58: return "ERROR" # Mitigation1 Fail
+    elif service in ['cache', 'worker'] and 58 <= t.minute < 62: return "INFO" # Mitigation2 Success
+    else: 
+        r = random.random()
+        if r > 0.9: return "ERROR"
+        elif r > 0.7: return "WARN"
+        else: return "INFO"
+
+def get_message(level, service):
+    msgs = {
+        'auth': ["Login attempt from IP", "Session validated"],
+        'api': ["Request processed", "Timeout waiting for DB", "Circuit breaker open"],
+        'db': ["Query executed", "Connection pool exhausted", "Replication lag detected"],
+        'cache': ["Cache hit", "Cache miss, fetching upstream", "Eviction policy triggered"],
+        'worker': ["Job started", "Job failed: timeout", "Retry scheduled"],
+        'ingest': ["Batch received", "Schema validation passed"]
+    }
+    return random.choice(msgs[service])
+
+# Generate lines with a deliberate 2-minute gap in 'db' logs around minute 54
+lines = []
+current_sec = 0
+gap_start = 3240 # 54 minutes * 60 seconds
+gap_end = 3300
+
+while current_sec < duration_minutes * 60:
+    for svc in services:
+        if svc == 'db' and gap_start <= current_sec <= gap_end:
+            continue # Skip to create gap
+        
+        ts_str = get_timestamp(svc)
+        lvl = get_level(svc)
+        msg = get_message(lvl, svc)
+        
+        lines.append(f"{ts_str}|{lvl}|{msg}")
+    current_sec += random.randint(1, 5)
+
+# Write raw logs to outputs/raw_logs.txt
+with open('outputs/raw_logs.txt', 'w') as f:
+    for line in lines:
+        f.write(line + '\n')
+```
+
+### Step 3: Create Rules and Decisions File
+*Rule:* Define how to handle timezones, gaps, and severity mapping.
+*Decision:* Gap > 60s is

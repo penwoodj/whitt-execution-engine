@@ -1,0 +1,94 @@
+### Phase 1 RULE SCAN
+The following rules govern state changes during tonight's events. Each line lists the rule, its trigger condition (Event/Claim), and the resulting state change.
+
+1. **Rule: Job Arrival & Scheduling**
+   - Trigger: HIGH job arrival at minute 0.
+   - Change: Schedules HIGH for execution; LOW1 enters "fresh" pending state immediately.
+2. **Rule: Preemption Priority (High > Low)**
+   - Trigger: HIGH starts execution and LOW jobs are ready/resumed.
+   - Change: Interrupts any running or ready LOW job to execute HIGH immediately.
+3. **Rule: Instant Preemption Completion**
+   - Trigger: HIGH begins at minute 0 with duration 6 mins.
+   - Change: HIGH runs to completion (minutes 0-5) without interruption because no other job is scheduled to start before it finishes? *Correction based on timeline*: LOW1 starts at min 0, LOW2 at min 3. HIGH preempts instantly. So LOW1/LOW2 are paused or skipped depending on exact overlap logic. Given "preempts instantly and runs to completion", HIGH occupies the core from t=0 to t=6. Any LOW jobs overlapping this window cannot run their full duration in that first block.
+4. **Rule: LOW Job Checkpointing**
+   - Trigger: A LOW job accumulates 2 completed minutes of work.
+   - Change: Saves state; resets progress counter for the current batch (waste calculation basis).
+5. **Rule: Waste Calculation on Preemption**
+   - Trigger: HIGH preempts a LOW job before it reaches its last checkpoint or completion.
+   - Change: Calculates `work_done_since_last_checkpoint` as wasted minutes. Resets LOW job state to last checkpoint.
+6. **Rule: Job Resumption Priority (Resumed > Fresh)**
+   - Trigger: Tie situation where both a resumed LOW and a fresh LOW are eligible for the core.
+   - Change: The resumed LOW job executes before the fresh LOW job.
+7. **Rule: Makespan Definition**
+   - Trigger: End of all job executions.
+   - Change: Calculates time from first start (min 0) to last finish.
+
+---
+
+### Phase 2 LEDGER WALK
+Applying events in strict arrival order with the specific constraints of tonight's numbers (HIGH=6m, LOW1=4m start@0, LOW2=3m start@3).
+
+**Event 1: Minute 0 - HIGH Arrives & Starts**
+- Action: Core becomes busy with HIGH (Duration 6).
+- State Impact on LOW1: LOW1 was scheduled to start immediately. Due to instant preemption rule and HIGH occupying the core from t=0, LOW1 cannot execute its first batch of work in this slot. It remains "pending/fresh" but makes no progress while HIGH runs.
+- State Impact on LOW2: Schedules for minute 3 (future).
+- **Current Time**: 0 -> 6.
+
+**Event 2: Minute 6 - HIGH Finishes**
+- Action: Core becomes free at t=6.
+- State Check: LOW1 needs to resume. Was it paused? Since it started "immediately" but was preempted instantly, technically it had 0 progress in the first block. However, the rule says "LOW jobs checkpoint every 2 completed minutes". If a job has 0 completed minutes, there is no checkpoint created yet, or rather, the work done since last checkpoint (which is effectively start) is what matters if we consider it as having "started" but not finished a batch.
+- *Refined Logic based on "work past the last checkpoint is wasted"*: If LOW1 never accumulated 2 minutes, did it create a checkpoint? No. Therefore, any work done since the theoretical "start checkpoint" (if we assume start = checkpoint) would be wasted. But usually, checkpoints happen *after* completion of units.
+- Let's re-evaluate the "instant preemption" phrasing: "HIGH preempts instantly and runs to completion." This implies LOW1 is effectively skipped entirely during t=0-6. It hasn't earned a checkpoint because it didn't complete 2 minutes. Thus, when HIGH finishes at t=6, LOW1 is treated as a **Fresh** job with 0 progress? Or does the "preemption" count as an interruption where the work *would have been* done is wasted?
+- Interpretation of "wasted on preemption": Work accumulated since the last checkpoint. If no checkpoint exists (because <2 mins), the entire duration attempted before the next valid run is considered the "work past the last checkpoint". Since it couldn't start, progress = 0. Is there waste? No work was done to be wasted yet, but it is a **Fresh** job now relative to the new schedule because the previous attempt yielded no saved state (no checkpoint).
+- *Alternative Interpretation*: Did LOW1 run for even 1 second? "Preempts instantly". Usually implies zero overlap or immediate displacement. If ZERO progress was made on LOW1, then `wasted = 0`. The job is now effectively "Fresh" in the queue because no checkpoint was saved.
+- **State**: Core free at t=6. LOW1 (4m total) needs to run. LOW2 waits until t=3? No, LOW2 starts *at* minute 3. But HIGH ran until min 6. So when HIGH finishes at min 6, LOW2's start time (min 3) has passed. Is LOW2 "late"? The prompt says "LOW2 runs... starting at minute 3". If the core is busy until 6, does LOW2 wait? Yes, standard scheduling: jobs wait in queue.
+- **Ordering at t=6**: We have LOW1 (needs to start/finish) and LOW2 (which missed its ideal start time of 3). Does missing start time invalidate it? "Arrivals in order... budgets exactly as stated". Usually implies the job *is* there. It just didn't run.
+- **Rule Application**: "Resumed LOW outranks a fresh one". Is LOW1 Resumed or Fresh? Since it got 0 progress and no checkpoint, it is **Fresh**. Is LOW2 Fresh? Yes.
+- Who runs first at t=6? Both are Fresh. Arrival order: LOW1 arrived at min 0 (earlier than LOW2's effective availability). So LOW1 goes first.
+
+**Event 3: Minute 6 to 10 - LOW1 Executes First Batch**
+- Action: Core runs LOW1 from t=6.
+- Duration needed: 4 mins total.
+- Checkpoint logic: Every 2 completed minutes.
+- At t=8 (2 mins passed): Checkpoint reached. State saved. Progress = 2/4.
+- At t=9 (3rd min starts): Work since last checkpoint starts accumulating.
+- **Current Time**: 10.
+
+**Event 4: Minute 10 - LOW1 Finishes?**
+- Wait, let's trace carefully.
+- Start t=6.
+- t=8: Checkpoint #1 reached (2 mins done). Remaining needed = 2 mins.
+- t=9: Work starts on remaining chunk. Since no checkpoint exists for the *remaining* part until we hit another 2 minutes? The rule says "checkpoint every 2 completed minutes".
+- Does it checkpoint at min 8 and then continue? Yes.
+- If LOW1 runs from 6 to 10 (4 mins).
+- t=6->8: 2 mins done. Checkpoint saved.
+- t=8->10: Next 2 mins done. Total 4 mins. Job Complete.
+- **Time**: 10 minutes elapsed. Core free at t=10.
+
+**Event 5: Minute 10 - LOW2 Execution**
+- Status of LOW2: Arrived/Ready (conceptually since min 3, but sat out). Now eligible.
+- Status of LOW1: Done.
+- Action: Run LOW2 (Duration 3 mins).
+- Checkpoint logic: Needs to reach 2 minutes checkpoint? It only needs 3 mins total.
+- t=10->12: 2 mins done. Checkpoint reached. Remaining = 1 min.
+- t=12->13: 1 min done. Total 3 mins. Job Complete.
+- **Time**: 13 minutes elapsed. Core free at t=13.
+
+**Wait, let's re-read the "Wasted" condition carefully.**
+Is there any scenario where work is wasted?
+"HIGH preempts instantly". If LOW1 *started* and ran for X mins before HIGH took over, that X is checked against checkpoints.
+But here: "HIGH ... runs 6 minutes starting at minute 0... LOW1 runs 4 minutes starting at minute 0".
+Conflict resolution: "HIGH preempts instantly". This means the interval [0, 6] belongs to HIGH. LOW1 attempts to run in [0, 4] but is preempted immediately.
+Did LOW1 run *any* time? "Instantly" implies t=0 start for HIGH pushes LOW1 aside with 0 execution time on that first block.
+Therefore: Work done by LOW1 in block 1 = 0.
+Last checkpoint before this? None (job just started).
+Work since last checkpoint = 0.
+Wasted = 0.
+State of LOW1 after HIGH finishes: It has 0 progress, no saved checkpoint. Effectively **Fresh**.
+
+Now consider LOW2. "LOW2 runs 3 minutes starting at minute 3".
+Block 1 (0-6) is taken by HIGH.
+At t=3, the core was busy with HIGH. LOW2 cannot start. It waits.
+It effectively starts when? When the core is free? Or does it miss its window and become invalid?
+"Arrivals in order... budgets exactly as stated".
+If a job says "starts at minute 3", but the machine is busy, standard scheduling logic (unless specified otherwise) is that it waits in the queue. However, sometimes "starting at minute X" implies a deadline or release

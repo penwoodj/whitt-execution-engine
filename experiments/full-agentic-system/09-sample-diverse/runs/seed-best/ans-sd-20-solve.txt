@@ -1,0 +1,80 @@
+### Phase 1: RULE SCAN
+The following rules govern the state changes during the event stream. Each rule is listed on one line with its trigger condition.
+
+1.  **Load Rule**: Triggered by a `load` request; if capacity allows, loads the model and updates recency (moves to most-recent).
+2.  **Eviction Selection Rule**: Triggered when a load cannot fit; selects the least-recently-touched *unpinned* model for eviction.
+3.  **Eviction Execution Rule**: Triggered by selection; evicts the selected unpinned model, freeing its space and updating recency (evicted model removed from list).
+4.  **Deferred Load Rule**: Triggered when a load cannot fit even after exhausting all *unpinned* models (only pinned remain); defers the load without eviction.
+5.  **Unload Rule**: Triggered by an `unload` request; frees the specified model's space if resident, updates recency (moves to most-recent).
+6.  **Recency Update Rule**: Triggered by any successful load or unload; moves the touched model to the end of the recency list.
+
+---
+
+### Phase 2: LEDGER WALK
+Applying events in strict arrival order with initial state: `loads=0`, `evictions=0`, `deferrals=0`, `deferred=[]`.
+Initial Pool: 8GB Free. Residents: []. Recency: [].
+
+**Event 1: load A (3 GB)**
+*   State Check: Pool has 8GB. Request needs 3GB. Fits.
+*   Action: Load A. Update recency.
+*   Resident List: [A]
+*   Free Space: 5GB
+*   Recency List: [A]
+
+**Event 2: load B (3 GB)**
+*   State Check: Pool has 5GB. Request needs 3GB. Fits.
+*   Action: Load B. Update recency.
+*   Resident List: [A, B]
+*   Free Space: 2GB
+*   Recency List: [A, B]
+
+**Event 3: load C (1 GB)**
+*   State Check: Pool has 2GB. Request needs 1GB. Fits.
+*   Action: Load C. Update recency.
+*   Resident List: [A, B, C]
+*   Free Space: 1GB
+*   Recency List: [A, B, C]
+
+**Event 4: load D (7 GB)**
+*   State Check: Pool has 1GB. Request needs 7GB. Does not fit.
+*   Eviction Logic: Need 6GB more. Look for unpinned models to evict.
+    *   Residents: A(3), B(3), C(1). All are unpinned (C is pinned but currently resident, wait—rule says "model C is pinned". So C is pinned. A and B are unpinned).
+    *   Unpinned Candidates: A, B.
+    *   Recency Order (Oldest to Newest): A, B, C.
+    *   Least-Recent-Touched Unpinned: **A**.
+*   Action 1: Evict A.
+    *   Evictions Count: 1.
+    *   Free Space becomes: 1GB + 3GB = 4GB.
+    *   Resident List: [B, C]. Recency: [B, C].
+*   State Check: Pool has 4GB. Request needs 7GB. Still does not fit (Need 3GB more).
+*   Eviction Logic 2: Need 3GB more. Look for unpinned models.
+    *   Unpinned Candidates: **B**. (C is pinned).
+    *   Least-Recent-Touched Unpinned: **B**.
+*   Action 2: Evict B.
+    *   Evictions Count: 1 + 1 = 2.
+    *   Free Space becomes: 4GB + 3GB = 7GB.
+    *   Resident List: [C]. Recency: [C].
+*   State Check: Pool has 7GB. Request needs 7GB. Fits exactly.
+*   Action: Load D. Update recency.
+*   Resident List: [C, D].
+*   Free Space: 0GB.
+*   Recency List: [C, D].
+
+**Event 5: unload B (3 GB)**
+*   State Check: Is B resident? No (Evicted in Event 4).
+*   Action: Unload is a no-op for non-resident model.
+*   Resident List: [C, D].
+*   Free Space: 0GB.
+*   Recency List: [C, D].
+
+---
+
+### Final Answer Calculation
+*   **loads**: Successful loads occurred in Events 1, 2, 3, and 4 (after evictions). Total = 4.
+*   **evictions**: Models A and B were evicted during Event 4. Total = 2.
+*   **deferrals**: No load was deferred. Total = 0.
+*   **deferred**: Empty list.
+
+```json
+{"loads": 4, "evictions": 2, "deferrals": 0, "deferred": []}
+```

@@ -1,0 +1,74 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event or claim list.*
+
+1.  **Arrival Rule**: Requests land in strict arrival order; each asks for a fixed number of tokens.
+2.  **Grant Rule (Full)**: If the pool covers the full ask, grant the full amount and subtract from the pool.
+3.  **Grant Rule (Partial)**: If the pool cannot cover the full ask, grant whatever remains in the pool (pool drops to zero), and the request is still considered "granted" (not denied).
+4.  **Denial Rule**: A request arriving at an empty pool (exactly zero) is denied and listed by ID; a partial grant never triggers denial.
+5.  **Expiry Trigger Rule**: The grant for `r2` expires after request `r3` completes.
+6.  **Return Amount Rule**: An expired grant returns half of its *granted* tokens (rounded down), not the asked amount.
+7.  **Timing Rule**: The expiry return happens immediately before the next request is processed (specifically, right before `r4` arrives).
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order.*
+
+**Initial State:** Pool = 50.
+
+1.  **Event: r1 arrives (Ask: 4)**
+    *   Rule Applied: Grant Rule (Full).
+    *   Action: Grant 4. Pool becomes $50 - 4 = 46$.
+    *   State: Pool=46, Granted=[r1(4)].
+
+2.  **Event: r2 arrives (Ask: 6)**
+    *   Rule Applied: Grant Rule (Full).
+    *   Action: Grant 6. Pool becomes $46 - 6 = 40$.
+    *   State: Pool=40, Granted=[r1(4), r2(6)].
+
+3.  **Event: r3 arrives (Ask: 9)**
+    *   Rule Applied: Grant Rule (Full).
+    *   Action: Grant 9. Pool becomes $40 - 9 = 31$.
+    *   State: Pool=31, Granted=[r1(4), r2(6), r3(9)].
+
+4.  **Event: Expiry Trigger (r3 completes)**
+    *   Rule Applied: Expiry Trigger Rule & Return Amount Rule.
+    *   Target: Grant for `r2` (Granted amount was 6).
+    *   Calculation: Half of granted = $6 / 2 = 3$. Round down = 3.
+    *   Action: Add 3 to pool. Pool becomes $31 + 3 = 34$.
+    *   State: Pool=34, Granted=[r1(4), r3(9)] (r2 removed).
+
+5.  **Event: r4 arrives (Ask: 13)**
+    *   Rule Applied: Grant Rule (Full).
+    *   Action: Grant 13. Pool becomes $34 - 13 = 21$.
+    *   State: Pool=21, Granted=[r1(4), r3(9), r4(13)].
+
+6.  **Event: r5 arrives (Ask: 15)**
+    *   Rule Applied: Grant Rule (Full).
+    *   Action: Grant 15. Pool becomes $21 - 15 = 6$.
+    *   State: Pool=6, Granted=[r1(4), r3(9), r4(13), r5(15)].
+
+**Final Totals:**
+*   Total Granted Units: $4 + 6 + 9 + 13 + 15 = 47$. (Note: Expiry return is not "granted units" in the sense of new consumption, but adds back to pool. The sum of *consumed* tokens from the initial 50 is $50 - 6 = 44$? No, let's re-read the definition of `granted_units`. Usually, this implies total successful allocation events.
+    *   r1: +4
+    *   r2: +6
+    *   r3: +9
+    *   r4: +13
+    *   r5: +15
+    *   Sum = 47.
+    *   Wait, the expiry return adds to the pool but doesn't count as a "grant" in the sense of fulfilling a request's ask? The prompt says "grants are partial... grant what is there". The expiry returns tokens. Does `granted_units` include the returned tokens?
+    *   Re-evaluating standard ledger logic: `granted_units` usually refers to the sum of amounts given out to satisfy requests. The return is a refund/replenishment.
+    *   Let's check the math against the "sanity formula": $Pool_{left} = Start - Sum(Granted) + Sum(Returns)$.
+    *   $6 = 50 - X + 3 \Rightarrow X = 47$.
+    *   So `granted_units` must be 47.
+
+*   Denied List: Empty (no request hit an empty pool).
+*   Pool Left: 6.
+
+---
+
+### Final Answer JSON
+
+```json
+{"granted_units": 47, "denied": [], "pool_left": 6}
+```

@@ -1,0 +1,91 @@
+Based on the strict rules provided for "tonight's" shift (ignoring orientation numbers), here is the step-by-step derivation of the state, followed by the final JSON output.
+
+### Phase 1: Rule List & Trigger Identification
+The following logic applies to every event in the stream `load A`, `load B`, `load C`, `load D`, `unload B`:
+
+1.  **State Change on Load**: If a load cannot fit, it evicts LRU unpinned models until space allows (or only pinned remain).
+2.  **Deferred Load Condition**: If *only* pinned models remain and the requested size still does not fit (total capacity < requested), the load is deferred. The ID of this specific load is recorded as a "deferred" ID. Even if deferred, any successful evictions performed before hitting the "no space left" cap count toward the total eviction count.
+3.  **State Change on Unload**: Removes a model from resident list and reduces capacity. If the model is not resident, it is a no-op (0 evictions).
+4.  **Totals Accumulation**: `loads` counts successful loads; `evictions` sums all LRU evictions performed; `deferrals` counts how many loads were deferred; `deferred` lists their IDs.
+
+### Phase 2: Ledger Walk
+**Initial State:** Empty (0 GB used, 8 GB free).
+
+*   **Event 1: load A (2 GB)**
+    *   Fits? Yes (Free = 8 >= 2).
+    *   Action: Load A resident.
+    *   Capacity Used: 2 GB. Free: 6 GB.
+    *   Evictions: 0.
+
+*   **Event 2: load B (2 GB)**
+    *   Fits? Yes (Free = 6 >= 2).
+    *   Action: Load B resident (Pinned).
+    *   Capacity Used: 4 GB. Free: 4 GB.
+    *   Evictions: 0.
+
+*   **Event 3: load C (2 GB)**
+    *   Fits? Yes (Free = 4 >= 2).
+    *   Action: Load C resident.
+    *   Capacity Used: 6 GB. Free: 2 GB.
+    *   Evictions: 0.
+
+*   **Event 4: load D (7 GB)**
+    *   Fits? No (Free = 2 < 7).
+    *   Action: Needs to free 5 GB.
+    *   Candidates for eviction: A, B, C are resident. B is pinned. A and C are unpinned.
+    *   LRU logic (assuming arrival order makes A the least recently touched among unpinned): Evict A (2 GB).
+        *   Used: 4 GB (B+C+D? No, D not loaded yet). Current resident set {A, B, C}. Remove A. Set {B, C}. Capacity used 4. Free space available for new load = Total - Used = 8 - 4 = 4 GB. Wait, standard logic: We need to make room.
+        *   Let's re-evaluate capacity math strictly: `Used` + `Free` = `Total`.
+        *   Before eviction: Resident {A(2), B(2), C(2)}. Used = 6. Free = 2.
+        *   Request D (7). Need to free at least $7 - \text{current\_free} = 5$ GB? No, simpler: New resident set must satisfy $\sum \text{sizes} \le 8$.
+        *   Current sum = 6. Target sum for {B, C, D} = $2+2+7=11 > 8$. Cannot load without evicting more.
+        *   Evict A (Unpinned). New Sum {B, C} = 4. Add D? Sum = 11. Still too big.
+        *   Next LRU Unpinned is C (since B is pinned and A was just evicted). Evict C.
+        *   New Sum {B} = 2. Add D? Sum = 9. Still too big ($>8$).
+        *   Next resident is B (Pinned). Cannot evict B.
+        *   **Result**: Only pinned models remain ({B}). Requested size 7 does not fit in remaining capacity ($8 - 2 = 6$ GB free, or simply total sum constraint fails).
+        *   Load D is **Deferred**.
+    *   Evictions performed: A (1), C (1). Total Evictions += 2.
+    *   State: Resident {B(2), D(deferred/not loaded yet)}. Used = 2 GB. Free = 6 GB.
+
+*   **Event 5: unload B**
+    *   Target: B (Pinned, currently resident).
+    *   Action: Remove B from resident list.
+    *   Capacity Used becomes 0 GB.
+    *   Evictions: 0.
+
+### Final Calculation
+*   **Loads**: A, B were loaded successfully. C was not explicitly in the "tonight" request stream to be counted as a *new* load event that resulted? Wait, the task says: "Requested stream: load A..., load B..., load C..., load D...".
+    *   Let's re-read Event 3 (Load C). Did it fit? Yes. So C is loaded.
+    *   Loads count = 3 (A, B, C).
+*   **Evictions**: During Load D, we evicted A and C. Total = 2.
+*   **Deferrals**: Load D failed after exhausting pinned options. Total = 1.
+*   **Deferred IDs**: ["D"].
+
+*Self-Correction on Event 3*: The prompt asks for the state after "load C". Since it fit, `loads` increments.
+*Correction on Eviction Count Logic*: In the orientation example (5GB card), Load P evicted M and loaded. Load Q deferred. Total evictions was 1. Here, Load D evicted A and C. That is 2 evictions.
+
+Let's double check the "LRU" assumption for Event 4.
+Resident: {A, B, C}. B is pinned.
+Time passes (implicit in stream). Order of touch: A touched first, then B, then C? Or strictly arrival order determines LRU if no explicit timestamps? Usually, arrival order = access time unless specified otherwise.
+Access history: Load A, Access A; Load B, Access B; Load C, Access C.
+If "Least Recently Used" implies the one accessed earliest in the sequence of accesses *since last eviction*:
+1. Load A (accessed).
+2. Load B (accessed).
+3. Load C (accessed).
+Access order: A -> B -> C.
+LRU is A. Evict A.
+New Resident: {B, C}. Access history effectively updates to B -> C (A gone).
+Next need space for D (7GB). Current Used 4GB. Need 7GB total sum <= 8? No, just fit in 8GB pool.
+Sum(B,C,D) = 2+2+7 = 11 > 8. Cannot load.
+Evict next LRU unpinned: C.
+New Resident: {B}. Sum=2.
+Add D? Sum=9 > 8. Cannot load.
+Only B (Pinned) remains. Cannot evict.
+Deferred.
+
+Count holds: Evictions = 2. Loads = 3. Deferrals = 1. Deferred = ["D"].
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

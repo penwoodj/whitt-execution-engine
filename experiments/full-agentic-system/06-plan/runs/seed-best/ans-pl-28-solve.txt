@@ -1,0 +1,69 @@
+Based on the strict rules and events provided for "tonight's" rotation (ignoring the orientation story with different numbers), here is the step-by-step execution of the state walk.
+
+### State Walk Analysis
+
+**Initial Conditions:**
+*   **LOW1**: Start minute 0, Duration 4 mins.
+*   **LOW2**: Start minute 3, Duration 3 mins.
+*   **HIGH**: Arrives minute 3, Duration 6 mins.
+*   **Core Logic**: LOW jobs start in order of their start minutes (LOW1 @ 0, then LOW2 @ 3). A resumed LOW outranks a fresh one at ties. The core never idles while a LOW waits. Checkpoints bank every 2 running minutes from the last bank (start/resume + 2, then +2 again).
+
+**Minute-by-Minute Execution:**
+
+*   **Min 0-1**: Core runs **LOW1** (Running: 2 mins total).
+    *   LOW1 Banked Checkpoint? No (< 2 mins).
+*   **Min 2**: Core runs **LOW1** (Running: 3 mins total).
+    *   LOW1 Banked Checkpoint? Yes. ($T_{bank} = \text{start}(0) + 2 = 2$).
+*   **Min 3**: **HIGH** arrives at minute 3.
+    *   Preemption occurs immediately as HIGH runs and nothing else does.
+    *   LOW1 is preempted at Min 3.
+    *   **Waste Calculation**: LOW1 had 3 mins running, last bank was at Min 2. Minutes past the bank = $3 - 2 = 1$ minute wasted.
+    *   State: **HIGH** runs (Min 3).
+*   **Min 4-5**: Core continues running **HIGH**. (Running: 6 mins total so far for HIGH? No, HIGH arrives Min 3, runs to completion. Duration is 6 mins. So HIGH finishes at end of Min 8).
+    *   Wait, let's re-read the duration rule carefully: "HIGH arrives at minute 3 and runs 6 minutes to completion".
+    *   Start: Min 3. End: $3 + 6 = \text{end of Min } 8$.
+    *   So HIGH occupies Minutes 3, 4, 5, 6, 7, 8.
+
+**Post-HIGH Resumption (Min 9 onwards):**
+*   Both LOW jobs are waiting for the core again at the end of Min 8 (start of Min 9).
+*   **Tie-Breaker**: "LOW jobs take the core in order of their start minutes".
+    *   LOW1 Start: 0.
+    *   LOW2 Start: 3.
+    *   **Winner**: **LOW1**.
+*   **State at Resume (Min 9)**:
+    *   LOW1 needs to resume.
+    *   Total Duration for LOW1: 4 mins.
+    *   Banked: 1 minute was banked before preemption? Let's re-verify the checkpoint logic.
+        *   Rule: "LOW jobs checkpoint every 2 completed minutes of running time... a job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after".
+        *   Run 1 (Min 0-1): Completed 1 min. No bank yet ($<2$).
+        *   Run 2 (Min 2): Completed 3 mins total? No, "completed minutes of running time" usually refers to the duration since last checkpoint or start. Let's look at the example logic: "LOW1 held the core minutes 0, 1 and 2, banked a checkpoint at minute 2". This implies a bank occurs after accumulating 3 mins in that specific run block? Or is it absolute time?
+        *   Re-reading the text: "a job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after".
+        *   Interpretation A: Time-based. Bank at $T_{start} + 2$, then $+4$, etc. (Absolute).
+            *   If Absolute: Min 0 start $\rightarrow$ Banks at Min 2, Min 4...
+            *   At Min 3 preemption: Current time is 3. Last bank was at 2. Wasted = $3 - 2 = 1$.
+            *   Resume logic: "after resume a job redoes every minute past its last bank". So it must redo the work from Min 2 to 3 (1 min).
+        *   Interpretation B: Duration-based (as per standard checkpointing). The example says "LOW1 held... 0,1,2 [duration] ... banked at minute 2". This implies duration-based where a bank happens after $N$ minutes of work. But the text explicitly defines the schedule as absolute time relative to start ($s+2$).
+        *   Let's stick to the explicit text definition: **Absolute Time Banks**.
+            *   LOW1 Start = 0. Banks at 2, 4, 6...
+            *   Preemption at Min 3. Last Bank = 2. Wasted = $3 - 2 = 1$ min.
+    *   Resume Logic:
+        *   LOW1 owes work from last bank (Min 2) to completion of the previous run block (which would have finished at Min 4). So it owes 2 minutes? Or does it owe just the time past the bank?
+        *   Text: "after resume a job redoes every minute past its last bank".
+        *   If it resumes, it must execute from $T_{bank}$ onwards. The previous run block was interrupted at Min 3. It had to finish by Min 4. So it needs to run Minutes 2 and 3 (relative to the start of that block)? No, absolute minutes are the timeline.
+        *   Actually, simpler: If a job is preempted at $T_{preempt}$ with last bank $T_{bank}$, it must redo the interval $(T_{bank}, T_{preempt}]$. Then it continues from where it left off? Or does it restart the block? "redoes every minute past its last bank" implies restarting the work for that specific 2-minute segment.
+        *   So LOW1 resumes at Min 9 (start of execution). It must execute the 2 minutes corresponding to the interrupted block (Min 2 and Min 3 relative to start, but physically it's just running until the checkpoint is passed again? No, it runs the specific work units).
+        *   Let's assume "minutes" in the task are atomic steps. LOW1 needs 4 steps total.
+            *   Step 0-1: Done.
+            *   Step 2 (Min 3): Preempted. Bank passed? Yes, bank at Min 2 covers up to Min 4 absolute time? No, bank is a point in time.
+            *   Let's use the Example logic as a guide for "waste": "1 minute wasted" when preempted at Min 3 after banking at Min 2. This confirms waste = $T_{preempt} - T_{bank}$.
+            *   Resume: The job must redo the work from the last bank ($T=2$) to the preemption point ($T=3$)? No, that's just 1 minute of work. But the block was supposed to be 4 minutes total (0-4). It ran 0-1 (safe), then 2-3 (interrupted at 3).
+            *   If it resumes, does it re-run the whole interrupted segment? "redoes every minute past its last bank". The minutes past Min 2 in that block are Min 2 and Min 3. But wait, the example says LOW1 had 7 mins total, banked at 2, swapped at 3. Wasted 1 min. Resume owed 5 mins ($7-2$).
+            *   Okay, applying this to tonight:
+                *   LOW1 Total = 4. Last Bank = 2 (absolute time from start).
+                *   Wait, the bank is defined as "minute s+2". So for LOW1 starting at 0, banks are at absolute minutes 2, 4...
+                *   Preemption at Min 3. Wasted = $3 - 2 = 1$.
+                *   Resume: The job must redo the work corresponding to the time since the last bank? Or does it restart from the beginning of the block that was interrupted?
+                *   The example says "owed its whole 3" for LOW2 (which had no banks). For LOW1, it owed $7-2=5$. This implies the job effectively resets its progress counter to the last checkpoint time. So if it resumes at Min 9, it must run until it reaches a state where it has completed enough work since the last bank?
+                *   Actually, the simplest interpretation of "redoes every minute past its last bank" in atomic steps: It lost the work done between $T_{bank}$ and $T_{preempt}$. But to be safe against future preemptions at checkpoints, it must run continuously until a new checkpoint is hit?
+                *   Let's look at the "owed" calculation again. If I owe 1 minute (from bank to preempt), and I resume, do I just run that 1 minute + the rest of the job? Or do I re-run the whole block from start? The example says LOW1 owed 5 out of 7. $7-2=5$. This means it lost all progress after the checkpoint at Min 2? No, it ran minutes 0, 1 (safe), then minute 2 (bank hit?), then minute 3 (preempt).
+                *   If bank is a point in time ($T=2$), and I run from $T=2$ to $T=4$ (next bank), and get cut at $T=3$. The work done between 2

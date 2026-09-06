@@ -1,0 +1,93 @@
+### Phase 1 RULE SCAN
+*Rules that change state during the event or claim list:*
+
+1. **Stage Completion Rule**: A clean observation at position $P$ completes stage $P$, setting `rollout_pct` to $10 \times P$. Triggered by: Clean observations (Pos 1, Pos 3).
+2. **Breach Penalty Rule**: A breaching observation spends the step and does not advance stages; state reverts to last completed stage values. Triggered by: Breach at Pos 2, Breach at Pos 4.
+3. **Limit Tightening Rule**: After any breach, the limit for all *remaining* steps tightens to 0.8%. Triggered by: Breach at Pos 2 (affects Pos 3), Breach at Pos 4 (affects End).
+4. **Stop Condition Rule**: A second breach triggers status `STOPPED`, holding state at last completed stage. Triggered by: Breach at Pos 4 (given previous breach at Pos 2).
+5. **Pause Condition Rule**: Exactly one breach and list ends triggers status `PAUSED`. Triggered by: N/A (Condition not met due to second breach).
+6. **Done Condition Rule**: No breaches and list ends triggers status `DONE`. Triggered by: N/A.
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events in strict arrival order:*
+
+**Event 1:** Position 1, Rate 0.4%
+- Limit Check: Stage 1 limit is 2.0%. $0.4 \le 2.0$. Clean.
+- State Update: Completes Stage 1. Rollout becomes $10 \times 1 = 10\%$.
+- **State:** Pos=1, Rate=0.4, Limit=2.0, Verdict=Clean, Stage_Completed=1, Rollout=10
+
+**Event 2:** Position 2, Rate 1.9%
+- Limit Check: Stage 2 limit is 2.0%. $1.9 \le 2.0$. Clean.
+- State Update: Completes Stage 2. Rollout becomes $10 \times 2 = 20\%$.
+- **State:** Pos=2, Rate=1.9, Limit=2.0, Verdict=Clean, Stage_Completed=2, Rollout=20
+
+**Event 3:** Position 3, Rate 0.5%
+- Limit Check: Stage 3 limit is 2.0%. $0.5 \le 2.0$. Clean.
+- State Update: Completes Stage 3. Rollout becomes $10 \times 3 = 30\%$.
+- **State:** Pos=3, Rate=0.5, Limit=2.0, Verdict=Clean, Stage_Completed=3, Rollout=30
+
+**Event 4:** Position 4, Rate 2.2%
+- Limit Check: Stage 4 limit is 2.0%. $2.2 > 2.0$. Breach.
+- State Update: Observation spent. State reverts to last completed stage (Stage 3). Rollout becomes 30%.
+- Side Effect: Future limits tighten to 0.8%.
+- **State:** Pos=4, Rate=2.2, Limit=2.0, Verdict=Breach, Stage_Completed=N/A, Rollout=30
+
+**Event 5:** Position 5 (End of List), Rate 0.6%
+- Limit Check: Current limit is tightened to 0.8%. $0.6 \le 0.8$. Clean.
+- State Update: Completes Stage 5? **NO.** Rule states "a breaching observation completes nothing... the rollback leaves the rollout and stages at the last completed stage's values." The clean observation at Pos 5 attempts to complete Stage 5, but wait—does it?
+    - Re-evaluating Rule Text: "a clean observation completes the stage equal to its own position in the list".
+    - However, we have **two breaches** (Pos 2 was clean, Pos 4 was breach). Wait, let's re-read Event 2. Rate 1.9 vs Limit 2.0. That is Clean.
+    - Let's re-read Event 4. Rate 2.2 vs Limit 2.0. That is Breach.
+    - So we have exactly **one** breach so far (Pos 4).
+    - Current State before Pos 5: Last completed stage was Stage 3? Or did the clean observation at Pos 3 complete Stage 3? Yes. Did the clean observation at Pos 2 complete Stage 2? Yes. Did the clean observation at Pos 1 complete Stage 1? Yes.
+    - The breach at Pos 4 "completes nothing". It does not advance stage count. State holds last completed stage values (Stage 3, Rollout 30).
+    - Now Event 5 arrives. Is it a new step in the climb? Yes. Does it complete Stage 5?
+    - Rule: "a clean observation completes the stage equal to its own position".
+    - If Pos 5 is clean, does it set Stage=5 and Rollout=50?
+    - Let's check the logic of "climb in 10 percent steps... one observed error rate per step."
+    - The stages are fixed by position. Pos 1 -> Stage 1. Pos 2 -> Stage 2. Pos 3 -> Stage 3. Pos 4 (Breach) -> No stage advance. Pos 5 -> Stage 5?
+    - If Pos 5 is clean, it completes Stage 5. Rollout = 50%.
+    - Status: One breach occurred (Pos 4). List ends. Condition "Exactly one breach and the list ends" applies. Status = PAUSED.
+
+*Correction on Event 2 Limit:* The prompt says "steps 1 through 5 may show up to 2.0 percent". Pos 2 is in steps 1-5. Rate 1.9 <= 2.0. Clean. Correct.
+*Correction on Event 4 Limit:* Pos 4 is in steps 1-5. Rate 2.2 > 2.0. Breach. Correct.
+*State after Breach at Pos 4:* Rollout stays at last completed (Stage 3 = 30%). Stages done = 3.
+*Event 5:* Pos 5. Limit for steps 6-10 is 1.0%, but we are in step 5 range? No, the list has 5 items. Item 5 is the last item. It falls under "steps 1 through 5". Limit is 2.0%.
+*Wait, does the limit tighten apply retroactively or only to future?* "after any rollback the limit tightens to 0.8 for every remaining step."
+- Event 4 was a breach. Remaining steps: Pos 5.
+- So for Pos 5, the limit is 0.8%.
+- Rate at Pos 5 is 0.6%. $0.6 \le 0.8$. Clean.
+- Does this clean observation complete Stage 5? Yes ("completes the stage equal to its own position").
+- New State: Stages Done = 5. Rollout = 50%.
+
+*Final Status Check:*
+- Breaches count: 1 (at Pos 4).
+- List ended.
+- Rule: "exactly one breach and the list ends: status PAUSED".
+- Values hold last completed stage's values? Or current?
+    - Text: "a clean observation completes the stage equal to its own position... even if earlier positions were spent on breaches."
+    - This implies the state *advances* on a clean observation regardless of prior breaches.
+    - So after Pos 5 (clean), Stage is 5, Rollout is 50%.
+    - Status is PAUSED because exactly one breach occurred and list ended.
+
+Let's double check the "orientation story" logic vs tonight's rules.
+Orientation: Breach at Pos 3. Pos 4 clean. Result: Rollout jumps to 40 (Stage 4). Status PAUSED.
+This confirms that a subsequent clean observation *does* advance the stage count and rollout, even after a breach. The breach just "spends" its own position.
+
+So tonight's walk:
+1. Pos 1 (0.4): Clean. Stage 1, Rollout 10.
+2. Pos 2 (1.9): Clean. Stage 2, Rollout 20.
+3. Pos 3 (0.5): Clean. Stage 3, Rollout 30.
+4. Pos 4 (2.2): Breach (>2.0). Spent. State holds last completed (Stage 3, Rollout 30). Limit tightens to 0.8 for remaining.
+5. Pos 5 (0.6): Clean. Check against tightened limit (0.8). $0.6 \le 0.8$. Passes. Completes Stage 5. Rollout becomes 50%.
+
+Final State:
+- Rollout: 50
+- Stages Done: 5
+- Status: PAUSED (Exactly one breach, list ended).
+
+```json
+{"rollout_pct": 50, "stages_done": 5, "status": "PAUSED"}
+```

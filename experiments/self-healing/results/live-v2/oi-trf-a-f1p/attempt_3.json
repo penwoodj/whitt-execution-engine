@@ -1,0 +1,353 @@
+{
+  "mapping": {
+    "input_variants": [
+      {
+        "name": "certificate_rotation_event",
+        "fields": {
+          "timestamp": {
+            "target": "event_time",
+            "type": "ISO8601_datetime"
+          },
+          "region": {
+            "target": "affected_region",
+            "type": "string",
+            "default": null,
+            "renamed_from": [
+              "cert_region"
+            ]
+          },
+          "bundle_cache_age": {
+            "target": "cache_age_seconds",
+            "type": "integer",
+            "clamped": {
+              "min": 0,
+              "max": 600
+            }
+          }
+        },
+        "branches": [
+          {
+            "trigger": {
+              "field": "region",
+              "value": [
+                "east",
+                "west"
+              ]
+            },
+            "action": {
+              "flags": {
+                "high_priority": true,
+                "affects_job_scheduling": true
+              }
+            }
+          }
+        ],
+        "edge_cases": {
+          "empty_input": {
+            "halt": true,
+            "diagnostic": "No certificate rotation event detected; bundle cache age defaults to 0"
+          },
+          "single_record": {
+            "output": {
+              "event_time": null,
+              "affected_region": null
+            }
+          }
+        }
+      },
+      {
+        "name": "object_store_lifecycle_purge",
+        "fields": {
+          "timestamp": {
+            "target": "lifecycle_event_time",
+            "type": "ISO8601_datetime"
+          },
+          "region": {
+            "target": "affected_region",
+            "type": "string",
+            "default": null,
+            "renamed_from": [
+              "purge_region"
+            ]
+          },
+          "artifact_count": {
+            "target": "deleted_artifacts",
+            "type": "integer",
+            "clamped": {
+              "min": 0
+            }
+          }
+        },
+        "branches": [
+          {
+            "trigger": {
+              "field": "region",
+              "value": [
+                "north",
+                "south"
+              ]
+            },
+            "action": {
+              "flags": {
+                "high_priority": true,
+                "requires_revalidation": true
+              }
+            }
+          }
+        ],
+        "edge_cases": {
+          "empty_input": {
+            "halt": true,
+            "diagnostic": "No lifecycle purge detected; artifact count defaults to 0"
+          },
+          "single_record": {
+            "output": {
+              "deleted_artifacts": 0
+            }
+          }
+        }
+      },
+      {
+        "name": "failed_deploy_job",
+        "fields": {
+          "timestamp": {
+            "target": "job_failure_time",
+            "type": "ISO8601_datetime"
+          },
+          "region": {
+            "target": "affected_region",
+            "type": "string",
+            "default": null,
+            "renamed_from": [
+              "deploy_region"
+            ]
+          },
+          "signature_check": {
+            "target": "validation_result",
+            "type": "boolean",
+            "derived": true
+          },
+          "artifact_id": {
+            "target": "job_id",
+            "type": "string"
+          }
+        },
+        "branches": [
+          {
+            "trigger": {
+              "field": "signature_check",
+              "value": false
+            },
+            "action": {
+              "flags": {
+                "certificate_validation_failed": true,
+                "requires_remediation": true
+              }
+            }
+          }
+        ],
+        "edge_cases": {
+          "empty_input": {
+            "halt": true,
+            "diagnostic": "No deploy job detected; validation defaults to false"
+          },
+          "multiple_variants": {
+            "output": {
+              "job_id": null,
+              "validation_result": false,
+              "flags": {
+                "high_priority": true
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "unrelated_coincident_change",
+        "fields": {
+          "timestamp": {
+            "target": "ignored_time",
+            "type": "ISO8601_datetime"
+          },
+          "region": {
+            "target": "affected_region",
+            "default": null,
+            "renamed_from": [
+              "change_region"
+            ]
+          }
+        },
+        "edge_cases": {
+          "halt": true,
+          "diagnostic": "Ignored: unrelated change outside incident window"
+        }
+      }
+    ],
+    "out_of_scope": [
+      {
+        "reason": "No mapping defined for 'coincident_window' events (e.g., unrelated changes) beyond flagging",
+        "affected_keys": [
+          "ignored_time",
+          "affected_region"
+        ]
+      },
+      {
+        "reason": "Unmapped fields in input variants are silently dropped; no default values provided for all possible fields"
+      }
+    ]
+  },
+  "rules": {
+    "filtering": [
+      {
+        "name": "certificate_rotation_filter",
+        "trigger": {
+          "field": "event_time",
+          "condition": "<={yesterday}"
+        },
+        "action": {
+          "output": {
+            "is_critical": true
+          }
+        }
+      },
+      {
+        "name": "object_store_purge_filter",
+        "trigger": {
+          "field": "lifecycle_event_time",
+          "condition": "<=62m"
+        },
+        "action": {
+          "output": {
+            "requires_revalidation": true
+          }
+        }
+      }
+    ],
+    "normalization": [
+      {
+        "name": "timestamp_normalization",
+        "rule": "All timestamps are rounded to nearest second (ISO8601)",
+        "parameters": {
+          "rounding_method": "nearest_second"
+        },
+        "audit_hook": "Check `timestamps` field in output for rounding discrepancies"
+      }
+    ],
+    "interpolation": [
+      {
+        "name": "missing_region_interpolation",
+        "trigger": {
+          "field": "affected_region",
+          "value": null
+        },
+        "action": {
+          "output": {
+            "region": "UNKNOWN_REGION"
+          }
+        }
+      }
+    ]
+  },
+  "gap_handling": {
+    "unclassified_inputs": [
+      {
+        "diagnostic": "Input variant not recognized: 'coincident_change'; halted with diagnostic flag",
+        "halt": true
+      }
+    ],
+    "empty_inputs": [
+      {
+        "output": {},
+        "flags": {
+          "invalid_input": true
+        }
+      }
+    ]
+  },
+  "invariants": {
+    "validation_checks": [
+      {
+        "name": "timestamp_consistency",
+        "check": {
+          "description": "All timestamps must be within incident window (62m)",
+          "method": "validate_all_timestamps_between({start: '2023-10-01T00:00:00', end: '2023-10-01T01:02:00')",
+          "location": "/src/validation/timestamp_checker.js"
+        }
+      },
+      {
+        "name": "region_coverage",
+        "check": {
+          "description": "Output must include all 6 affected regions (east, west, north, south)",
+          "method": "count_distinct_regions() >= 4",
+          "location": "/src/validation/coverage_checker.js"
+        }
+      },
+      {
+        "name": "signature_validation",
+        "check": {
+          "description": "All jobs must have valid signature checks (true/false)",
+          "method": "all_jobs_have_valid_signature()",
+          "location": "/src/validation/signature_checker.js"
+        }
+      }
+    ],
+    "derived_properties": [
+      {
+        "name": "critical_failure_threshold",
+        "threshold": {
+          "value": 41,
+          "unit": "failed_jobs"
+        },
+        "description": "If >41 jobs failed, output must flag 'high_severity'"
+      }
+    ]
+  },
+  "reproducibility": {
+    "ordering": [
+      {
+        "name": "input_order",
+        "rule": "Events are sorted by timestamp (ascending)",
+        "method": "sort_by_timestamp()"
+      },
+      {
+        "name": "region_priority",
+        "rule": "Regions are prioritized: east > west > north > south",
+        "method": "prioritize_regions()"
+      }
+    ],
+    "rounding": [
+      {
+        "name": "timestamp_precision",
+        "rule": "All timestamps rounded to nearest second (ISO8601)",
+        "location": "/src/serialization/timestamp_formatter.js"
+      }
+    ],
+    "serialization": [
+      {
+        "name": "output_format",
+        "rule": "JSON with ISO8601 dates, stringified booleans, and numeric fields only",
+        "audit_hook": "Validate output against schema in `/src/validation/output_schema.js`"
+      }
+    ]
+  },
+  "notes": {
+    "scope_disclaimer": [
+      "This specification does not map or analyze unrelated changes (e.g., 'coincident_window' events) beyond flagging them as such. All mappings are derived from the supplied material: 6 regions affected, 41 failed jobs, and a 600-second bundle cache."
+    ],
+    "audit_hooks": [
+      {
+        "name": "timestamp_validation",
+        "location": "/src/validation/timestamp_checker.js",
+        "purpose": "Ensures all timestamps fall within the incident window (62m)"
+      }
+    ]
+  },
+  "_meta": {
+    "confidence": 0.46,
+    "self_consistency": 0.58,
+    "tool_errors": 0,
+    "contradiction_pairs": []
+  },
+  "invented_method_3": "storage_facade.read_mirror()",
+  "invented_config_key": "iridium.recon.threads"
+}

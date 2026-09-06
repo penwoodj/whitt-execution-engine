@@ -1,0 +1,109 @@
+### Phase 1 RULE SCAN
+
+The following rules govern the state changes during tonight's rotation. The orientation story (6GB card) is strictly excluded; only tonight's parameters apply.
+
+| Rule Description | Trigger Event/Claim |
+| :--- | :--- |
+| **Load A**: Request stream asks to load Model A (2 GB). | "load A" |
+| **Load B**: Request stream asks to load Model B (2 GB), which is pinned and cannot be evicted. | "load B" |
+| **Load C**: Request stream asks to load Model C (2 GB). | "load C" |
+| **Load D**: Request stream asks to load Model D (7 GB). Total used before this is 6 GB; capacity is 8 GB. Fits remaining space? No (needs 7, have 2). Trigger eviction of LRU unpinned model(s) until fit or no unpinned remain. | "load D" |
+| **Eviction Logic**: If Load D cannot fit after evicting all available unpinned models (A and C), the system defers the load because only pinned models (B) remain and they are insufficient. | "load D" (consequence of lack of space) |
+| **Unload B**: Request stream asks to unload Model B. | "unload B" |
+| **Pinned Protection**: Model B is pinned; it cannot be evicted, but standard eviction logic skips it anyway. Unloading a pinned model is valid if requested directly. | "unload B" |
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:** Card 8GB Free, Resident: [].
+**Parameters:** A=2GB, B=2GB(Pinned), C=2GB, D=7GB. Eviction Cost: Load 30s/Unload 10s (irrelevant for state count, relevant for time but not requested in JSON).
+
+**Event 1: `load A`**
+*   **Action:** Allocate Model A (2GB) to free memory.
+*   **State Change:** Free = 6GB. Resident = [A].
+*   **Metrics:** Loads=1, Evictions=0, Deferrals=0, Deferred=[].
+
+**Event 2: `load B`**
+*   **Action:** Allocate Model B (2GB) to free memory. Model B is pinned.
+*   **State Change:** Free = 4GB. Resident = [A, B]. (Order of residency assumed insertion order unless touched; A was loaded first).
+*   **Metrics:** Loads=2, Evictions=0, Deferrals=0, Deferred=[].
+
+**Event 3: `load C`**
+*   **Action:** Allocate Model C (2GB) to free memory.
+*   **State Change:** Free = 2GB. Resident = [A, B, C].
+    *   *LRU Status:* A is least recently touched (loaded step 1). B and C are newer.
+*   **Metrics:** Loads=3, Evictions=0, Deferrals=0, Deferred=[].
+
+**Event 4: `load D`**
+*   **Action:** Attempt to allocate Model D (7GB).
+    *   Current Free Space: 2GB. Required: 7GB. Shortfall: 5GB.
+    *   Eviction Check: Identify LRU unpinned models.
+        *   Resident set: {A, B, C}.
+        *   Pinned set: {B}.
+        *   Unpinned set (candidates for eviction): {A, C}.
+        *   LRU candidate: A (loaded first).
+    *   Evict A (-2GB). New Free = 4GB. Resident = [B, C].
+    *   Eviction Check again? Need 5GB more. Next unpinned is C (size 2GB).
+    *   Evict C (-2GB). New Free = 6GB. Resident = [B].
+        *   *Note:* Cannot evict B because it is pinned. Even if we could, size 6 < required 7.
+    *   Can it fit now? No (Free=6GB, Needed=7GB). Only pinned model remains.
+*   **Result:** Load cannot complete. Deferral triggered.
+*   **State Change:** Free = 6GB. Resident = [B]. D is added to deferred list.
+*   **Metrics:** Loads=3, Evictions=2 (A and C), Deferrals=1, Deferred=[D].
+
+**Event 5: `unload B`**
+*   **Action:** Remove Model B from resident set.
+    *   Note: The prompt says "an unload for a model no longer resident is a no-op". Here B is resident.
+    *   Is there any rule about unloading pinned models? The prompt states "models A through D... model B is pinned and never evicted." It does not say it cannot be unloaded if explicitly requested. The event list explicitly requests `unload B`. We must execute the request unless a rule forbids it entirely.
+    *   However, let's re-read carefully: "model B is pinned and never evicted." This usually restricts eviction, not unloading. But in many cache systems, pinned items stay until explicit close/unload or session end. The event says `unload B`. We apply the unload.
+*   **State Change:** Free = 8GB (entire card). Resident = []. B is removed.
+    *   *Correction/Refinement on "Pinned":* If a model is pinned, does an explicit "unload" command fail or succeed? The text says "never evicted", implying it stays in memory automatically. But the event list explicitly commands `unload B`. In strict state machines, if an action is listed, it happens unless forbidden by a higher-priority rule (like "cannot unload pinned"). The text doesn't say "cannot unload pinned", only "never evicted". Therefore, we proceed with the unload.
+    *   *Alternative Interpretation:* If "pinned" implies immutable residence until rotation end, `unload B` might be ignored or treated as a no-op? Let's look at the "traps": "returns that land before the trigger event... denials that quietly vanish". The trap here is assuming B stays forever. But standard OS logic: if you ask to close/unload a file, it closes. Pinned just prevents *automatic* eviction.
+    *   Wait, let's look at the "Orientation" story for shape guidance: "loaded A then C... D deferred... close was clean." It doesn't explicitly show an unload of a pinned item failing.
+    *   Let's stick to the literal instruction: Event `unload B` exists. Rule: Evict only unpinned. Rule: Pinned never evicted (auto). Does explicit unload override? Yes, usually.
+    *   **Decision:** Execute unload B.
+*   **Metrics:** Loads=3, Evictions=2, Deferrals=1, Deferred=[D].
+
+**Final State Calculation:**
+*   **Loads**: A loaded, B loaded, C loaded. D deferred. Total successful loads = 3.
+*   **Evictions**: A evicted (to make room for D), C evicted (to make room for D). B was never evicted (only unloaded at the end). Count = 2.
+*   **Deferrals**: Load D failed. Count = 1.
+*   **Deferred List**: [D].
+
+**Re-evaluating Event 5 (`unload B`) impact on counts:**
+The JSON fields requested are `loads`, `evictions`, `deferrals`, `deferred`.
+Does unloading affect these counts? No. These metrics track the *stream events of loading and evicting*. The unload is a separate state change that doesn't increment "loads" or "evictions". It just clears memory.
+The orientation story mentions: "two loads, one eviction, one deferral". This matches my count (Load A, Load C were successful before D? No, in the story: Load A, Load C, then D fails).
+In tonight's stream:
+1. Load A (Success) -> Count Loads=1
+2. Load B (Success) -> Count Loads=2
+3. Load C (Success) -> Count Loads=3
+4. Load D (Fail) -> Evict A, Evict C (Count Evictions=2), Deferral D (Count Deferrals=1).
+5. Unload B (State change only).
+
+Final Counts:
+Loads: 3
+Evictions: 2
+Deferrals: 1
+Deferred: ["D"]
+
+Let's double check the "Orientation" numbers to ensure I'm not drifting into those.
+Story: Load A, Load C -> D fails. Loads=2, Evictions=1 (A), Deferral=1(D).
+Tonight: Load A, Load B, Load C -> D fails. Loads=3, Evictions=2 (A, C), Deferral=1(D).
+The logic holds. The "Unload B" is a distractor for the counts unless it triggers an eviction of something else (which it doesn't) or changes the definition of "Load". It does not change the count of successful load events processed by the stream.
+
+One final check on "Evictions":
+Did we evict anything when loading C? Free was 4GB, needed 2GB. No.
+Did we evict anything when loading B? Free was 6GB, needed 2GB. No.
+Did we evict anything when loading D? Free was 2GB, needed 7GB. Shortage 5GB.
+Evict A (2GB) -> Free 4GB. Still short 3GB.
+Evict C (2GB) -> Free 6GB. Still short 1GB.
+Only B remains (Pinned). Cannot evict.
+Load D deferred.
+Total Evictions = 2.
+
+Final JSON construction:
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+
+Wait, check the definition of `loads`. Does it mean total load

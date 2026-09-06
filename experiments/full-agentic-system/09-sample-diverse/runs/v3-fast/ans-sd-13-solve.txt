@@ -1,0 +1,43 @@
+### Phase 1 RULE SCAN
+This phase lists every rule in the task that changes state during the event sequence (the "flaky upstream" scenario), identifying the specific trigger for each.
+
+1.  **Per-Attempt Cost Rule**: Triggers on every attempt (failed or successful). Adds `2` tokens to spend.
+2.  **Wait Time Rule**: Triggers after a failed attempt. Adds wait seconds (`2`, then doubling) to spend.
+3.  **Total Spend Calculation Rule**: Aggregates Per-Attempt Cost + Wait Time for the current cycle.
+4.  **Budget Limit Check Rule**: Compares Total Spend against the initial Budget (`24`). If `Spend > Budget`, triggers suppression logic.
+5.  **Budget Doubling Rule**: Triggers if Budget Limit Check fails (Spend > Budget). Doubles the budget exactly once for re-evaluation.
+6.  **Re-Check Budget Limit Rule**: Compares Total Spend against the Doubled Budget. Determines final `suppressed` status (`false` if under, `true` if over).
+7.  **Budget After Calculation Rule**: Computes `budget_after` as `Doubled_Budget - Spend` (since doubling fired) or `Initial_Budget - Spend`.
+
+---
+
+### Phase 2 LEDGER WALK
+This phase applies the events in strict arrival order, updating the state line by line.
+
+**Event Sequence:**
+1.  **Attempt 1**: Fails. Cost = 2. Wait = 2s. Total Spend = 4.
+    *   Check: $4 \le 24$. OK.
+    *   State: `attempts`=1, `wait_s`=2, `spend`=4.
+2.  **Attempt 2**: Fails. Cost = 2. Wait = 4s (doubled). Total Spend = 4 + 6 = 10.
+    *   Check: $10 \le 24$. OK.
+    *   State: `attempts`=2, `wait_s`=6, `spend`=10.
+3.  **Attempt 3**: Fails. Cost = 2. Wait = 8s (doubled). Total Spend = 10 + 10 = 20.
+    *   Check: $20 \le 24$. OK.
+    *   State: `attempts`=3, `wait_s`=14, `spend`=20.
+4.  **Attempt 4**: Succeeds. Cost = 2. Wait = 0 (success). Total Spend = 20 + 2 = 22.
+    *   Check: $22 \le 24$. OK. No doubling needed.
+    *   State: `attempts`=4, `wait_s`=14, `spend`=22.
+
+**Final State Verification:**
+*   `attempts`: 4 (3 failed + 1 success).
+*   `wait_s`: $2 + 4 + 8 = 14$.
+*   `budget_after`: $24 - 22 = 2$.
+*   `suppressed`: false.
+
+---
+
+### Final Answer
+
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 2, "suppressed": false}
+```

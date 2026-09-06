@@ -1,0 +1,32 @@
+1. Initialize workspace at `/tmp/opencode/breaker-run` with subdirectories: `raw/`, `stages/`, `outputs/`, `logs/`, `rules.md`, `breaker.md`, `transitions.csv`, `summary.json`.  
+2. Create a raw trace file `raw/failure-trace.json` containing 2000 calls with timestamps, one duplicate call ID (call_id=1234), and exactly 5 failures to trigger trip, with failure events distributed such that the first 5 failures occur during closed state, then 30-second cool-down begins.  
+3. Define circuit breaker state machine rules in `rules.md`:  
+   - Trip threshold: 5 failures → open (rule: "trip_on_5_failures")  
+   - Cool-down duration: 30 seconds → half-open after 30s (rule: "cool_down_30s")  
+   - Half-open probe semantics: one probe at a time, serialized; only one active probe at any moment (rule: "serial_probe_semantics")  
+   - Flap detection: if state changes between open and closed within 15 seconds of cool-down start → flap event (rule: "flap_on_15s_intra_cool_down")  
+   - Failure during cool-down ambiguity: if failure occurs while in open state but cool-down has not yet expired, treat as a new failure count (rule: "failure_during_cool_down_counts")  
+4. Write `simulate.py` to process the trace file step-by-step, maintaining state transitions with timestamps and causes, logging each transition to `stages/transition_log.txt`.  
+5. Implement `state_time_summary.py` to compute time spent in closed/open/half-open states, total trip count, flap count, and edge cases (e.g., failure during cool-down, duplicate call ID) — output to `outputs/state-time-summary.json`.  
+6. Write `flap_dissection.py` to analyze the flapping period: identify all state transitions that occur within 15 seconds of a cool-down start, flag each as flap, and report whether policy (30s cool-down) helped or hurt by measuring recovery time vs. expected. Output to `outputs/flap-dissection.json`.  
+7. Write `what_if_thresholds.py` to simulate two variants: threshold=3 failures (trip), threshold=8 failures (trip). For each, compute total trip count and failure counts per state over full 2000-call trace. Output to `outputs/what-if-thresholds.json`.  
+8. Generate final deliverables:  
+   - `breaker.md`: human-readable description of the circuit breaker behavior with rules, edge cases, and observed outcomes.  
+   - `transitions.csv`: timestamped state transitions with cause (e.g., "failure", "cool-down end", "probe success") — one row per transition.  
+   - `summary.json`: time in each state, trip count, flap count, total failures, duplicate call ID handling, failure during cool-down events.  
+9. Run the full pipeline twice: first run to establish baseline; second run with identical input to verify idempotency and detect state bugs. Log both runs in `logs/run-1.txt` and `logs/run-2.txt`.  
+10. Validate outputs via independent recomputation script (`verify.py`) that reads raw trace, re-simulates the full circuit breaker walk, and checks:  
+    - All 2000 calls are accounted for (count matches)  
+    - Duplicate call ID is detected and handled (flagged in output)  
+    - Failure during cool-down counts as failure  
+    - Trip count matches simulation  
+    - Flap events are correctly identified  
+    - Output files match both human-readable and machine-readable versions  
+11. Report any contradiction between input specification and observed behavior: e.g., "Failure during cool-down occurred at t=35s, but rule says it should not count — actual behavior contradicts rule."  
+12. Flag every row where a rule and data disagree in `outputs/discrepancy-report.json`, with both the raw trace row and the rule that flagged it.  
+13. Ensure all percentages include denominators: e.g., "60% of failures occurred during cool-down (out of 5 failures)" — not just "60%".  
+14. Document in `README.md`:  
+    - Workspace layout  
+    - Rules and their justification (e.g., why 5 failures to trip, why 30s cool-down)  
+    - How each defect was handled: duplicate call ID → flagged and skipped; failure during cool-down → counted as failure  
+    - Why serialization of probes matters: only one probe at a time, walk pauses other calls until probe completes

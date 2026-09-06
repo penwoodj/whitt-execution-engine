@@ -1,0 +1,494 @@
+# ══════════════════════════════════════════════════════════════════
+# CORRECTION ATOM v5 — Multi-Model Per Angle
+# ══════════════════════════════════════════════════════════════════
+#
+# WHY MULTI-MODEL (user direction m0521):
+# v4 used single Qwen3-5-9B for all 5 angles → 5/5 PASS, but every fix
+# came from angle 1. v5 tests if specialist models per angle improve
+# quality or speed on the same hard cases.
+#
+# MODEL-TO-ANGLE MAPPING (per compressed research):
+# - Angle 1 (FORMAT AUDITOR): Qwen2.5-0.5B-Instruct (tiny, surface only)
+# - Angle 2 (FACT CHECKER): Qwen3-1.7B-abliterated (small careful, was Ministral-3B but engine filter "Qwen" excludes non-Qwen models)
+# - Angle 3 (REQUIREMENTS TRACER): Qwen3-4B-Instruct (schema-aware)
+# - Angle 4 (HALLUCINATION HUNTER): Qwen3-5-9B (deepest reasoning)
+# - Angle 5 (CONSISTENCY AUDITOR): Qwen3-4B-Instruct (general careful)
+#
+# WHY THIS ORDER (smallest to largest):
+# Tiny models catch surface errors cheaply. If angle 1 fixes format,
+# larger models in later angles see cleaner input. Final authority is
+# the largest model (angle 4) for hardest semantic issue type.
+#
+# FORWARD-ONLY WITH PER-ANGLE RETRY (inherited from v4):
+# No backward GWT routing (m0477 scope bug). Each angle retries once
+# with feedback on check failure. Same shell-injected-prompt pattern.
+#
+# ENGINE NATIVE MULTI-MODEL SWAP:
+# Each step declares different generative_entity. Engine handles load/
+# unload between steps. unload_unused=true ensures prior model frees
+# VRAM before next loads (1-model invariant per AGENTS.md).
+# ══════════════════════════════════════════════════════════════════
+workflow_id: correction_atom_v5
+name: "Correction Atom v5 — Multi-Model Per Angle"
+description: "Each angle uses specialist model. Tests if model diversity beats single-model cascade."
+version: "5.0.0"
+author: "Whitt Execution Engine"
+tags: [correction, multi-model, per-angle-specialist]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config: { host: localhost, port: 8080 }
+
+models:
+  "format_auditor":
+    name: "Qwen2.5-0.5B-Instruct-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.1, max_tokens: 300 }
+  "fact_checker":
+    name: "Qwen3-1.7B-abliterated-q4_k_m"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.2, max_tokens: 400 }
+  "requirements_tracer":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.2, max_tokens: 400 }
+  "hallucination_hunter":
+    name: "Qwen3-5-9B-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.2, max_tokens: 400 }
+  "consistency_auditor":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.2, max_tokens: 400 }
+
+workflow_execution_strategy:
+  memory: { model_lifecycle: { unload_unused: true } }
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "__OUTPUT_DIR__/last-run.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+
+    # ── STEP 0: BOOTSTRAP ─────────────────────────────────────
+    step_00_bootstrap:
+      generative_entity: "${models.format_auditor}"
+      prompt: "READY."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/emit-context.py __CASE_FILE__"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+
+    # ── STEP 1: ANGLE 1 (FORMAT AUDITOR — Qwen2.5-0.5B) ───────
+    step_01_angle_1:
+      generative_entity: "${models.format_auditor}"
+      prompt: |
+        PERSONA: FORMAT AUDITOR
+        GOAL: Fix structural defects only.
+
+        LENS: Surface structure (bullets, indentation, fences, leaked prompt artifacts).
+
+        RECOGNIZE:
+        - Bullet count != spec
+        - Mixed indentation
+        - Leaked prompt artifacts ("DRAFT:", "TASK_KIND:", meta phrases)
+        - Markdown broken
+        - Output format != spec format
+
+        FIX RULES:
+        - Preserve content. Only restructure.
+        - Use exactly format task spec requested.
+        - Strip prompt artifacts.
+        - COPY actual input text. Do NOT write "{input}" placeholder.
+
+        INPUTS:
+        {{bookmarks.shell_output.stdout}}
+
+        Emit corrected text only. FIRST WORD MUST MATCH TASK SPEC FORMAT (bullet '-', '*', or '1.' for lists; bare YAML key for YAML). NO prose preamble. NO 'Here is', NO 'The corrected'. NO closing remarks. NO commentary.
+      model_overrides: { temperature: 0.1, max_tokens: 300 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "__OUTPUT_DIR__/after-angle-1.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 1 __CASE_FILE__ __OUTPUT_DIR__/after-angle-1.txt > __OUTPUT_DIR__/check-angle-1.json 2>&1; echo $? > __OUTPUT_DIR__/check-angle-1.exit"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    # ── STEP 2: ANGLE 1 RETRY ─────────────────────────────────
+    step_02_angle_1_retry:
+      generative_entity: "${models.format_auditor}"
+      prompt: |
+        {{bookmarks.shell_output.stdout}}
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_state}}
+
+        Emit corrected text only. FIRST WORD MUST MATCH TASK SPEC FORMAT. NO prose preamble.
+      model_overrides: { temperature: 0.1, max_tokens: 300 }
+      when:
+        before_step_starts:
+          - shell:
+              command: |
+                EXIT_CODE=$(cat __OUTPUT_DIR__/check-angle-1.exit 2>/dev/null || echo 1)
+                if [ "$EXIT_CODE" = "0" ]; then
+                  echo "PRIOR ATTEMPT PASSED. Copy input verbatim. Change nothing."
+                else
+                  REASON=$(python3 -c "import json; d=json.load(open('__OUTPUT_DIR__/check-angle-1.json')); print(' ; '.join(f'{k}: {v}' for k,v in d.get('checks',{}).items() if not v.get('passed', True)))" 2>/dev/null || echo "deterministic check failed")
+                  cat <<EOF
+                PRIOR ATTEMPT FAILED. Reason: $REASON
+
+                Apply format auditor lens. Fix specifically the failure reason.
+                EOF
+                fi
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "__OUTPUT_DIR__/after-angle-1.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 1 __CASE_FILE__ __OUTPUT_DIR__/after-angle-1.txt > __OUTPUT_DIR__/check-angle-1.json 2>&1; echo $? > __OUTPUT_DIR__/check-angle-1.exit"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    # ── STEP 3: ANGLE 2 (FACT CHECKER — Ministral-3B) ─────────
+    step_03_angle_2:
+      generative_entity: "${models.fact_checker}"
+      prompt: |
+        PERSONA: FACT CHECKER
+        GOAL: Fix factual mismatches vs source.
+
+        LENS: Numbers, names, quotes must trace to task spec or auxiliary.
+
+        RECOGNIZE:
+        - Number != source
+        - Quoted text altered
+        - Named entity not in source
+        - Math wrong
+        - Statistics unsourced
+
+        FIX RULES:
+        - Replace wrong with sourced value.
+        - No correct value: remove claim.
+        - Preserve format.
+        - COPY actual input text.
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_state}}
+
+        TASK SPEC + AUXILIARY:
+        {{bookmarks.shell_output.stdout}}
+
+        Emit corrected text only. FIRST WORD MUST MATCH TASK SPEC FORMAT. NO prose preamble. NO commentary.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/emit-context.py __CASE_FILE__"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "__OUTPUT_DIR__/after-angle-2.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 2 __CASE_FILE__ __OUTPUT_DIR__/after-angle-2.txt > __OUTPUT_DIR__/check-angle-2.json 2>&1; echo $? > __OUTPUT_DIR__/check-angle-2.exit"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    # ── STEP 4: ANGLE 2 RETRY ─────────────────────────────────
+    step_04_angle_2_retry:
+      generative_entity: "${models.fact_checker}"
+      prompt: |
+        {{bookmarks.shell_output.stdout}}
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_state}}
+
+        Emit corrected text only. FIRST WORD MUST MATCH TASK SPEC FORMAT.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        before_step_starts:
+          - shell:
+              command: |
+                EXIT_CODE=$(cat __OUTPUT_DIR__/check-angle-2.exit 2>/dev/null || echo 1)
+                if [ "$EXIT_CODE" = "0" ]; then
+                  echo "PRIOR ATTEMPT PASSED. Copy input verbatim. Change nothing."
+                else
+                  REASON=$(python3 -c "import json; d=json.load(open('__OUTPUT_DIR__/check-angle-2.json')); print(' ; '.join(f'{k}: {v}' for k,v in d.get('checks',{}).items() if not v.get('passed', True)))" 2>/dev/null || echo "deterministic check failed")
+                  cat <<EOF
+                PRIOR ATTEMPT FAILED. Reason: $REASON
+
+                Apply fact checker lens. Fix specifically the failure reason.
+                EOF
+                fi
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "__OUTPUT_DIR__/after-angle-2.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 2 __CASE_FILE__ __OUTPUT_DIR__/after-angle-2.txt > __OUTPUT_DIR__/check-angle-2.json 2>&1; echo $? > __OUTPUT_DIR__/check-angle-2.exit"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    # ── STEP 5: ANGLE 3 (REQUIREMENTS TRACER — Qwen3-4B) ──────
+    step_05_angle_3:
+      generative_entity: "${models.requirements_tracer}"
+      prompt: |
+        PERSONA: REQUIREMENTS TRACER
+        GOAL: Fix incomplete output. Every spec requirement addressed.
+
+        LENS: Task spec = checklist. Missing = issue. Extra = also issue.
+
+        RECOGNIZE:
+        - Spec asks N items, output has different count
+        - Spec asks specific field, output omits
+        - Output addresses spec partially
+        - Output adds unrequested content
+
+        FIX RULES:
+        - Add missing requirements with sourced content.
+        - Remove scope creep.
+        - Match requested format.
+        - Only check format markers if task spec explicitly requires them.
+        - COPY actual input text.
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_state}}
+
+        TASK SPEC + AUXILIARY:
+        {{bookmarks.shell_output.stdout}}
+
+        Emit corrected text only. FIRST WORD MUST MATCH TASK SPEC FORMAT. NO prose preamble.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/emit-context.py __CASE_FILE__"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "__OUTPUT_DIR__/after-angle-3.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 3 __CASE_FILE__ __OUTPUT_DIR__/after-angle-3.txt > __OUTPUT_DIR__/check-angle-3.json 2>&1; echo $? > __OUTPUT_DIR__/check-angle-3.exit"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    # ── STEP 6: ANGLE 3 RETRY ─────────────────────────────────
+    step_06_angle_3_retry:
+      generative_entity: "${models.requirements_tracer}"
+      prompt: |
+        {{bookmarks.shell_output.stdout}}
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_state}}
+
+        Emit corrected text only.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        before_step_starts:
+          - shell:
+              command: |
+                EXIT_CODE=$(cat __OUTPUT_DIR__/check-angle-3.exit 2>/dev/null || echo 1)
+                if [ "$EXIT_CODE" = "0" ]; then
+                  echo "PRIOR ATTEMPT PASSED. Copy input verbatim. Change nothing."
+                else
+                  REASON=$(python3 -c "import json; d=json.load(open('__OUTPUT_DIR__/check-angle-3.json')); print(' ; '.join(f'{k}: {v}' for k,v in d.get('checks',{}).items() if not v.get('passed', True)))" 2>/dev/null || echo "deterministic check failed")
+                  cat <<EOF
+                PRIOR ATTEMPT FAILED. Reason: $REASON
+
+                Apply requirements tracer lens. Fix specifically the failure reason.
+                EOF
+                fi
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "__OUTPUT_DIR__/after-angle-3.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 3 __CASE_FILE__ __OUTPUT_DIR__/after-angle-3.txt > __OUTPUT_DIR__/check-angle-3.json 2>&1; echo $? > __OUTPUT_DIR__/check-angle-3.exit"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    # ── STEP 7: ANGLE 4 (HALLUCINATION HUNTER — Qwen3-5-9B) ───
+    step_07_angle_4:
+      generative_entity: "${models.hallucination_hunter}"
+      prompt: |
+        PERSONA: HALLUCINATION HUNTER
+        GOAL: Fix fabricated content. Output invents things not in source.
+
+        LENS: Distinguish sourced vs plausible-sounding invention.
+
+        RECOGNIZE:
+        - Taxonomy not in source
+        - Rubric/criteria invented
+        - Library/API/name fabricated
+        - Technical term that doesn't exist
+        - Claim attributed to source that source didn't make
+
+        FIX RULES:
+        - Remove fabricated content.
+        - Replace with sourced content if available.
+        - Nothing to replace with: leave gap.
+        - COPY actual input text.
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_state}}
+
+        TASK SPEC + AUXILIARY:
+        {{bookmarks.shell_output.stdout}}
+
+        Emit corrected text only. FIRST WORD MUST MATCH TASK SPEC FORMAT. NO prose preamble.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/emit-context.py __CASE_FILE__"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "__OUTPUT_DIR__/after-angle-4.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 4 __CASE_FILE__ __OUTPUT_DIR__/after-angle-4.txt > __OUTPUT_DIR__/check-angle-4.json 2>&1; echo $? > __OUTPUT_DIR__/check-angle-4.exit"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    # ── STEP 8: ANGLE 4 RETRY ─────────────────────────────────
+    step_08_angle_4_retry:
+      generative_entity: "${models.hallucination_hunter}"
+      prompt: |
+        {{bookmarks.shell_output.stdout}}
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_state}}
+
+        Emit corrected text only.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        before_step_starts:
+          - shell:
+              command: |
+                EXIT_CODE=$(cat __OUTPUT_DIR__/check-angle-4.exit 2>/dev/null || echo 1)
+                if [ "$EXIT_CODE" = "0" ]; then
+                  echo "PRIOR ATTEMPT PASSED. Copy input verbatim. Change nothing."
+                else
+                  REASON=$(python3 -c "import json; d=json.load(open('__OUTPUT_DIR__/check-angle-4.json')); print(' ; '.join(f'{k}: {v}' for k,v in d.get('checks',{}).items() if not v.get('passed', True)))" 2>/dev/null || echo "deterministic check failed")
+                  cat <<EOF
+                PRIOR ATTEMPT FAILED. Reason: $REASON
+
+                Apply hallucination hunter lens. Fix specifically the failure reason.
+                EOF
+                fi
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "__OUTPUT_DIR__/after-angle-4.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 4 __CASE_FILE__ __OUTPUT_DIR__/after-angle-4.txt > __OUTPUT_DIR__/check-angle-4.json 2>&1; echo $? > __OUTPUT_DIR__/check-angle-4.exit"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    # ── STEP 9: ANGLE 5 (CONSISTENCY AUDITOR — Qwen3-4B) ──────
+    step_09_angle_5:
+      generative_entity: "${models.consistency_auditor}"
+      prompt: |
+        PERSONA: CONSISTENCY AUDITOR
+        GOAL: Fix internal inconsistencies.
+
+        LENS: Internal coherence. Claims must agree. Acknowledged issues must be fixed.
+
+        RECOGNIZE:
+        - Meta language about output itself
+        - Acknowledged issue still present
+        - Output copy-verbatim of broken input
+        - Self-contradiction
+
+        FIX RULES:
+        - Remove meta language.
+        - Fix acknowledged issues OR remove acknowledgment.
+        - Output == input verbatim: rephrase broken section.
+        - COPY actual input text.
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_state}}
+
+        TASK SPEC + AUXILIARY:
+        {{bookmarks.shell_output.stdout}}
+
+        Emit corrected text only. FIRST WORD MUST MATCH TASK SPEC FORMAT. NO prose preamble.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/emit-context.py __CASE_FILE__"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "__OUTPUT_DIR__/after-angle-5.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 5 __CASE_FILE__ __OUTPUT_DIR__/after-angle-5.txt > __OUTPUT_DIR__/check-angle-5.json 2>&1; echo $? > __OUTPUT_DIR__/check-angle-5.exit; cp __OUTPUT_DIR__/after-angle-5.txt __OUTPUT_DIR__/final-corrected.txt"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    # ── STEP 10: ANGLE 5 RETRY (FINAL) ────────────────────────
+    step_10_angle_5_retry:
+      generative_entity: "${models.consistency_auditor}"
+      prompt: |
+        {{bookmarks.shell_output.stdout}}
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_state}}
+
+        Emit corrected text only.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        before_step_starts:
+          - shell:
+              command: |
+                EXIT_CODE=$(cat __OUTPUT_DIR__/check-angle-5.exit 2>/dev/null || echo 1)
+                if [ "$EXIT_CODE" = "0" ]; then
+                  echo "PRIOR ATTEMPT PASSED. Copy input verbatim. Change nothing."
+                else
+                  REASON=$(python3 -c "import json; d=json.load(open('__OUTPUT_DIR__/check-angle-5.json')); print(' ; '.join(f'{k}: {v}' for k,v in d.get('checks',{}).items() if not v.get('passed', True)))" 2>/dev/null || echo "deterministic check failed")
+                  cat <<EOF
+                PRIOR ATTEMPT FAILED. Reason: $REASON
+
+                Apply consistency auditor lens. Fix specifically the failure reason. This is the final pass.
+                EOF
+                fi
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "__OUTPUT_DIR__/after-angle-5.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 5 __CASE_FILE__ __OUTPUT_DIR__/after-angle-5.txt > __OUTPUT_DIR__/check-angle-5.json 2>&1; echo $? > __OUTPUT_DIR__/check-angle-5.exit; cp __OUTPUT_DIR__/after-angle-5.txt __OUTPUT_DIR__/final-corrected.txt; python3 __REPO_ROOT__/experiments/correction-atom/scripts/build-changelog-v4.py __CASE_FILE__ __OUTPUT_DIR__ > __OUTPUT_DIR__/change-log.json 2>&1 || true"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+          - log:
+              to_file_path: "__OUTPUT_DIR__/summary.log"
+              event_fields: [workflow_id, total_steps]
+              level: info

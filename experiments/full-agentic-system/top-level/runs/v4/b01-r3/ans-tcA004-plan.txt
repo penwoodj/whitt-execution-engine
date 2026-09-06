@@ -1,0 +1,43 @@
+### Step 1: Initialize Workspace & Rules
+**Rule:** Create directory structure `/tmp/opencode/logtriage-run` with subfolders `scripts`, `outputs`, `logs`.
+**Rule:** Generate `rules.md` defining all thresholds (e.g., clock skew > 3600s, malformed line detection) and decisions (e.g., empty file handling).
+**Formula:** `mkdir -p /tmp/opencode/logtriage-run/{scripts,outputs,logs}` && touch /tmp/opencode/logtriage-run/rules.md
+
+### Step 2: Generate Synthetic Log Data (Deterministic Seed)
+**Rule:** Create a Python script to generate 7 days of logs for web-a, web-b, web-c with specific patterns: daily restarts at ~03:00, peak traffic 14:00-17:00, and injected errors (5xx, 429).
+**Rule:** Inject specific "messes": mixed quoting lines, entries clock-skewed by exactly 1 hour, and one empty rotated file.
+**Formula:** `python3 /tmp/opencode/logtriage-run/scripts/generate_logs.py --seed 42`
+
+### Step 3: Stage 1 - Parse & Normalize Events
+**Rule:** Read all log files; skip the empty file (log action); parse valid lines into ISO timestamps; detect and flag malformed/mixed-quote lines.
+**Rule:** Correct clock-skewed entries by subtracting/adding 3600s based on heuristic detection (e.g., traffic spike mismatch) or explicit flagging if ambiguous.
+**Formula:** `python3 /tmp/opencode/logtriage-run/scripts/parse_logs.py --input-dir /tmp/opencode/logtriage-run/logs --output-file /tmp/opencode/logtriage-run/outputs/events_normalized.csv`
+
+### Step 4: Stage 2 - Calculate Error Rates per Hour per Node
+**Rule:** Group normalized events by `node`, `hour`, and `status_code`.
+**Formula:** `error_rate = (count(status >= 500) / total_count_in_hour) * 100`
+**Output:** Table showing percentages, not raw counts.
+
+### Step 5: Stage 3 - Identify Top 10 Offender Endpoints
+**Rule:** Filter events where `status_code >= 500`.
+**Formula:** `rank(endpoint, method) by count(status >= 500)`
+**Output:** List of top 10 endpoints with counts and methods.
+
+### Step 6: Stage 4 - Analyze 03:00 Restart Blast Radius
+**Rule:** Identify the restart event (node status change or specific log pattern at ~03:00).
+**Rule:** Correlate timestamps immediately following the restart to find in-flight requests that returned errors (5xx) vs. successful completions.
+**Formula:** `failed_requests = count(requests_started_before_restart AND request_completed_after_restart AND status >= 500)`
+
+### Step 7: Stage 5 - Generate Human & Machine Reports
+**Rule:** Create `report_human.md` with plain text, tables for all findings (error rates, top offenders, restart impact), and paths to scripts.
+**Formula:** `json.dump(report_data, open('/tmp/opencode/logtriage-run/outputs/report_machine.json', 'w'))`
+
+### Step 8: Stage 6 - Verification & Timing
+**Rule:** Run independent verification script that recomputes all metrics from raw logs (bypassing normalized CSV) and compares field-by-field with `report_machine.json`.
+**Formula:** `exit_code = compare_fields(raw_computed, report_json)`
+**Rule:** Output timing table for each stage.
+**Output:** Final verification log showing zero drift or specific discrepancies found.
+
+### Step 9: Finalize Workspace
+**Rule:** Generate `README.md` pointing to all outputs and rules.
+**Formula:** `cat /tmp/opencode/logtriage-run/outputs/report_human.md > /tmp/opencode/logtriage-run/README.md` (with paths included).

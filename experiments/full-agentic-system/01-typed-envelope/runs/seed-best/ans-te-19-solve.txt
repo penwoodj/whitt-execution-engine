@@ -1,0 +1,86 @@
+### Phase 1 RULE SCAN
+This phase lists every rule that changes state during the event sequence for "tonight", identifying the specific trigger and the resulting action (including expiry logic).
+
+1.  **Arrival Rule**: Triggered by `{"attempts": N, "wait_s": N, "budget_after": N, "suppressed": true|false}`; Action: Updates current attempt count ($N$), total wait seconds spent ($N$), remaining budget ($N$), and suppression status.
+2.  **Attempt Cost Rule**: Triggered by every failed attempt event; Action: Decreases `budget_after` by 2 tokens per attempt.
+3.  **Wait Cost Rule**: Triggered by the interval between attempts (observed waits: 2s, then 4s); Action: Decreases `budget_after` by 1 token per second of wait observed.
+4.  **Budget Exceedance Rule**: Triggered if `start_budget - spent > budget_limit`; Action: Suppresses the job (`suppressed=true`) and doubles the limit for re-check (not applicable here as spend is under initial limit).
+5.  **Success Condition Rule**: Triggered by the completion of the 4th attempt; Action: Stops counting attempts, sets final state to success.
+6.  **Expiry Return Rule**: Triggered when a grant expires; Action: Returns `floor(granted_amount / 2)` to the pool immediately before the next request is processed (Note: No grants were issued in tonight's events, so this rule does not trigger).
+
+---
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at one in strict arrival order for "tonight", showing the state after each step.
+
+**Initial State:**
+*   Start Budget: 24 tokens
+*   Limit: 24 tokens (implied by context of "budget doubles exactly once" logic usually applying to a cap, but here spend is checked against budget). *Correction based on text*: "spend exceeds the budget". Usually implies `spent > limit`. Let's assume standard retry logic where `limit` is the hard stop. The text says "attempt budget is 24 tokens... if the spend exceeds the budget". This implies `Limit = 24`.
+*   Current Attempt: 1
+
+**Event 1: First Failed Attempt + Wait**
+*   Action: Run Attempt 1 (Cost 2). Observe Wait 2s (Cost 2).
+*   Calculation: $24 - 2 (\text{attempt}) - 2 (\text{wait}) = 20$.
+*   State Check: Spent 4. Limit 24. Not exceeded.
+*   **State After Event 1**: `attempts=1`, `wait_s=2`, `budget_after=20`.
+
+**Event 2: Second Failed Attempt + Wait**
+*   Action: Run Attempt 2 (Cost 2). Observe Wait 4s (Cost 4).
+*   Calculation: $20 - 2 (\text{attempt}) - 4 (\text{wait}) = 14$.
+*   State Check: Spent $4+6=10$. Limit 24. Not exceeded.
+*   **State After Event 2**: `attempts=2`, `wait_s=6` ($2+4$), `budget_after=14`.
+
+**Event 3: Third Failed Attempt + Wait (Success)**
+*   Action: Run Attempt 3 (Cost 2). Observe Wait 8s (Cost 8). Job Succeeds on this attempt.
+*   Calculation: $14 - 2 (\text{attempt}) - 8 (\text{wait}) = 4$.
+*   State Check: Spent $10+10=20$. Limit 24. Not exceeded.
+*   **State After Event 3**: `attempts=3`, `wait_s=14` ($6+8$), `budget_after=4`.
+
+**Final Freeze:**
+The job succeeded on the 3rd attempt (which is the "4th" in the sequence of failures + success, i.e., failure, wait, failure, wait, failure, wait -> success). The text says "the job needs 3 failed attempts before the 4th succeeds". This matches our walk: Fail 1, Fail 2, Fail 3 -> Success on 4th try.
+The final state reflects the completion of the successful attempt and its associated wait (if any) or just the cost incurred to reach success. The prompt lists "waits observed: 2, 4, 8". This implies a wait occurred after the successful attempt as well, or these are the waits *between* attempts.
+Re-reading: "after each failed attempt the retry waits... waits observed: 2, 4, 8."
+If there are 3 failures and 1 success, there are intervals between them.
+Interval 1 (after Fail 1): Wait 2.
+Interval 2 (after Fail 2): Wait 4.
+Interval 3 (after Fail 3): Wait 8? Or is the wait after Success ignored/not observed?
+The list "waits observed: 2, 4, 8" strongly implies three waits occurred.
+Scenario A: Wait happens after every attempt including success. Total Wait = $2+4+8=14$.
+Scenario B: Wait only happens on failure. Then where does the third wait come from? Maybe the "orientation story" logic of doubling applies to the final interval too, or the prompt implies 3 waits were *observed*. I will sum all observed waits: $2+4+8=14$.
+
+Final Totals:
+*   Attempts: 3 (The count of attempts made until success). Note: The text says "needs 3 failed attempts before the 4th succeeds". So total attempts = 4. My previous walk counted `attempts` as the index of the current attempt. Let's clarify the key definition. Usually, `attempts` in JSON output for this type of task refers to the *total number of attempts made*.
+    *   Attempt 1 (Fail)
+    *   Attempt 2 (Fail)
+    *   Attempt 3 (Fail)
+    *   Attempt 4 (Success) -> Wait, the prompt says "waits observed: 2, 4, 8". If there are 4 attempts, there are 3 intervals between them. $2+4+8=14$. This fits perfectly if the wait after the success is also counted or if the sequence was Fail-Wait, Fail-Wait, Fail-Wait, Success (no wait). But "waits observed: 2, 4, 8" lists three numbers.
+    *   Let's re-read carefully: "the job needs 3 failed attempts before the 4th succeeds".
+    *   Sequence:
+        1. Attempt 1 (Fail) -> Wait 2s.
+        2. Attempt 2 (Fail) -> Wait 4s.
+        3. Attempt 3 (Fail) -> Wait 8s? Or is the wait after success not observed?
+        *   If "waits observed" lists exactly what happened, and there are only 3 numbers, maybe the wait after the successful attempt is NOT counted in `wait_s` for the final state, OR the sequence implies 3 waits occurred.
+        *   Let's assume standard doubling: $2 \to 4 \to 8$. These are the waits between attempts 1-2, 2-3, and 3-4? Or 1-2, 2-3, and after 3?
+        *   If there are 3 failures, there must be a wait after failure 1, failure 2, and failure 3. That makes 3 waits. Then the 4th attempt succeeds. Does it have a wait? The prompt says "waits observed: 2, 4, 8". This implies exactly these three waits happened.
+        *   Therefore: Wait after Fail 1 (2s), Wait after Fail 2 (4s), Wait after Fail 3 (8s). Then Attempt 4 succeeds. No wait after success? Or the list is just the sum of observed waits.
+        *   Sum = $2+4+8=14$.
+
+    *   Total Attempts made: 4 (Fail, Fail, Fail, Success).
+    *   Wait Seconds: 14.
+    *   Budget Spent:
+        *   Attempt costs: $4 \times 2 = 8$.
+        *   Wait costs: $2+4+8 = 14$.
+        *   Total Spend: $22$.
+    *   Initial Budget: 24.
+    *   Remaining (`budget_after`): $24 - 22 = 2$.
+    *   Suppressed: False (Spend 22 < Limit 24).
+
+**Final State Verification:**
+*   `attempts`: 4 (Total attempts executed).
+*   `wait_s`: 14 ($2+4+8$).
+*   `budget_after`: 2.
+*   `suppressed`: false.
+
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 2, "suppressed": false}
+```

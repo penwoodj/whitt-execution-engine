@@ -1,0 +1,75 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event sequence, triggered by specific events.*
+
+1. **Rule: Attempt Execution & Costing** – Triggered by each failed attempt (Event 1) and successful attempt (Event 3). Action: Decrease budget by 3 tokens per attempt; increment attempt count.
+2. **Rule: Wait Interval Enforcement** – Triggered before every attempt after the first (Events 2, 3). Action: Consume wait time from budget (3s for Event 1->2, 6s for Event 2->3); increment total wait seconds.
+3. **Rule: Failure Counting & Retry Logic** – Triggered by failed attempts (Event 1, Event 2). Action: Increment failure counter; if failures < 2, schedule next attempt with doubled wait.
+4. **Rule: Success Termination** – Triggered by successful attempt (Event 3). Action: Stop processing further events for this job; final state locked.
+5. **Rule: Budget Suppression Check** – Triggered after every cost application (Events 1, 2, 3). Action: If budget < 0, suppress job and double remaining budget limit exactly once; re-check suppression condition immediately after doubling.
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events in strict arrival order, showing state after each.*
+
+**Initial State:**
+- Attempts: 0
+- Wait Seconds: 0
+- Budget Remaining: 30
+- Suppressed: false
+- Failures: 0
+
+**Event 1: First Attempt (Failed)**
+- *Rule Applied:* Attempt Execution & Costing; Failure Counting.
+- *Calculation:* Cost = 3 tokens. New Budget = 30 - 3 = 27. Wait applied before this? No (first attempt). Failures = 1.
+- *State After Event 1:* Attempts: 1, Wait_s: 0, Budget_after: 27, Suppressed: false.
+
+**Event 2: Second Attempt (Failed)**
+- *Rule Applied:* Wait Interval Enforcement; Failure Counting; Budget Suppression Check.
+- *Calculation:* Pre-wait cost = 3s. New Budget = 27 - 3 = 24. Attempt Cost = 3 tokens. New Budget = 24 - 3 = 21. Failures = 2 (now < 2 is false, but we need to check if job stops). Wait logic: Since failures were 1 before this attempt, a wait was required. The prompt says "after each failed attempt the retry waits". So between Attempt 1 and 2, wait of 3s occurred. Between Attempt 2 and 3? Failures is now 2. Job needs 2 failed attempts before 3rd succeeds. This implies we have had 2 failures. Does the job stop here or go to a 3rd attempt? "The job needs 2 failed attempts before the 3th succeeds." This phrasing usually means: Failure #1 -> Retry. Failure #2 -> Retry (to make it the 3rd). Success on Attempt #3.
+- *Re-evaluating Event Sequence based on "needs 2 failed attempts before the 3th succeeds":*
+    - Start.
+    - Try 1 (Fail). Failures=1. Need to retry. Wait 3s. Cost 3s. Cost 3 tokens.
+    - Try 2 (Fail). Failures=2. Need to retry (to make this the 3rd attempt which will succeed). Wait 6s (doubled from 3). Cost 6s. Cost 3 tokens.
+    - Try 3 (Success). Stop.
+
+*Correction on Event 2 Walk:*
+- *State Before Event 2:* Attempts: 1, Wait_s: 0, Budget_after: 27, Suppressed: false.
+- *Action:* Apply Wait (3s) -> Budget 24. Apply Attempt Cost (3t) -> Budget 21. Record Failure #2. Failures count = 2.
+- *State After Event 2:* Attempts: 2, Wait_s: 3, Budget_after: 21, Suppressed: false.
+
+**Event 3: Third Attempt (Success)**
+- *Rule Applied:* Wait Interval Enforcement; Attempt Execution & Costing; Success Termination.
+- *Calculation:* Pre-wait cost = 6s (doubled from previous 3). New Budget = 21 - 6 = 15. Attempt Cost = 3 tokens. New Budget = 15 - 3 = 12. Success occurs. Job ends. No suppression check needed as budget > 0.
+- *State After Event 3:* Attempts: 3, Wait_s: 9 (3+6), Budget_after: 12, Suppressed: false.
+
+**Final Verification:**
+- Total Attempts: 3.
+- Total Wait: 3 + 6 = 9s.
+- Total Cost: 3 (atm) + 3 (wait) + 3 (atm) + 6 (wait) + 3 (atm) = 18? No, wait costs are separate from attempt costs in the prompt logic ("every attempt costs 3 and every wait second costs 1").
+    - Wait 1: 3s * 1 token/s = 3 tokens.
+    - Attempt 1: 3 tokens.
+    - Wait 2: 6s * 1 token/s = 6 tokens.
+    - Attempt 2: 3 tokens.
+    - Wait 3 (before attempt 3): 6s * 1 token/s = 6 tokens.
+    - Attempt 3: 3 tokens.
+    - Total Spend: 3 + 3 + 6 + 3 + 6 + 3 = 24 tokens?
+    - Let's re-read carefully: "first wait is 3s... after each failed attempt the retry waits".
+    - Sequence:
+        1. Attempt 1 (Cost 3). Fail.
+        2. Wait 3s (Cost 3*1=3). Total Spend 6.
+        3. Attempt 2 (Cost 3). Fail. Total Spend 9.
+        4. Wait 6s (Cost 6*1=6). Total Spend 15.
+        5. Attempt 3 (Cost 3). Success. Total Spend 18.
+    - Budget Start: 30. Remaining: 30 - 18 = 12.
+    - Suppressed? No (12 > 0).
+
+**Final State Construction:**
+- attempts: 3
+- wait_s: 9 (3 + 6)
+- budget_after: 12
+- suppressed: false
+
+```json
+{"attempts": 3, "wait_s": 9, "budget_after": 12, "suppressed": false}
+```

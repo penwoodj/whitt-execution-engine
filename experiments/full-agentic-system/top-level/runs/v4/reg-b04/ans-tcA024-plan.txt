@@ -1,0 +1,70 @@
+# Stage 0: Workspace Initialization & Data Ingestion
+
+**Step 1:** Create directory structure `/tmp/opencode/forecast-run` with subdirectories `data`, `scripts`, `logs`, `outputs`.
+```bash
+mkdir -p /tmp/opencode/forecast-run/{data,scripts,logs,outputs}
+cd /tmp/opencode/forecast-run
+```
+
+**Step 2:** Generate synthetic raw data file `raw_traffic.csv` containing 12 months of traffic for 6 services (A-F), including missing values for Service A (Month 3) and Service B (Month 4), and an outlier spike in December for all services.
+```python
+import csv, random, os
+
+# Seed for determinism
+random.seed(42)
+
+services = ['Service_A', 'Service_B', 'Service_C', 'Service_D', 'Service_E', 'Service_F']
+months = list(range(1, 13)) # Jan-Dec
+
+# Define patterns: Linear (A,C,D), Seasonal (B,E - period 6, amp 20%), Flat+Noise (F)
+patterns = {
+    'Service_A': ('linear', 500, 40),      # Base 500, slope 40
+    'Service_B': ('seasonal', 300, 20, 6), # Base 300, amp 20, period 6
+    'Service_C': ('linear', 100, 80),      # Base 100, slope 80 (High growth)
+    'Service_D': ('linear', 200, 50),      # Base 200, slope 50
+    'Service_E': ('seasonal', 400, 30, 6), # Base 400, amp 30, period 6
+    'Service_F': ('flat', 150, 10)         # Base 150, noise 10
+}
+
+# Capacity ceilings (arbitrary thresholds for Q3 crossing check)
+capacities = {s: p[1] * 2.5 if isinstance(p[1], int) else p[1]*2.5 + 100 for s,p in patterns.items()} 
+# Simplified capacity logic based on base*factor for demo
+capacities = {'Service_A': 2000, 'Service_B': 1800, 'Service_C': 3500, 'Service_D': 2400, 'Service_E': 2600, 'Service_F': 1200}
+
+with open('data/raw_traffic.csv', 'w', newline='') as f:
+    writer = csv.writer(f)
+    writer.writerow(['month', *services])
+    
+    for m in months:
+        row = [m]
+        for i, svc in enumerate(services):
+            pat = patterns[svc]
+            base = pat[0] == 'linear' and (pat[1] + (m-1)*pat[2]) or \
+                   pat[0] == 'seasonal' and (pat[1] + 20*math.sin(2*math.pi*(m-1)/6)) or \
+                   pat[0] == 'flat' and pat[1]
+            
+            # Add noise
+            val = base + random.gauss(0, pat[-1] if len(pat)>3 else 5)
+            
+            # Handle specific data issues
+            if svc == 'Service_A' and m == 3: row.append(None) # Missing
+            elif svc == 'Service_B' and m == 4: row.append(None) # Missing
+            elif m == 12: val = val * random.uniform(1.8, 2.5) # Outlier spike
+            
+            row.append(round(val, 2))
+        writer.writerow(row)
+
+# Inject missing data explicitly for verification later if needed (simulated via None in CSV logic above)
+```
+
+**Step 3:** Create `rules.md` defining thresholds and handling strategies.
+```markdown
+# Rules & Thresholds
+
+## Data Handling
+- **Missing Values**: If cell is empty/None, impute with linear interpolation between neighbors. Log: "IMPUTE_MISSING svc=m".
+- **Outliers (>2 std dev)**: Flag but do not remove; include in forecast with error bar expansion. Log: "FLAG_OUTLIER svc=m val".
+- **Capacity Crossing**: Trigger when Forecast > Capacity Ceiling. Log: "CAPACITY_ALERT svc=q3".
+
+## Forecasting Logic
+-

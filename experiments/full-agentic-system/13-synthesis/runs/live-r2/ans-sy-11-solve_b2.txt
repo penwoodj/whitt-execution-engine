@@ -1,0 +1,74 @@
+Based on the strict instructions to **re-derive the SECOND HALF** of the task (the residency/eviction logic) and output **ONLY** that specific JSON object (no `part_a`, no merged keys), here is the solution:
+
+### Phase 1: Residency State Analysis
+*   **Capacity:** 8 GB.
+*   **Resident Sizes:** A=2, B=2, C=2, D=7. Total = 13 GB (Over capacity).
+*   **Pinned Model:** B is pinned and never evicted.
+*   **Eviction Policy:** LRU among unpinned models.
+
+### Phase 2: Stream Walk
+1.  **Load (2 GB):** Fits? No (Current free space = -5 GB relative to capacity, but effectively we must fit into the 8GB limit).
+    *   *Correction:* The system starts empty or with previous state? The prompt implies a fresh "tonight" stream starting from scratch unless specified. Let's assume start at 0 usage.
+    *   **Start:** Usage = 0 GB. Free = 8 GB.
+    *   **Action:** `Load (2 GB)`. Fits in 8 GB.
+    *   **State:** {A: 2}. Usage = 2. Evictions = 0. Loads = 1.
+
+2.  **Load B (2 GB):** Fits? Yes (Free = 6 GB).
+    *   **Action:** `Load B`.
+    *   **State:** {A: 2, B: 2}. Usage = 4. Evictions = 0. Loads = 2.
+
+3.  **Load C (2 GB):** Fits? Yes (Free = 4 GB).
+    *   **Action:** `Load C`.
+    *   **State:** {A: 2, B: 2, C: 2}. Usage = 6. Evictions = 0. Loads = 3.
+
+4.  **Load D (7 GB):** Fits? No (Free = 2 GB).
+    *   **Action:** `Load D`. Needs to evict unpinned models until space >= 7.
+    *   Current Residents: A(2), B(2, Pinned), C(2). Unpinned: A, C. Total Unpinned Size = 4.
+    *   Space needed for D (7) + keep existing? No, load command adds size. We need to make room for the new item.
+    *   Current Usage = 6. Target Usage after load = 6 + 7 = 13. Capacity = 8. Deficit = 5 GB.
+    *   Evict Unpinned: A (2) and C (2). Total freed = 4. New Usage = 6 - 4 + 7 = 9. Still > 8.
+    *   Wait, B is pinned. Can we evict B? No ("B is pinned and never evicted").
+    *   If only pinned models remain (A and C are gone), can we fit D?
+        *   After evicting A and C: Residents = {B}. Usage = 2. Free = 6.
+        *   Load D (7) requires 7 space. We have 6. Still doesn't fit.
+    *   Since only pinned model B remains, and it cannot be evicted, the load **cannot fit**.
+    *   **Result:** Deferral occurs.
+    *   **Deferred ID:** The stream order usually implies IDs based on position or content. Given "load (2 GB)", "load B...", etc., let's assign sequential IDs starting from 1 for loads that are executed/attempted? Or just the count of loads?
+    *   Let's re-read: "loads counts every load command...". "deferred id is that load's own id."
+    *   Assuming ID corresponds to the step number in the stream (1-based): Step 4.
+    *   **State:** {B}. Usage = 2. Evictions performed = 2 (A and C). Loads executed = 3. Deferrals = 1. Deferred IDs = [4].
+
+5.  **Unload B (2 GB):**
+    *   Model B is resident. Unload command executes? Usually, unloading a pinned model might be restricted or just removes it from usage if allowed by the "tonight" rules. The prompt says "unload for model no longer resident is no-op". It doesn't explicitly forbid unloading a pinned one in this specific stream context, but typically "pinned" implies it stays resident to satisfy loads. However, the command is explicit: `Unload B`.
+    *   If we unload B: Usage becomes 0.
+    *   Does this affect counts? The prompt asks for final `loads`, `evictions`, `deferrals`. These are cumulative counters of the stream events.
+    *   **Final Counts:**
+        *   Loads executed: 3 (Steps 1, 2, 3). Step 4 deferred.
+        *   Evictions performed: 2 (Step 4 evicted A and C).
+        *   Deferrals: 1 (Step 4).
+
+    *Refining the "Load D" logic:*
+    Is it possible the system starts with residents? The prompt says "one 8GB card tonight... resident sizes: A2 B2 C2 D7". This lists the models and their sizes, not necessarily that they are currently loaded. Standard interpretation for such problems is starting empty unless a state is given.
+    
+    *Re-evaluating Step 4 (Load D):*
+    Current: {A, B, C}. Usage 6.
+    Load D (7). Need to fit 7 into remaining space.
+    Evict A (2), C (2). Free = 8 - 2 = 6. Add D(7) -> Total 13? No.
+    Logic: `Current_Usage + New_Size <= Capacity`.
+    $6 + 7 \le 8$ is False. Deficit 5.
+    Evict Unpinned (A, C). Size freed = 4.
+    New Usage = $(6 - 4) + 7 = 9$. Still $> 8$.
+    Remaining unpinned: None. Pinned: B.
+    Can we evict B? No ("never evicted").
+    Therefore, Load D cannot fit even after maxing out eviction of unpinned models.
+    **Deferral confirmed.**
+
+    *Final Values:*
+    Loads (executed): 3.
+    Evictions (performed): 2.
+    Deferrals: 1.
+    Deferred IDs: [4] (Assuming ID matches stream index).
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": [4]}
+```

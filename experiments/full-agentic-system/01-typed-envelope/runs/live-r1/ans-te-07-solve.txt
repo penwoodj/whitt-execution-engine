@@ -1,0 +1,59 @@
+### Phase 1 RULE SCAN
+
+1.  **Climb Step Rule**: The rollout climbs in steps; each step has an associated error rate limit based on its position (Steps 1–5: ≤2.0%, Steps 6–10: ≤1.0%).
+2.  **Breach Pause Rule**: If an observed error rate exceeds the current step's limit, the climb pauses immediately.
+3.  **Rollback Rule**: Upon a breach, the system rolls back to the previous step (the last successfully verified step).
+4.  **Observation Spent Rule**: The specific observation that caused the breach is marked "spent" and does not trigger re-evaluation against the new tighter limit; it is discarded.
+5.  **Tighten Limit Rule**: After any rollback, the error rate limit for *every remaining step* tightens to 0.8%.
+6.  **Resume Observation Rule**: The climb resumes starting from the observation immediately following the spent/breached one.
+7.  **Second Breach Stop Rule**: If a second breach occurs (any subsequent breach after the first), the rollout status becomes "STOPPED", holding the current step, and no further steps are attempted.
+8.  **Completion Rule**: If zero breaches occur during the entire climb sequence, the status is "DONE".
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:** Step=0, Status=PENDING, Limit=(1-5: 2.0%, 6-10: 1.0%).
+**Event List:** [0.5, 0.8, 2.1, 0.6, 0.7, 0.9]
+
+**Step 1 Arrival (Observed: 0.5)**
+*   Current Step: 1.
+*   Limit Check: Step 1 is in range [1-5], so Limit = 2.0%.
+*   Observation 0.5 <= 2.0%. Passes.
+*   Action: Advance to next step.
+*   State Update: Steps Done = 1, Current Step Target = 2.
+
+**Step 2 Arrival (Observed: 0.8)**
+*   Current Step: 2.
+*   Limit Check: Step 2 is in range [1-5], so Limit = 2.0%.
+*   Observation 0.8 <= 2.0%. Passes.
+*   Action: Advance to next step.
+*   State Update: Steps Done = 2, Current Step Target = 3.
+
+**Step 3 Arrival (Observed: 2.1)**
+*   Current Step: 3.
+*   Limit Check: Step 3 is in range [1-5], so Limit = 2.0%.
+*   Observation 2.1 > 2.0%. **BREACH**.
+*   Rule Application: Pause climb, Rollback to previous step (Step 2). Mark observation 2.1 as spent. Tighten limit for remaining steps to 0.8%.
+*   State Update: Status = PAUSED, Steps Done = 3 (Rollback keeps count of completed verification? No, "rollback to the previous step" implies we are now at Step 2 ready to retry or move forward? Re-reading carefully: "rolls back to the previous step... climb resumes from the next observation."
+    *   Interpretation A: We go back to testing Step 2 again. But there is no new observation for Step 2. The text says "climb resumes from the next observation". This implies we skip the retry of the failed step and move forward? Or does it mean we are now at Step 2, waiting for a new observation?
+    *   Re-reading the prompt's specific constraint: "the climb resumes from the next observation." This usually means the *next event in the queue* applies to the *current target step*. If we rolled back to Step 2, and the next observation (0.6) arrives, does it test against Step 2 or Step 3?
+    *   Let's look at the "Orientation" story for shape: "rolled 0.2, 0.75, 2.5... third step breached... climb paused at 20 percent holding a pair of clean stages". This implies the state is frozen at the success point (Step 2). The next observation arrives and must be tested against the *current* target.
+    *   Standard Canary Logic: If Step N fails, you revert to State N-1. You then wait for new traffic/observation to test State N-1 again? OR do you immediately try State N with new data?
+    *   Prompt text: "climb resumes from the next observation". This suggests the *next event* in the list is applied against the *current active step*. If we rolled back to Step 2, and the next number (0.6) comes in, it tests Step 2.
+    *   HOWEVER, looking at the list: [0.5, 0.8, 2.1]. We are now at State 2 (clean). The "next observation" is 0.6. Does 0.6 test State 2 or State 3? In a "climb", you don't usually re-test the previous step unless explicitly told to "re-rollout". But the rule says "rolls back to the previous step".
+    *   Let's look at the strict wording: "after any rollback... the climb resumes from the next observation." This implies the *next incoming event* triggers the check for the *current target*. If we are rolled back to Step 2, the current target is Step 2. The next number (0.6) tests against Limit of Step 2.
+    *   Wait, there is a nuance: "the observation that breached is spent... it does not re-test against the tighter limit, the NEXT observation does." This confirms we skip the bad one and take the next number for the *current* state.
+    *   Crucial Logic Check: If I roll back to Step 2, do I need a new observation for Step 2? Yes, because traffic hasn't hit Step 3 since the error. The "next observation" (0.6) represents a new batch of traffic hitting the system. Since we are at Step 2, this batch tests if Step 2 is stable enough to proceed? Or does it test if we can move to Step 3?
+    *   Standard interpretation of such problems: You cannot advance to Step 3 until you verify Step 3 again (or a new observation confirms the transition). However, usually "rollback" means "go back to previous state". The next event tests that previous state. If it passes, you try to climb again?
+    *   Let's trace the "Orientation Story" logic provided: "rolled 0.2, 0.75, 2.5... third step breached... climb paused at 20 percent holding a pair of clean stages". It implies the system is held at the previous successful state (Step 2). The next observation arrives.
+    *   Does the next observation test the *previous* state or the *failed* state? If it tests the previous state, and passes, do we try Step 3 again immediately with a *new* observation? We only have one list of observations: [0.5, 0.8, 2.1, 0.6, 0.7, 0.9].
+    *   Hypothesis 1 (Retry Previous): Event 4 (0.6) tests Step 2. Limit for Step 2 is now 0.8% (tightened). 0.6 <= 0.8. Pass. We are still at Step 2. Next event? None left? Then we stop at 20%.
+    *   Hypothesis 2 (Immediate Retry Failed): Event 4 (0.6) tests Step 3 (the failed step). Limit for Step 3 is now 0.8%. 0.6 <= 0.8. Pass. We advance to Step 4.
+    *   Which fits "climb resumes"? If I am at Step 2, and I get a new observation, do I assume it validates the transition to 3? No, usually you need an observation for the new step. But we don't have infinite observations.
+    *   Let's re-read: "climb resumes from the next observation". This phrasing is tricky. It likely means: The *next number in the list* applies to the *current target*. If the target is Step 2 (after rollback), then 0.6 tests Step 2.
+    *   BUT, consider the phrase "holding a pair of clean stages" in the example. This implies we are stuck at Step 2. The window closed. We never got a new observation for Step 3. Thus, Hypothesis 1 seems correct: Rollback puts us at Step 2. Next number tests Step 2. If it passes, do we auto-advance? Or must the *next* number test Step 3?
+    *   Let's look at the "Second Breach" rule: "a second breach stops everything". This implies multiple breaches can happen. This requires a scenario where an observation fails again.
+    *   If Hypothesis 1 is true (Test Step 2 with 0.6), and it passes, are we back to normal? Or do we need another observation to test Step 3? The prompt gives exactly 6 observations for a potential 10-step climb. It's highly likely the intention is that each number corresponds to an attempt at the *current* step.
+    *   Let's try Hypothesis 2 (Test Current Target): After rollback to Step 2, we are trying to enter Step 3? No, "rollback to previous step" means state = Step 2. The next event tests State 2. If it passes, do we increment? Usually, yes, if the observation is for the *climb*. But strictly, an observation validates the *current* version.
+    *   Let's reconsider the standard algorithmic pattern for this specific riddle type: "Rollback to previous step

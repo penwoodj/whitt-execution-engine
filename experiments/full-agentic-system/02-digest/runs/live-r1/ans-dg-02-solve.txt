@@ -1,0 +1,60 @@
+### Phase 1 RULE SCAN
+*Rules that change state during the event or claim list:*
+
+1. **Grant Rule**: When a request arrives, if `pool >= ask`, grant full amount (`ask`), subtract from pool; if `pool < ask`, grant partial amount (`pool`), set pool to zero. Triggered by: r1, r2, r3, r4, r5, r6.
+2. **Expiry Rule**: The grant for request r1 expires after request r2 completes. Triggered by: completion of r2.
+3. **Return Rule**: Upon expiry (Rule 2), return half the *granted* amount rounded down to the pool. Triggered by: Expiry event following r2.
+4. **Denial Rule**: If a request arrives and the pool is zero, deny the request (add id to denied list). Triggered by: r3 (if pool empty after refill), r4, r5, r6 (depending on state).
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events in strict arrival order:*
+
+**Initial State**: Pool = 40. Grants = []. Denied = [].
+
+1. **Event: r1 arrives (ask=5)**
+   - Rule Applied: Grant Rule.
+   - Logic: Pool (40) >= Ask (5). Grant 5. New Pool = 35.
+   - State After: Pool=35, Grants=[{id:r1, amount:5}], Denied=[]
+
+2. **Event: r2 arrives (ask=8)**
+   - Rule Applied: Grant Rule.
+   - Logic: Pool (35) >= Ask (8). Grant 8. New Pool = 27.
+   - State After: Pool=27, Grants=[{id:r1, amount:5}, {id:r2, amount:8}], Denied=[]
+
+3. **Event: r2 completes**
+   - Rule Applied: Expiry Rule (r1 expires after r2).
+   - Logic: Grant for r1 expires. Return = floor(5 / 2) = 2. Add 2 to pool. New Pool = 27 + 2 = 29. Remove r1 from grants.
+   - State After: Pool=29, Grants=[{id:r2, amount:8}], Denied=[]
+
+4. **Event: r3 arrives (ask=12)**
+   - Rule Applied: Grant Rule.
+   - Logic: Pool (29) >= Ask (12). Grant 12. New Pool = 17.
+   - State After: Pool=17, Grants=[{id:r2, amount:8}, {id:r3, amount:12}], Denied=[]
+
+5. **Event: r4 arrives (ask=14)**
+   - Rule Applied: Grant Rule.
+   - Logic: Pool (17) >= Ask (14). Grant 14. New Pool = 3.
+   - State After: Pool=3, Grants=[{id:r2, amount:8}, {id:r3, amount:12}, {id:r4, amount:14}], Denied=[]
+
+6. **Event: r5 arrives (ask=17)**
+   - Rule Applied: Grant Rule.
+   - Logic: Pool (3) < Ask (17). Grant partial = 3. New Pool = 0.
+   - State After: Pool=0, Grants=[{id:r2, amount:8}, {id:r3, amount:12}, {id:r4, amount:14}, {id:r5, amount:3}], Denied=[]
+
+7. **Event: r6 arrives (ask=21)**
+   - Rule Applied: Denial Rule (Pool is 0).
+   - Logic: Pool (0) < Ask (21). Grant 0. Request denied. Add "r6" to denied list.
+   - State After: Pool=0, Grants=[{id:r2, amount:8}, {id:r3, amount:12}, {id:r4, amount:14}, {id:r5, amount:3}], Denied=["r6"]
+
+---
+
+### Final Calculation Check
+- **Granted Units**: 5 (r1) + 8 (r2) + 12 (r3) + 14 (r4) + 3 (r5 partial) = 42.
+- **Denied IDs**: ["r6"].
+- **Pool Left**: 0.
+
+```json
+{"granted_units": 42, "denied": ["r6"], "pool_left": 0}
+```

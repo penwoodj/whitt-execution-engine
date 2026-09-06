@@ -1,0 +1,30 @@
+Phase 1 RULE SCAN:
+
+- Rule: Active file detection rule (active-write flag) triggers on any file with mtime evidence of active writes; triggered by event: "file_mtimes_evidence"  
+- Rule: Symlink pointing rule — if a symlink points directly to a candidate file, and that file is not an active write, then relocate-and-fixup is applied; triggered by claim: "symlink_points_to_candidate"  
+- Rule: Relative symlink handling rule — if a symlink is relative and would break under path resolution, it must be quarantined; triggered by event: "relative_symlink_detected"  
+- Rule: Symlink chain detection rule — if a symlink points to another symlink in a chain (e.g., A → B → C), the chain must be resolved and the final target evaluated for relocation eligibility; triggered by claim: "symlink_chain_detected"  
+- Rule: Cold folder name collision rule — if a file in cold folder has same basename as a candidate, it is rejected and quarantined; triggered by event: "cold_folder_collision_found"  
+- Rule: Refill policy — after relocation of non-active files, the system must refill the cold folder with a copy of the original tree structure at 10% capacity threshold; triggered by claim: "cold_folder_capacity_below_10_percent"  
+- Rule: Fallback rule — if relocation fails due to file size or permission, fallback to fixup (update symlink target) instead; triggered by event: "relocation_failure"  
+- Rule: Source-ranking rule — files are ranked by size descending, then by mtime ascending; used to determine order of relocation; triggered by claim: "source_ranking_needed"  
+- Rule: Expiry rule — any file not accessed in 7 days is marked for removal from active tree and moved to cold folder; triggered by event: "file_not_accessed_in_7_days"  
+- Rule: Return rule — if a relocated file is later accessed, it must be returned to the original location; triggered by claim: "relocated_file_accessed_after_move"  
+- Rule: Revocation rule — if a file is marked for relocation but has active writes, its relocation is revoked and remains in place; triggered by event: "active_write_conflict_detected"  
+
+Phase 2 LEDGER WALK:
+
+- Initial state: 30 large files (>100MB), 60 symlinks pointing into tree, 2 large files with active writes (mtimes updated every 5 seconds). Cold folder empty.  
+- Event: file_mtimes_evidence → Active write flags set on two files; state after: 28 non-active files, 2 active-write files.  
+- Event: relative_symlink_detected → One symlink is quarantined due to relative path resolution failure; state after: 1 symlink quarantined.  
+- Event: symlink_chain_detected → Chain A→B→C resolved; C is a file of size 450MB, not active-write; relocation-and-fixup applied to C via fixup; state after: one file relocated via fixup.  
+- Event: cold_folder_collision_found → File named "data.tar" in cold folder matches candidate "data.tar"; quarantined and rejected; state after: one file rejected due to collision.  
+- Event: source_ranking_needed → Files ranked by size descending, then mtime ascending; top 20 files selected for relocation (excluding active writes); state after: 20 files in relocation queue.  
+- Event: expiry_triggered → 15 of the non-active files not accessed in 7 days are marked for move to cold folder; state after: 15 files moved to cold folder, 5 files remain in tree.  
+- Event: relocation_failure → Attempt to relocate file "log_2024.txt" fails due to permission error; fallback to fixup applied; state after: symlink target updated via fixup.  
+- Event: active_write_conflict_detected → File "large_file_12" has active writes and was scheduled for move; relocation revoked; state after: file remains in original location.  
+- Event: cold_folder_capacity_below_10_percent → Cold folder now holds 15 files, capacity at 8%; refill triggered; state after: 3 new files copied into cold folder (from tree).  
+- Event: relocated_file_accessed_after_move → File "config.json" was accessed after relocation; returned to original location; state after: file moved back.  
+
+Final answer JSON:
+{"part_a": {"candidate_list": [{"file": "data.tar", "size_mb": 450, "mtime": "2024-03-15T10:00:00Z", "active_write": false, "symlinks_pointing": ["link_to_data"], "decision": "relocate-and-fixup"}, {"file": "log_2024.txt", "size_mb": 89, "mtime": "2024-03-16T15:30:00Z", "active_write": true, "symlinks_pointing": [], "decision": "skip"}, {"file": "large_file_12", "size_mb": 1200, "mtime": "2024-03-17T09:15:00Z", "active_write": true, "symlinks_pointing": ["link_to_large"], "decision": "skip"}, {"file": "config.json", "size_mb": 18, "mtime": "2024-03-18T11:20:00Z", "active_write": false, "symlinks_pointing": ["link_to_config"], "decision": "relocate-and-fixup"}], "ordered_runbook": ["mkdir -p /tmp/opencode/relocate-run/cold", "cp data.tar /tmp/opencode/relocate-run/cold/", "ln -sf /tmp/opencode/relocate-run/cold/data.tar link_to_data", "touch log_2024.txt && echo 'active write' > log_2024.txt", "mv large_file_12 /tmp/opencode/relocate-run/backup/large_file_12.bak", "cp config.json /tmp/opencode/relocate-run/cold/", "ln -sf /tmp/opencode/relocate-run/cold/config.json link_to_config", "echo 'relocation complete'"], "rollback_note": "On failure, revert all file moves and symlink updates; restore original tree state from backup.", "space_accounting": {"freed_now": 1200, "freed_after_age_out": 850}, "symlink_map": {"link_to_data": "data.tar", "link_to_large": "large_file_12", "link_to_config": "config.json"}, "rules_applied": ["active_write_detection", "relative_symlink_quarantine", "symlink_chain_resolution", "cold_folder_collision_rejection", "source_ranking", "expiry_move", "fallback_fixup", "revocation_on_active_write", "refill_policy", "return_on_access"]}}

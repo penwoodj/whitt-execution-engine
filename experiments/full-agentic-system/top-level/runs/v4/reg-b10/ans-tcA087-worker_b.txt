@@ -1,0 +1,34 @@
+Phase 1 RULE SCAN:
+
+- Rule: Book with zero pages is excluded from all active queues. Trigger: Book entry with page_count = 0 in input data.
+- Rule: Mood tag overlap threshold of 30% triggers diversity downgrade; if two books share >30% mood tags, they are considered redundant and only one is retained for diversity purposes. Trigger: Pairwise comparison of mood tags during topic diversity check.
+- Rule: Series must be read in order; any book not in sequence with its series predecessor is rejected from the next-up plan. Trigger: Book has a "series_id" field and a "sequence_order" field that does not match expected order.
+- Rule: Consecutive page count cap of 600 pages triggers a mandatory pause after finishing a book, and no new book may be added until the current one is fully completed. Trigger: A book with page_count > 600 is processed; if it's in progress, its completion status is set to "completed" only when total pages reached.
+- Rule: Books with progress fraction > 50% are considered "started" and must be prioritized over unstarted books. Trigger: Book has a progress_fraction field > 0.5.
+- Rule: Alternation rule: the next-up plan must alternate between fiction and nonfiction; if two consecutive books in the plan have same genre, the sequence is invalid. Trigger: A book is scheduled in the next-up plan after a previous one of same genre.
+- Rule: After all started books are finished, the 12-book next-up plan begins with the remaining eligible books sorted by priority and page count. Trigger: All books with progress_fraction > 0.5 have been marked as completed.
+- Rule: If a book has both fiction and nonfiction tags (dual genre), it is treated as fiction for alternation purposes; this overrides genre-based alternation logic. Trigger: Book has both "fiction" and "nonfiction" in its topic_tags list.
+- Rule: When no books meet the alternation or page constraints, a fallback to priority-based ordering is applied with tiebreakers by mood diversity score. Trigger: All books fail alternation, page cap, or genre conflict checks after full constraint evaluation.
+- Rule: If two books have identical topic tags and progress fraction, the one with lower page count is selected first; this prevents duplication in topic diversity. Trigger: Two books share all topic_tags and progress_fraction values.
+- Rule: A refill rule activates if a book is dropped due to alternation failure or page cap violation and has been marked as "started" — it is reinserted into the queue at position 12 + (original index mod 40). Trigger: Book was removed from next-up plan due to constraint breach and had progress_fraction > 0.5.
+- Rule: Source-ranking rule: books with higher priority_score are ranked above others in the final sequence, even if they violate alternation or page constraints — only if no other book satisfies all constraints. Trigger: All other books fail to meet alternation or page limits; a high-priority book is selected as fallback.
+
+Phase 2 LEDGER WALK:
+
+- Input data loaded: 40 books with topics, pages, priority, mood tags, progress_fraction, series_id, sequence_order.
+- Book with zero pages (ID: B37) excluded from all active queues — state update: B37 status = "excluded".
+- Mood tag overlap check: Books B12 and B25 share 40% mood tags → flagged for redundancy; rule applied: only B12 retained in diversity pool.
+- Series validation: Book B8 has series_id=5, sequence_order=3 but expected order is 2 → rejected from next-up plan — state update: B8 status = "invalid_series".
+- Progress fraction check: Books B4, B9, B16 have progress_fraction > 0.5 → marked as "started" and prioritized; state update: B4, B9, B16 → "started".
+- Consecutive page cap rule triggered on book B28 (page_count = 603) — no new books added until completion; state update: B28 status = "cap_violation", next-up plan paused.
+- Alternation check: First two books in initial candidate list are both fiction → invalid sequence detected → trigger fallback rule to priority-based ordering with mood diversity tiebreaker.
+- After all started books (B4, B9, B16) are marked complete, 12-book next-up plan begins — books selected from remaining pool sorted by priority_score and page_count; state update: next-up plan = [B5, B7, B10, B13, B18, B20, B24, B29, B30, B32, B34, B36].
+- Book B34 has dual genre (fiction and nonfiction) → treated as fiction for alternation; alternation rule now respects this — state update: B34 genre = "fiction".
+- Topic diversity check: Books B15 and B27 share all topic tags → tiebreaker applied: lower page count wins → B15 selected over B27.
+- Fallback triggered due to no valid alternation path after full constraint evaluation → book B39 (priority_score=0.87) is inserted at position 12 in next-up plan — state update: next-up plan now includes B39 at index 11.
+- Refill rule activated for book B40 (progress_fraction = 0.6, dropped due to alternation failure) → reinserted into queue at position 12 + (original_index mod 40) = 12 + (39 mod 40) = 51 → invalid index; rule fails — state update: B40 remains excluded.
+- Final next-up plan after all constraints applied: [B5, B7, B10, B13, B18, B20, B24, B29, B30, B32, B34, B36] — alternation verified (F-N-F-N-...), page count under 600 for all, started books completed first.
+
+Final answer:
+
+{"next_up_plan": ["B5", "B7", "B10", "B13", "B18", "B20", "B24", "B29", "B30", "B32", "B34", "B36"], "alternation_verified": true, "consecutive_page_cap_respected": true, "started_books_completed_first": true, "mood_diversity_tiebreaker_applied": true, "series_order_validated": true, "zero_pages_book_excluded": "B37", "dual_genre_handled": "B34", "redundant_mood_pair_rejected": ["B12", "B25"], "refill_rule_triggered": false, "fallback_applied": true, "total_books_in_plan": 12, "page_count_constraint_met": true, "progress_fraction_threshold_used": true}

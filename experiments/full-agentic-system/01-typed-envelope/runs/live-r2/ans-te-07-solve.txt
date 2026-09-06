@@ -1,0 +1,69 @@
+### Phase 1: RULE SCAN
+*Rules that change state during the event sequence, listed in order of application priority (higher rules listed first as per instruction "pick the one higher in the list"):*
+
+1. **Breach Detection Rule**: If observed error rate > current limit for the current step, trigger BREACH.
+   *Triggered by:* Event 3 (0.6 vs 2.1) and Event 5 (0.9 vs 0.8).
+
+2. **Rollback Execution Rule**: Upon breach, pause climb, rollback to previous stage number ($N-1$), mark current observation as SPENT.
+   *Triggered by:* Event 3 (resulting in rollback from Stage 3 to 2) and Event 5 (attempting rollback from Stage 5).
+
+3. **Stage Completion Rule**: If no breach, clean observation completes current stage; next step advances to $N+1$ with new limit ($10 \times N$ for first phase, then $10 \times (N-1)$? No: "climbs in 10 percent steps... limits: steps 1 through 5 may show up to 2.0 percent [implies Stage 1=2%, Stage 2=4% etc? Or fixed per step index?]".
+   *Clarification from text:* "limits: steps 1 through 5 may show up to 2.0 percent, steps 6 through 10 only 1.0 percent." AND "climbs in 10 percent steps... after a clean observation completes its stage and the rollout then shows 10 percent times that stage number".
+   *Interpretation:* The "Stage Number" ($S$) is defined by the step index within the climb sequence (1, 2, 3...). The Limit for Step $k$ is: if $k \le 5$, Limit = $\min(2.0\%, S \times 10\%)$. Wait, text says "shows 10 percent times that stage number". If Stage=1, Limit=10%? That contradicts the "steps 1 through 5 may show up to 2.0 percent" constraint.
+   *Re-reading carefully:* "limits: steps 1 through 5 may show up to 2.0 percent, steps 6 through 10 only 1.0 percent." This is a HARD CAP per step index. The phrase "shows 10 percent times that stage number" likely defines the *target* or the *stage value* for reporting, but the limit is explicitly capped at 2.0% or 1.0%.
+   *Correction based on standard canary logic and text:* Usually, Stage 1 allows X%, Stage 2 allows 2X%. But here: "steps 1 through 5 may show up to 2.0 percent". This implies Step 1 Limit = 2.0%, Step 2 Limit = 2.0%... until Step 6 where it drops to 1.0%.
+   *Wait, let's look at the example:* "rolled 0.2, 0.75, 2.5... third step breached the 2.0 line". So Step 3 had a limit of 2.0%. This confirms: Steps 1-5 have Limit = 2.0%. Steps 6-10 have Limit = 1.0%.
+   *What about "shows 10 percent times that stage number"?* Maybe the "Stage" is not just the step index? Or maybe the limit IS $S \times 10\%$ but capped at 2.0? If Stage=1, Limit=10% (capped to 2%). If Stage=2, Limit=20% (capped to 2%). This makes no sense for a canary.
+   *Alternative Interpretation:* The "Stage Number" is the counter of successful steps. Step 1 = Stage 1. Step 2 = Stage 2. The text says "rollout then shows 10 percent times that stage number". If Stage=1, show 10%. But the limit rule says "steps 1 through 5 may show up to 2.0 percent".
+   *Resolution:* The explicit constraint ("may show up to 2.0") overrides the formula if they conflict, OR the "Stage Number" logic applies differently. Let's look at the Example again: Step 3 breached the 2.0 line with value 2.5. So Limit was 2.0%. If the limit was $3 \times 10\% = 30\%$, 2.5 wouldn't breach. So the Limit is definitely 2.0% for steps 1-5.
+   *Hypothesis:* The "shows 10 percent times that stage number" refers to a different metric (perhaps the 'defended' value or target), but the BUDGET/LIMIT for passing/failing is strictly 2.0% (Steps 1-5) and 1.0% (Steps 6-10).
+   *Wait, another reading:* "after a clean observation completes its stage and the rollout then shows 10 percent times that stage number". Maybe this means the LIMIT changes? No, "limits: steps 1 through 5 may show up to 2.0 percent" sounds like a hard cap per step index.
+   *Let's assume:* Limit = 2.0% for Steps 1-5. Limit = 1.0% for Steps 6-10. The "10x Stage Number" might be the value displayed in a dashboard, but the error rate limit is fixed by the step index bucket (1-5 vs 6-10).
+   *Actually, let's re-read:* "climbs in 10 percent steps... limits: steps 1 through 5 may show up to 2.0 percent". This phrasing "steps 1 through 5" likely refers to the Step Index (1st attempt, 2nd attempt...). So Attempt 1 Limit=2%. Attempt 2 Limit=2%... Attempt 6 Limit=1%.
+   *What about the "10x Stage Number"?* Maybe "Stage" is distinct from "Step"? No, text says "every observation carries the next stage number in line". So Step Index = Stage Number.
+   *Conflict:* If Stage=2, $10 \times 2 = 20\%$. But limit says max 2%.
+   *Resolution for Logic:* The "Limit" is the threshold to breach. The text explicitly defines limits: Steps 1-5 -> 2.0%, Steps 6-10 -> 1.0%. The "shows 10x Stage Number" might be a distractor or refers to something else (like a target metric not relevant for the error rate limit). I will proceed with the explicit numeric limits: **Step Index $\le$ 5 $\to$ Limit 2.0%**. **Step Index $>$ 5 $\to$ Limit 1.0%**.
+
+4. **Tightened Limit Rule**: After any rollback, the limit tightens to 0.8 for every *remaining* step.
+   *Triggered by:* Event 3 (Rollback occurred). Applies to future attempts. Does it apply to the current "spent" observation? Text: "the observation that breached is spent... a second breach stops everything". It doesn't say the current one gets re-tested against 0.8 immediately, but usually, the "tightened limit" applies to the *resume* (next observation). The orientation story says: "the breach observation is spent, it does not re-test against the tighter limit, the NEXT observation does."
+   *Triggered by:* Event 3 and Event 5.
+
+5. **Stop Rule**: A second breach stops everything; hold step, status STOPPED.
+   *Triggered by:* Event 5 (if a second breach occurs).
+
+6. **Done Rule**: If list ends with no second breach, status DONE.
+   *Triggered by:* End of list.
+
+---
+
+### Phase 2: LEDGER WALK
+
+**Initial State:**
+*   Current Step Index ($S$): 1
+*   Limit for $S=1$: 2.0% (Bucket 1-5)
+*   Status: CLIMBING
+*   History of Breaches: 0
+
+**Event 1:** Observed Error Rate = 0.5%
+*   **Rule Check:** Is $0.5 > \text{Limit}(S=1)$? Limit is 2.0%. $0.5 \le 2.0$. No breach.
+*   **Action:** Clean observation. Completes Stage 1.
+*   **State Update:** Step advances to 2.
+    *   New Step Index: 2
+    *   New Limit (Bucket 1-5): 2.0%
+
+**Event 2:** Observed Error Rate = 0.8%
+*   **Rule Check:** Is $0.8 > \text{Limit}(S=2)$? Limit is 2.0%. $0.8 \le 2.0$. No breach.
+*   **Action:** Clean observation. Completes Stage 2.
+*   **State Update:** Step advances to 3.
+    *   New Step Index: 3
+    *   New Limit (Bucket 1-5): 2.0%
+
+**Event 3:** Observed Error Rate = 2.1%
+*   **Rule Check:** Is $2.1 > \text{Limit}(S=3)$? Limit is 2.0%. $2.1 > 2.0$. **BREACH**.
+*   **Action (Rollback):**
+    *   Pause climb.
+    *   Rollback to previous step ($S_{prev} = 2$).
+    *   Mark current observation as SPENT.
+    *   Apply Tightened Limit Rule: Future limits become 0.8%.
+*   **State Update:**
+    *   Current Step Index: 2 (H

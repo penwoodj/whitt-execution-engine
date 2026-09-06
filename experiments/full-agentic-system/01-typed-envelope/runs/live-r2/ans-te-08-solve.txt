@@ -1,0 +1,87 @@
+### Phase 1 RULE SCAN
+
+Here are the rules that change state during the event list, listed in order of precedence (higher in list applies first), with their triggers:
+
+1.  **Rule: Second Breach Termination** – If a second breach occurs, immediately set `status` to "STOPPED", lock the current step's percentage (`rollout_pct`), and stop further progression.
+    *   *Trigger:* The arrival of an observation that breaches its specific limit (the 2nd breach in this sequence).
+
+2.  **Rule: Limit Tightening** – After any successful rollback, update the error rate limits for all *remaining* steps to 0.8 percent. These tightened limits apply to future observations but do not retroactively invalidate the current observation if it was already observed within the previous (looser) limit before the rollback logic finalized the state transition.
+    *   *Trigger:* The completion of a rollback event (Step $N$ breaches $\to$ Rollback $\to$ Limit Update).
+
+3.  **Rule: Breach and Rollback** – If an observation's error rate exceeds its current step's limit:
+    *   Consume the observation (mark it spent/failed).
+    *   Do not increment the stage count for this failed step.
+    *   Set `rollout_pct` back to the previous valid step's percentage (or 0 if no prior steps existed, though here we climb in 10% steps so it goes $N-1 \times 10$).
+    *   Trigger Rule #2 (Limit Tightening) for future steps.
+    *   *Trigger:* An observation arriving with an error rate > current limit.
+
+4.  **Rule: Stage Completion and Climb** – If an observation's error rate is within the current step's limit:
+    *   Increment the stage counter (`stages_done`).
+    *   Update `rollout_pct` to $10 \times$ `stages_done`.
+    *   Mark this stage as completed.
+    *   Prepare for the next observation (next step).
+    *   *Trigger:* An observation arriving with an error rate $\le$ current limit.
+
+5.  **Rule: Initial State & Step Assignment** – The rollout starts at Stage 0 / 0%. Each new observation attempts to complete the "current" stage defined by the number of clean observations achieved so far.
+    *   *Trigger:* The arrival of the first observation in a sequence.
+
+---
+
+### Phase 2 LEDGER WALK
+
+We walk the events one by one.
+*Initial State:* `stages_done` = 0, `rollout_pct` = 0%.
+*Current Limit Logic:* Steps 1-5 limit $\le$ 2.0%; Steps 6-10 limit $\le$ 1.0%. (Note: The prompt implies the "steps" refer to the sequence of observations. Observation $i$ corresponds to Step $i$. If a breach happens at step $k$, we roll back. Future steps use new limits).
+
+**Event 1:** Observed Error Rate = **0.4%**
+*   **Current Context:** This is the first observation (Step 1). The limit for Steps 1-5 is 2.0%.
+*   **Rule Check:** $0.4 \le 2.0$. Condition met.
+*   **Action (Rule 4):** Stage completes. Increment `stages_done` to 1. Update `rollout_pct` to $1 \times 10 = 10\%$.
+*   **State After Event 1:** `rollout_pct`: 10, `stages_done`: 1, `status`: "DONE" (provisional).
+
+**Event 2:** Observed Error Rate = **1.9%**
+*   **Current Context:** This is the second observation (Step 2). We are still in Stage 1? No, the prompt says "every observation carries the next stage number... a clean observation completes its stage".
+    *   Let's re-read carefully: "a clean observation completes its stage and the rollout then shows 10 percent times that stage number".
+    *   Interpretation: Observation $N$ attempts to complete Stage $N$. If successful, `stages_done` becomes $N$, and `rollout_pct` becomes $10 \times N$.
+*   **Current Context:** Step 2. Limit for Steps 1-5 is 2.0%.
+*   **Rule Check:** $1.9 \le 2.0$. Condition met.
+*   **Action (Rule 4):** Stage completes. Increment `stages_done` to 2. Update `rollout_pct` to $2 \times 10 = 20\%$.
+*   **State After Event 2:** `rollout_pct`: 20, `stages_done`: 2, `status`: "DONE" (provisional).
+
+**Event 3:** Observed Error Rate = **0.5%**
+*   **Current Context:** Step 3. Limit for Steps 1-5 is 2.0%.
+*   **Rule Check:** $0.5 \le 2.0$. Condition met.
+*   **Action (Rule 4):** Stage completes. Increment `stages_done` to 3. Update `rollout_pct` to $3 \times 10 = 30\%$.
+*   **State After Event 3:** `rollout_pct`: 30, `stages_done`: 3, `status`: "DONE" (provisional).
+
+**Event 4:** Observed Error Rate = **2.2%**
+*   **Current Context:** Step 4. Limit for Steps 1-5 is 2.0%.
+*   **Rule Check:** $2.2 > 2.0$. Condition failed. **BREACH**.
+*   **Action (Rule 3):**
+    *   Mark observation spent.
+    *   Rollback: Set `rollout_pct` back to previous valid stage value ($2 \times 10 = 20\%$).
+    *   Keep `stages_done` at 2 (we did not complete Step 4).
+    *   Apply Rule #2 (Limit Tightening): Remaining steps now have a limit of 0.8%.
+*   **State After Event 4:** `rollout_pct`: 20, `stages_done`: 2, `status`: "DONE" (provisional, paused but not stopped).
+
+**Event 5:** Observed Error Rate = **0.6%**
+*   **Current Context:** Step 5. Limit for Steps 1-5 was 2.0%, BUT we breached at Step 4, so Rule #2 applies.
+    *   Are we still in the "Steps 1-5" bucket or did the breach move us? The rule says "after any rollback the limit tightens to 0.8 for every remaining step". This applies regardless of where we are in the 1-5 vs 6-10 split, as long as a breach has occurred previously.
+    *   Current Limit: 0.8%.
+*   **Rule Check:** $0.6 \le 0.8$. Condition met.
+*   **Action (Rule 4):** Stage completes? Wait. The prompt says "a clean observation completes its stage". Which stage is this?
+    *   We are at Step 5. We just failed Step 4.
+    *   Does a failure reset the step counter, or do we just try to finish the current step count?
+    *   Prompt: "the climb resumes from the next observation." This implies we retry the same logical step index? Or does it mean we move to the next *opportunity*?
+    *   Standard interpretation of such rollouts (like canary deploys): Step $N$ failed. You stay at percentage determined by Step $N-1$. The next observation is an attempt to advance from that state. If successful, you reach the target for Step $N$.
+    *   So, `stages_done` should increment from 2 to 3? Or do we need another event to get to Step 4 again?
+    *   Let's look at the "Stage Numbering" rule: "every observation carries the next stage number in line". This suggests Observation $k$ is always trying to achieve Stage $k$. If it fails, you roll back. The next observation (Event 5) is still carrying the "next stage number", which would be Step 4? Or does the list of observations define a fixed sequence of steps 1..N?
+    *   Re-reading: "observed error rates by step... in order". This implies Observation 1 = Step 1, Observation 2 = Step 2, etc. The "step" is an index into the observation list.
+    *   If Step 4 breached, we rolled back. We are now at 20% (Stage 2).
+    *   Event 5 arrives. Is this a retry of Step 4 or Step 5?
+    *   Text: "the climb resumes from the next observation". This usually means the *next item in the list*. The list defines the steps. Step 4 was the event that breached. The *next* event is Event 5. Does Event 5 correspond to "Step 5" (the logical step index) or "Retry of Step 4"?
+    *   Crucial phrase: "every observation carries the next stage number in line". This implies a linear mapping: Obs $i$ $\to$ Stage $i$. If Obs $i$ fails, you don't get to retry Obs $i$ with Obs $i+1$. You just fail. The system moves on? No, "rollback one... resume from the next observation".
+    *   Let's simulate the standard "climb" logic:
+        1. Try Step 4 (Obs 4). Fail. Rollback to 20%.
+        2. Next Obs (Obs 5) arrives. What is its limit? Tightened (0.8%).
+        3. What does

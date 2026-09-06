@@ -1,0 +1,99 @@
+```text
+WORKSPACE LAYOUT (as defined in README.md)
+
+/tmp/opencode/weather-run/
+├── scripts/
+│   ├── gap_census.py
+│   ├── fill_policy.py
+│   ├── freeze_events.py
+│   ├── convert_units.py
+│   ├── detect_outliers.py
+│   └── verify_pipeline.py
+├── outputs/
+│   ├── weather.md
+│   ├── filled.csv
+│-   gaps.json
+├── rules.md
+├── decisions.txt
+└── run_timestamps.log
+
+README.md (in root)
+```
+
+---
+
+**STAGE 1: GAP CENSUS**
+
+Step 1: Read all daily temperature rows from three stations into a list of dicts, one row per day.  
+Formula: `rows = [dict(row) for row in open("data/raw.csv")]`  
+
+Step 2: For each station, extract missing days (where any field is NaN or empty string).  
+Rule: A gap exists if temperature value is missing OR the entire row is blank.  
+Threshold: Any day with no temperature data counts as a gap; use `pd.isna()` or equivalent in pure Python.  
+
+Step 3: For each station, compute duration distribution of consecutive gaps (in days) using sliding window over sorted dates.  
+Formula:  
+```python
+gaps_by_station = {}
+for station in stations:
+    gap_list = []
+    for i in range(len(rows)):
+        if missing_at(i, station):
+            start = i
+            while i < len(rows) and missing_at(i, station): 
+                i += 1
+            duration = i - start
+            gap_list.append(duration)
+    gaps_by_station[station] = gap_list
+```
+
+Step 4: Compute total missing percentage per station.  
+Formula:  
+`missing_pct = (total_gap_days / total_days) * 100`  
+Total days = 366 (non-leap year), so denominator is fixed at 366.
+
+Step 5: Save gap census to `outputs/gaps.json`.  
+Format:  
+```json
+{
+  "station_A": {
+    "total_missing_days": 42,
+    "gap_duration_distribution": [1, 2, 3, 5],
+    "missing_percentage": 11.54320987654321
+  },
+  "station_B": { ... }
+}
+```
+
+Step 6: Log all gaps per station in raw form (day-by-day) to `outputs/gap_log_per_station.csv`.  
+Each row: date, station, missing_fields (comma-separated), gap_duration.
+
+---
+
+**STAGE 2: FILL POLICY**
+
+Step 1: Define time-interpolation threshold: gaps under 3 days.  
+Rule: For any gap of length < 3 days, interpolate using linear interpolation between adjacent valid days in the same station.  
+Threshold: 3 days — chosen because shorter gaps are likely sensor noise or brief outage; longer gaps require cross-station correlation to avoid overfitting.  
+
+Step 2: Define station-correlation threshold: gaps ≥ 3 days.  
+Rule: For gaps of length ≥ 3 days, use weighted average of neighboring stations at same date (same day-of-year).  
+Weighting formula: `w_i = 1 / (|T_i - T_j| + 0.5)` where T is temperature in °C or °F converted to °C.  
+Threshold: 3 days — justified by empirical observation that sensor drift and calibration errors are more likely over longer absences; cross-station correlation reduces bias from single-point failure.
+
+Step 3: For each row, determine whether it was interpolated (time-based), cross-station, or left as original.  
+Rule: If the row has a gap in temperature field but is not missing due to sensor lie, and interpolation applies → mark with method="time_interp".  
+If gap ≥ 3 days and cross-station used → method="cross_station".  
+If no gap → method="original".
+
+Step 4: Flag any row where interpolation fails (e.g., only one valid day before/after) or where data is inconsistent.  
+Rule: If fewer than two valid days exist on either side of a gap, flag the row with reason "insufficient neighbors" and record in output.
+
+Step 5: Save filled dataset to `outputs/filled.csv` with columns: date, station, temp_celsius, method, original_missing_flag (boolean), gap_duration.  
+Each row must have a method field; if no interpolation applied → method="original".
+
+Step 6: Log all policy decisions per row in `outputs/policy_log.csv`.  
+Format:  
+```csv
+date,station,temp_celsius,method,reason,original_missing
+2023-1

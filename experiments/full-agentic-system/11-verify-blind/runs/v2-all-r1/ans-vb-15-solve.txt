@@ -1,0 +1,89 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the "orientation story" provided as a reference for rule shape (which must be applied to tonight's numbers), here are the rules that change state during an event or claim list:
+
+1.  **Arrival Rule**: Upon arrival of an attempt, increment `attempts` by 1 and add the per-attempt cost (2) to `spend`.
+2.  **Wait Rule**: Upon failure of an attempt, add the current wait duration (starting at 2s, doubling each time: 2, 4, 8...) to `wait_s` and add that duration to `spend`.
+3.  **Budget Check Rule**: After every spend increment (arrival or wait), check if `spend > budget`. If true, trigger a "double" event where `budget` becomes `budget * 2`, reset the suppression flag to false for the re-check, and continue processing the current spend against the new budget.
+4.  **Success Rule**: Upon completion of an attempt (after waits), if it is the successful one (the 4th in this sequence), stop processing further attempts for this job.
+5.  **Suppression Verdict Rule**: After all events are processed and any potential doubling has occurred, determine `suppressed`. It is `true` only if the final `spend` exceeds the *final* `budget` (after any doublings). If `spend <= budget`, `suppressed` is `false`.
+6.  **Final State Calculation Rule**: Compute `budget_after` as `final_budget - final_spend`.
+
+**Trigger Mapping:**
+*   **Event "Attempt Arrival"**: Triggers Rules 1 (Arrival), then potentially Rule 3 (Budget Check).
+*   **Event "Wait Period"**: Triggers Rule 2 (Wait), then potentially Rule 3 (Budget Check).
+*   **Event "Success/Failure Decision"**: Triggers Rule 4 (Stop if success) or allows flow to next event.
+*   **End of Job**: Triggers Rules 5 and 6 for final state determination.
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   `attempts`: 0
+*   `wait_s`: 0
+*   `budget`: 36
+*   `spend`: 0
+*   `suppressed`: false (default)
+
+**Event 1: Attempt 1 Arrival**
+*   Action: Increment attempts, add cost.
+*   Calculation: `attempts` = 1. Cost = 2. `spend` = 0 + 2 = 2.
+*   Budget Check: Is 2 > 36? No.
+*   State After Event 1: `attempts`: 1, `wait_s`: 0, `budget`: 36, `spend`: 2.
+
+**Event 2: Attempt 1 Failure & Wait 1**
+*   Action: Add wait time, add cost.
+*   Calculation: Wait = 2s. Cost = 2 (attempt) + 2 (wait) = 4? No, the prompt says "every attempt costs 2 and every wait second costs 1". The previous spend was 2 (for the attempt). Now we fail. We add the wait cost.
+    *   Wait duration: 2s. Cost of wait: 2 * 1 = 2.
+    *   Total Spend update: Previous `spend` (2) + Wait Cost (2) = 4.
+*   Budget Check: Is 4 > 36? No.
+*   State After Event 2: `attempts`: 1, `wait_s`: 2, `budget`: 36, `spend`: 4.
+
+**Event 3: Attempt 2 Arrival**
+*   Action: Increment attempts, add cost.
+*   Calculation: `attempts` = 2. Cost = 2. `spend` = 4 + 2 = 6.
+*   Budget Check: Is 6 > 36? No.
+*   State After Event 3: `attempts`: 2, `wait_s`: 2, `budget`: 36, `spend`: 6.
+
+**Event 4: Attempt 2 Failure & Wait 2**
+*   Action: Add wait time, add cost.
+*   Calculation: Next wait doubles to 4s. Cost of wait = 4 * 1 = 4.
+    *   Total Spend update: Previous `spend` (6) + Wait Cost (4) = 10.
+*   Budget Check: Is 10 > 36? No.
+*   State After Event 4: `attempts`: 2, `wait_s`: 2+4=6, `budget`: 36, `spend`: 10.
+
+**Event 5: Attempt 3 Arrival**
+*   Action: Increment attempts, add cost.
+*   Calculation: `attempts` = 3. Cost = 2. `spend` = 10 + 2 = 12.
+*   Budget Check: Is 12 > 36? No.
+*   State After Event 5: `attempts`: 3, `wait_s`: 6, `budget`: 36, `spend`: 12.
+
+**Event 6: Attempt 3 Failure & Wait 3**
+*   Action: Add wait time, add cost.
+*   Calculation: Next wait doubles to 8s. Cost of wait = 8 * 1 = 8.
+    *   Total Spend update: Previous `spend` (12) + Wait Cost (8) = 20.
+*   Budget Check: Is 20 > 36? No.
+*   State After Event 6: `attempts`: 3, `wait_s`: 6+8=14, `budget`: 36, `spend`: 20.
+
+**Event 7: Attempt 4 Arrival (Success)**
+*   Action: Increment attempts, add cost.
+*   Calculation: `attempts` = 4. Cost = 2. `spend` = 20 + 2 = 22.
+*   Budget Check: Is 22 > 36? No.
+*   State After Event 7: `attempts`: 4, `wait_s`: 14, `budget`: 36, `spend`: 22.
+
+**Final Calculation:**
+*   Total Attempts: 4
+*   Total Wait Seconds (`wait_s`): 2 + 4 + 8 = 14.
+*   Total Spend: 22 (includes all attempt costs and wait costs).
+*   Budget Check for Suppression: Is `spend` (22) > `budget` (36)? No.
+*   `suppressed`: false.
+*   `budget_after`: 36 - 22 = 14.
+
+---
+
+### Final Answer
+
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 14, "suppressed": false}
+```

@@ -1,0 +1,74 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the "Residency Discipline" constraints (which override general memory rules regarding expiry returns), here are the active rules for tonight's stream:
+
+1.  **Capacity Rule**: A load of size $S$ fits if `current_free_memory` $\ge S$.
+2.  **LRU Eviction Rule**: If a load does not fit, evict the Least-Recently-Touched (LRT) *unpinned* model one at a time until it fits or no unpinned models remain. Each eviction increments the `evictions` counter.
+3.  **Pinned Protection Rule**: Pinned models are never selected for eviction.
+4.  **Deferral Rule**: If an LRU load cannot fit even after evicting all available unpinned models (because only pinned models remain), the load is deferred. The `deferred` list records this ID, and no further evictions occur for this specific load attempt.
+5.  **Touch Update Rule**: Every successful load or eviction moves the involved model to the Most-Recently-Touched position.
+6.  **Unload Rule**: Unloading a resident frees its size immediately; unloading a non-resident is a no-op.
+
+*Note on Expiry/Returns*: The prompt explicitly states "the expiry rule is where walks break" and defines an "Expiry Discipline". However, the provided event stream (`load A`, `load C`, `load D`, `unload D`) contains **no events** that trigger an expiry (e.g., no "close", "return", or "expire" commands). Therefore, no expiry rules are triggered in this specific walk. The instruction to return half of what was granted applies *only* if such a trigger event exists. Since none exist, the `loads` count reflects successful grants, and no returns occur.
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State**:
+- Card Size: 8 GB
+- Residents: {} (Empty)
+- Free Space: 8 GB
+- Recency List: [] (Oldest to Newest)
+- Pinned Models: {C} (Model C is pinned, but currently not resident). *Correction*: The prompt says "model C is pinned and never evicted". This implies if it loads, it stays. It does not imply it is pre-loaded unless stated. The stream starts with `load A`.
+
+**Event 1**: `load A` (Size: 1 GB)
+- Check Fit: Free Space (8 GB) $\ge$ 1 GB? Yes.
+- Action: Load Model A.
+- State Update:
+    - Residents: {A}
+    - Free Space: $8 - 1 = 7$ GB
+    - Recency: [A]
+- Result: Success.
+
+**Event 2**: `load C` (Size: 3 GB)
+- Check Fit: Free Space (7 GB) $\ge$ 3 GB? Yes.
+- Action: Load Model C.
+- State Update:
+    - Residents: {A, C}
+    - Free Space: $7 - 3 = 4$ GB
+    - Recency: [C, A] (C touched most recently)
+    - Note: Model C is pinned. It is now resident and protected.
+- Result: Success.
+
+**Event 3**: `load D` (Size: 4 GB)
+- Check Fit: Free Space (4 GB) $\ge$ 4 GB? Yes ($4 \ge 4$).
+- Action: Load Model D.
+- State Update:
+    - Residents: {A, C, D}
+    - Free Space: $4 - 4 = 0$ GB
+    - Recency: [D, C, A] (D touched most recently)
+- Result: Success.
+
+**Event 4**: `unload D` (Size: 4 GB)
+- Check Resident: Is D in Residents? Yes.
+- Action: Unload Model D.
+- State Update:
+    - Residents: {A, C}
+    - Free Space: $0 + 4 = 4$ GB
+    - Recency: [C, A] (D removed, order of remaining is preserved based on previous touches; C was touched before A in the sequence D->C->A? Wait. Sequence: Load A (Recency: A). Load C (Recency: C, A). Load D (Recency: D, C, A). Unload D removes D. Remaining Recency order is [C, A] where C is most recent).
+- Result: Success.
+
+**Final Totals Calculation**:
+- `loads`: Count of successful load events = 3 (A, C, D).
+- `evictions`: Count of models evicted during the stream = 0.
+- `deferrals`: Count of deferred loads = 0.
+- `deferred`: List of deferred IDs = [].
+
+---
+
+### Final Answer JSON
+
+```json
+{"loads": 3, "evictions": 0, "deferrals": 0, "deferred": []}
+```

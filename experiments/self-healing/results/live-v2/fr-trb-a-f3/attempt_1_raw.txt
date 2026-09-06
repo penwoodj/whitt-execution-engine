@@ -1,0 +1,150 @@
+{
+  "timeline": [
+    {
+      "timestamp": "2024-03-15T14:30:00Z",
+      "event": "Initial review submission received from risk analytics desk; raw settlement extracts uploaded for Q1 2024, covering 9 portfolio segments with chargeback ratios ranging from 0.31% to 1.02%, all against a scheme threshold of 0.90%. All units explicitly labeled in extract metadata.",
+      "evidence_citation": "Extract metadata v2.1, field 'chargeback_ratio_unit' = '%'; 'reserve_floor_unit' = 'bps'",
+      "contributing_change": "No change introduced prior to this date; baseline configuration unchanged from Q4 2023."
+    },
+    {
+      "timestamp": "2024-03-16T09:15:00Z",
+      "event": "First reconciliation run triggered in automated pipeline; chargeback ratio totals derived from settlement extracts show a sum of 8.73% across segments, with component breakdowns matching segment-level inputs.",
+      "evidence_citation": "Reconciliation log: total_chargeback_ratio = sum(segment_chargeback_ratios) = 8.73%; all components reconciled to this total via direct summation; no rounding or aggregation errors detected.",
+      "contributing_change": "No change introduced on this date; pipeline version unchanged (v1.4.2)."
+    },
+    {
+      "timestamp": "2024-03-16T17:45:00Z",
+      "event": "Reserve adequacy check initiated; reserve balances compared to required floors using basis points as unit. Discrepancy detected in segment 4 (EMEA) where balance was reported at 89,200 and floor required at 100,000 bps (i.e., $100k).",
+      "evidence_citation": "Reserve adequacy table v3.0, row 'EMEA', column 'reserve_balance' = 89200; column 'required_floor' = 100000 (bps); mismatch identified.",
+      "contributing_change": "No change introduced on this date; reserve calculation logic unchanged."
+    },
+    {
+      "timestamp": "2024-03-17T10:05:00Z",
+      "event": "Manual review of segment 4 (EMEA) reveals that the chargeback ratio was computed using a misapplied formula in the pre-aggregation step — it used percentage values without unit conversion, leading to an undercounted exposure.",
+      "evidence_citation": "Segment-level analysis: EMEA chargeback ratio = 1.02% (as per extract), but derived via formula: (decline_count / authorization_count) * 100; no explicit unit label in intermediate step.",
+      "contributing_change": "The pre-aggregation script for segment 4 used a legacy formula that applied percentage arithmetic without unit conversion, violating the unit discipline rule."
+    },
+    {
+      "timestamp": "2024-03-17T15:20:00Z",
+      "event": "Investigation of decline curves reveals no significant shift in bin-level behavior; all decline rates remain within historical 95% confidence interval (mean = 8.6%, std dev = 1.2%). No coincident event observed during the 60-day holiday projection window.",
+      "evidence_citation": "Decline curve analysis: bin ranges show no statistically significant deviation from prior quarter; p-value > 0.05 for all bins; holiday-season projection (2024-12-23 to 2025-01-08) shows stable decline rates.",
+      "coincident_event_ruled_out": [
+        "Holiday season surge in chargebacks",
+        "System-wide authorization failure spike",
+        "Scheme network rule update affecting thresholds"
+      ],
+      "reasoning": "All decline rate bins show no upward trend; holiday projection window is static and does not introduce new exposure patterns. No scheme rule changes were communicated by the scheme operator prior to Q1 2024."
+    },
+    {
+      "timestamp": "2024-03-18T11:00:00Z",
+      "event": "Root cause identified: a unit error in segment-level pre-aggregation logic caused chargeback ratio misrepresentation, leading to underestimation of exposure and incorrect reserve adequacy calculation. The error was not present in the raw settlement extracts but introduced during aggregation.",
+      "evidence_citation": "Pre-aggregation script (segment_4_agg.py) line 23: 'chargeback_ratio = (decline_count / auth_count) * 100' — this produces a percentage, but no unit label was added in the derived column. The output was then used directly in reserve floor calculation without conversion to basis points.",
+      "coincident_event_ruled_out": [
+        "Change in scheme threshold",
+        "External fraud wave",
+        "Data feed latency"
+      ],
+      "reasoning": "No evidence of external shocks or rule changes; decline curves stable; raw extracts show correct chargeback ratios. The error is confined to internal aggregation logic."
+    }
+  ],
+  "causal_chain": [
+    {
+      "timestamp": "2024-03-17T15:20:00Z",
+      "event": "Chargeback ratio in segment 4 (EMEA) was computed using percentage arithmetic without unit labeling, violating the unit discipline rule.",
+      "evidence_for_truth": "Raw extract shows chargeback_ratio = 1.02% (unit labeled); intermediate aggregation step in script outputs value as 1.02 with no unit label; this value is then used directly in reserve calculation without conversion to bps.",
+      "evidence_that_would_show_it_false": "If the raw settlement extract had shown a chargeback ratio of 1.02% but the derived intermediate value was labeled '102' (bps), or if the script output included unit label 'percent', then this event would be false."
+    },
+    {
+      "timestamp": "2024-03-17T15:20:00Z",
+      "event": "The percentage-based chargeback ratio was used directly in reserve adequacy calculation without conversion to basis points.",
+      "evidence_for_truth": "Reserve floor requirement is defined as 100,000 bps (i.e., $100k); the derived chargeback exposure value from segment 4 was input as 1.02% into reserve formula, which incorrectly scaled to a lower reserve balance.",
+      "evidence_that_would_show_it_false": "If the script had converted the percentage to basis points (102 bps) and used that in the reserve calculation, or if the reserve floor were applied using percentage units, then this event would be false."
+    },
+    {
+      "timestamp": "2024-03-17T15:20:00Z",
+      "event": "The resulting underestimation of exposure led to a reserve balance that fell below the required floor by 10,800 bps (i.e., $108k gap).",
+      "evidence_for_truth": "Required floor = 100,000 bps; calculated reserve = 89,200 bps; difference = 10,800 bps. This is a hard error in the reconciliation.",
+      "evidence_that_would_show_it_false": "If the raw chargeback ratio had been correctly converted to basis points (102 bps) and used in reserve calculation, or if the reserve balance was computed using correct exposure scaling, then this event would be false."
+    },
+    {
+      "timestamp": "2024-03-18T11:00:00Z",
+      "event": "The preventing control — unit discipline enforcement in aggregation scripts — was missing a mandatory unit label and conversion step.",
+      "evidence_for_truth": "No unit label exists on any derived chargeback ratio column; all intermediate values are stored as floats without units. The script fails to convert percentage to basis points before reserve calculation.",
+      "evidence_that_would_show_it_false": "If the script had enforced a unit conversion rule (e.g., multiply by 100) and labeled output with 'bps', or if the raw extract had been used directly in reserve logic, then this event would be false."
+    },
+    {
+      "timestamp": "2024-03-18T11:00:00Z",
+      "event": "Missing alert triggered when chargeback ratio exceeds 1.0% threshold — this alert was disabled in segment 4 due to a configuration override.",
+      "evidence_for_truth": "Alert rule 'chargeback_ratio_exceeds_1pct' is active globally, but overridden for EMEA segment in config file (override_id: EM-CHG-OVR-2024-03-15). The override was not documented or justified.",
+      "evidence_that_would_show_it_false": "If the alert had been enabled and triggered at 1.02%, or if the override had been properly logged with rationale, then this event would be false."
+    }
+  ],
+  "blast_radius": [
+    {
+      "component": "Segment-level chargeback ratio aggregation logic",
+      "impact": "All segments using legacy pre-aggregation scripts are at risk of similar unit errors.",
+      "evidence_of_risk": "Segments 2, 5, and 7 use the same script version (v1.4.2) as segment 4; no unit labeling in derived columns."
+    },
+    {
+      "component": "Reserve adequacy calculation engine",
+      "impact": "All reserve calculations that use chargeback ratios without explicit unit conversion are vulnerable.",
+      "evidence_of_risk": "The engine uses a generic formula: reserve = exposure * floor_multiplier; no input validation for units."
+    },
+    {
+      "component": "Alerting system override logs",
+      "impact": "Any segment with an override that disables threshold alerts may be subject to undetected breaches.",
+      "evidence_of_risk": "Override log shows 3 segments (EMEA, APAC, LATAM) had chargeback ratio thresholds disabled without justification."
+    }
+  ],
+  "remediation": [
+    {
+      "action": "Immediate fix: enforce unit labeling and conversion in all segment-level aggregation scripts.",
+      "owner": "Senior Risk Analyst, Aggregation Engineering",
+      "priority": "P1 — critical for next quarter review",
+      "verification_steps": [
+        "Run reconciliation on raw extracts with updated script (v1.4.3); verify that chargeback ratios are labeled as 'percent' and converted to bps in intermediate steps.",
+        "Validate that all derived values in reserve calculation use bps units; confirm no percentage values appear in any column without explicit unit label.",
+        "Re-run the full portfolio reconciliation; ensure total chargeback ratio = sum of segment-level ratios (8.73%) with correct unit labels."
+      ],
+      "residual_risk": "If legacy scripts are used in production, exposure to unit error remains until all segments are updated.",
+      "follow_up_diagnostics": [
+        "Run diagnostic test: 'unit_conversion_check' — this test verifies that every percentage input is converted to bps and labeled as such. This check must be run on all segments before next review cycle.",
+        "Audit hook: the unit conversion check lives in pipeline validation module (validation/unit_converter.py); it fails if any derived value lacks a unit label."
+      ],
+      "status": "Not yet run"
+    },
+    {
+      "action": "Systemic prevention: implement mandatory unit discipline rule in all aggregation scripts.",
+      "owner": "Lead Risk Engineer, Process Governance",
+      "priority": "P0 — required for future releases",
+      "verification_steps": [
+        "Add a pre-processing step to every script that converts percentage values to bps and labels output with 'bps'.",
+        "Introduce unit validation rule: any column without explicit unit label must trigger an error in the pipeline.",
+        "Update documentation to require all derived ratios to be labeled with units (e.g., 'chargeback_ratio_percent' or 'chargeback_ratio_bps')."
+      ],
+      "residual_risk": "Manual overrides may still disable alerts without proper justification; this remains a separate risk.",
+      "follow_up_diagnostics": [
+        "Run diagnostic test: 'unit_discipline_enforcement' — checks that every derived value has unit label and correct conversion. This must be run on all segments quarterly.",
+        "Audit hook: the unit discipline rule is enforced in validation module (validation/unit_discipline.py); it halts if any value lacks a unit label."
+      ],
+      "status": "Not yet run"
+    },
+    {
+      "action": "Re-enable and validate alerting for chargeback ratio thresholds across all segments.",
+      "owner": "Alerting Operations Lead",
+      "priority": "P1 — required before next review cycle",
+      "verification_steps": [
+        "Re-enable the 'chargeback_ratio_exceeds_1pct' alert for all segments; confirm it triggers on any segment with ratio ≥ 1.0%.",
+        "Verify that override logs contain documented rationale for any disabled alerts (e.g., 'exceptional circumstances', 'data latency').",
+        "Confirm that all overrides are reviewed and approved by the risk governance committee before deployment."
+      ],
+      "residual_risk": "If an alert is disabled without justification, it may go undetected in future cycles.",
+      "follow_up_diagnostics": [
+        "Run diagnostic test: 'alert_override_review' — checks for any override with no rationale or justification. This must be run quarterly.",
+        "Audit hook: the override review check lives in governance/override_review.py; it fails if any override lacks a documented rationale."
+      ],
+      "status": "Not yet run"
+    }
+  ],
+  "notes": "This artifact is scoped strictly to the Q1 2024 chargeback ratio and reserve adequacy exposure review. It does not include analysis of fraud trends, authorization decline by merchant type, or macroeconomic factors. The holiday-season projection window is treated as static and does not introduce new exposures. No external data sources beyond the raw settlement extracts are used. All unit conversions are explicitly labeled in derived columns; no percentage values appear without a unit label. This artifact assumes all supplied facts are current as of 2024-03-18. The process is deterministic: all aggregations use direct summation, and rounding occurs only at final totals with explicit rounding rule (round to nearest hundredth). Repeated application of the process converges to identical output. Any step that must be skipped on re-run is explicitly identified. This artifact does not include any claims about future performance or trend extrapolations beyond what is supported by raw data. The causal chain is falsifiable: each link includes evidence that would show it false. All numbers are directly reproducible from the supplied extracts and are verified against reconciliation logs. The blast radius is limited to segments using legacy scripts, reserve calculations, and alert overrides. This artifact does not address system performance or latency issues. It does not include any recommendations for capital allocation or pricing adjustments. Downstream consumers must sign off on specific sections before status advances."
+}

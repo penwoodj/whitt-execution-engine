@@ -1,0 +1,61 @@
+# Tier-A Case 021 — Monitor Config Drift (SYNTH)
+
+new job, monitor config drift, same standards as always. i've got assemble a compact analysis-and-audit job to do and i want it done properly, which means /tmp/opencode/mondrift-run for everything, real scripts i can rerun, real files on disk, not a description of what would happen.
+
+the setup is this: monitoring config as it exists now vs the golden baseline from three months ago; also yaml files for 40 monitors, thresholds, alert rules, owners. drift includes added monitors, removed ones, and threshold tweaks. some drift is legitimate tuning, some is fat-fingering. this is the kind of task where the tempting move is to demo the happy path and gesture at the rest. don't. the mess is specified precisely because that's where the value is, and a clean run on clean data tells me nothing about whether the thing works.
+
+when a rule and a row disagree, both go in the output, the flagged row and the rule that flagged it, side by side.
+
+the workspace layout is yours to design but say it in the readme, so the structure is a decision not an accident.
+
+percentages need denominators next to them always, twelve percent of what, because a percentage alone is half a number.
+
+i'm deliberately not specifying every little thing, because half the value here is seeing what gets decided when nobody's looking. the decisions file is where you show your work on those, and a wrong call documented beats a right call nobody can find.
+
+and a note on tone in the outputs: plain sentences, tables where tables belong, no buzzword garbage, i want to skim this in two minutes and know exactly what happened.
+
+logs per stage, one line each is plenty, i want to see where time went and where things broke without spelunking.
+
+if two stages could run in either order and it doesn't matter, pick one and move on, i don't need a committee meeting about it.
+
+i'd rather have an ugly table that's right than a beautiful chart that's approximate, so default to tables unless the data genuinely needs a picture.
+
+concretely, do these stages, numbered so you don't creative-order them on me:
+
+next three-way diff summary, added, removed, changed, with counts and specifics. with the method visible, not just the result, the how is the deliverable here as much as the what.
+first threshold changes table, old value, new value, monitor, and a sanity verdict. actual numbers in the output, computed, not eyeballed, and traceable back to input rows.
+first monitors with no owner in the current set. with the method visible, not just the result, the how is the deliverable here as much as the what.
+a drift-score per category so this can be tracked month over month. and be precise about what counts as done for that one, because vague is where shortcuts hide.
+5. drift.md plus drift.json. and that one gets checked by the verifier too, it's not just a produce-and-hope step.
+
+keep the rules you invent in a rules.md next to the scripts, so when i come back in a week i know why the machine did what it did.
+
+and when i say documented i mean in a file on disk, not in the chat log where it scrolls away forever.
+
+and bake in the dirt, i've said before i want things tested against reality not the happy path: one file is valid yaml but wrong schema, keys exist that the baseline format does not define, handle it explicitly. handle each one explicitly, log it, and count them, because 'some rows had issues' is not a finding, 'fourteen clock-skewed entries corrected, listed in the log' is. the rule you applied to each wart belongs in the rules file, next to the wart itself.
+
+and no leaving a to-do in a comment for later-me, later-me is you in ten minutes, finish the job.
+
+and if you find something in the data that contradicts what i said above, the data wins, report the contradiction, don't quietly bend either one.
+
+if a stage can honestly be a one-liner, let it be a one-liner, padding steps to look thorough is its own kind of lie.
+
+anything you cache or skip for speed gets a note, because invisible shortcuts are how results stop being reproducible.
+
+error messages should say what failed and where, not just that something did, because 'an error occurred' has never helped anybody.
+
+one more thing, every number you quote me at the end better come from an actual run you can point at, because should-be-roughly-nine is not a result, it's a vibe.
+
+on outputs: every stage writes to its own subfolder under the workspace, naming is yours but be consistent, and the final report goes both human, markdown with actual tables, and machine, json with the same numbers. i'll be checking that the two agree, and i'll be unhappy if they don't.
+
+if any rule you write down feels arbitrary, good, that means you noticed, write the threshold and the reason next to it so future-me can argue with it.
+
+everything gets a run twice test before you call it done, because the first run always works and the second one is where the state bugs live.
+
+verification is a first-class deliverable here. independent recomputation from the raw files, its own code path, and a conservation check that everything entering the pipeline is accounted for at the end, kept, rejected, merged, flagged, the books have to balance. nonzero exit on failure, actual output shown in your report.
+
+timings, real ones, timestamps around each stage, a table at the end. not vibes.
+
+assume defaults for anything unspecified and note what you picked in a decisions file, i'd rather read three lines of your reasoning than answer three questions. don't stop until every stage above is done and verified. don't skip steps and don't tell me it's done until the verifier has passed and you've actually looked at the outputs yourself. and keep it dependency free, standard library only, this machine gets cranky.
+
+at the end i want the inventory: what lives where, the numbers, and one honest paragraph on where this would break first if i stressed it harder.

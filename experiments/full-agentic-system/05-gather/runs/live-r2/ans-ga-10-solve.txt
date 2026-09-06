@@ -1,0 +1,98 @@
+Based on the source material and the specific rules provided in the "TONIGHT'S EVENTS" section, here is the analysis of the Cache Change Rollout.
+
+### Phase 1: Rule Scan & Trigger Identification
+
+The following rules govern the state changes based on the observed error rates (events):
+
+1.  **Rule:** Step Limit Enforcement for Steps 1-5.
+    *   **Condition:** If `position` $\le$ 5, the maximum allowable `rate` is **2.0%**.
+    *   **Trigger:** Every observation in steps 1 through 5.
+    *   **Effect on Breach:** If observed rate > limit, it counts as a breach.
+
+2.  **Rule:** Step Limit Enforcement for Steps 6-10.
+    *   **Condition:** If `position` $\ge$ 6 and $\le$ 10, the maximum allowable `rate` is **1.0%**.
+    *   **Trigger:** Observations in steps 6 through 10 (None occurred).
+
+3.  **Rule:** Breach Counting & Stage Completion Logic.
+    *   **Condition:** A "clean observation" completes a stage equal to its position. A "breaching observation" completes nothing and is spent.
+    *   **Trigger:** Every observation line.
+    *   **Effect on Rollout:** Rollout = 10% $\times$ `stages_done`.
+
+4.  **Rule:** Post-Breach Limit Tightening (First Breach).
+    *   **Condition:** If a breach occurs.
+    *   **Trigger:** Any observation resulting in a breach.
+    *   **Effect:** Limits for all *remaining* steps tighten to **0.8%**.
+
+5.  **Rule:** Status Determination (Exactly One Breach + List Ends).
+    *   **Condition:** Total breaches = 1 AND list ends after the last event.
+    *   **Trigger:** End of sequence with exactly one breach recorded.
+    *   **Effect on Status:** Set status to **"PAUSED"**.
+
+6.  **Rule:** Second Breach Stop Logic (Not triggered here).
+    *   **Condition:** Total breaches $\ge$ 2.
+    *   **Trigger:** Any observation resulting in a second breach.
+    *   **Effect on Status:** Set status to **"STOPPED"**.
+
+---
+
+### Phase 2: Ledger Walk (Event Application)
+
+Processing the 5 observations in strict arrival order:
+
+1.  **Line 1** (Step 1):
+    *   `position`: 1
+    *   `rate`: 0.4%
+    *   `limit` (Base for Step 1): 2.0%
+    *   `verdict`: CLEAN (0.4 $\le$ 2.0)
+    *   `stages_done`: 1 (Clean observation at pos 1 completes stage 1)
+    *   `rollout`: $10 \times 1 = 10$%
+
+2.  **Line 2** (Step 2):
+    *   `position`: 2
+    *   `rate`: 1.9%
+    *   `limit` (Base for Step 2): 2.0%
+    *   `verdict`: CLEAN (1.9 $\le$ 2.0)
+    *   `stages_done`: 2 (Clean observation at pos 2 completes stage 2)
+    *   `rollout`: $10 \times 2 = 20$%
+
+3.  **Line 3** (Step 3):
+    *   `position`: 3
+    *   `rate`: 0.5%
+    *   `limit` (Base for Step 3): 2.0%
+    *   `verdict`: CLEAN (0.5 $\le$ 2.0)
+    *   `stages_done`: 3 (Clean observation at pos 3 completes stage 3)
+    *   `rollout`: $10 \times 3 = 30$%
+
+4.  **Line 4** (Step 4):
+    *   `position`: 4
+    *   `rate`: 2.2%
+    *   `limit` (Base for Step 4): 2.0%
+    *   `verdict`: BREACH (2.2 > 2.0) -> **Breaches: 1**
+    *   `stages_done`: 3 (Breach at pos 4 completes nothing; retains last completed stage count of 3)
+    *   `rollout`: $10 \times 3 = 30$%
+    *   *Note:* Future limits would tighten to 0.8%, but no further events occur.
+
+5.  **Line 5** (Step 5):
+    *   `position`: 5
+    *   `rate`: 0.6%
+    *   `limit` (Post-breach limit for Step 5): 0.8% (Tightened from rule #4)
+    *   `verdict`: CLEAN (0.6 $\le$ 0.8) -> Note: Even though it passed the tightened limit, the stage count does not increase because the previous event was a breach and stages are fixed by position of clean events only. The rule states "clean observation completes stage equal to its own position". However, since Line 4 was a breach, Line 5 is the next event. Is it treated as completing stage 5?
+    *   *Correction on Logic:* Let's re-read: "breaching observation completes nothing... clean observation completes stage equal to its own position."
+    *   If Line 4 breached, `stages_done` was stuck at 3.
+    *   Line 5 is a clean event (0.6 $\le$ 0.8). Does it complete stage 5? Or does the system only count stages for positions that were clean *in sequence*? The rule says "clean observation completes stage equal to its own position". It implies absolute position based on being clean, regardless of prior breaches, provided the limit was met at that specific step.
+    *   However, usually in these rollouts, a breach resets progress or keeps it at the last completed stage. Let's look at the `rollout` calculation: "even if earlier positions were spent on breaches." This suggests stages are independent counters? No, "stage numbering is fixed by position". If pos 4 breached, did pos 5 complete its stage?
+    *   Scenario A (Sequential Integrity): Once a breach happens, you cannot progress further. `stages_done` remains 3.
+    *   Scenario B (Absolute Clean Count): Pos 5 was clean ($0.6 \le 0.8$), so it completes Stage 5. `rollout` becomes 50%.
+    *   Let's check the constraint: "breaching observation completes nothing...". It doesn't say subsequent ones are blocked. But standard rollout logic implies a breach stops the climb for that specific step, and often the whole sequence if not handled carefully. However, the rule explicitly says limits tighten after a breach. Why tighten limits if you can't complete the stage? The existence of a tightened limit (0.8%) implies Step 5 *can* be checked against it.
+    *   If Step 5 is clean against the tightened limit, does it count as Stage 5?
+    *   Let's re-read: "clean observation completes stage equal to its own position". This sounds absolute. Pos 1=Stage 1, Pos 2=Stage 2... if Pos 4 was a breach, it didn't complete Stage 4. If Pos 5 is clean, does it complete Stage 5?
+    *   Wait, the rule "stage numbering is fixed by position" and "clean observation completes stage equal to its own position". If I am at position 5, and I pass the limit, I complete stage 5. The fact that pos 4 failed doesn't retroactively invalidate pos 5's success in completing *its* stage, unless there's a rule saying "stages must be contiguous". There is no such rule listed in the text provided ("breaches do not shift count").
+    *   So, Line 5 completes Stage 5. `stages_done` = 5. `rollout` = 50%.
+    *   **BUT**, let's look at the status logic: "exactly one breach and list ends: status PAUSED". This confirms we have exactly one breach (Line 4). The state is PAUSED.
+    *   What if Line 5 was a breach? Then 2 breaches -> STOPPED.
+    *   Since Line 5 is clean (0.6 <= 0.8), it completes stage 5.
+    *   Therefore: `stages_done` = 5, `rollout_pct` = 50.
+
+    *Self-Correction/Refinement:* Is there a hidden rule that stages must be contiguous? "stage numbering is fixed by position... clean observation completes stage equal to its own position". If pos 4 was a breach, it didn't complete stage 4. Pos 5 completes stage 5. This creates a gap in completion (Stage 3 -> Stage 5). The text says "breaches do not shift count". This implies the count is just the sum of completed stages.
+    *   Let's assume the standard interpretation: You only advance the counter if you are clean. If you are at step 4 and fail, you stay at 3. At step 5, if you pass (even with tight limits), do you jump to 5? Or does the system require sequential completion (3 -> 4 -> 5)?
+    *   Re-reading: "clean observation completes stage equal to its own position". It defines the action of a clean observation. It doesn't explicitly forbid jumping stages, but "rollout then shows 10 percent times that stage number" implies the current state variable `stages_done`. If pos 4 failed, `stages_done` was 3. If pos 5 passes, does it

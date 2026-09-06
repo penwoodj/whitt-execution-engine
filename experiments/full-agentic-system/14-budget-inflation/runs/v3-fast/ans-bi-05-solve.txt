@@ -1,0 +1,58 @@
+### Phase 1 RULE SCAN
+Based on the task description and "orientation story" analysis, here are the rules that change state during the event or claim list:
+
+1.  **Grant Rule**: Requests arrive in strict order; if the pool covers the full ask, grant the full amount and subtract from the pool. If the pool cannot cover the full ask, grant the partial available amount (pool drops to zero) and mark the request as partially granted.
+2.  **Denial Rule**: A request arriving at an empty pool is denied (listed by ID). The state does not change for this specific event other than recording the denial; no tokens are added back immediately.
+3.  **Expiry/Return Rule**: When a grant expires (triggered by the completion of the *next* request), it returns half of the amount actually granted to that specific grant, rounded down (`floor(granted / 2)`). This return is applied to the pool *before* the next request is processed.
+4.  **No-Other-Return Rule**: Grants never return any other way (e.g., no automatic refunds upon denial or partials unless explicitly expired).
+
+**Triggers:**
+*   Request Arrival ($r_1$ through $r_6$) triggers Grant/Denial logic.
+*   Completion of Request $r_{n}$ triggers Expiry/Return for the grant associated with $r_{n-1}$.
+
+---
+
+### Phase 2 LEDGER WALK
+Applying events in strict arrival order ($r_1 \to r_6$).
+**Initial State**: Pool = 40.
+**Expiry Logic**: Grant from $r_i$ expires when $r_{i+1}$ completes. Return = $\lfloor \text{granted}_i / 2 \rfloor$.
+
+| Event | Action Description | Calculation | State After Event (Pool) |
+| :--- | :--- | :--- | :--- |
+| **Arrival: r1** | Ask 5. Pool 40 $\ge$ 5. Grant full. | $40 - 5 = 35$ | 35 |
+| **Completion: r1** (Triggers Expiry for r1) | *Note*: The prompt says "the grant for r2 expires after request r3 completes". This implies grants do not expire immediately upon the next arrival, but only when the *next* request finishes. However, looking at the sequence $r_1 \to r_2$, there is no explicit "completion" event listed between arrivals in the input stream provided ("arrival order: r1..."). Let's re-read carefully: "the grant for r2 expires after request r3 completes". This implies grants persist until their specific trigger. Since we only have an arrival list, and no "completion" events are explicitly inserted into the stream *between* arrivals in the text (it just lists requests), we must assume the standard flow: Request arrives $\to$ Grant/Deny happens. Does expiry happen? The rule says "expires after request r3 completes". Since we don't have a "completion" event for $r_1$ or $r_2$ in the input list, they remain active until their specific trigger ($r_3$ completion for $r_2$, etc.). Wait, if $r_1$ is never completed in the stream? The stream ends at $r_6$. Therefore, only grants that have a defined "completion" event will expire. But the input *only* lists arrivals. This suggests either: 1) Every request completes immediately after arrival (standard batch processing), or 2) Only the ones with explicit triggers in the text matter. The text says "the grant for r2 expires after request r3 completes". It does not say "r1 expires after r2 completes". Let's look at the orientation story: "third ask of 13 landed against only 17... first grant expired and returned 5". In that story, expiry happened mid-stream. Here, we have a specific rule: "the grant for r2 expires after request r3 completes". This is asymmetric. $r_1$'s expiry condition is not stated. If the system processes requests sequentially ($r_1$ arrives, finishes; $r_2$ arrives, finishes...), then $r_1$ would expire when $r_2$ finishes. But the text specifically calls out $r_2 \to r_3$. Let's assume the standard interpretation for these "ledger" puzzles: **Every request completes immediately upon arrival** unless stated otherwise, OR the specific expiry rule overrides general behavior. The specific rule says "$r_2$ expires after $r_3$". It is silent on $r_1$. If $r_1$ never expires (because no rule triggers it), then we ignore its return. Let's trace with this assumption: Only $r_2$ has an explicit expiry trigger mentioned ($r_3$ completion). What about $r_3, r_4, r_5$? The pattern "grant for X expires after Y completes" usually implies a chain. If the text only specifies $r_2 \to r_3$, maybe it's a unique constraint. However, looking at the orientation story again: "first grant expired... third ask landed". It seems expiry is an event that happens. Let's re-read the specific instruction: "the grant for r2 expires after request r3 completes". This is a hard rule for $r_2$. Is there a rule for others? No. If no rule exists, they don't expire? That seems unlikely for a "pool" system where tokens are usually recycled. But strict adherence to the text: Only $r_2$ has an expiry trigger defined. Let's proceed with **only** applying the return for $r_2$. |
+| **Arrival: r2** | Ask 8. Pool 35 $\ge$ 8. Grant full. | $35 - 8 = 27$ | 27 |
+| **Arrival: r3** | Ask 12. Pool 27 $\ge$ 12. Grant full. | $27 - 12 = 15$ | 15 |
+| **Completion: r3** (Triggers Expiry for r2) | Rule: "grant for r2 expires after request r3 completes". Return = $\lfloor \text{granted}_{r2} / 2 \rfloor$. Granted $r_2$ was 8. Return = $\lfloor 4 \rfloor = 4$. Add to pool. | $15 + 4 = 19$ | 19 |
+| **Arrival: r4** | Ask 14. Pool 19 $\ge$ 14. Grant full. | $19 - 14 = 5$ | 5 |
+| **Arrival: r5** | Ask 17. Pool 5 < 17. Partial grant. Grant available (5). Deny remainder. | $5 - 5 = 0$. Request $r_5$ is partially granted, effectively denied for the rest? The rule says "a request arriving at an empty pool is denied". Here it's not empty, but insufficient. "grants are partial when the pool cannot cover the full ask... grant what is there and the pool drops to zero". So $r_5$ gets 5. Pool becomes 0. | 0 |
+| **Arrival: r6** | Ask 21. Pool 0 < 21. Empty pool. Deny. | No change. | 0 |
+
+*Self-Correction on Expiry Logic*: The prompt says "the grant for r2 expires after request r3 completes". It does not mention $r_1$ expiring after $r_2$. If we strictly follow the text, only $r_2$ returns tokens.
+Let's re-verify the "empty pool" rule vs "partial" rule.
+$r_5$: Ask 17, Pool 5. Rule: "grants are partial when the pool cannot cover the full ask". So $r_5$ gets 5. Pool becomes 0.
+$r_6$: Ask 21, Pool 0. Rule: "a request arriving at an empty pool is denied". So $r_6$ is denied.
+
+Total Granted:
+$r_1$: 5
+$r_2$: 8
+$r_3$: 12
+$r_4$: 14
+$r_5$: 5 (Partial)
+$r_6$: 0 (Denied)
+Sum = $5+8+12+14+5 = 44$.
+
+Total Returned:
+Only $r_2$ returned 4.
+Net Pool = Start - Sum(Granted) + Sum(Returned) = $40 - 44 + 4 = 0$.
+
+Wait, let's re-read the orientation story logic to ensure I'm not missing a "general" expiry rule implied by the shape. "the first grant expired and returned 5". In that story, it was the *first* grant (from $r_1$) expiring after $r_2$? No, "third ask of 13 landed against only 17... first grant expired". The text in the task is very specific: "the grant for r2 expires after request r3 completes". It does not say "grants expire sequentially". It names a specific pair. I will stick to the literal instruction: Only $r_2$ returns.
+
+Let's double check the math on $r_5$.
+Pool before $r_5$: 5. Ask: 17.
+Action: Grant partial (5). Pool -> 0.
+Is this a "denial"? The rule says "a request arriving at an empty pool is denied". It does not say "insufficient pool is denied", it says "grants are partial... grant what is there and the pool drops to zero". So $r_5$ is partially granted, not denied.
+$r_6$: Pool 0. Ask 21. Action: Denied.
+
+Final Counts:
+Granted Units: $5 + 8 + 12 + 14 + 5 = 44

@@ -1,0 +1,823 @@
+workflow_id: harness_v7_hb-05
+name: "Harness v7 - hb-05"
+description: "TABLE->GATE->AGGREGATE->JUDGE-V2->LEAK-AUDIT. Case: hb-05 hops=5 route=heavy"
+version: "7.0.0"
+author: "Experiment"
+tags: [harness, agentic, v7, routing, snapshot, meter, audit]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  m_light:
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  m_heavy:
+    name: "Qwen3-5-9B-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  m_judge:
+    name: "Hermes-2-Pro-Mistral-7B.Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  timing:
+    cooldown_after_unload_secs: 0
+    min_tmp_space_mb: 50
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+  steps:
+    s00_screen:
+      generative_entity: "${models.m_heavy}"
+      prompt: "pre-flight"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/screen-validate.py /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-05.yml"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - skip_step: true
+
+    s01_solve:
+      generative_entity: "${models.m_heavy}"
+      prompt: |
+        ROLE: on-call operator. Precise. Zero fluff.
+
+                You are the release conductor for the Friday deployment train, and the
+        train's rules were rewritten after the March incident when a rolled-back
+        car left a slot empty for three hours while a ready candidate sat in the
+        station. Tonight you are running the first train under the new rules, and
+        the post-train report needs the final composition numbers exactly right.
+        
+        The train works like this. The train carries exactly eight cars — that is
+        its capacity, fixed by the infrastructure review and not open to
+        interpretation. Candidates for the train are service releases, and they
+        board in readiness order, which is the order their owning teams certified
+        them ready. Before departure the train runs a smoke pass over everything
+        boarded, and any car that fails smoke within the first ten minutes is
+        rolled back — removed from the train. Under the new rule, a rolled-back car
+        immediately frees its slot, and the freed slot is offered to the next
+        ready candidate in certification order who has not yet boarded. If that
+        replacement also fails its smoke test, the slot frees again and passes to
+        the next candidate, and so on until a replacement passes or the candidate
+        list is exhausted. A second smoke window confirms the final consist before
+        the train is declared departed. Cars that never boarded because the train
+        filled up, or because they were passed over after failing smoke, are
+        waitlisted for Monday.
+        
+        Ten candidates certified ready tonight, in this certification order. Car
+        one, the authentication service, certified first. Car two, the notification
+        worker. Car three, the billing calculator — a risky one, big rewrite.
+        Car four, the search indexer. Car five, the admin dashboard. Car six, the
+        rate limiter. Car seven, the file-preview service. Car eight, the mobile
+        gateway. Car nine, the metrics collector. Car ten, the webhook dispatcher,
+        certified last, literally as the train doors were about to close.
+        
+        Boarding begins. The first eight candidates in certification order take
+        the eight slots: authentication, notifications, billing, search, dashboard,
+        rate limiter, file-preview, mobile gateway. The metrics collector and the
+        webhook dispatcher initially remain on the platform.
+        
+        The first smoke window runs, ten minutes of canary traffic, and two cars
+        fail. The billing calculator — car three — trips a currency-rounding
+        assertion within four minutes, and its team pulls it. The file-preview
+        service — car seven — times out on its health endpoint at minute eight,
+        and it rolls back too. Both rollbacks free their slots immediately under
+        the new rule.
+        
+        The freed slots refill in certification order from the remaining
+        candidates. The metrics collector, certified ninth, boards into the first
+        freed slot. The webhook dispatcher, certified tenth, boards into the
+        second. Both are onboard before the refill window closes.
+        
+        The second smoke window then runs over the full consist — the six original
+        cars that passed the first window plus the two replacements. This time
+        everything passes. The billing calculator and the file-preview service,
+        having failed smoke once each, are out of tonight's train entirely; they do
+        not get a second attempt within a single train under the rules, and they
+        join the waitlist for Monday along with anyone who never boarded.
+        
+        One footnote that must not leak into the counts: the platform team's
+        station monitoring system reports the door-cycle count for its own
+        maintenance dashboard, and tonight it logged three door cycles — the
+        initial boarding, the double refill, and a final door check. Door cycles
+        are not cars; you do not manage the station monitoring system; and three
+        door cycles over a train of eight cars is exactly the kind of number that
+        sounds meaningful in a hallway conversation and is not.
+        
+        The report needs: how many cars ultimately departed on the train, how many
+        candidates were rolled back after failing smoke, and how many candidates
+        ended the night waitlisted for Monday.
+        
+        Tonight's train is the first under the revised cut policy, and the whole
+        release organization knows it. The old policy played it looser — a train
+        held for any failing car, everyone re-boarding once the fix landed — and
+        last quarter that generosity produced a train that departed four hours
+        late with a passenger manifest everyone had lost track of, followed by a
+        week of arguing about which fixes had actually shipped. The retrospective
+        recommended clarity over comfort — trains leave when the window opens,
+        failing cars roll back to their station, stragglers wait for the next
+        train — and after a pilot run behind closed doors the policy took effect
+        for good tonight. The release manager's opening remarks at the boarding
+        review quoted the old incident number twice, which tells you how eager
+        everyone is to not repeat it.
+        
+        Your role as car conductor for this train has been mostly trajectory
+        watching. Each car's health checks run continuously through final
+        integration, and the dashboard paints each one green, red, or pending
+        with a refresh that feels slower on nights like this. As the window
+        approached you walked the board car by car, confirmed each red car's
+        rollback plan existed and its owner was on the bridge, and marked your
+        portion of the departure checklist. The checklist itself is a lesson in
+        humble bureaucracy — forty lines, each initialed, none of them glamorous,
+        all of them existing because some past train taught the checklist's
+        authors a specific lesson about what happens when nobody looks.
+        
+        The station around the train hums with activity that will not touch the
+        manifest. A fleet of canary deployments you do not manage rides its own
+        smaller schedule in production, graduating traffic percentages
+        autonomously and reporting to a different dashboard entirely. The docs
+        pipeline publishes release notes from the train's contents the moment it
+        departs, occasionally lagging reality by minutes that annoy the support
+        team but change no facts. And the sales-enablement group tracks feature
+        availability against customer commitments in a spreadsheet that links
+        trains to promises — analysis layered on the outcome, never part of the
+        boarding decision itself.
+        
+        In the final minutes before the window opens, the discipline that
+        matters most is re-verification of the boarding state. You re-read each
+        car's last health check directly rather than trusting the dashboard's
+        color, because a cache serving stale green is the oldest trick this
+        infrastructure knows. You confirm that every rollback already executed
+        left its car in a state the station can re-board next train, since a
+        half-rolled car is worse than a failing one — it presents healthy
+        patches of both versions and fools every check that samples shallowly.
+        You walk the waitlist one last time against the departure checklist's
+        capacity column, verifying that the number of cars holding a seat
+        matches the number of seats the train actually has. Only when the board,
+        the checklist, and the manifest all tell the same story do you initial
+        the final line — the same manifest whose counts you are about to report,
+        and the last thing standing between tonight and the record.
+        
+        One more wrinkle of the cut policy deserves to be stated plainly, since
+        it is the part new conductors most often get wrong. A car that rolls
+        back does not damage the train's record — rollback is a designed
+        outcome, not a failure of process, and the station logs it with the
+        same neutrality as a departure. The waitlist state exists for cars that
+        are neither aboard nor rolled back, and its residents sometimes feel
+        embarrassed to carry it, as though waiting were a verdict. It is not.
+        The manifest you will report simply records where each car stood when
+        the window closed — aboard, rolled back, or waiting — and the healthiest
+        culture the release team has built in years is the one that treats all
+        three states as ordinary outcomes of an ordinary train.
+        
+        A note on the boarding review itself, because its tone shapes what the
+        counts mean. The review is short by design — five minutes, the board
+        projected, the release manager reading the cut policy aloud once like a
+        captain invoking the sea laws, and then the window simply opens.
+        Nothing in the review changes a car's state; the checks have already
+        spoken, the rollbacks have already run where they were going to run,
+        and the waitlist already holds whoever it holds. The ritual exists so
+        that tomorrow, when someone asks why a car waited, the answer begins
+        with a policy everyone heard read aloud rather than a rule someone
+        remembers differently. The counts you report tonight are that policy's
+        shadow cast across nine cars, and the review made sure nobody can
+        claim the light surprised them.
+        
+        One final check completes the ritual. The conductor's manifest, the
+        departure checklist, and the station's own boarding record are three
+        documents that must agree before the window opens, and you walk all
+        three one last time in parallel — nine cars, three states, no
+        discrepancy surviving the cross-read. The release manager watches you
+        do it without comment, because watching conductors verify is how
+        release managers spend window-eve minutes, and because everyone in the
+        room remembers the train where the three documents disagreed and the
+        argument that followed outlived the quarter. They agree tonight. The
+        window opens. The train does what trains now do under the revised
+        policy, and the counts you report are simply the truth of it.
+
+        METHOD: for EACH entity below, derive its answer from the rules.
+        Track state step by step in plain text. Entities you do not manage
+        NEVER count. Check deadline/budget rules BEFORE finalizing.
+
+        Entities (one line each, id then question):
+        - departed: cars on the departed train (6 first-window survivors + 2 replacements) [answer format: a whole number]
+        - rolled_back: candidates rolled back after failing smoke (billing, file-preview) [answer format: a whole number]
+        - waitlisted: candidates never boarded nor rolled back (all 10 accounted: 8 departed + 2 rolled back) [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 3 lines,
+        one per entity above, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines. No JSON. No explanations.
+      model_overrides: { temperature: 0.1, max_tokens: 1280 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-05.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s02_fix_1
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json check ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-05"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.solve.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage solve --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-05"
+              working_dir: "."
+              fail_on_error: false
+
+    s02_fix_1:
+      generative_entity: "${models.m_heavy}"
+      prompt: |
+        ROLE: correction specialist. Entity table failed checks. Fix rows.
+
+        Original task:
+                You are the release conductor for the Friday deployment train, and the
+        train's rules were rewritten after the March incident when a rolled-back
+        car left a slot empty for three hours while a ready candidate sat in the
+        station. Tonight you are running the first train under the new rules, and
+        the post-train report needs the final composition numbers exactly right.
+        
+        The train works like this. The train carries exactly eight cars — that is
+        its capacity, fixed by the infrastructure review and not open to
+        interpretation. Candidates for the train are service releases, and they
+        board in readiness order, which is the order their owning teams certified
+        them ready. Before departure the train runs a smoke pass over everything
+        boarded, and any car that fails smoke within the first ten minutes is
+        rolled back — removed from the train. Under the new rule, a rolled-back car
+        immediately frees its slot, and the freed slot is offered to the next
+        ready candidate in certification order who has not yet boarded. If that
+        replacement also fails its smoke test, the slot frees again and passes to
+        the next candidate, and so on until a replacement passes or the candidate
+        list is exhausted. A second smoke window confirms the final consist before
+        the train is declared departed. Cars that never boarded because the train
+        filled up, or because they were passed over after failing smoke, are
+        waitlisted for Monday.
+        
+        Ten candidates certified ready tonight, in this certification order. Car
+        one, the authentication service, certified first. Car two, the notification
+        worker. Car three, the billing calculator — a risky one, big rewrite.
+        Car four, the search indexer. Car five, the admin dashboard. Car six, the
+        rate limiter. Car seven, the file-preview service. Car eight, the mobile
+        gateway. Car nine, the metrics collector. Car ten, the webhook dispatcher,
+        certified last, literally as the train doors were about to close.
+        
+        Boarding begins. The first eight candidates in certification order take
+        the eight slots: authentication, notifications, billing, search, dashboard,
+        rate limiter, file-preview, mobile gateway. The metrics collector and the
+        webhook dispatcher initially remain on the platform.
+        
+        The first smoke window runs, ten minutes of canary traffic, and two cars
+        fail. The billing calculator — car three — trips a currency-rounding
+        assertion within four minutes, and its team pulls it. The file-preview
+        service — car seven — times out on its health endpoint at minute eight,
+        and it rolls back too. Both rollbacks free their slots immediately under
+        the new rule.
+        
+        The freed slots refill in certification order from the remaining
+        candidates. The metrics collector, certified ninth, boards into the first
+        freed slot. The webhook dispatcher, certified tenth, boards into the
+        second. Both are onboard before the refill window closes.
+        
+        The second smoke window then runs over the full consist — the six original
+        cars that passed the first window plus the two replacements. This time
+        everything passes. The billing calculator and the file-preview service,
+        having failed smoke once each, are out of tonight's train entirely; they do
+        not get a second attempt within a single train under the rules, and they
+        join the waitlist for Monday along with anyone who never boarded.
+        
+        One footnote that must not leak into the counts: the platform team's
+        station monitoring system reports the door-cycle count for its own
+        maintenance dashboard, and tonight it logged three door cycles — the
+        initial boarding, the double refill, and a final door check. Door cycles
+        are not cars; you do not manage the station monitoring system; and three
+        door cycles over a train of eight cars is exactly the kind of number that
+        sounds meaningful in a hallway conversation and is not.
+        
+        The report needs: how many cars ultimately departed on the train, how many
+        candidates were rolled back after failing smoke, and how many candidates
+        ended the night waitlisted for Monday.
+        
+        Tonight's train is the first under the revised cut policy, and the whole
+        release organization knows it. The old policy played it looser — a train
+        held for any failing car, everyone re-boarding once the fix landed — and
+        last quarter that generosity produced a train that departed four hours
+        late with a passenger manifest everyone had lost track of, followed by a
+        week of arguing about which fixes had actually shipped. The retrospective
+        recommended clarity over comfort — trains leave when the window opens,
+        failing cars roll back to their station, stragglers wait for the next
+        train — and after a pilot run behind closed doors the policy took effect
+        for good tonight. The release manager's opening remarks at the boarding
+        review quoted the old incident number twice, which tells you how eager
+        everyone is to not repeat it.
+        
+        Your role as car conductor for this train has been mostly trajectory
+        watching. Each car's health checks run continuously through final
+        integration, and the dashboard paints each one green, red, or pending
+        with a refresh that feels slower on nights like this. As the window
+        approached you walked the board car by car, confirmed each red car's
+        rollback plan existed and its owner was on the bridge, and marked your
+        portion of the departure checklist. The checklist itself is a lesson in
+        humble bureaucracy — forty lines, each initialed, none of them glamorous,
+        all of them existing because some past train taught the checklist's
+        authors a specific lesson about what happens when nobody looks.
+        
+        The station around the train hums with activity that will not touch the
+        manifest. A fleet of canary deployments you do not manage rides its own
+        smaller schedule in production, graduating traffic percentages
+        autonomously and reporting to a different dashboard entirely. The docs
+        pipeline publishes release notes from the train's contents the moment it
+        departs, occasionally lagging reality by minutes that annoy the support
+        team but change no facts. And the sales-enablement group tracks feature
+        availability against customer commitments in a spreadsheet that links
+        trains to promises — analysis layered on the outcome, never part of the
+        boarding decision itself.
+        
+        In the final minutes before the window opens, the discipline that
+        matters most is re-verification of the boarding state. You re-read each
+        car's last health check directly rather than trusting the dashboard's
+        color, because a cache serving stale green is the oldest trick this
+        infrastructure knows. You confirm that every rollback already executed
+        left its car in a state the station can re-board next train, since a
+        half-rolled car is worse than a failing one — it presents healthy
+        patches of both versions and fools every check that samples shallowly.
+        You walk the waitlist one last time against the departure checklist's
+        capacity column, verifying that the number of cars holding a seat
+        matches the number of seats the train actually has. Only when the board,
+        the checklist, and the manifest all tell the same story do you initial
+        the final line — the same manifest whose counts you are about to report,
+        and the last thing standing between tonight and the record.
+        
+        One more wrinkle of the cut policy deserves to be stated plainly, since
+        it is the part new conductors most often get wrong. A car that rolls
+        back does not damage the train's record — rollback is a designed
+        outcome, not a failure of process, and the station logs it with the
+        same neutrality as a departure. The waitlist state exists for cars that
+        are neither aboard nor rolled back, and its residents sometimes feel
+        embarrassed to carry it, as though waiting were a verdict. It is not.
+        The manifest you will report simply records where each car stood when
+        the window closed — aboard, rolled back, or waiting — and the healthiest
+        culture the release team has built in years is the one that treats all
+        three states as ordinary outcomes of an ordinary train.
+        
+        A note on the boarding review itself, because its tone shapes what the
+        counts mean. The review is short by design — five minutes, the board
+        projected, the release manager reading the cut policy aloud once like a
+        captain invoking the sea laws, and then the window simply opens.
+        Nothing in the review changes a car's state; the checks have already
+        spoken, the rollbacks have already run where they were going to run,
+        and the waitlist already holds whoever it holds. The ritual exists so
+        that tomorrow, when someone asks why a car waited, the answer begins
+        with a policy everyone heard read aloud rather than a rule someone
+        remembers differently. The counts you report tonight are that policy's
+        shadow cast across nine cars, and the review made sure nobody can
+        claim the light surprised them.
+        
+        One final check completes the ritual. The conductor's manifest, the
+        departure checklist, and the station's own boarding record are three
+        documents that must agree before the window opens, and you walk all
+        three one last time in parallel — nine cars, three states, no
+        discrepancy surviving the cross-read. The release manager watches you
+        do it without comment, because watching conductors verify is how
+        release managers spend window-eve minutes, and because everyone in the
+        room remembers the train where the three documents disagreed and the
+        argument that followed outlived the quarter. They agree tonight. The
+        window opens. The train does what trains now do under the revised
+        policy, and the counts you report are simply the truth of it.
+
+        Failed cells (id + your observed value, correct values withheld):
+        {{bookmarks.cell_feedback}}
+
+        Prior table:
+        {{bookmarks.table}}
+
+        METHOD: re-read the task rules above, then re-derive each failed
+        entity. Use these exact entity ids:
+
+        - departed: cars on the departed train (6 first-window survivors + 2 replacements) [answer format: a whole number]
+        - rolled_back: candidates rolled back after failing smoke (billing, file-preview) [answer format: a whole number]
+        - waitlisted: candidates never boarded nor rolled back (all 10 accounted: 8 departed + 2 rolled back) [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 3 lines,
+        one per entity, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines.
+      model_overrides: { temperature: 0.0, max_tokens: 1600 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/table-feedback.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-05.yml"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$cell_feedback"
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-05.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s03_fix_2
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json fix_1 ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-05"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.fix_1.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage fix_1 --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-05"
+              working_dir: "."
+              fail_on_error: false
+
+    s03_fix_2:
+      generative_entity: "${models.m_heavy}"
+      prompt: |
+        ROLE: escalation solver. Two attempts wrong. Rebuild table from scratch.
+
+        Original task:
+                You are the release conductor for the Friday deployment train, and the
+        train's rules were rewritten after the March incident when a rolled-back
+        car left a slot empty for three hours while a ready candidate sat in the
+        station. Tonight you are running the first train under the new rules, and
+        the post-train report needs the final composition numbers exactly right.
+        
+        The train works like this. The train carries exactly eight cars — that is
+        its capacity, fixed by the infrastructure review and not open to
+        interpretation. Candidates for the train are service releases, and they
+        board in readiness order, which is the order their owning teams certified
+        them ready. Before departure the train runs a smoke pass over everything
+        boarded, and any car that fails smoke within the first ten minutes is
+        rolled back — removed from the train. Under the new rule, a rolled-back car
+        immediately frees its slot, and the freed slot is offered to the next
+        ready candidate in certification order who has not yet boarded. If that
+        replacement also fails its smoke test, the slot frees again and passes to
+        the next candidate, and so on until a replacement passes or the candidate
+        list is exhausted. A second smoke window confirms the final consist before
+        the train is declared departed. Cars that never boarded because the train
+        filled up, or because they were passed over after failing smoke, are
+        waitlisted for Monday.
+        
+        Ten candidates certified ready tonight, in this certification order. Car
+        one, the authentication service, certified first. Car two, the notification
+        worker. Car three, the billing calculator — a risky one, big rewrite.
+        Car four, the search indexer. Car five, the admin dashboard. Car six, the
+        rate limiter. Car seven, the file-preview service. Car eight, the mobile
+        gateway. Car nine, the metrics collector. Car ten, the webhook dispatcher,
+        certified last, literally as the train doors were about to close.
+        
+        Boarding begins. The first eight candidates in certification order take
+        the eight slots: authentication, notifications, billing, search, dashboard,
+        rate limiter, file-preview, mobile gateway. The metrics collector and the
+        webhook dispatcher initially remain on the platform.
+        
+        The first smoke window runs, ten minutes of canary traffic, and two cars
+        fail. The billing calculator — car three — trips a currency-rounding
+        assertion within four minutes, and its team pulls it. The file-preview
+        service — car seven — times out on its health endpoint at minute eight,
+        and it rolls back too. Both rollbacks free their slots immediately under
+        the new rule.
+        
+        The freed slots refill in certification order from the remaining
+        candidates. The metrics collector, certified ninth, boards into the first
+        freed slot. The webhook dispatcher, certified tenth, boards into the
+        second. Both are onboard before the refill window closes.
+        
+        The second smoke window then runs over the full consist — the six original
+        cars that passed the first window plus the two replacements. This time
+        everything passes. The billing calculator and the file-preview service,
+        having failed smoke once each, are out of tonight's train entirely; they do
+        not get a second attempt within a single train under the rules, and they
+        join the waitlist for Monday along with anyone who never boarded.
+        
+        One footnote that must not leak into the counts: the platform team's
+        station monitoring system reports the door-cycle count for its own
+        maintenance dashboard, and tonight it logged three door cycles — the
+        initial boarding, the double refill, and a final door check. Door cycles
+        are not cars; you do not manage the station monitoring system; and three
+        door cycles over a train of eight cars is exactly the kind of number that
+        sounds meaningful in a hallway conversation and is not.
+        
+        The report needs: how many cars ultimately departed on the train, how many
+        candidates were rolled back after failing smoke, and how many candidates
+        ended the night waitlisted for Monday.
+        
+        Tonight's train is the first under the revised cut policy, and the whole
+        release organization knows it. The old policy played it looser — a train
+        held for any failing car, everyone re-boarding once the fix landed — and
+        last quarter that generosity produced a train that departed four hours
+        late with a passenger manifest everyone had lost track of, followed by a
+        week of arguing about which fixes had actually shipped. The retrospective
+        recommended clarity over comfort — trains leave when the window opens,
+        failing cars roll back to their station, stragglers wait for the next
+        train — and after a pilot run behind closed doors the policy took effect
+        for good tonight. The release manager's opening remarks at the boarding
+        review quoted the old incident number twice, which tells you how eager
+        everyone is to not repeat it.
+        
+        Your role as car conductor for this train has been mostly trajectory
+        watching. Each car's health checks run continuously through final
+        integration, and the dashboard paints each one green, red, or pending
+        with a refresh that feels slower on nights like this. As the window
+        approached you walked the board car by car, confirmed each red car's
+        rollback plan existed and its owner was on the bridge, and marked your
+        portion of the departure checklist. The checklist itself is a lesson in
+        humble bureaucracy — forty lines, each initialed, none of them glamorous,
+        all of them existing because some past train taught the checklist's
+        authors a specific lesson about what happens when nobody looks.
+        
+        The station around the train hums with activity that will not touch the
+        manifest. A fleet of canary deployments you do not manage rides its own
+        smaller schedule in production, graduating traffic percentages
+        autonomously and reporting to a different dashboard entirely. The docs
+        pipeline publishes release notes from the train's contents the moment it
+        departs, occasionally lagging reality by minutes that annoy the support
+        team but change no facts. And the sales-enablement group tracks feature
+        availability against customer commitments in a spreadsheet that links
+        trains to promises — analysis layered on the outcome, never part of the
+        boarding decision itself.
+        
+        In the final minutes before the window opens, the discipline that
+        matters most is re-verification of the boarding state. You re-read each
+        car's last health check directly rather than trusting the dashboard's
+        color, because a cache serving stale green is the oldest trick this
+        infrastructure knows. You confirm that every rollback already executed
+        left its car in a state the station can re-board next train, since a
+        half-rolled car is worse than a failing one — it presents healthy
+        patches of both versions and fools every check that samples shallowly.
+        You walk the waitlist one last time against the departure checklist's
+        capacity column, verifying that the number of cars holding a seat
+        matches the number of seats the train actually has. Only when the board,
+        the checklist, and the manifest all tell the same story do you initial
+        the final line — the same manifest whose counts you are about to report,
+        and the last thing standing between tonight and the record.
+        
+        One more wrinkle of the cut policy deserves to be stated plainly, since
+        it is the part new conductors most often get wrong. A car that rolls
+        back does not damage the train's record — rollback is a designed
+        outcome, not a failure of process, and the station logs it with the
+        same neutrality as a departure. The waitlist state exists for cars that
+        are neither aboard nor rolled back, and its residents sometimes feel
+        embarrassed to carry it, as though waiting were a verdict. It is not.
+        The manifest you will report simply records where each car stood when
+        the window closed — aboard, rolled back, or waiting — and the healthiest
+        culture the release team has built in years is the one that treats all
+        three states as ordinary outcomes of an ordinary train.
+        
+        A note on the boarding review itself, because its tone shapes what the
+        counts mean. The review is short by design — five minutes, the board
+        projected, the release manager reading the cut policy aloud once like a
+        captain invoking the sea laws, and then the window simply opens.
+        Nothing in the review changes a car's state; the checks have already
+        spoken, the rollbacks have already run where they were going to run,
+        and the waitlist already holds whoever it holds. The ritual exists so
+        that tomorrow, when someone asks why a car waited, the answer begins
+        with a policy everyone heard read aloud rather than a rule someone
+        remembers differently. The counts you report tonight are that policy's
+        shadow cast across nine cars, and the review made sure nobody can
+        claim the light surprised them.
+        
+        One final check completes the ritual. The conductor's manifest, the
+        departure checklist, and the station's own boarding record are three
+        documents that must agree before the window opens, and you walk all
+        three one last time in parallel — nine cars, three states, no
+        discrepancy surviving the cross-read. The release manager watches you
+        do it without comment, because watching conductors verify is how
+        release managers spend window-eve minutes, and because everyone in the
+        room remembers the train where the three documents disagreed and the
+        argument that followed outlived the quarter. They agree tonight. The
+        window opens. The train does what trains now do under the revised
+        policy, and the counts you report are simply the truth of it.
+
+        Failed cells (id + observed, withheld correct):
+        {{bookmarks.cell_feedback}}
+
+        METHOD: discard prior attempts. Re-derive EVERY entity answer from
+        the rules. Use these exact entity ids:
+
+        - departed: cars on the departed train (6 first-window survivors + 2 replacements) [answer format: a whole number]
+        - rolled_back: candidates rolled back after failing smoke (billing, file-preview) [answer format: a whole number]
+        - waitlisted: candidates never boarded nor rolled back (all 10 accounted: 8 departed + 2 rolled back) [answer format: a whole number]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 3 lines,
+        one per entity, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines. No prose summaries.
+      model_overrides: { temperature: 0.0, max_tokens: 1600 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/table-feedback.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-05.yml"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$cell_feedback"
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-05.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json fix_2 ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-05"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.fix_2.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage fix_2 --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-05"
+              working_dir: "."
+              fail_on_error: false
+
+    s04_aggregate:
+      generative_entity: "${models.m_heavy}"
+      prompt: "deterministic-aggregate-noop"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/aggregate.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-05.yml --table-result ./docs/benchmarks/outputs/output/ha-table-result.json --out ./docs/benchmarks/outputs/output/ha-final.json"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-deterministic.py --artifact ./docs/benchmarks/outputs/output/ha-final.json --criteria /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-05.yml --out ./docs/benchmarks/outputs/output/ha-final-check.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s05_judge
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-final-check.json final ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-05"
+              working_dir: "."
+              fail_on_error: false
+          - skip_step: true
+
+    s05_judge:
+      generative_entity: "${models.m_judge}"
+      prompt: |
+        ROLE: blind auditor. See only task + result. No author knowledge.
+
+        Task objective: Apply slot-refill release train rules to compute final consist counts.
+        Result: {{bookmarks.final_json}}
+
+        Answer EXACTLY 6 lines, nothing else:
+        KEYS: yes or no
+        VALUES: yes or no
+        FORMAT: yes or no
+        VERDICT: PASS or FAIL
+        REASON: one sentence
+        SCORE: 1-10
+
+        VERDICT must be PASS only if all three of KEYS, VALUES, FORMAT are yes.
+      model_overrides: { temperature: 0.0, max_tokens: 160 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/output/ha-final.json"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$final_json"
+        after_step_succeeds:
+          - save_to:
+              - "$verdict"
+              - "./docs/benchmarks/outputs/output/ha-verdict.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-judge.py ./docs/benchmarks/outputs/output/ha-verdict.txt ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-05"
+              working_dir: "."
+              fail_on_error: false
+
+    s06_end_fail:
+      generative_entity: "${models.m_heavy}"
+      prompt: "FAIL"
+      model_overrides: { temperature: 0.0, max_tokens: 8 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/failflag.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --final-check ./docs/benchmarks/outputs/output/ha-final-check.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s07_fail_trace
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s08_audit
+          - skip_step: true
+
+    s07_fail_trace:
+      generative_entity: "${models.m_heavy}"
+      prompt: "trace-only"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl end_fail fail case=hb-05"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s08_audit
+
+    s08_audit:
+      generative_entity: "${models.m_heavy}"
+      prompt: "leak-audit-noop"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/leak-audit.py --run-dir ./docs/benchmarks/outputs/output --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-05.yml"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s09_audit_pass
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s10_audit_leak
+          - skip_step: true
+
+    s09_audit_pass:
+      generative_entity: "${models.m_heavy}"
+      prompt: "audit-pass-trace"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl audit pass case=hb-05"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s_end
+
+    s10_audit_leak:
+      generative_entity: "${models.m_heavy}"
+      prompt: "audit-leak-trace"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl audit fail leak=true case=hb-05"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s_end
+
+    s_end:
+      generative_entity: "${models.m_heavy}"
+      prompt: "term"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - skip_step: true

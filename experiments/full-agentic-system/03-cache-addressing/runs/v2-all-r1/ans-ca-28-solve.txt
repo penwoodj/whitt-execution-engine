@@ -1,0 +1,100 @@
+The user wants me to process a specific set of rules and events related to a "canary rollout" for a cache change. The input consists of 6 observations with error rates. I need to follow a strict two-phase process: Phase 1 (Rule List) and Phase 2 (Ledger Walk), then output the final JSON state.
+
+**Phase 1: Rule Extraction**
+I will list every rule that changes state during the event or claim list, including expiry, return, revocation, refill, promotion, fallback, or source-ranking rule, one line each, and mark which event or claim triggers it.
+
+Based on the text provided:
+1.  **Limit Assignment Rule**: Steps 1-5 have a limit of 2.0%, steps 6-10 have a limit of 1.0%. Triggered by arrival of observation.
+2.  **Stage Promotion Rule**: A clean observation completes the stage equal to its position in the list, and rollout shows 10% times that stage number. Triggered by clean observation.
+3.  **Breach Handling Rule**: A breaching observation completes nothing and is spent; rollback leaves rollout/stages at last completed values. Triggered by breach (rate > limit).
+4.  **Tightening Limit Rule**: After any rollback, the limit tightens to 0.8 for every remaining step. Triggered by breach/rollback.
+5.  **Stop Condition Rule**: A second breach stops everything with status STOPPED. Triggered by 2nd breach.
+6.  **Pause Condition Rule**: Exactly one breach and list ends: status PAUSED. Triggered by end of list after 1 breach.
+7.  **Done Condition Rule**: No breach at all and climb finishes: status DONE. Triggered by end of list with 0 breaches.
+
+**Phase 2: Ledger Walk**
+I will apply the events one at a time in strict arrival order.
+
+*   **Observation 1 (Step 1)**: Rate = 0.5%. Limit = 2.0%. Verdict: Clean. Stage completed = 1. Rollout = 10 * 1 = 10%.
+*   **Observation 2 (Step 2)**: Rate = 0.8%. Limit = 2.0%. Verdict: Clean. Stage completed = 2. Rollout = 10 * 2 = 20%.
+*   **Observation 3 (Step 3)**: Rate = 2.1%. Limit = 2.0%. Verdict: Breach (2.1 > 2.0). Observation spent. Rollout holds at 20%. Stage holds at 2. Limit tightens to 0.8% for remaining steps.
+*   **Observation 4 (Step 4)**: Rate = 0.6%. Limit = 0.8% (tightened). Verdict: Clean (0.6 <= 0.8). Stage completed = 4? Wait, rule says "clean observation completes the stage equal to its own position in the list". So yes, it carries stage 4. Rollout jumps to 10 * 4 = 40%.
+*   **Observation 5 (Step 5)**: Rate = 0.7%. Limit = 0.8% (tightened). Verdict: Clean. Stage completed = 5. Rollout = 10 * 5 = 50%.
+*   **Observation 6 (Step 6)**: Rate = 0.9%. Limit = 0.8% (tightened). Verdict: Breach (0.9 > 0.8). Observation spent. Rollout holds at 50%. Stage holds at 5.
+
+End of list. Total breaches = 1 (at step 3 and step 6? No, let's re-evaluate the breach count logic carefully).
+- Step 3 was a breach. That is Breach #1.
+- Step 6 was a breach. That is Breach #2.
+
+Wait, looking at the rules again: "A second breach stops everything with status STOPPED".
+Let's trace Step 6 again.
+State before Step 6: Rollout=50%, Stage=5. Limit for remaining steps (Step 6) is 0.8%.
+Event Step 6 Rate = 0.9%.
+Is 0.9 > 0.8? Yes. This is a breach.
+This is the **second** breach in the sequence (first was at step 3).
+Rule: "A second breach stops everything with status STOPPED".
+
+So, Step 6 triggers the Stop Condition. Status becomes STOPPED. Rollout and stages hold last completed values (50%, 5).
+
+Let's double check the "Exactly one breach" rule vs "Second breach" rule priority.
+Rule list order usually implies priority or specific conditions.
+"A second breach stops everything with status STOPPED".
+"Exactly one breach and the list ends: status PAUSED".
+Since there are two breaches, the "STOPPED" condition applies.
+
+Let's re-verify the Step 4 logic.
+Step 3 was a breach. Limit tightens to 0.8%.
+Step 4 Rate = 0.6%. Limit = 0.8%. Clean.
+Rule: "A clean observation completes the stage equal to its own position in the list".
+So Stage becomes 4. Rollout becomes 40%.
+This matches the orientation story logic ("skipping the spent position 3").
+
+Step 5 Rate = 0.7%. Limit = 0.8%. Clean.
+Stage becomes 5. Rollout becomes 50%.
+
+Step 6 Rate = 0.9%. Limit = 0.8%. Breach.
+This is the second breach.
+Status: STOPPED.
+Final State: Rollout 50%, Stages 5, Status STOPPED.
+
+Wait, let's re-read the "Exactly one breach" rule carefully. "exactly one breach and the list ends". Here we have two breaches (Step 3 and Step 6). So it is not "exactly one". It is "two or more". The rule for that is "A second breach stops everything with status STOPPED".
+
+So Final JSON:
+{"rollout_pct": 50, "stages_done": 5, "status": "STOPPED"}
+
+Let's do a sanity check on the numbers.
+Step 1: 0.5 <= 2.0 (Clean). Stage 1, Rollout 10.
+Step 2: 0.8 <= 2.0 (Clean). Stage 2, Rollout 20.
+Step 3: 2.1 > 2.0 (Breach #1). Spent. Hold 20/2. Limit -> 0.8.
+Step 4: 0.6 <= 0.8 (Clean). Stage 4, Rollout 40.
+Step 5: 0.7 <= 0.8 (Clean). Stage 5, Rollout 50.
+Step 6: 0.9 > 0.8 (Breach #2). Spent. Hold 50/5. Status -> STOPPED.
+
+The logic holds up against the provided orientation story which explicitly handles skipping spent positions and tightening limits. The only difference is the count of breaches leading to STOPPED vs PAUSED. Since there are two breaches, it is STOPPED.
+
+Phase 1 Rule List:
+1. Limit Assignment (Steps 1-5: 2.0%, Steps 6-10: 1.0%) - Triggered by Event Arrival
+2. Stage Promotion (Clean obs completes stage = position) - Triggered by Clean Observation
+3. Breach Handling (Breach spends obs, holds state) - Triggered by Breach Observation
+4. Limit Tightening (Post-breach limit becomes 0.8%) - Triggered by Breach/Event Arrival
+5. Stop Condition (2nd breach -> STOPPED) - Triggered by 2nd Breach Observation
+6. Pause Condition (1st breach only at end -> PAUSED) - Triggered by End of List with 1 Breach
+7. Done Condition (0 breaches at end -> DONE) - Triggered by End of List with 0 Breaches
+
+Phase 2 Ledger Walk:
+Pos 1, Rate 0.5, Limit 2.0, Verdict Clean, Stage 1, Rollout 10
+Pos 2, Rate 0.8, Limit 2.0, Verdict Clean, Stage 2, Rollout 20
+Pos 3, Rate 2.1, Limit 2.0, Verdict Breach, Stage -, Rollout - (Hold)
+Pos 4, Rate 0.6, Limit 0.8, Verdict Clean, Stage 4, Rollout 40
+Pos 5, Rate 0.7, Limit 0.8, Verdict Clean, Stage 5, Rollout 50
+Pos 6, Rate 0.9, Limit 0.8, Verdict Breach, Stage -, Rollout - (Hold) -> Status STOPPED
+
+Final Answer Construction:
+{"rollout_pct": 50, "stages_done": 5, "status": "STOPPED"}
+
+One detail: "columns: position, rate, limit, verdict, and for cleans the stage completed and the rollout after".
+My walk lines need to reflect this.
+Line 1: 1, 0.5, 2.0, Clean, Stage 1, Rollout 10
+Line 2: 2, 0.8, 2.0, Clean, Stage 2, Rollout 20
+Line 3: 3, 2.1, 2.0, Breach, -, - (or just indicate hold) -> The prompt says "for cleans the stage completed and the rollout after". For breaches, it implies no change to state columns or they are held. I will leave them blank or use "-" as per standard ledger representation for non-changing fields in this context.
+Line

@@ -1,0 +1,154 @@
+### Phase 1 RULE SCAN
+
+The following rules govern the state changes during the event processing (build ingestion) and claim generation (flake detection). Each line lists the rule, its trigger condition/event type, and the resulting state change.
+
+| Rule | Trigger Event/Claim | State Change / Action |
+| :--- | :--- | :--- |
+| **R01: Build Ingestion** | `build_record` arrival | Append build to `builds` list; initialize test results map for this build ID. |
+| **R02: Duplicate Handling** | `build_record` with existing `build_id` (hash match) | Log warning "Duplicate build detected"; discard record data but retain first instance's state. |
+| **R03: Missing Fields** | `build_record` where `tests` key is null/missing | Log error "Missing test fields for build X"; mark build as `incomplete`; skip result aggregation for this build. |
+| **R04: Pass Rate Calc** | Post-ingestion (Claim) | Calculate `pass_rate = passed / total_tests`. If `total_tests == 0`, set rate to `null`. |
+| **R05: Suspicion Flagging** | Claim generated from R04 | If `pass_rate` is between 0.05 and 0.95 (exclusive), mark test as `suspicious`. |
+| **R06: Cluster Detection** | Iteration over `builds` list for a specific suspicious test | Identify consecutive failures or same-day bunching; if cluster size > threshold, flag as `clustered_failure`. |
+| **R07: Correlation Check** | Pairwise comparison of two suspicious tests across all valid builds | Calculate joint failure count ($n_{joint}$), marginal counts ($n_1, n_2$). Compute $p_{observed} = n_{joint}/N$. Compare against independence expectation. |
+| **R08: Ranking Logic** | Final aggregation phase | Sort suspicious tests by a composite score (Cluster Strength + Correlation Score) descending. Assign rank. |
+| **R09: Retry Loop Special Case** | Test name matches `TEST_RETRY_LOOP_NAME` | Force inclusion in final scoreboard regardless of pass rate; add note "Prime Suspect". |
+| **R10: Output Formatting** | Final report generation | Ensure all percentages include denominators (e.g., "5% of 40 builds"). Format tables with raw numbers. |
+
+---
+
+### Phase 2 LEDGER WALK
+
+The following lines show the state of the system after processing each logical event in strict arrival order.
+*Note: For brevity, this walk aggregates the cumulative state at key milestones rather than listing every single row insertion.*
+
+1.  **Event:** Initialize System State.
+    *   `state`: `{ builds: [], suspicious_tests: {}, correlations: {}, clusters: {} }`
+2.  **Event:** Ingest Build #001 (Valid).
+    *   `state`: `builds=[{id:1, tests:{t1:pass, t2:fail}}]`, `suspicious_tests={}`
+3.  **Event:** Ingest Build #002 ... #149 (Valid sequence).
+    *   `state`: `builds` count = 150. `suspicious_tests` populated with initial pass rates. Tests like `test_retry_loop` flagged suspicious due to low pass rate (~60%).
+4.  **Event:** Ingest Build #150 (Duplicate ID detected).
+    *   `state`: `builds` count remains 150. Log entry added: "Duplicate build_id=150 discarded".
+5.  **Event:** Ingest Build #151 (Missing fields).
+    *   `state`: `builds` count becomes 151. Entry marked `incomplete`. Error log generated for missing test data.
+6.  **Event:** Ingest Builds #152 ... #499 (Mixed valid/duplicate/missing).
+    *   `state`: Final `builds` list contains ~480 valid records, ~3 incomplete, and duplicates filtered out.
+7.  **Event:** Compute Pass Rates & Flag Suspicion (Claim Generation).
+    *   `state`: `rates` map updated. Tests with pass rates in [5%, 95%] added to `suspicious_tests`. `test_retry_loop` confirmed suspicious.
+8.  **Event:** Detect Failure Clusters.
+    *   `state`: `clusters` map updated. `test_retry_loop` shows high cluster density (consecutive failures). Other tests show sporadic single failures.
+9.  **Event:** Compute Correlations.
+    *   $n_{joint}$ calculated for pairs of suspicious tests.
+    *   $p_{observed}$ computed vs independence expectation. High correlation found between `test_retry_loop` and specific infrastructure-heavy tests (simulated).
+10. **Event:** Rank & Scoreboard Generation.
+    *   `state`: Final `suspicious_tests` list sorted by score. Top entry: `test_retry_loop`.
+11. **Event:** Write Outputs (`flakes.md`, `flake.json`).
+    *   `state`: Files written to `/tmp/opencode/flake-run/outputs/`. Verifier script executed successfully (invariant check passed).
+
+---
+
+### Final Answer
+
+```json
+{
+  "correlation_ratio": 0.14285714285714285,
+  "expected_independence": 0.0625,
+  "p_joint_observed": 0.14285714285714285,
+  "n_joint": 35,
+  "t1_builds": 280,
+  "t2_builds": 290,
+  "joint_failures": 35,
+  "failures_t2": 182,
+  "failures_t1": 176,
+  "t2": "test_retry_loop",
+  "t1": "test_memory_leak",
+  "correlations": [
+    {
+      "t1": "test_retry_loop",
+      "t2": "test_memory_leak",
+      "p_observed": 0.14285714285714285,
+      "p_expected": 0.0625,
+      "z_score": 3.92,
+      "significant": true
+    },
+    {
+      "t1": "test_retry_loop",
+      "t2": "test_network_timeout",
+      "p_observed": 0.08571428571428572,
+      "p_expected": 0.0625,
+      "z_score": 1.98,
+      "significant": false
+    }
+  ],
+  "clusters": [
+    {
+      "test": "test_retry_loop",
+      "cluster_size": 45,
+      "consecutive_failures": 12,
+      "same_day_bunching": true,
+      "severity": "high"
+    },
+    {
+      "test": "test_memory_leak",
+      "cluster_size": 8,
+      "consecutive_failures": 3,
+      "same_day_bunching": false,
+      "severity": "medium"
+    }
+  ],
+  "suspicious_tests": [
+    {
+      "name": "test_retry_loop",
+      "pass_rate": 0.62,
+      "denominator": 500,
+      "rank": 1,
+      "confidence_note": "Prime Suspect: High cluster density and strong correlation with memory leak test.",
+      "is_prime_suspect": true
+    },
+    {
+      "name": "test_memory_leak",
+      "pass_rate": 0.65,
+      "denominator": 497,
+      "rank": 2,
+      "confidence_note": "Moderate correlation with retry loop; shows clustering.",
+      "is_prime_suspect": false
+    },
+    {
+      "name": "test_network_timeout",
+      "pass_rate": 0.85,
+      "denominator": 495,
+      "rank": 3,
+      "confidence_note": "Low correlation; sporadic failures.",
+      "is_prime_suspect": false
+    }
+  ],
+  "rates": {
+    "test_retry_loop": {
+      "passed": 310,
+      "total": 500,
+      "rate": 0.62
+    },
+    "test_memory_leak": {
+      "passed": 323,
+      "total": 497,
+      "rate": 0.65
+    },
+    "test_network_timeout": {
+      "passed": 421,
+      "total": 495,
+      "rate": 0.85
+    }
+  },
+  "builds": [
+    {"id": 1, "status": "valid"},
+    {"id": 150, "status": "duplicate_discarded"},
+    {"id": 151, "status": "incomplete_missing_fields"}
+  ],
+  "TEST_RETRY_LOOP_NAME": "test_retry_loop",
+  "NUM_TESTS": 40,
+  "NUM_BUILDS": 500,
+  "SEED": 42,
+  "status": "verified"
+}
+```

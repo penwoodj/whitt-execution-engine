@@ -1,0 +1,198 @@
+# REA+ v2.2 concept — phase-batched specialization (DO NOT RUN YET)
+# Same 6 specialists as v2.1 but cases pre-sorted by classifier into
+# per-model phases: ONE load per model for the whole suite (2-load
+# pattern from batch-enhance, scaled to 6). Kills the per-case swap
+# penalty that dominates v2.1 wall time. Within each phase a same-
+# model repair pass runs failed cases before moving on; only cases
+# failing their own specialist twice escalate to the cross-model
+# rescue phase (generalist -> deep reasoner).
+# Phase order minimizes expected swap cost: cheap models first,
+# Bonsai last (biggest load, fewest cases expected).
+workflow_id: rea2_v2_phasebatch
+name: "REA+ v2.2 — phase-batched specialization (concept)"
+version: "2.2.0"
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  fmt_specialist:
+    name: Qwen3-4B-Instruct-2507-Q4_K_M
+    provider: llama_cpp_with_vulkan
+    host:
+      type: llama_cpp_with_vulkan
+  pln_specialist:
+    name: gemma-3n-E4B-it-Q4_K_M
+    provider: llama_cpp_with_vulkan
+    host:
+      type: llama_cpp_with_vulkan
+  fmt_repair:
+    name: AesCoder-4B.Q6_K
+    provider: llama_cpp_with_vulkan
+    host:
+      type: llama_cpp_with_vulkan
+  generalist:
+    name: Qwen3-4B-Hivemind-Inst-Hrtic-Ablit-Uncensored-Q4_K_M-imat
+    provider: llama_cpp_with_vulkan
+    host:
+      type: llama_cpp_with_vulkan
+  auditor:
+    name: nvidia_Orchestrator-8B-Q5_K_L
+    provider: llama_cpp_with_vulkan
+    host:
+      type: llama_cpp_with_vulkan
+  deep_reasoner:
+    name: Bonsai-27B-Q1_0
+    provider: llama_cpp_with_vulkan
+    host:
+      type: llama_cpp_with_vulkan
+
+agentic_workflow:
+  steps:
+    presort_suite:
+      generative_entity: "${models.generalist}}"
+      prompt: "placeholder - shell presort below writes the phase plan"
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/scripts/presort-suite.py --cases-dir /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v2/cases --out /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v2/phase-plan.json"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: true
+        after_step_starts:
+          - gwt:
+              - given: "bookmarks.shell_output.exit_code == 0"
+                then: { route_to: phase_fmt }
+              - given: "bookmarks.shell_output.exit_code != 0"
+                then: { route_to: done }
+
+    phase_fmt:
+      generative_entity: "${models.fmt_specialist}}"
+      prompt: "__FMT_BATCH_PROMPTS__"
+      model_overrides: { temperature: 0.0, max_tokens: 250 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v2/phase-fmt-answers.json"
+
+    phase_fmt_repair:
+      generative_entity: "${models.fmt_specialist}}"
+      prompt: "__FMT_FAILED_PROMPTS_WITH_FIX_HINTS__"
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v2/phase-fmt-repair.json"
+
+    phase_pln:
+      generative_entity: "${models.pln_specialist}}"
+      prompt: "__PLN_BATCH_PROMPTS__"
+      model_overrides: { temperature: 0.0, max_tokens: 250 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v2/phase-pln-answers.json"
+
+    phase_pln_repair:
+      generative_entity: "${models.pln_specialist}}"
+      prompt: "__PLN_FAILED_PROMPTS_WITH_FIX_HINTS__"
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v2/phase-pln-repair.json"
+
+    phase_general:
+      generative_entity: "${models.generalist}}"
+      prompt: "__GENERAL_BATCH_PROMPTS__"
+      model_overrides: { temperature: 0.0, max_tokens: 250 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v2/phase-general-answers.json"
+
+    phase_general_repair:
+      generative_entity: "${models.generalist}}"
+      prompt: "__GENERAL_FAILED_PROMPTS_WITH_FIX_HINTS__"
+      model_overrides: { temperature: 0.2, max_tokens: 3500 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v2/phase-general-repair.json"
+
+    phase_audit:
+      generative_entity: "${models.auditor}}"
+      prompt: "__AUDIT_BATCH_PROMPTS__"
+      model_overrides: { temperature: 0.0, max_tokens: 3500 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v2/phase-audit-answers.json"
+
+    phase_audit_repair:
+      generative_entity: "${models.auditor}}"
+      prompt: "__AUDIT_FAILED_PROMPTS_WITH_FIX_HINTS__"
+      model_overrides: { temperature: 0.2, max_tokens: 3500 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v2/phase-audit-repair.json"
+
+    phase_logic_derive:
+      generative_entity: "${models.deep_reasoner}}"
+      prompt: "__LOGIC_DRV_BATCH_PROMPTS__"
+      model_overrides: { temperature: 0.0, max_tokens: 2000 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v2/phase-logic-answers.json"
+
+    phase_logic_derive_repair:
+      generative_entity: "${models.deep_reasoner}}"
+      prompt: "__LOGIC_DRV_FAILED_PROMPTS_WITH_STEPCHECKS__"
+      model_overrides: { temperature: 0.0, max_tokens: 3500 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v2/phase-logic-repair.json"
+
+    rescue_cross_model:
+      generative_entity: "${models.deep_reasoner}}"
+      prompt: "__ALL_STILL_FAILED_PROMPTS_FULL_CONTEXT__"
+      model_overrides: { temperature: 0.0, max_tokens: 3500 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v2/rescue-answers.json"
+
+    final_report:
+      generative_entity: "${models.generalist}}"
+      prompt: "placeholder - shell aggregates all phase results"
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/scripts/collect-phases.py --run-dir /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v2 > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer-plus/results/rea2-runs/v2/summary.json"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: false
+
+    done:
+      generative_entity: "${models.generalist}}"
+      prompt: "terminal"
+      model_overrides: { temperature: 0.0, max_tokens: 3 }

@@ -1,0 +1,171 @@
+**Fact Bullets:**
+- LOW1: duration 4 min, start minute 0.
+- LOW2: duration 3 min, start minute 3.
+- HIGH: arrival minute 3, duration 6 min.
+
+**Minute-by-Minute Table:**
+
+| Minute | Core Status | Event Details |
+| :--- | :--- | :--- |
+| **0** | Running LOW1 | Start LOW1 (rem=4). Bank @ 2. |
+| **1** | Running LOW1 | Run LOW1 (rem=3). |
+| **2** | Running LOW1 | Run LOW1 (rem=2). **Bank @ 2**. |
+| **3** | Preempted/Idle | HIGH arrives. LOW1 has 2 min banked. LOW1 resumes later? No, core busy with HIGH. <br> *Wait*: Task says "resume LOW outranks fresh one". But core is occupied by HIGH instantly. <br> Can LOW2 start? LOW2 starts at minute 3. <br> **Conflict**: Core cannot run two jobs. HIGH preempts everything. <br> Does LOW1 resume immediately after HIGH finishes? No, HIGH runs 6 mins (4-9). <br> So minutes 4-9 are taken by HIGH. <br> What about LOW2 start at minute 3? It waits for core. <br> **Correction**: At minute 3, HIGH arrives and takes core. LOW1 is preempted. <br> Checkpoint status: LOW1 banked 2 mins (absolute min 2). <br> LOW2 starts at absolute min 3 but must wait until core free? Or does it start immediately if core was idle? Core not idle due to HIGH. <br> So LOW2 waits. |
+| **4** | Running HIGH | HIGH runs (rem=5). |
+| **5** | Running HIGH | HIGH runs (rem=4). |
+| **6** | Running HIGH | HIGH runs (rem=3). |
+| **7** | Running HIGH | HIGH runs (rem=2). |
+| **8** | Running HIGH | HIGH runs (rem=1). |
+| **9** | Finished HIGH / Start LOWs? | HIGH finishes. Core free at minute 9. <br> Waiting jobs: LOW1 (preempted), LOW2 (started waiting). <br> Priority: Resumed LOW > Fresh LOW. <br> So LOW1 resumes first. <br> **Wasted Calculation**: LOW1 had banked 2 mins. Total duration 4. Needs to run 2 more. <br> Does it waste anything? No, it resumes exactly where it left off (bank). <br> Wait, check "wasted" definition: "minutes past last bank". Bank was at absolute min 2. Current time is 9. <br> Did LOW1 run between 3 and 8? No, core busy with HIGH. <br> So no minutes were "run" but not saved. The state was preserved. Wasted = 0 for LOW1. |
+| **10** | Running LOW1 | Resume LOW1 (rem=2). Bank @ 4 (absolute min 10+2? No, bank is every 2 running mins). <br> Run 1st min of resume. Rem=1. |
+| **11** | Running LOW1 | Run 2nd min of resume. Rem=0. **Bank @ 4**. Finish LOW1 at minute 11. |
+
+*Re-evaluating the "Start" logic for LOW2*:
+The prompt says: "LOW2 runs 3 minutes starting at minute 3".
+Usually, this implies an intent to start. However, if the core is busy (by HIGH), it cannot start until free.
+If LOW1 resumes first (priority rule), then LOW2 waits behind LOW1.
+Let's trace LOW1 finish:
+- Start 0, End 4. Bank at 2.
+- Preempted at 3 by HIGH.
+- HIGH runs 4..9 (6 mins).
+- Resume at 9.
+- Run remaining 2 mins. Finish at 11.
+- LOW1 finishes at 11.
+
+Now LOW2:
+- Intended start 3. Waited until 9? Or does it start immediately if core was free? Core not free.
+- So LOW2 starts after LOW1 finishes (at minute 11)?
+- Priority rule: "resume LOW outranks fresh one". This applies when both are waiting for the same slot.
+- At minute 9, only LOW1 is waiting (resumed). LOW2 is "waiting to start" but hasn't technically started yet? Or does "starting at minute 3" mean it enters the queue at minute 3?
+- If it enters the queue at minute 3, then at minute 9 we have: LOW1 (resumed) vs LOW2 (fresh). Resumed wins.
+- So sequence: HIGH finishes -> LOW1 resumes -> LOW1 finishes -> LOW2 starts.
+
+Let's re-calculate LOW2 duration and finish:
+- LOW2 starts at minute 11 (after LOW1 finishes).
+- Duration 3 mins.
+- Runs minutes 11, 12, 13? No, if it starts at 11, it occupies 11, 12, 13?
+- Standard: Start $S$, duration $D$. Occupies $[S, S+D)$. Finishes at $S+D$.
+- If starts at 11, runs 11, 12. (2 mins)? No, needs 3 mins. Runs 11, 12, 13?
+- Let's assume discrete minutes: Minute 11 is the first minute of execution.
+- Execution: Min 11 (rem 2), Min 12 (rem 1), Min 13 (rem 0).
+- Finish time = Start + Duration = 11 + 3 = 14? Or does it finish at the end of the last minute?
+- Prompt: "FINISHES AT minute s+n". If start=11, n=3 -> finishes at 14.
+
+Wait, let's check the "wasted" logic again.
+Is there any wasted time?
+LOW1 banked at absolute min 2.
+Core busy with HIGH from 3 to 9.
+Did LOW1 run during this? No. So no minutes were "run but not saved". Wasted = 0.
+
+What about LOW2?
+It waits. Does it waste anything? No, it hasn't started.
+So total wasted = 0.
+
+Makespan:
+HIGH finishes at 9 (start 3 + dur 6).
+LOW1 resumes at 9, runs 2 mins, finishes at 11.
+LOW2 starts at 11, runs 3 mins, finishes at 14.
+Max finish = 14.
+
+Order of LOW jobs:
+LOW1 finished at 11.
+LOW2 finished at 14.
+Order: ["LOW1", "LOW2"].
+
+Let's double check the "Start" constraint for LOW2.
+"LOW2 runs 3 minutes starting at minute 3".
+If the core is busy, it effectively starts later.
+Is there a scenario where LOW2 starts immediately if HIGH didn't preempt? Yes, but HIGH did.
+So the delay is forced.
+
+Let's re-read "resume LOW outranks fresh one".
+At minute 9, core becomes free.
+Candidates: LOW1 (resumed), LOW2 (fresh).
+LOW1 wins.
+LOW1 runs remaining 2 mins. Finishes at 11.
+Then LOW2 starts. Runs 3 mins. Finishes at 14.
+
+Wait, check the "Bank" logic for LOW1 again.
+"LOW jobs checkpoint every 2 completed minutes of running time".
+Start 0.
+Min 0 (run 1), Min 1 (run 2). Bank @ absolute min 2?
+Prompt: "bank landing on exact minute HIGH arrives still counts".
+HIGH arrives at minute 3.
+Bank was at absolute min 2.
+So bank is valid.
+When resuming, does it need to run the minutes between 2 and 9? No, state is saved.
+So wasted = 0.
+
+Final check on Makespan:
+HIGH finishes at 9.
+LOW1 runs [9, 11). Finishes at 11.
+LOW2 runs [11, 14). Finishes at 14.
+Makespan = 14.
+
+Wait, is it possible LOW2 starts *before* HIGH arrives? No, core busy.
+Is it possible LOW2 starts immediately after HIGH if priority wasn't an issue? Yes, but priority ensures LOW1 goes first anyway.
+So the timeline holds.
+
+One nuance: "LOW whose start minute arrives while core is busy simply waits."
+This confirms LOW2 waits until 9 (or later).
+"core never idles while LOW job is waiting".
+At minute 9, core free. LOW1 waiting (resumed). Core runs LOW1. No idle.
+After LOW1 finishes at 11, core free. LOW2 waiting. Core runs LOW2. No idle.
+
+Result:
+Makespan: 14
+Wasted: 0
+Order: ["LOW1", "LOW2"]
+
+Let's verify the "wasted" calculation one more time with a hypothetical failure case to ensure I'm not missing a trick.
+If HIGH arrived at minute 2 (before bank), then bank would be invalid?
+Prompt: "bank landing on exact minute HIGH arrives still counts".
+So even if HIGH arrived at min 2, it would count.
+Here HIGH arrives at min 3. Bank was at min 2. Safe.
+
+What if LOW1 had duration 5?
+Start 0..4 (finish 4). Bank @ 2.
+Preempted at 3.
+Resume at 9. Run remaining 3 mins. Finish 12.
+Still no wasted because state saved.
+The only way to have waste is if the job ran *some* minutes after the bank but before preemption, and those minutes were lost? No, "minutes past last bank are wasted". This implies running minutes that don't contribute to progress towards completion? No, it means running minutes that exceed the checkpointed state.
+Actually, usually "wasted" in these problems refers to work done *after* a checkpoint that is then discarded upon preemption.
+Example: Job runs 0-2 (bank). Runs 2-3. Preempted at 3.
+Resume. Must re-run 2-3? Or does it resume at state 2?
+Prompt: "on preemption work past last checkpoint is wasted and redone after resume".
+So if job ran 0-2, bank @ 2. Then runs 2-3 (1 min). Preempted.
+Resume. Must run that 1 min again. Wasted = 1.
+In our case: Job ran 0-2. Bank @ 2.
+Did it run anything between 2 and 3? No, preemption happens at arrival of HIGH (minute 3).
+So no minutes were added after the bank. Wasted = 0.
+
+Correct.
+
+Final Answer Formulation:
+{"makespan_min": 14, "wasted_min": 0, "order": ["LOW1", "LOW2"]}
+
+Wait, let's re-read the start times carefully.
+"LOW1 runs 4 minutes starting at minute 0". -> Occupies [0, 4). Finishes 4.
+"LOW2 runs 3 minutes starting at minute 3". -> Intends [3, 6). But core busy.
+"HIGH arrives at minute 3 and runs 6 minutes to completion". -> Occupies [3, 9).
+Timeline:
+0-3: LOW1 runs. (Bank @ 2).
+3-9: HIGH runs. (Preempts LOW1).
+9-?: Resume LOW1. Remaining duration = 4 - 2 = 2 mins. Runs [9, 11). Finishes 11.
+11-?: Start LOW2. Duration 3 mins. Runs [11, 14). Finishes 14.
+
+Makespan = 14.
+Wasted = 0.
+Order = ["LOW1", "LOW2"].
+
+One final check: "makespan counts from last finish". Yes, max(9, 11, 14) = 14.
+"completion order lists LOW jobs by minute each finishes". 11 < 14. So LOW1 first.
+
+The previous attempt had `{"makespan_min": 13, "wasted_min": 0, "order": ["LOW1", "LOW2"]}` which was wrong (13 vs 14).
+Why would it be 13? Maybe thinking HIGH finishes at 9, LOW1 runs 2 mins -> 11. Then LOW2 runs... maybe thinking LOW2 starts earlier? No.
+Maybe calculating finish as start+duration-1? "FINISHES AT minute s+n". So 0+4=4. Correct.
+So 14 is correct.
+
+```json
+{"makespan_min": 14, "wasted_min": 0, "order": ["LOW1", "LOW2"]}
+```

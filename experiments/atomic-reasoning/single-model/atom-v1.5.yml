@@ -1,0 +1,132 @@
+# ══════════════════════════════════════════════════════════════════
+# ATOM OF REASONING — SINGLE-MODEL v1.5 (SAFE)
+# Tiny budgets. No loops. No concurrency. Single-pass only.
+# Designed to NEVER crash the machine.
+# ══════════════════════════════════════════════════════════════════
+workflow_id: atom_single_v1_5
+name: "Atom of Reasoning — Single-Model v1.5 (safe)"
+description: "Single-pass linear pipeline. Tight budgets. Crash-safe."
+version: "1.5.0"
+author: "Whitt Execution Engine"
+tags: [atom, single-model, safe]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config: { host: localhost, port: 8080 }
+
+models:
+  "worker":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.3, max_tokens: 300 }
+
+workflow_execution_strategy:
+  memory: { model_lifecycle: { unload_unused: false } }
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "__OUTPUT_DIR__/last-run.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+
+    step_00_bootstrap:
+      generative_entity: "${models.worker}"
+      prompt: "READY."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat __INPUT_FILE__"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+
+    step_01_generate:
+      depends_on: [step_00_bootstrap]
+      generative_entity: "${models.worker}"
+      prompt: |
+        TASK:
+        {{bookmarks.shell_output.stdout}}
+
+        Produce the answer directly. Output ONLY the result.
+      model_overrides: { temperature: 0.4, max_tokens: 300 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $draft
+              - "__OUTPUT_DIR__/draft.txt"
+          - log:
+              to_file_path: "__OUTPUT_DIR__/step-01.log"
+              event_fields: [step_name, duration_ms, total_tokens]
+              level: info
+
+    step_02_critique:
+      depends_on: [step_01_generate]
+      generative_entity: "${models.worker}"
+      prompt: |
+        You did NOT write this. Review cold.
+
+        DRAFT:
+        {{bookmarks.draft}}
+
+        List the SINGLE most important problem. One sentence. Start with "PROBLEM:".
+      model_overrides: { temperature: 0.2, max_tokens: 60 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $critique
+              - "__OUTPUT_DIR__/critique.txt"
+
+    step_03_refine:
+      depends_on: [step_02_critique]
+      generative_entity: "${models.worker}"
+      prompt: |
+        Fix the stated problem.
+
+        DRAFT:
+        {{bookmarks.draft}}
+
+        PROBLEM:
+        {{bookmarks.critique}}
+
+        Output complete fixed version. No commentary.
+      model_overrides: { temperature: 0.3, max_tokens: 300 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $draft
+              - "__OUTPUT_DIR__/refined.txt"
+
+    step_04_verify:
+      depends_on: [step_03_refine]
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/atomic-reasoning/scripts/verify.py '{{bookmarks.draft}}' > __OUTPUT_DIR__/verify-result.txt 2>&1; echo $? > __OUTPUT_DIR__/verify-exit.txt"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+        after_step_succeeds:
+          - log:
+              to_file_path: "__OUTPUT_DIR__/verify.log"
+              event_fields: [step_name, shell_output_exit_code]
+              level: info
+
+    step_05_emit:
+      depends_on: [step_04_verify]
+      generative_entity: "${models.worker}"
+      prompt: "DONE."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $final_output
+              - "__OUTPUT_DIR__/final.txt"
+          - log:
+              to_file_path: "__OUTPUT_DIR__/summary.log"
+              event_fields: [workflow_id, total_steps]
+              level: info

@@ -1,0 +1,184 @@
+```json
+{
+  "mapping": {
+    "input_variants": [
+      {
+        "trigger": "exact_match",
+        "action": {
+          "fields": {
+            "user_id": { "rename": "id" },
+            "registration_date": { "rename": "cohort_start" },
+            "daily_count": { "type": "integer", "unit": "" },
+            "onboarding_rate_decimal": { "type": "float", "precision": 4, "unit": "%" },
+            "activation_rate_decimal": { "type": "float", "precision": 4, "unit": "%" },
+            "push_rate_decimal": { "type": "float", "precision": 4, "unit": "%" }
+          },
+          "flags": {
+            "valid": true,
+            "instrumentation_quirk": null
+          }
+        },
+        "output_flags": [
+          "onboarding_rate_decimal",
+          "activation_rate_decimal",
+          "push_rate_decimal"
+        ]
+      },
+      {
+        "trigger": "percentage_to_float_conversion",
+        "action": {
+          "fields": {
+            "user_id": { "rename": "id" },
+            "registration_date": { "rename": "cohort_start" },
+            "daily_count": { "type": "integer", "unit": "" },
+            "onboarding_rate_percent": { "retype": "float", "precision": 4, "unit": "%" },
+            "activation_rate_percent": { "retype": "float", "precision": 4, "unit": "%" },
+            "push_rate_percent": { "retype": "float", "precision": 4, "unit": "%" }
+          },
+          "flags": {
+            "valid": true,
+            "instrumentation_quirk": null
+          }
+        },
+        "output_flags": [
+          "onboarding_rate_decimal",
+          "activation_rate_decimal",
+          "push_rate_decimal"
+        ]
+      },
+      {
+        "trigger": "legacy_percentage_format_with_silent_zero_fills",
+        "action": {
+          "fields": {
+            "user_id": { "rename": "id" },
+            "registration_date": { "rename": "cohort_start" },
+            "daily_count": { "type": "integer", "unit": "" },
+            "onboarding_rate_percent": { "retype": "float", "precision": 4, "unit": "%", "clamp": { "min": 0.0, "max": 100.0 } },
+            "activation_rate_percent": { "retype": "float", "precision": 4, "unit": "%", "clamp": { "min": 0.0, "max": 100.0 } },
+            "push_rate_percent": { "type": null, "interpolate": true }
+          },
+          "flags": {
+            "valid": false,
+            "instrumentation_quirk": "silent_zero_fills"
+          }
+        },
+        "output_flags": [
+          "onboarding_rate_decimal",
+          "activation_rate_decimal",
+          "push_rate_decimal"
+        ]
+      },
+      {
+        "trigger": "missing_keys_or_instrumentation_quirks",
+        "action": {
+          "halt": true,
+          "diagnostic": "Input contains missing keys or documented instrumentation quirks (e.g., 'none-known' annotations). Halting to prevent silent failures."
+        }
+      }
+    ],
+    "edge_cases": [
+      {
+        "input": "empty_input",
+        "behavior": { "halt": true, "output": null, "diagnostic": "Empty input triggers halt; no output produced." }
+      },
+      {
+        "input": "single_record_with_multiple_variants",
+        "behavior": {
+          "action": "prioritize_legacy_percentage_format_with_silent_zero_fills",
+          "output_flags": ["onboarding_rate_decimal", "activation_rate_decimal"]
+        }
+      },
+      {
+        "input": "none_of_the_above_variants",
+        "behavior": { "halt": true, "diagnostic": "Unrecognized input variant; halting to prevent silent drops." }
+      }
+    ]
+  },
+
+  "rules": {
+    "filtering": [
+      {
+        "trigger": "daily_count_zero_or_invalid",
+        "action": { "clamp": { "min": 1, "max": 25000 }, "diagnostic": "Clamped to [1, 25k] due to invalid count." }
+      },
+      {
+        "trigger": "rate_decimal_out_of_bounds",
+        "action": {
+          "clamp": { "min": 0.0, "max": 1.0 },
+          "diagnostic": "Clamped to [0%, 100%] due to invalid rate."
+        }
+      }
+    ],
+    "normalization": [
+      {
+        "trigger": "onboarding_rate_decimal",
+        "action": { "rounding": { "precision": 4, "mode": "ROUND_HALF_UP" } },
+        "rationale": "Weekly rates are decimals to four places; deltas use the same precision."
+      },
+      {
+        "trigger": "activation_rate_decimal",
+        "action": { "rounding": { "precision": 4, "mode": "ROUND_HALF_UP" } }
+      },
+      {
+        "trigger": "push_rate_decimal",
+        "action": { "rounding": { "precision": 4, "mode": "ROUND_HALF_UP" } }
+      }
+    ],
+    "interpolation": [
+      {
+        "trigger": "push_rate_percent_interpolated",
+        "action": {
+          "method": "linear_interpolate",
+          "source": ["onboarding_rate_decimal", "activation_rate_decimal"],
+          "fallback": 0.22,
+          "diagnostic": "Interpolates push rate to 22% if not provided."
+        }
+      }
+    ],
+    "anomaly_detection": [
+      {
+        "trigger": "weekly_mean_calculation",
+        "action": { "method": "compute_rolling_mean", "window_size": 7, "precision": 4 },
+        "rationale": "Anomalies are deviations beyond ±1.5% of the weekly mean."
+      }
+    ]
+  },
+
+  "gap_handling": {
+    "missing_fields": [
+      { "field": "user_id", "action": { "skip": true, "diagnostic": "User ID is required; skipped if missing." } },
+      { "field": "cohort_start", "action": { "skip": true, "diagnostic": "Cohort start date is required; skipped if missing." } }
+    ],
+    "missing_instrumentation_notes": [
+      {
+        "trigger": "none-known",
+        "action": { "flag": "instrumentation_quirk", "value": "none-known" },
+        "diagnostic": "Instrumentation note not provided; flagged as 'none-known'."
+      }
+    ]
+  },
+
+  "invariants": [
+    {
+      "name": "total_reconciliation",
+      "check": { "method": "sum_daily_counts", "expected": { "min": 100, "max": 75000 } },
+      "audit_hook": "Checksum validation in pipeline: `sum(daily_count) == expected_total`"
+    },
+    {
+      "name": "rate_component_sum",
+      "check": { "method": "validate_rate_components", "expected": true, "diagnostic": "Sum of onboarding/activation/push rates must equal 100%." }
+    },
+    {
+      "name": "anomaly_validation",
+      "check": { "method": "verify_anomalies", "threshold": 1.5, "precision": 4 },
+      "audit_hook": "Weekly mean anomaly check: `abs(rate - weekly_mean) > threshold`"
+    }
+  ],
+
+  "reproducibility": {
+    "ordering": { "method": "cohort_start_date", "sort": "ascending" },
+    "rounding": { "precision": 4, "mode": "ROUND_HALF_UP" },
+    "serialization": { "format": "ISO_8601", "delimiter": "," }
+  }
+}
+```

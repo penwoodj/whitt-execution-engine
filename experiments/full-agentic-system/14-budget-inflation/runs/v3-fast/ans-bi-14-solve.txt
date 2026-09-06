@@ -1,0 +1,85 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the specific "Canary Discipline" and "Expiry Discipline" instructions provided in the prompt (which override general narrative text), here are the active rules for tonight's event list:
+
+1.  **Limit Rule**: Steps 1–5 have a limit of `2.0`%; Steps 6–10 have a limit of `1.0`%.
+2.  **Tightening Rule**: After any rollback, the limit tightens to `0.8`% for every remaining step in the climb.
+3.  **Breach Definition**: A breach occurs if `observed > limit`.
+4.  **First Breach Action (Rollback)**: On the first breach, pause the climb and roll back exactly one step (`rollback_one`). The current observation is marked `spent` (never retested). The climb resumes from the next observation.
+5.  **Second Breach Action (Stop)**: On a second breach, stop everything immediately. Status becomes `STOPPED`. Rollout percentage equals `10 × the step being defended`. Stages done equals observations consumed so far.
+6.  **No Breach Completion**: If no breaches occur through Step 10, status is `DONE`, rollout_pct = `10 × steps` (10), stages_done = `steps` (10).
+
+*Note: The "Expiry Discipline" mentioned in the prompt text regarding grants returning half amounts applies to a different contract type ("grant expiry") and does not apply to this specific "canary rollout" task which uses observations, limits, and rollbacks. Therefore, no expiry rules are active for tonight's events.*
+
+### Phase 2 LEDGER WALK
+
+Processing events in strict arrival order: `0.4`, `1.9`, `0.5`, `2.2`, `0.6`.
+
+**Step 1:**
+*   Observation: `0.4`%
+*   Limit: `2.0`% (Steps 1-5)
+*   Check: `0.4 <= 2.0` -> **OK**
+*   State: Climb continues to Step 2.
+
+**Step 2:**
+*   Observation: `1.9`%
+*   Limit: `2.0`% (Steps 1-5)
+*   Check: `1.9 <= 2.0` -> **OK**
+*   State: Climb continues to Step 3.
+
+**Step 3:**
+*   Observation: `0.5`%
+*   Limit: `2.0`% (Steps 1-5)
+*   Check: `0.5 <= 2.0` -> **OK**
+*   State: Climb continues to Step 4.
+
+**Step 4:**
+*   Observation: `2.2`%
+*   Limit: `2.0`% (Steps 1-5)
+*   Check: `2.2 > 2.0` -> **BREACH**
+*   Action: This is the **First Breach**.
+    *   Rollback exactly one step.
+    *   Current observation (`2.2`) is marked `spent`.
+    *   Climb resumes from the next observation (Step 5).
+    *   Limit tightens to `0.8`% for all remaining steps in this climb sequence.
+
+**Step 5:**
+*   Observation: `0.6`%
+*   Limit: `0.8`% (Tightened limit applies to remaining steps after rollback)
+*   Check: `0.6 <= 0.8` -> **OK**
+*   State: Climb continues.
+
+**End of Event List:**
+The event list contains only 5 observations. The climb has not reached Step 10 (the full target). However, the rules define the final state based on whether a *second* breach occurred or if the climb finished naturally without further events. Since there are no more events to trigger a second breach, and the last action was a successful observation after a rollback, we must determine the `rollout_pct` and `stages_done`.
+
+Re-evaluating the "Canary Discipline" definition for final state:
+*   "Second breach stops everything... rollout_pct = 10 × the step you were defending". (Did not happen).
+*   "No breach at all and the climb finishes with status DONE." -> This usually implies reaching Step 10.
+*   However, the prompt asks for the state *after* the events. The events stopped after a rollback.
+*   Let's look at the specific calculation logic often implied in these "thin desk" scenarios: If the climb is paused/rolled back and no second breach occurs within the provided event window, does it count as `DONE` (reached target) or `PAUSED`?
+*   The prompt text says: "after any rollback... the climb resumes from the next observation." It implies a continuous process. Since we ran out of events while in a valid state (post-rollback), and no second breach occurred, the system is effectively halted at its current progress.
+*   BUT, looking closely at the provided JSON contract keys: `{"rollout_pct": N, "stages_done": N, "status": ...}`.
+*   If the climb was intended to go to 10 steps and we only have 5 events, and one triggered a rollback, we are effectively at Step 4 (defended) having rolled back from Step 4? Or did we successfully defend Step 5?
+    *   Sequence:
+        1. Defend Step 1 (OK).
+        2. Defend Step 2 (OK).
+        3. Defend Step 3 (OK).
+        4. Attempt Step 4 -> Breach. Rollback to Step 3? Or "Roll back exactly one step" means we go back to the previous successful state? Usually, in canary rollouts, if you breach at N, you revert to N-1. Here, we breached at Step 4 (attempting to move from 3->4). We rollback to Step 3.
+        5. Resume climb. Next observation is for Step 5? Or do we retry Step 4 with the new limit?
+    *   The prompt says: "the observation that breached is spent, the climb resumes from the next observation." This implies we skip the failed step and move to the next index in the list of observations provided.
+    *   So, Observation 1 (Step 1), Obs 2 (Step 2), Obs 3 (Step 3). Breach at Obs 4 (intended for Step 4). Rollback. Skip Obs 4. Resume with Obs 5 (intended for Step 5).
+    *   We processed Obs 5 successfully against the new limit (`0.8`).
+    *   Current state: We have successfully validated observations up to index 5 of our list, but logically we are at "Step 3" + "Step 5"? No, canary steps are sequential. If you breach Step 4 and rollback, you are effectively back at Step 3. The next observation (Obs 5) is the *next* step in the sequence to attempt? Or is it a retry of Step 4?
+    *   "Resumes from the next observation" strongly suggests skipping the failed index. So we attempted Step 1, 2, 3. Failed Step 4. Skipped Step 4. Attempted Step 5 (using Obs 5). Success.
+    *   Current logical step count: We have completed Steps 1, 2, 3, and 5? That leaves a gap at 4. Or does "Step N" refer to the Nth observation in the list?
+    *   Standard interpretation for these specific logic puzzles: The `stages_done` is the number of observations successfully processed that contributed to the rollout before stopping or finishing. We processed 3 OK, then 1 Breach (spent), then 1 OK. Total valid stages = 4? Or do we count the rollback as resetting the counter?
+    *   Let's look at the "Second breach" rule: `stages_done = observations consumed so far`. This implies a simple count of events processed until stop.
+    *   Here, we didn't stop due to a second breach. We stopped because the event list ended.
+    *   Is the status `DONE`? The text says "No breach at all and the climb finishes with status DONE." Since we had a breach (first one), it's not "no breach". But did we finish? We finished the provided events.
+    *   However, usually, if you rollback, you haven't reached the target (10). If the event list ends mid-climb, is it `PAUSED`? The prompt options are `PAUSED`, `STOPPED`, `DONE`.
+    *   Given "after any rollback... the climb resumes", and we resumed successfully with the last event, but no second breach occurred, the system is in a valid state. But has it reached Step 10? No. Has it stopped due to error? No (only one breach).
+    *   Wait, let's re-read the "Second breach" condition carefully: "a second breach stops everything... status STOPPED". We only had one breach.
+    *   Did we reach Step 10? The input has 5 events. Even if we retry steps, we don't have enough events to reach 10 without more data.
+    *   Therefore, the climb is incomplete. Status must be `PAUSED` (implied by "climb pauses" on breach) or does it finish as `DONE` because no second breach happened?
+    *   Let's check the math for `rollout_pct`. If we are at Step 3 (after rollback from 4), and we successfully did Step 5? That doesn't make sense sequentially.
+    *   Alternative interpretation: "Roll back exactly one step" means revert to the previous state count. We were at Step 3. Breach at Step 4 attempt. Rollback -> Back to Step 3. Next observation (Obs 5)

@@ -1,0 +1,64 @@
+### Phase 1 RULE SCAN
+This phase lists every rule in the task that changes state during the event sequence (tonight's events), including expiry, return, revocation, refill, promotion, fallback, or source-ranking rules, one line each, and marks which event triggers it.
+
+1.  **Retry Wait Rule**: Triggers on `Attempt Fail` event; sets wait time to current base (doubling after each failure).
+2.  **Cost Accumulation Rule**: Triggers on `Wait` and `Attempt` events; adds cost of seconds waited ($1/sec) and attempt cost ($2/attempt) to total spend.
+3.  **Budget Check Rule**: Triggers after every Cost Accumulation step; compares current spend against budget (24).
+4.  **Suppression Rule**: Triggers if Budget Check fails (spend > budget); sets `suppressed` state and doubles the budget for re-check.
+5.  **Success Condition Rule**: Triggers on `Attempt Success` event; ends the sequence upon reaching the required number of failures before success (3 failed, then 4th succeeds).
+6.  **Expiry Return Rule**: Triggers if a grant expires; returns half of what was *granted* (rounded down) immediately to the pool.
+
+---
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at a time in strict arrival order, showing the state after each event.
+
+**Initial State:**
+-   `attempts`: 0
+-   `wait_s`: 0
+-   `budget_after`: 24 (initial budget)
+-   `suppressed`: false
+-   `total_cost`: 0
+-   `granted`: 0 (no grants issued in this sequence, only retries)
+
+**Event Sequence:**
+1.  **Attempt 1 (Fail)**:
+    -   Action: Run attempt. Cost = $2.
+    -   Wait: Observe wait of 2s. Cost = $2 * 1 = $2.
+    -   Total Cost: $4.
+    -   State Check: $4 <= 24. No suppression.
+    -   Failures Count: 1.
+
+2.  **Attempt 2 (Fail)**:
+    -   Action: Run attempt. Cost = $2.
+    -   Wait: Observe wait of 4s (doubled). Cost = $4 * 1 = $4.
+    -   Total Cost: $4 + $2 + $4 = $10.
+    -   State Check: $10 <= 24. No suppression.
+    -   Failures Count: 2.
+
+3.  **Attempt 3 (Fail)**:
+    -   Action: Run attempt. Cost = $2.
+    -   Wait: Observe wait of 8s (doubled). Cost = $8 * 1 = $8.
+    -   Total Cost: $10 + $2 + $8 = $20.
+    -   State Check: $20 <= 24. No suppression.
+    -   Failures Count: 3.
+
+4.  **Attempt 4 (Success)**:
+    -   Action: Run attempt. Cost = $2.
+    -   Wait: The prompt states "waits observed: 2, 4, 8". It does not list a wait for the successful 4th attempt. Even if there were one, the sequence ends on success. Assuming no wait cost for the final success or that the observation list is exhaustive for the *failed* retries described.
+    -   Total Cost: $20 + $2 = $22.
+    -   State Check: $22 <= 24. No suppression.
+    -   Success Reached: Yes (3 failures occurred, then this one succeeded).
+
+**Final State Calculation:**
+-   `attempts`: 4 (Total attempts made: Fail, Fail, Fail, Success)
+-   `wait_s`: 14 (Sum of observed waits: 2 + 4 + 8 = 14. No wait for the successful attempt is listed/observed).
+-   `budget_after`: 24 (Budget was never exceeded, so it remains at initial value).
+-   `suppressed`: false (Spend $22 < Budget $24).
+
+---
+
+### Final Answer JSON
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 24, "suppressed": false}
+```

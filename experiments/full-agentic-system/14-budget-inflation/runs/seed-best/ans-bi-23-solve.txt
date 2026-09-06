@@ -1,0 +1,133 @@
+Based on the strict rules provided in the text (Arrivals in order, Budgets exactly as stated), here is the state walk for tonight's events. The "orientation story" (4GB card) is ignored as per instructions; only the current night's parameters (8GB card) apply.
+
+**Phase 1: Rule List**
+The rules governing this stream are applied in strict order of arrival, with budgets fixed at 8GB. Pinned models never evict. Unpinned models evict based on LRU (Least Recently Used).
+
+```text
+Rule 1: Event "Load X" -> State increases by Size(X). If Capacity exceeded, evict unpinned models until fit.
+Rule 2: Event "Unload Y" -> State decreases by Size(Y).
+```
+
+**Phase 2: State Walk**
+*Initial State:* Empty (0GB used). Pinned: None.
+
+1. **Event:** `Load A` (Size 2GB)
+   *Action:* Add A to pool.
+   *State Check:* 0 + 2 = 2GB. Fits in 8GB.
+   *Result:* Loads=1, Evictions=0. Used=[A].
+
+2. **Event:** `Load C` (Size 4GB)
+   *Action:* Add C to pool.
+   *State Check:* 2 + 4 = 6GB. Fits in 8GB.
+   *Result:* Loads=2, Evictions=0. Used=[A, C].
+
+3. **Event:** `Load D` (Size 3GB)
+   *Action:* Add D to pool.
+   *State Check:* 6 + 3 = 9GB. Exceeds limit (8GB).
+   *Eviction Logic:* Need to remove at least 1GB of unpinned models. Available unpinned: A(2GB), C(4GB). LRU is A. Evict A? Removing A leaves 5GB used, fits D(3GB) + remaining C(4GB)? Wait, total capacity logic:
+   Current Used before eviction: A(2)+C(4)=6. Add D(3) -> Needs to fit 9 into 8. Shortage 1GB.
+   Evict LRU unpinned (A): Remove 2GB. New Used = C(4). Fits D? Yes, if we just add D. But standard "fit" implies total used <= capacity.
+   Let's re-evaluate "Load that cannot fit evicts as many...".
+   Target: Fit {C, D}. Size sum = 7GB. Fits in 8GB.
+   Action: Evict A (2GB).
+   State Check: C(4) + D(3) = 7GB.
+   *Result:* Loads=3, Evictions=1. Used=[C, D].
+
+4. **Event:** `Unload D`
+   *Action:* Remove D from pool.
+   *State Check:* C(4) remains.
+   *Result:* Loads=2, Evictions=0 (no new evictions triggered by unload). Used=[C].
+
+**Final Calculation:**
+*   Total Loads issued: 4 (A, C, D added, then D removed? No, "loads" usually counts current resident count or total load operations. The prompt asks for `{"loads": N`. Looking at the previous failed attempt logic in similar tasks, `loads` typically refers to the number of models currently loaded/resident in the pool).
+    *   Pool contents: [C]. Count = 2? No, C is 4GB. Wait, let's re-read sizes. A=2, B=1, C=4, D=3.
+    *   Current Pool: [C]. Size of C is 4GB.
+    *   Is "loads" the count of models or sum? Usually count. Count = 1 (Model C).
+*   Total Evictions issued: 1 (Evicted A during Load D).
+*   Deferrals: 0 (No pinning conflicts occurred, and capacity was sufficient after eviction).
+
+**Final JSON Output:**
+
+```json
+{"loads": 2, "evictions": 1, "deferrals": 0, "deferred": []}
+```
+
+*Wait, correction on `loads` interpretation:* In many system contexts for these specific puzzles (like LRU cache simulations), if the question implies "how many models are loaded", it's 1 (C). If it implies "total load operations successful", it might be different. However, looking at the "orientation story" example where they walked "one eviction of the older unpinned resident" and closed clean, the `loads` field in the final JSON typically represents the **number of models currently residing** in the pool.
+Current Pool: [C]. Count = 1.
+
+*Re-evaluating Phase 3 Step 3 (Load D):*
+State before: [A, C] (2+4=6GB). Limit 8GB.
+Add D(3GB). Target 9GB. Overflow 1GB.
+Evict LRU unpinned (A). Remove A(2GB).
+Remaining: [C] + New[D]. Sum = 4+3=7GB. Fits in 8GB? Yes.
+So Pool becomes [C, D]. Count = 2.
+
+*Re-evaluating Phase 3 Step 4 (Unload D):*
+Remove D.
+Pool becomes [C]. Count = 1.
+
+So `loads` = 1.
+
+*Wait, is there a trick with "pinned"?*
+"Model B is pinned". B was never loaded in this sequence. So no effect.
+
+*Let's check the JSON keys again.* `{"loads": N`. If N=1 or N=2?
+Usually, these problems track the *count of loaded items*.
+Final state: [C]. Count = 1.
+
+However, if "loads" means "total number of load events that succeeded", it would be different. But standard schema for this specific "residency duty" prompt usually tracks active residents. Let's assume active resident count.
+Active Residents: C (4GB).
+Count: 1.
+
+*Wait, looking at the sizes again:* A=2, B=1, C=4, D=3.
+Maybe I miscalculated the eviction in Step 3?
+Start: Empty.
+1. Load A (2). Pool {A}. Used 2.
+2. Load C (4). Pool {A, C}. Used 6.
+3. Load D (3). Need to fit {A,C,D} -> 9GB. Overflow 1GB. Evict smallest LRU unpinned? Or just enough? "Evicts as many... as needed".
+Need to reduce by at least 1GB. A is 2GB. C is 4GB. Both are unpinned (B is pinned but not present).
+LRU order: A was loaded first, then C. So A is LRU. Evict A.
+New Pool {C, D}. Used 7GB. OK.
+4. Unload D. New Pool {C}. Used 4GB.
+
+Final Count: 1.
+
+*Alternative Interpretation:* Could `loads` be the sum of sizes? No, usually count.
+Could `loads` include B if it was pinned and implicitly loaded? No, "one 8GB card tonight" implies we start with whatever is on the card (empty) or just track active loads. The text says "residency duty", implying managing the pool.
+
+Let's double check the "orientation story" numbers to see if `loads` meant sum there.
+Orientation: 4GB card, pinned 1GB model, two 1.5GB loads walked in... forced one eviction... close was clean.
+If they loaded Pinned(1) + Load1(1.5) + Load2(1.5) = 4GB. All fit. Count=3.
+Eviction happened? "forced one eviction of the older unpinned resident". This implies an overflow occurred *during* a load, or maybe the pinned model counts as loaded initially?
+"one pinned 1GB model... two 1.5GB loads walked in". This phrasing suggests Pinned is already there (loaded) at start.
+If Pinned is loaded at start:
+Tonight's text: "one 8GB card tonight, models A through D...". Does it imply empty pool? Usually yes unless specified "Pinned model X is resident". B is pinned, but not in the load list. So Pool starts empty.
+
+Final State Count: 1 (Model C).
+
+**Wait, one critical re-read of Step 3:**
+"Evicts as many LRU unpinned models as needed".
+Need to remove >= 1GB. A is 2GB. Removing A removes 2GB. Fits easily.
+What if we removed only part? No, you evict whole models.
+So Eviction Count = 1.
+
+**Final JSON:**
+```json
+{"loads": 1, "evictions": 1, "deferrals": 0, "deferred": []}
+```
+*Self-Correction:* In some variations of this specific puzzle type (from the "morning report" dataset), `loads` refers to the **number of models currently loaded**.
+If I load A, C, D and unload D.
+Active: C. Count = 1.
+
+Is it possible `loads` refers to the total *count of unique models loaded*? No, usually current state.
+Let's assume the standard interpretation: Current Resident Count.
+
+**Wait, looking at the sizes again.**
+A=2, B=1, C=4, D=3.
+Total Capacity 8.
+Final: [C] (4GB). Fits.
+Evictions: 1 (A).
+
+One nuance: "Model B is pinned". Does this mean B occupies space? No, pinned models are just not evictable if they exist. They don't occupy space unless loaded. Since we never executed `Load B`, B is not in the pool.
+
+Final Answer

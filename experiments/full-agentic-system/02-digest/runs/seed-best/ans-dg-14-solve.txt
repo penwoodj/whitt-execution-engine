@@ -1,0 +1,47 @@
+### Phase 1 RULE SCAN
+
+The following rules govern the state changes during the event list. Each rule is listed on one line with its trigger condition.
+
+1.  **Limit Assignment Rule**: Triggers at start of each step; assigns limit $L=2.0$ for steps 1-5, $L=1.0$ for steps 6-10, and $L=0.8$ for any remaining steps after a rollback.
+2.  **Clean Observation Rule**: Triggers if `observed < limit`; completes the stage equal to the current position in the list ($S = P$) and sets rollout to $R = 10 \times S$.
+3.  **Breach Observation Rule (First)**: Triggers if `observed >= limit` on a clean step; marks observation as SPENT, rolls back one stage ($S_{new} = S_{prev}$), sets rollout to $R_{new} = 10 \times S_{prev}$, and tightens the limit for all future steps to $L=0.8$.
+4.  **Breach Observation Rule (Second)**: Triggers if `observed >= limit` on a step where no rollback has occurred yet (or effectively the second breach logic); stops the climb immediately with status STOPPED, holding rollout and stages at the last completed values.
+5.  **Single Breach Termination Rule**: Triggers if exactly one breach occurs and the list ends; sets status PAUSED with rollout and stages at the last completed values.
+6.  **No Breach Termination Rule**: Triggers if zero breaches occur and the list ends; sets status DONE with rollout and stages equal to total steps.
+
+---
+
+### Phase 2 LEDGER WALK
+
+Applying events one by one in strict arrival order:
+
+1.  **Step 1**: Observed 0.4 vs Limit 2.0 -> Clean. Stage becomes 1, Rollout becomes 10.
+    *   State: Pos=1, Rate=0.4, Lim=2.0, Verdict=Clean, Stage=1, Rollout=10.
+2.  **Step 2**: Observed 1.9 vs Limit 2.0 -> Clean. Stage becomes 2, Rollout becomes 20.
+    *   State: Pos=2, Rate=1.9, Lim=2.0, Verdict=Clean, Stage=2, Rollout=20.
+3.  **Step 3**: Observed 0.5 vs Limit 2.0 -> Clean. Stage becomes 3, Rollout becomes 30.
+    *   State: Pos=3, Rate=0.5, Lim=2.0, Verdict=Clean, Stage=3, Rollout=30.
+4.  **Step 4**: Observed 2.2 vs Limit 2.0 -> Breach (2.2 >= 2.0).
+    *   Action: Mark Step 4 as SPENT. Rollback to last completed stage (Stage 3, Rollout 30). Tighten limit for remaining steps to 0.8.
+    *   State: Pos=4, Rate=2.2, Lim=0.8 (tightened), Verdict=Breach, Stage=3, Rollout=30.
+5.  **Step 5**: Observed 0.6 vs Limit 0.8 -> Clean (0.6 < 0.8).
+    *   Action: Since this is a clean observation after a rollback, it completes the stage equal to its position in the list? No, re-reading rule: "a clean observation completes the stage equal to its own position in the list". Wait, let's re-read carefully: "the 1st observation carries stage 1... breaches do not shift the count." vs "after any rollback the limit tightens... a clean observation completes the stage equal to its own position in the list".
+    *   Let's check the orientation example logic again. In the example, after breach at pos 3 (spent), pos 4 was clean and it said "it carries stage 4 by position". This implies that *after* a rollback, a clean observation resets the stage counter to match its current list position?
+    *   Re-reading: "a clean observation completes the stage equal to its own position in the list... even if earlier positions were spent on breaches." AND "breaches do not shift the count". This is contradictory unless interpreted as: The "count" of stages done refers to the value $S$. If I am at Pos 4, and it's clean, does $S$ become 4?
+    *   Let's look at the specific text: "a clean observation completes the stage equal to its own position in the list". This suggests $S_{new} = P$.
+    *   However, usually rollbacks imply holding state. But the rule says "completes the stage equal to its own position". If I am at Pos 4, and it is clean, do I jump to Stage 4?
+    *   Let's re-read the orientation example: "position 4 rolled 0.5... so the rollout jumps to 40 and stages to 4, skipping the spent position 3." This confirms that after a breach/rollback, if the next is clean, it advances the stage counter to match the current list position ($S=P$).
+    *   So for Step 5 (Pos 5): Clean. Stage becomes 5. Rollout becomes $10 \times 5 = 50$.
+
+    *   State: Pos=5, Rate=0.6, Lim=0.8, Verdict=Clean, Stage=5, Rollout=50.
+
+List ends. Breaches count = 1. Status = PAUSED.
+Final values: Rollout = 50, Stages = 5.
+
+---
+
+### Final Answer
+
+```json
+{"rollout_pct": 50, "stages_done": 5, "status": "PAUSED"}
+```

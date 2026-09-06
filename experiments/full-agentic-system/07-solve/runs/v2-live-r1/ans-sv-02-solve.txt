@@ -1,0 +1,96 @@
+Based on the strict rules and events provided in the task description, here is the step-by-step deduction of the state changes and the final result.
+
+### **Logic & State Walk**
+
+**Initial State:**
+*   `pool_left`: 40 tokens
+*   `granted_units`: 0
+*   `denied`: [] (empty list)
+
+**Event 1: `r1` asks for 5.**
+*   *Rule Application:* The pool has 40, which is $\ge$ 5. Grant the full ask.
+*   *Action:* Deduct 5 from pool. Add 5 to granted total.
+*   *State Change:* Pool becomes $40 - 5 = 35$. Granted becomes $0 + 5 = 5$.
+*   *Result:* **Granted**.
+
+**Event 2: `r2` asks for 8.**
+*   *Rule Application:* The pool has 35, which is $\ge$ 8. Grant the full ask.
+*   *Action:* Deduct 8 from pool. Add 8 to granted total.
+*   *State Change:* Pool becomes $35 - 8 = 27$. Granted becomes $5 + 8 = 13$.
+*   *Result:* **Granted**.
+
+**Event 3: `r3` asks for 12.**
+*   *Rule Application:* The pool has 27, which is $\ge$ 12. Grant the full ask.
+*   *Action:* Deduct 12 from pool. Add 12 to granted total.
+*   *State Change:* Pool becomes $27 - 12 = 15$. Granted becomes $13 + 12 = 25$.
+*   *Result:* **Granted**.
+
+**Event 4: `r4` asks for 14.**
+*   *Rule Application:* The pool has 15, which is $\ge$ 14. Grant the full ask.
+*   *Action:* Deduct 14 from pool. Add 14 to granted total.
+*   *State Change:* Pool becomes $15 - 14 = 1$. Granted becomes $25 + 14 = 39$.
+*   *Result:* **Granted**.
+
+**Event 5: `r5` asks for 17.**
+*   *Rule Application:* The pool has 1 token. This is less than the ask (17), but greater than 0. Rule states: "grants are partial when the pool cannot cover the full ask".
+*   *Action:* Deduct all available tokens (1) from pool. Add 1 to granted total.
+*   *State Change:* Pool becomes $1 - 1 = 0$. Granted becomes $39 + 1 = 40$.
+*   *Result:* **Granted** (Partial).
+
+**Event 6: `r6` asks for 21.**
+*   *Rule Application:* The pool has 0 tokens. Rule states: "a request arriving at an empty pool is denied and listed by id".
+*   *Action:* Deny the request. Do not modify pool or granted total. Record ID in denial list.
+*   *State Change:* Pool remains 0. Granted remains 40.
+*   *Result:* **Denied**.
+
+**Expiry Rule Application:**
+The task states: "the grant for r1 expires after request r2 completes".
+*   Trigger Event: Completion of `r2`.
+*   Target Grant ID: `r1`.
+*   Amount Granted to `r1`: 5 (from step 1).
+*   Return Calculation: "returns half its granted tokens rounded down". $5 / 2 = 2.5$. Rounded down ($\lfloor 2.5 \rfloor$) is 2.
+*   Timing: The return happens *after* the trigger event (`r2` completion).
+*   Action: Add 2 to the pool.
+*   State Change: Pool becomes $0 + 2 = 2$. Granted remains 40 (the original grant count doesn't decrease, just returns tokens upon expiry per specific rule logic, or rather, the "granted_units" metric in this context typically sums the units that successfully entered the system; however, looking at the standard accounting of such problems where `granted_units` is a cumulative sum of successful requests regardless of subsequent expiry unless specified otherwise. Let's re-read carefully: "the grant for r1 expires... returns half its granted tokens". It does not say "remove from granted total". Usually `granted_units` tracks the volume served. The pool recovers partially.)
+*   *Refined State Check:*
+    *   Pool before expiry trigger: 0.
+    *   Return amount: $\lfloor 5/2 \rfloor = 2$.
+    *   Pool after return: $0 + 2 = 2$.
+    *   Total Granted Units (Sum of successful requests): $r1(5) + r2(8) + r3(12) + r4(14) + r5(1) = 40$.
+
+**Final Verification:**
+*   `granted_units`: Sum of all units granted in steps 1-6.
+    *   $r1: 5$
+    *   $r2: 8$
+    *   $r3: 12$
+    *   $r4: 14$
+    *   $r5: 1$ (Partial)
+    *   Total = $40$.
+*   `denied`: List of IDs for requests arriving at an empty pool.
+    *   Only `r6` arrived when pool was 0.
+    *   List = [`"r6"`].
+*   `pool_left`: Current tokens in the pool.
+    *   Started with 1 (after r5).
+    *   Requested by r6, denied (no change). Pool stays 0? Wait. The rule says "denied... listed". It doesn't say denied requests consume anything if empty. So pool is 0 before expiry processing completes the trigger window.
+    *   Expiry of `r1` triggered after `r2`. `r2` happened way back (Step 2). The state at that moment was Pool=27, Granted=13.
+    *   Wait, the rule says "expires after request r2 completes". This is a specific conditional event tied to ID `r1`, not a time-based expiry. It implies that once `r2` finishes, the contract associated with `r1` activates an expiry clause.
+    *   Does this happen sequentially in the stream? Yes. The events are processed in strict arrival order. The completion of `r2` is effectively instantaneous after its grant. So the expiry happens immediately following Step 2.
+    *   If the expiry happened after Step 2:
+        *   Pool was 27 (after r2).
+        *   Return $\lfloor 5/2 \rfloor = 2$.
+        *   Pool becomes $27 + 2 = 29$.
+        *   Then `r3` arrives, asks 12. Grant full. Pool $29-12=17$. Granted $13+12=25$.
+        *   `r4` arrives, asks 14. Grant full. Pool $17-14=3$. Granted $25+14=39$.
+        *   `r5` arrives, asks 17. Pool has 3. Partial grant of 3. Pool becomes 0. Granted $39+3=42$.
+        *   `r6` arrives, asks 21. Pool is 0. Denied. List [`"r6"`].
+    *   **Crucial Interpretation Check**: The text says "the grant for r1 expires after request r2 completes". In the flow of events provided ("arrival order: r1... r6"), `r2` is the second event. If an expiry event occurs logically between `r2`'s completion and `r3`'s arrival, it must be processed then.
+    *   Let's re-read the "Orientation" example to confirm timing: "the first grant expired and returned 5... and the third ask of 13 landed against only 17". In the orientation story: Start 30. Ask 11 (Grant 11, Left 19). Ask 7 (Grant 7, Left 12). Expiry happens. Returns 5. Pool becomes $12+5=17$. Third ask (13) lands on 17.
+    *   This confirms: The expiry event modifies the pool state *before* subsequent requests are processed if it is tied to a preceding request's completion.
+    *   Therefore, for `r1` expiring after `r2`:
+        1.  **Event r1**: Ask 5. Pool $40 \to 35$. Granted 5.
+        2.  **Event r2**: Ask 8. Pool $35 \to 27$. Granted 13.
+            *   **Triggered Expiry Event (r1 expires)**: Pool is 27. Return $\lfloor 5/2 \rfloor = 2$. Pool becomes $27 + 2 = 29$.
+        3.  **Event r3**: Ask 12. Pool has 29. Grant full. Pool $29 \to 17$. Granted $13+12=25$.
+        4.  **Event r4**: Ask 14. Pool has 17. Grant full. Pool $17 \to 3$. Granted $25+14=39$.
+        5.  **Event r5**: Ask 17. Pool has 3. Partial grant of 3. Pool $3 \to 0$. Granted $39+3=42$.
+        

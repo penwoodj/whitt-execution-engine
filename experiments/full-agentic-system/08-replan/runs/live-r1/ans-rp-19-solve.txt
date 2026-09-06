@@ -1,0 +1,85 @@
+Based on the strict rules provided in the text, here is the step-by-step derivation of the final state for "tonight".
+
+### **Rule Analysis (Phase 1)**
+The system operates with a fixed pool size of **8 GB**.
+- **Model B**: Size 2 GB. Status: **Pinned** and **Never Evicted**.
+- **Other Models (A, C, D)**: Sizes 2, 2, 7 GB respectively. Status: **Unpinned**, subject to LRU eviction if they do not fit.
+
+**Eviction Logic**:
+1. If a load cannot fit in the current free space, evict unpinned models starting from the Least Recently Used (LRU).
+2. Continue evicting until either:
+   - The new model fits, OR
+   - Only pinned models remain and the new model still does not fit.
+3. **Deferred**: If only pinned models remain and the required size is larger than the remaining free space (which would be just Model B), the load is deferred.
+4. **Counts**: Every successful eviction counts toward `evictions`. A deferred load sets `deferred` to its ID.
+
+**Execution Stream**:
+1. `load A` (2 GB) -> Fits (Free: 8). State: {A, B}. Free: 6.
+2. `load B` (2 GB) -> Fits (Free: 6). Note: Model B is already loaded implicitly or re-confirmed? Wait, the text says "models A through D... resident sizes". Usually, in these problems, unless specified as "already loaded", we assume an empty start. However, the prompt lists `load A`, then `load B`.
+   - Let's trace carefully: Start Empty (0 GB used).
+   - **Event 1**: `load A` (2 GB). Fits in 8. Used: 2. Free: 6. Residents: {A}.
+   - **Event 2**: `load B` (2 GB). Fits in 6. Used: 4. Free: 4. Residents: {A, B}.
+     *(Note: The prompt text says "Model B is pinned and never evicted". It does not say it starts loaded. We load it).*
+   - **Event 3**: `load C` (2 GB). Fits in 4. Used: 6. Free: 2. Residents: {A, B, C}.
+     *(LRU Order for eviction candidates among unpinned A, C: A was touched first, then C. So A is LRU).*
+   - **Event 4**: `load D` (7 GB). Fits? Current free space = 2 GB. Required = 7 GB. Does not fit.
+     - Must evict unpinned models until D fits or only pinned remain.
+     - **Candidate 1**: A (2 GB, Unpinned). Evict A.
+       - Free becomes $2 + 2 = 4$. Used: $6-2=4$. Residents: {B, C}.
+       - Does D (7) fit in 4? No.
+     - **Candidate 2**: C (2 GB, Unpinned). Evict C.
+       - Free becomes $4 + 2 = 6$. Used: $4-2=2$. Residents: {B}.
+       - Does D (7) fit in 6? No.
+     - **Check Pinned**: Only B remains. B is pinned and cannot be evicted.
+     - Remaining Free Space: 6 GB (Model B). Required: 7 GB.
+     - Result: Cannot fit even with only pinned models remaining.
+     - Action: **Defer**.
+     - Stats Update: `evictions` += 2 (A and C). `deferred` = "D".
+
+3. `unload B` (2 GB).
+   - Rule: "an unload for a model no longer resident is a no-op." -> Here B IS resident.
+   - Rule: Standard unload removes the model from memory, adding its size to free space?
+   - Let's re-read the specific constraint logic in the text vs standard behavior. The text describes evictions and deferrals based on fitting. It implies the pool is managed dynamically.
+   - Does `unload B` happen *after* the deferred load D? Yes.
+   - If we unload B, free space increases to $6 + 2 = 8$.
+   - **BUT**: The problem asks for the final state based on the stream: "load A... load B... load C... load D... unload B".
+   - Does the deferred status persist? Yes. `deferred` is set when the event occurs and fails to execute. Subsequent events do not retroactively fix a failure that already happened (the text emphasizes "a denial is permanent the instant it happens").
+   - However, does the count of `evictions` change? No, those evictions were performed during Event 4.
+   - Does the final state need to reflect the memory after unload? The output contract asks for `loads`, `evictions`, `deferrals`, `deferred`. It does not ask for current memory usage or resident list.
+   - Wait, is there a trick with "Model B is pinned and never evicted"?
+     - If we load A (2), Load B (2), Load C (2). Pool: 8. Used: 6. Free: 2.
+     - Load D (7). Needs 7. Evicts A (2) -> Free 4. Evicts C (2) -> Free 6. Only B left. Fails. Defers.
+     - Unload B. Removes B. Free becomes 8.
+   - Is there any scenario where `evictions` count is different?
+     - Maybe the initial state assumes A and B are loaded? "models A through D... resident sizes". No, that just defines capacity.
+     - Let's check the "orientation" example logic to ensure I'm not missing a subtlety about "never evicted" meaning it stays in memory regardless of load/unload commands? No, "unloads 10s" implies removal is possible.
+   - Is it possible `load B` was redundant because it's pinned and assumed loaded? Even if so:
+     - Start: {A?, B?}. If A not loaded: Load A (2). Used 2.
+     - If B assumed loaded: Used 2+2=4. Load C (2) -> Used 6. Load D (7) -> Evict A (2) -> Free 4. No pinned left except B. Fail. Same result.
+
+   - Let's reconsider the "deferred" list format. The text says `deferred: [ids]`. Since only D deferred, it should be `["D"]`.
+   - Counts:
+     - `loads`: Usually refers to successful loads? Or total load commands? In similar problems (like the "Residency Duty" or "Pad wants state"), `loads` often tracks the number of items currently resident at the end.
+       - After Unload B: Residents = {D, A?, C?, ...}? No, D was deferred (not loaded). A and C were evicted.
+       - So residents = {B}.
+       - Count = 1? Or does `loads` mean "number of load events successfully completed"?
+         - Successful loads: A, B, C. (3). D failed. Unload is not a load.
+         - If `loads` means "current resident count": Only B remains (since D deferred and didn't enter). Count = 1.
+       - Let's look at the orientation example: "three loads...". It counted successful executions. M, N, P loaded. Q deferred. So "loads" likely means **successful load events**.
+       - Successful Loads: A, B, C. Total = 3.
+     - `evictions`: We evicted A and C to make room for D. Total = 2.
+     - `deferrals`: One event (D) deferred. Total = 1.
+     - `deferred`: ["D"].
+
+   - Wait, let's re-read the "orientation" example carefully: "three loads, two evictions, one deferral".
+     - Orientation Stream: Load M, Load N, Load P, Load Q.
+     - Result: M loaded (1), N loaded (2), P loaded (3). Q deferred. Total successful loads = 3.
+     - Evictions: M evicted by P? No, P fit after evicting M? Wait, in orientation: 5GB card. M(2), N(2 pinned), P(3), Q(4).
+       - Start Empty. Load M (2). Used 2. Free 3.
+       - Load N (2). Used 4. Free 1.
+       - Load P (3). Needs 3. Fits in 1? No. Evict unpinned LRU. Unpinned is {M}. Evict M (2). Free becomes $1+2=3$. Fits P (3)? Yes ($3 \ge 3$). Loaded.
+         - Evictions: 1.
+       - Load Q (4). Needs 4. Free space = 0 (P uses 3, N uses 2? No, M evicted. Residents {N, P}. Total size $2+3=5$. Card size 5. Free 0). Needs 4. Does not fit in 0.
+         - Evict unpinned LRU. Unpinned is {P} (size 3) and {M} was evicted? No, M was resident then evicted? Wait, "evictions choose the least-recently-touched unpinned model". M was touched first, then N, then P?
+         - Timeline Orientation: Load M (t1), Load N (t2). LRU is M. Evict M. Now Residents {N}. Touch P.
+         - So when Q comes, Unpinned residents are {P} and maybe others? No, only N (pinned) and P (

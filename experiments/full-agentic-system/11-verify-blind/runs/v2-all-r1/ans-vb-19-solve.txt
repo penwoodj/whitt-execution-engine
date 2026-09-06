@@ -1,0 +1,99 @@
+### Phase 1 RULE SCAN
+
+The following rules govern the state changes during the event stream:
+
+1.  **Arrival Rule**: Each request (load/unload) arrives in strict order and triggers a check against current capacity.
+2.  **Fit Check Rule**: If the requested size fits within `Total Capacity - Sum(Resident Sizes)`, the model loads immediately without eviction.
+3.  **Eviction Selection Rule**: If the request does not fit, identify all unpinned models sorted by recency (Least Recently Touched first).
+4.  **Single Eviction Step Rule**: Evict exactly one LRU unpinned model per step until either:
+    *   The request fits (`Free + Evicted Size >= Requested Size`).
+    *   No unpinned models remain.
+5.  **Deferred Load Rule**: If no unpinned models remain and the request still does not fit, the load is deferred (no eviction occurs for this step). Record the ID as a deferral.
+6.  **Recency Update Rule**: Upon any successful load or eviction of an existing resident, that model's recency is updated to "Most Recently Touched".
+7.  **Unload Rule**: If the target model exists and is pinned, it remains (no-op). If it exists and is unpinned, its size is freed and it is removed from residents. If it does not exist, it is a no-op.
+8.  **Counter Accumulation Rule**: Increment `loads` only on successful loads. Increment `evictions` for every model physically evicted (even if the load later defers). Increment `deferrals` and record ID only when a load fails after exhausting unpinned residents.
+
+**Trigger Mapping:**
+*   Event 1 (`load A`): Triggers Fit Check Rule -> Loads.
+*   Event 2 (`load B`): Triggers Fit Check Rule -> Loads (B is pinned).
+*   Event 3 (`load C`): Triggers Eviction Selection Rule -> Fits without eviction (A is unpinned, but not needed? Wait: Capacity 8GB. Residents A(2)+B(2)=4GB. Free=4GB. Request C=2GB. Fits immediately). *Correction*: Let's re-verify capacity math in Phase 2.
+*   Event 4 (`load D`): Triggers Eviction Selection Rule -> Needs eviction of A (LRU unpinned) to fit? Capacity 8. Residents A(2)+B(2)=4. Free=4. Request D=7. Fits? No. Must evict. Evicts A (2GB). New Free = 6GB + 2GB(A) - wait, logic: `Free` is empty space. `Used` is sum of residents.
+    *   Start: Used=0, Free=8.
+    *   Load A(2): Used=2, Free=6. Fits.
+    *   Load B(2): Used=4, Free=4. Fits. (B pinned).
+    *   Load C(2): Used=6, Free=2. Fits.
+    *   Load D(7): Used=8, Free=0. Request 7 > 0. Evict LRU Unpinned (A). A is unpinned? Yes. Evict A (-2GB used). New Used=6. Free=2. Still need 7. Fits? No.
+    *   Wait, standard LRU eviction logic: "Evicts as many... as needed".
+    *   Let's re-eval Event 4 carefully in Phase 2.
+*   Event 5 (`unload B`): Triggers Unload Rule -> B is pinned, so no-op (B stays resident).
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   Capacity: 8 GB
+*   Residents: []
+*   Free Space: 8 GB
+*   Recency List (Oldest to Newest): []
+*   Pinned Models: {B}
+*   Unpinned Models: {}
+*   Counts: Loads=0, Evictions=0, Deferrals=0
+
+**Event 1: `load A` (2 GB)**
+*   Request Size: 2 GB.
+*   Current Free Space: 8 GB.
+*   Check Fit: $8 \ge 2$. Fits.
+*   Action: Load A. Update Recency [A].
+*   State: Residents {A(2)}, Free 6, Recency [A], Pinned {}, Unpinned {A}.
+*   Counts: Loads=1, Evictions=0, Deferrals=0.
+
+**Event 2: `load B` (2 GB)**
+*   Request Size: 2 GB.
+*   Current Free Space: 6 GB.
+*   Check Fit: $6 \ge 2$. Fits.
+*   Action: Load B. Update Recency [A, B]. Mark B as Pinned.
+*   State: Residents {A(2), B(2)}, Free 4, Recency [A, B], Pinned {B}, Unpinned {A}.
+*   Counts: Loads=2, Evictions=0, Deferrals=0.
+
+**Event 3: `load C` (2 GB)**
+*   Request Size: 2 GB.
+*   Current Free Space: 4 GB.
+*   Check Fit: $4 \ge 2$. Fits.
+*   Action: Load C. Update Recency [A, B, C]. Mark C as Unpinned.
+*   State: Residents {A(2), B(2), C(2)}, Free 2, Recency [A, B, C], Pinned {B}, Unpinned {A, C}.
+*   Counts: Loads=3, Evictions=0, Deferrals=0.
+
+**Event 4: `load D` (7 GB)**
+*   Request Size: 7 GB.
+*   Current Free Space: 2 GB.
+*   Check Fit: $2 < 7$. Does not fit.
+*   Identify Unpinned Residents for Eviction: {A, C}. Sorted by Recency (Oldest first): [A, C].
+*   Step 4a: Evict A (Size 2).
+    *   Action: Evict A. Count Evictions=1. Update Recency of remaining residents? No, only touched models move to MRU. D is not loaded yet.
+    *   New Free Space: $2 + 2 = 4$ GB.
+    *   Current Residents: {B(2), C(2)}. Used=4.
+*   Check Fit again: Request 7 vs Free 4. $4 < 7$. Still does not fit.
+*   Step 4b: Evict C (Size 2). (C is next in LRU list after A was removed).
+    *   Action: Evict C. Count Evictions=2.
+    *   New Free Space: $4 + 2 = 6$ GB.
+    *   Current Residents: {B(2)}. Used=2.
+*   Check Fit again: Request 7 vs Free 6. $6 < 7$. Still does not fit.
+*   Identify Unpinned Residents for Eviction: {}. (Only B remains, and B is Pinned).
+*   Condition Met: No unpinned models remain AND request still does not fit.
+*   Action: Defer Load D. Record ID "4".
+*   State: Residents {B(2)}, Free 6, Recency [B], Pinned {B}, Unpinned {}.
+*   Counts: Loads=3 (D failed), Evictions=2, Deferrals=1. Deferred=[4].
+
+**Event 5: `unload B` (2 GB)**
+*   Target Model: B.
+*   Status: Resident and Pinned.
+*   Rule Application: "An unload for a model no longer resident is a no-op." -> Wait, rule says "Unload frees its size" generally, but specific constraint: "model B is pinned and never evicted". Does it imply it cannot be unloaded? The prompt says "unload B (2 GB)".
+*   Re-reading rules: "An unload for a model no longer resident is a no-op." It does not explicitly forbid unloading a pinned model, but the orientation story implies pinned models are persistent. However, standard memory management usually allows unloading pinned pages if requested, or treats them as read-only. But looking at the specific text: "model B is pinned and never evicted". This usually refers to eviction logic (LRU). Does it forbid unload?
+*   Let's look at the "Orientation" example for clues on pinned behavior: In orientation, N was pinned. Request `load N` happened. Later `unload N` wasn't requested in the short stream provided in the text ("requests load M, load N, load P, load Q"). The text doesn't show an unload of a pinned model failing or succeeding explicitly in the example description other than "M and N loaded clean".
+*   However, standard interpretation of "pinned" in these specific constraint puzzles (often derived from LRU cache problems) is that they cannot be evicted. Can they be unloaded? If I request `unload B`, and B exists, does it free space?
+    *   Scenario A: Pinned means "cannot leave". Unload fails or is ignored.
+    *   Scenario B: Pinned just affects eviction priority. Unload works normally.
+*   Let's check the text again: "model B is pinned and never evicted." This is a constraint on *eviction*. It does not say "B cannot be unloaded".
+*   However, if I unload B, Free becomes $6+2=8$. Residents {}.
+*   Is there a rule preventing this? "An unload for a model no longer resident is a no-op." That's the only restriction listed.
+*   Let's assume standard behavior: Unload works unless specified otherwise. The "never evicted" clause specifically targets the eviction logic (LRU selection). If I manually unload, it should work.
+    *   Action: Remove B.

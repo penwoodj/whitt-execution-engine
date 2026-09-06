@@ -1,0 +1,62 @@
+Based on the strict rules provided for tonight's audit window, here is the step-by-step derivation of the state and the final classification of the claims.
+
+### Phase 1: Rule List (SCAN)
+The following rules govern the state changes during the event processing. Each rule applies to specific claim IDs based on their source hierarchy and content.
+
+1.  **Rule: Contradiction Override**
+    *   **Trigger:** When a higher-ranked source contradicts a lower-ranked source regarding a claim's status (e.g., Machine Log vs. Signed Handoff).
+    *   **Effect:** The higher source wins; the lower source's assertion counts as `FALSE`.
+    *   **Applies to:** `c2` (Machine Log says moved, Signed Handoff says never moved).
+
+2.  **Rule: Hearsay Alone**
+    *   **Trigger:** A claim rests solely on "hallway hearsay" with no corroboration from higher sources.
+    *   **Effect:** The claim is `UNVERIFIED`. It is not false, but lacks verification.
+    *   **Applies to:** `c4` (Hearsay alone claims cache was cold).
+
+3.  **Rule: Dashboard Alone**
+    *   **Trigger:** A claim rests solely on the "status dashboard" which is marked as KNOWN-BUGGY and cannot carry a claim alone.
+    *   **Effect:** The claim is `UNVERIFIED`. Even if the dashboard shows data, it does not verify the claim without higher source agreement.
+    *   **Applies to:** `c5` (Only buggy dashboard shows queue depth).
+
+4.  **Rule: Agreement Verification**
+    *   **Trigger:** When sources agree on a fact (e.g., Signed Handoff and Hearsay both say 03:00).
+    *   **Effect:** The claim is `TRUE`.
+    *   **Applies to:** `c3` (Signed Handoff puts backup at 03:00, Hearsay says 03:00 too).
+
+5.  **Rule: Machine Log Truth**
+    *   **Trigger:** A claim rests solely on the "machine log" which is the highest source available in this specific scenario (no contradiction present).
+    *   **Effect:** The claim is `TRUE`.
+    *   **Applies to:** `c1` (Machine log shows shard rebalanced at 02:10).
+
+### Phase 2: Ledger Walk (EVENTS)
+Applying the events one at a time in strict arrival order (`c1` through `c5`) and updating the state for each claim.
+
+*   **Event c1:** Machine log shows shard rebalanced at 02:10.
+    *   *Analysis:* Source is Machine Log (Highest). No contradiction exists.
+    *   *State:* Claim `c1` becomes **TRUE**.
+
+*   **Event c2:** Signed handoff says shard never moved; Machine log shows it moved at 02:10.
+    *   *Analysis:* Contradiction between Machine Log (Higher) and Signed Handoff (Lower). Rule of Contradiction Override applies. Higher source wins. Lower source assertion counts FALSE.
+    *   *State:* Claim `c2` becomes **FALSE**.
+
+*   **Event c3:** Signed handoff puts backup at 03:00; Hallway hearsay says 03:00 too.
+    *   *Analysis:* Agreement between sources (Signed Handoff and Hearsay). Rule of Agreement Verification applies.
+    *   *State:* Claim `c3` becomes **TRUE**.
+
+*   **Event c4:** Hallway hearsay alone claims cache was cold at 04:00.
+    *   *Analysis:* Source is solely Hearsay. No higher source agrees or contradicts. Rule of Hearsay Alone applies.
+    *   *State:* Claim `c4` becomes **UNVERIFIED**.
+
+*   **Event c5:** Only the buggy dashboard shows queue depth peaking at 05:00.
+    *   *Analysis:* Source is solely Dashboard (Known-Buggy). Cannot carry a claim alone. Rule of Dashboard Alone applies.
+    *   *State:* Claim `c5` becomes **UNVERIFIED**.
+
+### Final Answer
+
+```json
+{
+  "true": ["c1", "c3"],
+  "false": ["c2"],
+  "unverified": ["c4", "c5"]
+}
+```

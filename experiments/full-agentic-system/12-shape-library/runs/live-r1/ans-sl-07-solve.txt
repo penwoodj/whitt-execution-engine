@@ -1,0 +1,92 @@
+The user wants me to solve a specific state machine problem based on a set of rules and input data provided in the text. The output must be strictly formatted JSON with three keys: `rollout_pct`, `stages_done`, and `status`.
+
+**1. Analyze the Rules (Phase 1 Logic):**
+*   **Input:** A list of observations (error rates) for steps 1 through 6.
+    *   Step 1: 0.5%
+    *   Step 2: 0.8%
+    *   Step 3: 2.1%
+    *   Step 4: 0.6%
+    *   Step 5: 0.7%
+    *   Step 6: 0.9%
+*   **Limits:**
+    *   Steps 1-5 limit is 2.0%.
+    *   Steps 6-10 limit is 1.0%. (Note: The input only goes to step 6).
+*   **Stage Logic:**
+    *   "The 1st observation carries stage 1, the 2nd carries stage 2..." -> Stage number = Position in list (1-based index).
+    *   "A clean observation completes the stage equal to its own position... rollout then shows 10 percent times that stage number." -> If Clean at Pos $P$, Rollout becomes $10 \times P$.
+    *   "A breaching observation completes nothing and is spent; the rollback leaves the rollout and stages at the last completed stage's values." -> If Breach at Pos $P$, State remains at previous valid state. Limit tightens to 0.8% for remaining steps.
+*   **Termination Conditions:**
+    *   "Exactly one breach and the list ends: status PAUSED with the last completed stage's values."
+    *   "A second breach stops everything with status STOPPED..."
+    *   "No breach at all... status DONE."
+
+**2. Walk the Events (Phase 2 Logic):**
+
+*   **Event 1 (Step 1):** Rate = 0.5%. Limit = 2.0%.
+    *   $0.5 \le 2.0$ -> Clean.
+    *   Position = 1. Stage completed = 1. Rollout = $10 \times 1 = 10$.
+    *   State: Rollout=10, Stages=1.
+
+*   **Event 2 (Step 2):** Rate = 0.8%. Limit = 2.0%.
+    *   $0.8 \le 2.0$ -> Clean.
+    *   Position = 2. Stage completed = 2. Rollout = $10 \times 2 = 20$.
+    *   State: Rollout=20, Stages=2.
+
+*   **Event 3 (Step 3):** Rate = 2.1%. Limit = 2.0%.
+    *   $2.1 > 2.0$ -> Breach.
+    *   Observation spent. State reverts to last completed stage values (Rollout=20, Stages=2).
+    *   New Limit for remaining steps = 0.8%.
+    *   Status check: We have exactly one breach so far. List continues.
+
+*   **Event 4 (Step 4):** Rate = 0.6%. Limit = 0.8% (Tightened from previous breach).
+    *   $0.6 \le 0.8$ -> Clean.
+    *   Position = 4. Stage completed = 4. Rollout = $10 \times 4 = 40$.
+    *   State: Rollout=40, Stages=4.
+
+*   **Event 5 (Step 5):** Rate = 0.7%. Limit = 2.0%? Or does the limit stay tight?
+    *   Rule text: "after any rollback the limit tightens to 0.8 for every remaining step."
+    *   Since Event 3 was a breach, the limit applies to all subsequent steps until another breach occurs or the list ends.
+    *   Limit = 0.8%.
+    *   $0.7 \le 0.8$ -> Clean.
+    *   Position = 5. Stage completed = 5. Rollout = $10 \times 5 = 50$.
+    *   State: Rollout=50, Stages=5.
+
+*   **Event 6 (Step 6):** Rate = 0.9%. Limit = 0.8% (Tightened).
+    *   $0.9 > 0.8$ -> Breach.
+    *   Observation spent. State reverts to last completed stage values (Rollout=50, Stages=5).
+    *   Status check: We now have exactly two breaches (Step 3 and Step 6).
+    *   Rule text: "A second breach stops everything with status STOPPED".
+
+**3. Final State Calculation:**
+*   **Last Completed Stage:** Before the second breach (at Step 6), the state was Rollout=50, Stages=5. The breach at Step 6 reverts to this.
+*   **Rollout Pct:** 50.
+*   **Stages Done:** 5.
+*   **Status:** STOPPED (because there were two breaches).
+
+**4. Verification against "Orientation" Example:**
+The text provides an example: `0.2, 0.75, 2.5, 0.5`.
+1. Pos 1 (0.2) Clean -> Stage 1, Rollout 10.
+2. Pos 2 (0.75) Clean -> Stage 2, Rollout 20.
+3. Pos 3 (2.5) Breach (>2.0). Spent. Revert to Stage 2, Rollout 20. Limit tightens.
+4. Pos 4 (0.5) Clean (<0.8). Carries Stage 4 -> Rollout 40.
+End of list. One breach total. Status PAUSED.
+
+My trace:
+1. Pos 1 (0.5) Clean -> S1, R10.
+2. Pos 2 (0.8) Clean -> S2, R20.
+3. Pos 3 (2.1) Breach (>2.0). Spent. Revert to S2, R20. Limit tightens.
+4. Pos 4 (0.6) Clean (<0.8). Carries Stage 4 -> S4, R40.
+5. Pos 5 (0.7) Clean (<0.8). Carries Stage 5 -> S5, R50.
+6. Pos 6 (0.9) Breach (>0.8). Spent. Revert to S5, R50. Limit tightens (irrelevant as list ends).
+End of list. Two breaches total. Status STOPPED.
+
+The logic holds. The final state is determined by the last *completed* stage before the termination condition triggered by the second breach.
+
+**Final Values:**
+`rollout_pct`: 50
+`stages_done`: 5
+`status`: "STOPPED"
+
+```json
+{"rollout_pct": 50, "stages_done": 5, "status": "STOPPED"}
+```

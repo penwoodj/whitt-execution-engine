@@ -1,0 +1,125 @@
+### Phase 1 RULE SCAN
+This phase lists every rule that changes state during the event sequence, triggered by specific events or claims.
+
+1. **Initial State Rule**: The pool starts at 50 tokens (Trigger: System Initialization).
+2. **Grant Request Rule (r1)**: Request r1 asks for 4; since Pool(50) >= Ask(4), grant 4, reduce Pool to 46 (Trigger: Event r1 arrival).
+3. **Grant Expiry Rule**: The grant from r1 expires after request r2 completes (Trigger: Post-Event r2 completion).
+4. **Return Rule**: Upon expiry of the r1 grant, return half of the granted amount (floor(4/2)=2) to the pool (Trigger: Event r3 arrival, as it arrives right after r2 completes and triggers the expiry logic described in the prompt's specific sequencing "return arrives right before the request the trigger names").
+5. **Grant Request Rule (r2)**: Request r2 asks for 6; since Pool(48) >= Ask(6), grant 6, reduce Pool to 42 (Trigger: Event r2 arrival).
+6. **Grant Request Rule (r3)**: Request r3 asks for 9; since Pool(48) >= Ask(9), grant 9, reduce Pool to 39 (Trigger: Event r3 arrival). *Note: The expiry/return from r1 happens here based on the "right before" rule.*
+7. **Grant Request Rule (r4)**: Request r4 asks for 13; since Pool(30) < Ask(13), grant partial 30, reduce Pool to 0 (Trigger: Event r4 arrival).
+8. **Denial Rule**: Request r5 arrives at an empty pool; deny request, do not change pool state (Trigger: Event r5 arrival).
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at a time in strict arrival order, showing the state after each event. The expiry of r1's grant occurs immediately before r3 arrives (as per "return arrives right before the request the trigger names").
+
+**Event: System Initialization**
+- Action: Set initial pool.
+- State: Pool = 50.
+
+**Event: Request r1 (Ask: 4)**
+- Rule Applied: Grant Request Rule.
+- Calculation: Grant min(4, 50) = 4. New Pool = 50 - 4 = 46.
+- State: Pool = 46. Granted so far: 4.
+
+**Event: Request r2 (Ask: 6)**
+- Rule Applied: Grant Request Rule.
+- Calculation: Grant min(6, 46) = 6. New Pool = 46 - 6 = 40.
+- State: Pool = 40. Granted so far: 10.
+
+**Event: Expiry of r1 Grant (Triggered by completion of r2)**
+- Rule Applied: Return Rule.
+- Calculation: Return floor(4 / 2) = 2. New Pool = 40 + 2 = 42.
+- State: Pool = 42. Granted so far: 10.
+
+**Event: Request r3 (Ask: 9)**
+- Rule Applied: Grant Request Rule.
+- Calculation: Grant min(9, 42) = 9. New Pool = 42 - 9 = 33.
+- State: Pool = 33. Granted so far: 19.
+
+**Event: Request r4 (Ask: 13)**
+- Rule Applied: Grant Request Rule (Partial).
+- Calculation: Grant min(13, 33) = 13? Wait, re-evaluating pool state from previous step.
+  - Start: 50
+  - After r1 (-4): 46
+  - After r2 (-6): 40
+  - Expiry return (+2): 42
+  - After r3 (-9): 33
+  - Request r4 asks for 13. Pool is 33. 33 >= 13. Grant full 13. New Pool = 20.
+- State: Pool = 20. Granted so far: 32.
+
+**Event: Request r5 (Ask: 15)**
+- Rule Applied: Denial Rule.
+- Calculation: Pool is 20. Ask is 15. Wait, let me re-read the prompt's specific numbers vs my calculation.
+  - Prompt: "r4 asks for 13". My calc: Pool was 33. Grant 13 -> Pool 20.
+  - Prompt: "r5 asks for 15". My calc: Pool is 20. Grant 15 -> Pool 5.
+  
+  *Self-Correction/Re-reading the prompt carefully:*
+  Let's re-read the "sister pool" example logic to ensure I didn't miss a nuance about partials or expiry timing that changes the math for tonight.
+  Sister pool: Start 25. Ask 11 -> Grant 11, Pool 14. Ask 7 -> Grant 7, Pool 7. Expiry returns half of 11 (5) -> Pool 12. Ask 13 -> Partial grant 12, Pool 0.
+  
+  Tonight's numbers: Start 50.
+  r1 (Ask 4): Grant 4. Pool = 46.
+  r2 (Ask 6): Grant 6. Pool = 40.
+  Expiry of r1 (Grant was 4): Return floor(4/2) = 2. Pool = 42.
+  r3 (Ask 9): Grant 9. Pool = 33.
+  r4 (Ask 13): Grant 13. Pool = 20.
+  r5 (Ask 15): Grant 15. Pool = 5.
+
+  Wait, did I misread the "partial" condition?
+  "grants are partial when the pool cannot cover the full ask".
+  In my trace:
+  Start: 50
+  r1 (-4) -> 46
+  r2 (-6) -> 40
+  Expiry (+2) -> 42
+  r3 (-9) -> 33
+  r4 (-13) -> 20 (Full grant possible since 33 >= 13)
+  r5 (-15) -> 5 (Full grant possible since 20 >= 15)
+
+  Is there a rule I missed? "the grant for r1 expires after request r2 completes". Yes.
+  "an expired grant returns half its granted tokens rounded down to the pool". Yes.
+  
+  Let's check the sister pool logic again to see if it implies a different interpretation of "arrival order" or timing.
+  Sister: Start 25. Ask 11 (Grant 11, Rem 14). Ask 7 (Grant 7, Rem 7). Expiry returns 5 (Rem 12). Ask 13 (Partial 12, Rem 0).
+  
+  Tonight: Start 50.
+  r1 (4) -> 46.
+  r2 (6) -> 40.
+  Expiry (+2) -> 42.
+  r3 (9) -> 33.
+  r4 (13) -> 20.
+  r5 (15) -> 5.
+
+  Total Granted: 4 + 6 + 9 + 13 + 15 = 47.
+  Pool Left: 5.
+  Denied: [].
+
+  Let me double check the "partial" logic in my head. Did I miscalculate a subtraction?
+  50 - 4 = 46.
+  46 - 6 = 40.
+  40 + 2 = 42.
+  42 - 9 = 33.
+  33 - 13 = 20.
+  20 - 15 = 5.
+  
+  The math seems solid. No denials occur because the pool never drops below zero before a request, and even after the partials/expiry adjustments, there is enough buffer for r4 and r5.
+
+  Wait, let me re-read "r4 asks for 13". Is it possible the prompt implies r4 causes a partial?
+  If r4 caused a partial, Pool would need to be < 13 before r4.
+  Current Pool before r4 is 33. That is > 13. So full grant.
+  
+  Let me re-read "r5 asks for 15".
+  Current Pool before r5 is 20. That is > 15. So full grant.
+
+  Okay, the result stands: All requests granted fully (except potentially partials if math was tighter, but here it's loose). No denials. Final pool 5. Total granted sum = 4+6+9+13+15 = 47.
+
+  Let's do a sanity check on the "sister pool" description again to ensure I'm not missing a hidden rule about "grants never return any other way".
+  Sister: Start 25. r1(11)->14. r2(7)->7. Expiry(+5)->12. r3(13)->Partial 12->0. Total granted: 11+7+12 = 30. Matches story "closed with 30 granted".
+  
+  Tonight: Start 50.
+  r1(4) -> 46.
+  r2(6) -> 40.
+  Expiry(+2) -> 42.
+  r3(9) -> 33.
+  r4(

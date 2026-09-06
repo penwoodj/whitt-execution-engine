@@ -1,0 +1,81 @@
+The task describes a scheduling simulation involving two LOW jobs and one HIGH job on a single core. The rules dictate preemption, checkpointing (wasted work), and resumption order based on start times. The "EXPIRY DISCIPLINE" section appears to be boilerplate or a distractor from a different context (financial ledgers with grants/returns) that does not apply to this specific scheduling problem, as there are no "grants," "pools," or "expiry events" in the provided task logic. The core mechanics are strictly deterministic based on time minutes.
+
+**Analysis of the Scheduling Logic:**
+
+1.  **Parameters:**
+    *   `LOW1`: Duration = 4 min, Start = 0.
+    *   `LOW2`: Duration = 3 min, Start = 3.
+    *   `HIGH`: Arrival = 5, Duration = 4 min (runs until minute 9). Preempts whatever is running at arrival.
+
+2.  **Timeline & State Walk:**
+
+    *   **Minute 0 (`LOW1` starts):**
+        *   `LOW1` begins execution.
+        *   Checkpoint banked? The rule says "bank a checkpoint at minute s+2". $s=0$, so bank at min 2.
+        *   State: Running `LOW1`. Time elapsed for `LOW1`: 0.
+
+    *   **Minute 1:**
+        *   `LOW1` continues.
+        *   State: Running `LOW1`. Time elapsed: 1.
+
+    *   **Minute 2:**
+        *   `LOW1` completes minute 2.
+        *   Checkpoint logic: "A job that starts or resumes at minute s banks a checkpoint at minute s+2". $s=0$, bank at min 2.
+        *   Since it reached minute 2, the first checkpoint is saved. Work done = 3 mins (minutes 0, 1, 2). Wait, usually discrete minutes mean:
+            *   Start of Min 0 -> End of Min 0 (1 unit done)
+            *   Start of Min 1 -> End of Min 1 (2 units done)
+            *   Start of Min 2 -> End of Min 2 (3 units done).
+        *   Rule: "A job ... banks a checkpoint at minute s+2". This implies the checkpoint is saved *at* that moment. So after completing minute 2, `LOW1` has 3 minutes of work saved? Or does it mean every 2 minutes?
+        *   Re-reading: "checkpoint every 2 completed minutes... banks a checkpoint at minute s+2 and again every 2 running minutes after".
+            *   Start $s=0$. Bank at $0+2=2$. Next bank at $2+2=4$.
+            *   So, after completing minute 2, `LOW1` has saved the first checkpoint. The work done since last checkpoint (which was start) is 3 minutes? Or does "every 2 completed minutes" mean checkpoints are at times $T$ where $T \ge s+2$ and $(T-s)/2$ is integer?
+            *   Let's stick to the text: "banks a checkpoint at minute s+2". So specifically at Min 2.
+            *   Work done before Min 2 completion: Minutes 0, 1 (and part of 2?). If discrete steps: End of Min 0 (1), End of Min 1 (2). End of Min 2 (3).
+            *   The checkpoint is saved at Min 2. Does this save the work done in Min 0 and 1? Yes, likely cumulative or just a marker.
+            *   "A job ... resumes with X minutes left". If `LOW1` has 4 mins total. After Min 2 (3 units), remaining is 1 unit.
+            *   However, let's look at the "wasted" rule: "on preemption the work past the last checkpoint is wasted and redone after resume."
+            *   If the checkpoint is saved *at* minute 2, does it save the work of minute 2? Usually, checkpoints happen periodically. "Every 2 completed minutes".
+                *   Completed mins: 1 (No), 2 (Yes).
+                *   So at end of Min 2, a checkpoint exists.
+                *   Work done since last checkpoint (start): 3 minutes (0, 1, 2)? Or does "every 2" mean checkpoints are sparse?
+                *   Text: "checkpoint every 2 completed minutes". This implies frequency. $T \ge s$, $(T-s)$ divisible by 2.
+                *   $T=2$: $(2-0)=2$. Divisible. Checkpoint at Min 2.
+                *   So `LOW1` has a checkpoint at Min 2. Work done: 3 minutes? Or is the unit count different? Let's assume standard discrete time steps where "running 4 minutes" means completing 4 units of work.
+                *   If checkpoint is at Min 2, and it saves work up to that point.
+                *   Wait, the example says: "LOW1 runs 7 minutes... banked a checkpoint at minute 2... its 3rd minute was unbanked when the swap came". This implies checkpoints are specific events (every 2 mins). So if you have a checkpoint at Min 2, and another at Min 4.
+                *   In our case: `LOW1` starts at 0. Checkpoints at $0+2=2$, $2+2=4$.
+                *   At End of Min 2: Checkpoint saved. Work done = 3 units? Or is the "minute" count inclusive? Let's assume work done = time elapsed. Elapsed = 3 mins (Min 0, 1, 2).
+                *   Wait, the example says "its 3rd minute was unbanked". This suggests that at Min 2, only checkpoints for Min 2 are saved? And maybe the checkpoint logic is strictly "at even minutes relative to start"?
+                *   Let's re-read carefully: "A job ... banks a checkpoint at minute s+2 and again every 2 running minutes after".
+                    *   Start $s=0$. Bank at 2. Next at 4.
+                    *   So checkpoints are strictly at Minutes 2, 4, 6...
+                *   At the moment HIGH arrives (Min 5), `LOW1` has been running from Min 0 to Min 5? No, it was preempted at Min 5. It ran continuously until Min 5.
+                *   Path of `LOW1`:
+                    *   Min 0: Run.
+                    *   Min 1: Run.
+                    *   Min 2: Run. (Checkpoint saved). Work done = 3? Or is it discrete units? Let's assume "4 minutes" means 4 time slots.
+                    *   Min 3: Run. (No checkpoint, next is 4). Work done since last CP (at 2) = Slot 3. Total work = 4.
+                    *   Min 4: Run. (Checkpoint saved at 4). Work done since last CP (at 2) = Slot 4? Or does "every 2 running minutes after" mean intervals of length 2?
+                        *   Interval 1: Min 2 to Min 3+1=4?
+                        *   Let's assume checkpoints are at absolute times $T$ where $T \ge s$ and $(T-s) \% 2 == 0$.
+                        *   So Checkpoints at Min 2, Min 4.
+                    *   At End of Min 4: Second checkpoint saved.
+                    *   Work done since last CP (at 4): Just started Min 5? No, preemption happens "while HIGH runs".
+                    *   Event: HIGH arrives at Min 5.
+                    *   Current state of `LOW1` just before arrival: It has completed Min 0, 1, 2, 3, 4. (Total 5 minutes).
+                    *   Last checkpoint was at Min 4.
+                    *   Work done since last checkpoint (Min 4) = Minute 5 (partially or fully?). Preemption happens "at minute 5". Usually this means the transition from end of 4 to start of 5, or during 5?
+                    *   Text: "HIGH arrives at minute 5 and runs... instantly preempting whatever LOW job is running".
+                    *   If HIGH arrives at Min 5, it likely interrupts `LOW1` right as it starts processing the work for Minute 5.
+                    *   So `LOW1` has completed Minutes 0-4 (5 units). The last checkpoint was at Min 4.
+                    *   Work "past the last checkpoint" = Work done in Minute 5? If preemption happens immediately upon arrival, maybe it hasn't finished Minute 5 yet.
+                    *   Wait, let's look at the example again: "LOW1 held core minutes 0, 1 and 2... its 3rd minute was unbanked".
+                        *   Min 0 (1st), Min 1 (2nd), Min 2 (3rd).
+                        *   Checkpoints were at Min 2. So the 3rd minute (the work done during Min 2) is included in the checkpoint?
+                        *   If so, "work past last checkpoint" refers to work done *after* the checkpoint time.
+                        *   In our case: Checkpoint at Min 4. Preemption at Min 5.
+                        *   Work done since Min 4 = Minute 5 (incomplete).
+                        *   Is this work wasted? "Work past the last checkpoint is wasted". Yes, if preemption cuts it off.
+                        *   So Wasted = 1 minute (the duration of Min 5 for `LOW1`).
+                    *   Wait, let's re-evaluate "every 2 running minutes after".
+                        *   Start

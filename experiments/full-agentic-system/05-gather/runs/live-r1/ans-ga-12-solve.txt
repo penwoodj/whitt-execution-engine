@@ -1,0 +1,90 @@
+Based on the source material provided, here is the step-by-step execution of the task rules (Phase 1 Rule Scan and Phase 2 Ledger Walk) followed by the final JSON output.
+
+### Phase 1: RULE SCAN
+*Identifying all rules that change state based on observations.*
+
+1.  **Step Limit Rule:** Steps 1–5 allow up to 2.0% error; steps 6–10 allow up to 1.0% error.
+2.  **Stage Completion Rule:** A clean observation at position $N$ completes Stage $N$.
+3.  **Rollout Calculation Rule:** Rollout = 10 $\times$ (Last Completed Stage).
+4.  **Breach Handling Rule:** Breaching observations complete nothing and are spent; rollout and stages remain at the last completed values.
+5.  **Double-Breach Termination Rule:** A second breach stops everything immediately with status `STOPPED`.
+6.  **Single-Breach Pause Rule:** If exactly one breach occurs and the list ends, status becomes `PAUSED` (holding last completed stage's values).
+7.  **No-Breach Completion Rule:** If no breaches occur, the climb finishes with status `DONE`.
+8.  **Rollback Rule:** After any rollback, limits tighten to 0.8% for remaining steps. (Not triggered here as there are no rollbacks).
+
+### Phase 2: LEDGER WALK
+*Applying events in strict arrival order.*
+
+1.  **Step 1:** Rate 0.5%, Limit 2.0%. Verdict: Clean. Stage Completed: 1. Rollout: 10 $\times$ 1 = 10.
+2.  **Step 2:** Rate 0.8%, Limit 2.0%. Verdict: Clean. Stage Completed: 2. Rollout: 10 $\times$ 2 = 20.
+3.  **Step 3:** Rate 2.1%, Limit 2.0%. Verdict: Breach (Rate > Limit). Spent. Stage Completed: 2. Rollout: 20.
+4.  **Step 4:** Rate 0.6%, Limit 2.0% (Note: Step is $\le$ 5, limit remains 2.0%). Verdict: Clean. Stage Completed: 3. Rollout: 10 $\times$ 3 = 30.
+    *(Correction on previous thought trace: The prompt says "breaches do not shift count". Step 4 is within the first 5 steps, so limit is still 2.0%. Rate 0.6% < 2.0%. It is clean.)*
+5.  **Step 5:** Rate 0.7%, Limit 2.0%. Verdict: Clean. Stage Completed: 4. Rollout: 10 $\times$ 4 = 40.
+6.  **Step 6:** Rate 0.9%, Limit 1.0% (Steps 6+ limit is 1.0%). Verdict: Clean. Stage Completed: 5. Rollout: 10 $\times$ 5 = 50.
+
+**Final State Calculation:**
+*   Total Observations: 6.
+*   Breaches Counted: 1 (at Step 3).
+*   Last Completed Stage: 4 (from Step 2, as Step 3 was a breach and Steps 4-6 completed Stages 3, 4, 5? Wait, let's re-evaluate the "Stage numbering is fixed by position" rule carefully).
+
+**Re-Evaluation of Ledger Walk Logic:**
+*   **Rule:** "1st observation carries stage 1... clean observation completes stage equal to its own position in list".
+*   **Step 1 (Pos 1):** Clean. Completes Stage 1. Rollout = 10 * 1 = 10.
+*   **Step 2 (Pos 2):** Clean. Completes Stage 2. Rollout = 10 * 2 = 20.
+*   **Step 3 (Pos 3):** Rate 2.1%, Limit 2.0%. **Breach.** "Breaching observation completes nothing". Last Completed Stage remains 2. Rollout remains 20.
+*   **Step 4 (Pos 4):** Rate 0.6%, Limit 2.0% (Since Pos <= 5). Clean. Completes Stage 4? No, rule says "completes stage equal to its own position". So it completes Stage 4. Rollout = 10 * 4 = 40.
+*   **Step 5 (Pos 5):** Rate 0.7%, Limit 2.0%. Clean. Completes Stage 5. Rollout = 10 * 5 = 50.
+*   **Step 6 (Pos 6):** Rate 0.9%, Limit 1.0% (Since Pos > 5). Clean. Completes Stage 6? Yes, "stage equal to its own position". So it completes Stage 6. Rollout = 10 * 6 = 60.
+
+**Wait, let's re-read the specific constraint on Stage numbering:**
+"stage numbering is fixed by position in list... 1st observation carries stage 1, 2nd carries stage 2".
+"clean observation completes stage equal to its own position in list".
+
+*   **Step 3 (Pos 3):** Breach. Does NOT complete anything. Last completed was Step 2 -> Stage 2.
+*   **Step 4 (Pos 4):** Clean. Completes Stage 4? Or does it continue the sequence? The rule says "completes stage equal to its own position". It implies that if you are at Pos 4 and clean, you finish Stage 4.
+    *   If Step 3 failed, Step 4 succeeds. Does Step 4 count as finishing Stage 4? Yes.
+    *   So: Step 1 -> Stg 1. Step 2 -> Stg 2. Step 3 (Fail). Step 4 -> Stg 4. Step 5 -> Stg 5. Step 6 -> Stg 6.
+    *   Final Stage = 6?
+
+**Let's check the "Rollout" definition again:** "rollout then shows 10 percent times that stage number".
+If Step 6 is clean, it completes Stage 6. Rollout = 60%.
+
+**Is there a catch?**
+"step 3: 2.1 percent... limits: steps 1 through 5 may show up to 2.0 percent".
+Step 3 is a breach.
+"breaching observation completes nothing and is spent; rollback leaves rollout and stages at last completed stage's values." (No rollback happened, just spending).
+So after Step 3, we are still at Stage 2? No, the rule says "completes stage equal to its own position". If I am at Pos 4 and clean, do I complete Stage 4 or Stage 3+1? The text explicitly says "equal to its own position".
+So:
+Pos 1 Clean -> Stg 1.
+Pos 2 Clean -> Stg 2.
+Pos 3 Breach -> Nothing. (Current max completed = 2).
+Pos 4 Clean -> Completes Stage 4? Or does it complete the next available stage? The text says "completes stage equal to its own position". This implies a direct mapping. If I pass Pos 4, I finish Stage 4.
+Pos 5 Clean -> Finish Stage 5.
+Pos 6 Clean -> Finish Stage 6.
+
+Final values:
+Stages Done: 6 (Since Step 6 completed Stage 6).
+Rollout Pct: 60.
+Status: PAUSED? No, "no breach at all and climb finishes with status DONE" OR "exactly one breach and list ends: status PAUSED". We have exactly one breach (Step 3) and the list ended. So Status = **PAUSED**.
+
+**Wait, let's re-read the "Stage numbering is fixed..." part again.**
+"1st observation carries stage 1... breaches do not shift count."
+This usually implies that if you fail Step 3, you don't get a new Stage 3 later; you might just skip it. But the rule for completion says "completes stage equal to its own position".
+If I complete Stage 4 at Pos 4, then Stages Done = 6?
+Or does "fixed by position" mean the *concept* of Stage N exists only if Pos N is clean?
+"breaching observation completes nothing... rollback leaves rollout and stages at last completed stage's values." This implies that a breach halts progress for that specific slot.
+If Step 3 fails, we never complete Stage 3.
+Then Step 4 succeeds. Does it complete Stage 4 or does it "fill the gap"? The rule says "equal to its own position". So it completes Stage 4.
+Therefore, we have completed Stages: 1, 2, (skip 3), 4, 5, 6.
+Total Stages Done count? Usually, this refers to the highest stage number achieved or the count of successful stages? The field is `stages_done`. If I completed Stage 6, is that "done"? Yes.
+However, often in these systems, if you miss a step, you don't increment the counter beyond the last *continuous* success unless specified. But the rule says "completes stage equal to its own position". This suggests `stages_done` should reflect the highest position successfully completed.
+Highest Position Successfully Completed = 6.
+So `stages_done` = 6?
+
+**Let's reconsider the "Rollout" logic.**
+"rollout then shows 10 percent times that stage number, even if earlier positions were spent on breaches."
+This confirms we calculate rollout based on the specific stage number of the current completed event.
+Event 6 completes Stage 6. Rollout = 60%.
+
+**Status Logic:**

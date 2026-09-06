@@ -1,0 +1,53 @@
+The state is walked event by event according to the strict rules provided. No events from the orientation story (M, N, P, Q) are applied; only tonight's stream (A, C, D, unload D) is processed.
+
+**Phase 1: Rule List & Triggers**
+Based on the text "arrivals in order... evictions choose the least-recently-touched unpinned model... loads cost 30s... unloads 10s... a load that cannot fit evicts as many LRU unpinned models as needed... if only pinned models remain and it still does not fit it defers", the rules are:
+1.  **Load Attempt Rule**: On arrival of a load request, check available space against requested size.
+2.  **Eviction Selection Rule**: If space is insufficient, identify all unpinned resident models. Select the one with the least-recently-touched (LRU) timestamp for eviction.
+3.  **Eviction Execution Rule**: Evict the selected LRU unpinned model(s). Update state: remove from loads, add to evictions count, update timestamps/cleanliness if applicable. Repeat until space is sufficient or no unpinned models remain.
+4.  **Deferral Rule**: If after exhausting all unpinned models (evicting every one) the requested load still does not fit, mark this specific load ID as deferred. Add to deferrals count and deferred list. Do not load it.
+5.  **Unload Rule**: On arrival of an unload request, if the model is resident, remove from loads, update evictions/loads counts (if applicable), and handle timing costs. If not resident, perform no-op.
+
+**Phase 2: Ledger Walk**
+*Initial State*: Card = 8GB. Loads = {}. Evictions = 0. Deferrals = 0. Deferred = []. Timestamps/Cleanliness irrelevant for initial clean loads unless specified (text implies "clean" or default state). Model C is pinned.
+
+1.  **Event: Load A (1 GB)**
+    *   Requested: 1 GB. Available: 8 GB.
+    *   Action: Fits immediately.
+    *   State Update: Loads = {A: 1GB}. Used = 1GB. Free = 7GB.
+
+2.  **Event: Load C (3 GB)**
+    *   Requested: 3 GB. Available: 8 - 1 = 7 GB.
+    *   Action: Fits immediately. Model C is pinned, but it fits without eviction.
+    *   State Update: Loads = {A: 1GB, C: 3GB}. Used = 4GB. Free = 4GB.
+
+3.  **Event: Load D (4 GB)**
+    *   Requested: 4 GB. Available: 8 - 4 = 4 GB.
+    *   Action: Fits immediately (exactly).
+    *   State Update: Loads = {A: 1GB, C: 3GB, D: 4GB}. Used = 8GB. Free = 0GB.
+
+4.  **Event: Unload D (4 GB)**
+    *   Requested: Remove D.
+    *   Action: Model D is resident. Remove from loads.
+    *   State Update: Loads = {A: 1GB, C: 3GB}. Used = 4GB. Free = 4GB.
+
+**Totals Calculation**:
+*   **Loads (N)**: The count of successful load operations performed in the stream.
+    *   Load A: Success (+1)
+    *   Load C: Success (+1)
+    *   Load D: Success (+1)
+    *   Unload D: Not a load operation.
+    *   Total Loads = 3.
+*   **Evictions (N)**: The count of successful eviction operations performed.
+    *   No evictions occurred because every load fit in the available space at its arrival time.
+    *   Total Evictions = 0.
+*   **Deferrals (N)**: The count of loads deferred due to lack of space even after exhausting unpinned models.
+    *   No deferrals occurred.
+    *   Total Deferrals = 0.
+*   **Deferred**: List of IDs for deferred loads.
+    *   Empty list [].
+
+**Final Answer JSON**:
+```json
+{"loads": 3, "evictions": 0, "deferrals": 0, "deferred": []}
+```

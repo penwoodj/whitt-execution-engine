@@ -1,0 +1,71 @@
+Based on the strict rules and events provided for "tonight's" rotation, here is the step-by-step derivation of the state.
+
+### **Phase 1: Rule List**
+The following rules govern the system state changes during this event stream:
+1.  **Arrival/Load Rule**: A load request attempts to occupy `size` GB. If current free space $\ge$ `size`, the model loads successfully (incrementing `loads`).
+2.  **Eviction Trigger Rule**: If current free space $<$ `size`, the system must evict models to make room. It targets **unpinned** models first, selecting the **Least-Recently-Touched (LRT)** unpinned model one at a time. Each eviction increments the `evictions` counter and frees that model's size.
+3.  **Deferred Load Rule**: If after exhausting all available **unpinned** models, free space is still $<$ `size`, the load cannot be performed. The system records this as a deferral (incrementing `deferrals`) and stores the request ID in the `deferred` list. No eviction occurs for pinned-only scenarios that fail to fit.
+4.  **Recency Update Rule**: Every time a model is loaded or evicted, its recency changes. Evicted models move to the "oldest" end of the LRT queue; loaded/active models move to the "newest" end. Pinned models are excluded from eviction selection but maintain their position in the active set.
+5.  **Unload Rule**: An unload request frees `size` GB immediately if the model is resident. If not resident, it is a no-op.
+
+### **Phase 2: Ledger Walk**
+We process the requested stream: `load A`, `load B`, `load C`, `load D`, `unload B`.
+*   **Card Size**: 8 GB
+*   **Model Sizes**: A=1, B=4, C=2, D=6.
+*   **Pinned Status**: Model B is pinned (never evicted). Others are unpinned.
+
+**Event 1: `load A` (1 GB)**
+*   Current Free: 8 GB. Required: 1 GB.
+*   Fits? Yes ($8 \ge 1$).
+*   Action: Load A.
+*   State: `[A(1)]`, Free: 7 GB. Recency: `{A}`.
+
+**Event 2: `load B` (4 GB)**
+*   Current Free: 7 GB. Required: 4 GB.
+*   Fits? Yes ($7 \ge 4$).
+*   Action: Load B.
+*   State: `[A(1), B(4)]`, Free: 3 GB. Recency: `{B, A}` (B is newest).
+
+**Event 3: `load C` (2 GB)**
+*   Current Free: 3 GB. Required: 2 GB.
+*   Fits? Yes ($3 \ge 2$).
+*   Action: Load C.
+*   State: `[A(1), B(4), C(2)]`, Free: 1 GB. Recency: `{C, B, A}` (C is newest).
+
+**Event 4: `load D` (6 GB)**
+*   Current Free: 1 GB. Required: 6 GB.
+*   Fits? No ($1 < 6$).
+*   Eviction Phase: Need to free $6 - 1 = 5$ GB.
+    *   Target: Unpinned models only (A=1, C=2). B is pinned and ignored for eviction selection.
+    *   LRT Queue of Unpinned: `{A, C}` (Order based on previous touches: A touched at Ev 1, C touched at Ev 3. So A is oldest/LRT).
+    *   **Eviction 1**: Select **A** (1 GB). Evict A.
+        *   Free becomes $1 + 1 = 2$ GB.
+        *   `evictions` count: 1.
+        *   Remaining Unpinned LRT: `{C}`.
+    *   Check Fit: Need 6 GB, have 2 GB. Still need 4 GB.
+    *   **Eviction 2**: Select **C** (2 GB). Evict C.
+        *   Free becomes $2 + 2 = 4$ GB.
+        *   `evictions` count: 2.
+        *   Remaining Unpinned LRT: `{}` (Empty).
+    *   Check Fit: Need 6 GB, have 4 GB. Still need 2 GB.
+*   Deferral Phase: No unpinned models remain to evict. Only pinned model B remains.
+    *   Can we fit? No ($4 < 6$).
+    *   Action: Defer load D.
+    *   `deferrals` count: 1.
+    *   `deferred` list: `[D]`.
+*   State after Event 4: `[B(4)]`, Free: 4 GB. Recency: `{B}` (Only resident).
+
+**Event 5: `unload B` (4 GB)**
+*   Current Resident: `[B(4)]`.
+*   Action: Unload B.
+*   State: `[]`, Free: 8 GB.
+
+### **Final Calculation**
+*   **Loads**: A, B, C loaded successfully. D deferred. Total = 3.
+*   **Evictions**: A and C were evicted to make room for D. Total = 2.
+*   **Deferrals**: D was deferred because only pinned models remained and they didn't fit. Total = 1.
+*   **Deferred IDs**: `[D]`.
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

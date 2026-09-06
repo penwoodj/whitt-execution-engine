@@ -1,0 +1,133 @@
+{
+  "symptom_summary": "Thirty percent of jobs fail with exit code 141 during the RMSD-fit stage in the evening hours, exclusively for trajectories exceeding four gigabytes. Failures are intermittent and do not occur consecutively across replicas. Successful runs produce valid results that pass regression checks. Failed jobs consume their full walltime before terminating, indicating a resource exhaustion or process termination event rather than a quick error. The failures are absent in smaller trajectories (<4 GB) and do not affect the two other groups running identical code with shorter inputs.",
+  "environment_differential": "The cluster underwent a maintenance window that introduced several changes: (1) The scheduler was upgraded from version 19 to version 21, which now enforces ulimits previously ignored by older versions; (2) The group's scratch storage moved from an NFSv3 export to an NFSv-than-4.2 with a different caching appliance in front; (3) The cluster's interconnect driver was patched; and (4) The group's software stack was rebuilt against MPI version 4.1, due to compatibility issues with the patched driver. All other components—node hardware, Python environment, container images—remain unchanged.",
+  "hypothesis_matrix": {
+    "scoring_rubric": [
+      "Reproduces only on large trajectories (>4 GB)",
+      "Reproduces intermittently (non-consecutive failures)",
+      "Explains exit code 141",
+      "Explains evening clustering",
+      "Survives single-node replay success [T1]"
+    ],
+    "hypotheses": [
+      {
+        "cause": "NFSv4.2 caching degradation during evening backup window",
+        "score": {
+          "reproduces_only_large_trajectories": 0,
+          "reproduces_intermittently": 1,
+          "explains_exit_code_141": 0,
+          "explains_evening_clustering": 1,
+          "survives_single_node_replay": 0
+        },
+        "justification": "The cache hit ratio drops in the evening, correlating with the backup window [T5]. However, it does not explain why large trajectories fail specifically or produce exit code 141. The single-node replay succeeds, which contradicts this hypothesis as failures should be environment-agnostic."
+      },
+      {
+        "cause": "Scheduler-enforced ulimit on stack size (8MB default)",
+        "score": {
+          "reproduces_only_large_trajectories": 0,
+          "reproduces_intermittently": 1,
+          "explains_exit_code_141": 1,
+          "explains_evening_clustering": 0,
+          "survives_single_node_replay": 0
+        },
+        "justification": "The ulimit is enforced by the scheduler in version 21. However, increasing stack size to unlimited [T3] fixes failures only on large trajectories and does not explain why they occur at specific times or fail intermittently. The single-node replay succeeds, indicating that the failure is not due to a node-level resource constraint."
+      },
+      {
+        "cause": "MPI 4.1 runtime atexit handler writing to scheduler pipe",
+        "score": {
+          "reproduces_only_large_trajectories": 1,
+          "reproduces_intermittently": 1,
+          "explains_exit_code_141": 1,
+          "explains_evening_clustering": 0,
+          "survives_single_node_replay": 0
+        },
+        "justification": "MPI 4.1 registers an atexit handler that writes to a pipe used by the scheduler's resource tracker daemon [T4]. This introduces a SIGPIPE when the write end is closed, which propagates through the process group and causes exit code 141. The failure occurs only for large trajectories because memory-mapping large files increases process group size and resource usage, making the pipe liveness more likely to be violated. However, it does not explain evening clustering."
+      },
+      {
+        "cause": "Scheduler-enforced open file descriptor limit (4096)",
+        "score": {
+          "reproduces_only_large_trajectories": 0,
+          "reproduces_intermittently": 1,
+          "explains_exit_code_141": 0,
+          "explains_evening_clustering": 0,
+          "survives_single_node_replay": 0
+        },
+        "justification": "The open file descriptor limit is enforced, but no evidence links it to exit code 141 or trajectory size. The single-node replay succeeds, and there is no observed failure pattern tied to large files or evening hours. This hypothesis lacks direct support from any diagnostic test."
+      },
+      {
+        "cause": "MPI 3.1 runtime using Unix socket instead of pipe",
+        "score": {
+          "reproduces_only_large_trajectories": 0,
+          "reproduces_intermittently": 0,
+          "explains_exit_code_141": 0,
+          "explains_evening_clustering": 0,
+          "survives_single_node_replay": 1
+        },
+        "justification": "This is a known behavior in the older MPI version. However, it does not explain why failures only occur for large trajectories or at specific times. The single-node replay succeeds, and this hypothesis fails to account for the intermittent nature of failures or exit code 141. It is eliminated as a root cause because it does not reproduce under current conditions."
+      }
+    ],
+    "ranked_hypotheses": [
+      {
+        "cause": "MPI 4.1 runtime atexit handler writing to scheduler pipe",
+        "score": 3,
+        "rank": 1
+      },
+      {
+        "cause": "Scheduler-enforced ulimit on stack size (8MB default)",
+        "score": 2,
+        "rank": 2
+      },
+      {
+        "cause": "NFSv4.2 caching degradation during evening backup window",
+        "score": 1,
+        "rank": 3
+      },
+      {
+        "cause": "Scheduler-enforced open file descriptor limit (4096)",
+        "score": 0,
+        "rank": 4
+      },
+      {
+        "cause": "MPI 3.1 runtime using Unix socket instead of pipe",
+        "score": 0,
+        "rank": 5
+      }
+    ]
+  },
+  "diagnostic_evidence": {
+    "T1_single_node_replay": "Replaying a failed trajectory on a single node with the same software stack succeeds. This confirms that the failure is not due to node-level hardware or filesystem issues, and rules out environment-specific failures such as disk corruption or node instability.",
+    "T2_MPI_3_1_rollback": "Forcing the MPI version back to 3.1 on the new stack resolves the failures. This indicates that the issue is tied to behavior differences between MPI versions, particularly in how they interact with the scheduler's resource tracker.",
+    "T3_unlimited_stack_experiment": "Raising the stack size ulimit to unlimited eliminates the four-gigabyte trajectory failures on two nodes tested. This shows that stack size constraints are a contributing factor, but only when combined with other conditions (e.g., large memory-mapped files).",
+    "T4_strace_capture": "A strace of a failing run shows a SIGPIPE delivered during a write to a pipe whose read end is held by the scheduler's resource tracker daemon. This confirms that the failure originates in a signal delivery chain triggered by an atexit handler in MPI 4.1.",
+    "T5_filer_cache_ratio_correlation": "The filer's cache hit ratio drops sharply during evening hours, correlating with the group-wide backup window. However, this correlation does not explain why failures occur only for large trajectories or produce exit code 141.",
+    "T6_exit_code_frequency_scan": "Exit code 141 is observed exclusively in RMSD-fit stage jobs on large trajectories (>4 GB), and never in smaller ones or in the other groups running similar code with shorter inputs. This confirms trajectory size dependence and rules out general cluster-wide issues.",
+    "T7_evening_window_job_distribution": "Job failures cluster in the evening hours, coinciding with the backup window. However, this pattern is not consistent with a simple cache degradation model because the failure mechanism (SIGPIPE) does not depend on I/O latency or cache hits; it depends on process lifecycle and signal propagation."
+  },
+  "root_cause_determination": "The root cause is a combination of the scheduler upgrade to version 21, which introduced enforcement of ulimits and a new resource tracker daemon that uses pipes for communication. The MPI 4.1 runtime, when built against the patched interconnect driver, registers an atexit handler that attempts to write to a pipe used by the scheduler's resource tracker daemon. When large trajectories are memory-mapped during RMSD-fit, the process group size increases significantly, and the scheduler's resource tracker daemon closes the read end of this pipe after job completion. This causes a SIGPIPE when the MPI 4.1 atexit handler attempts to write to the now-closed pipe. The signal propagates through the process group due to shared process group membership, resulting in exit code 141. This failure is specific to large trajectories because memory-mapping files larger than four gigabytes increases the number of processes and resource usage, making the pipe liveness more likely to be violated. The evening clustering is not a result of cache degradation but rather a consequence of job scheduling patterns: jobs are submitted during off-peak hours (evening) due to cluster-wide backup windows, which coincidentally align with when the scheduler's resource tracker daemon is active and the process group lifecycle is triggered. This explains why failures cluster in the evening—because that’s when jobs are scheduled—and not because of I/O performance or cache behavior. The evidence supports this mechanism: T4 shows SIGPIPE on pipe write; T1 confirms no failure in single-node replay (failure is environment-specific); T2 shows failure resolution with MPI 3.1, which avoids the pipe-based atexit handler; T3 shows that stack ulimit increase fixes failures—because large memory-mapped files require more stack space and are thus more likely to trigger the signal under tight limits—but only when combined with the pipe issue; T5 and T7 show correlation but do not explain the mechanism. The failure pattern is consistent with a process lifecycle issue, not I/O or cache degradation.",
+  "remediation_plan": {
+    "immediate_fix": "Set the stack size ulimit to unlimited in the job submission template for all jobs using the RMSD-fit stage.",
+    "rollout_steps": [
+      "Update the group's standard job submission script to include: ulimit -s unlimited",
+      "Verify that this change is applied to all compute nodes via a test job with a large trajectory (>4 GB) and monitor for failure reduction.",
+      "Roll out the updated template across all active queues in batches of 100 jobs per day, monitoring for stability over three days."
+    ],
+    "verification_protocol": [
+      "At node level: Run a test job with a >4 GB trajectory and confirm it completes without exit code 141.",
+      "At queue level: Monitor the failure rate for RMSD-fit jobs over a 24-hour period to ensure exit code 141 drops below 5%.",
+      "Weekly timescale: Compare weekly failure rates against historical baselines; if failures remain at or below 3%, consider the fix effective."
+    ],
+    "prevention_measures": [
+      "Implement monitoring of stack size ulimits and process group sizes in job logs to detect similar issues early.",
+      "Update cluster policy to require all MPI-based applications to validate their signal handling behavior when using new scheduler versions.",
+      "Enforce change management for software stacks that interact with the scheduler's resource tracker—requiring a compatibility review before upgrades."
+    ],
+    "residual_risk": "This fix addresses the immediate failure mechanism but does not eliminate the underlying risk of process group signal propagation in large-scale simulations. Future MPI versions or new scheduler features could reintroduce similar issues if they alter how atexit handlers interact with resource trackers. A long-term solution would require a redesign of the MPI runtime's lifecycle management to avoid pipe-based communication during cleanup.",
+    "operator_checklist": [
+      "Add 'ulimit -s unlimited' to the job submission template in the compute node script",
+      "Place it immediately after the '#SBATCH --job-name' line and before any other environment setup",
+      "Verify it took effect with: 'ulimit -s' on a compute node shell session",
+      "Monitor for exit code 141 failures; the alert threshold should drop to <3% of total RMSD-fit jobs once the fix is fleet-wide",
+      "If evening clustering persists after the ulimit fix, escalate to cluster operations team with a report of job distribution and failure logs"
+    ]
+  }
+}

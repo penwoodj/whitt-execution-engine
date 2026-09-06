@@ -1,0 +1,203 @@
+# Data Pipeline Specification: Daily JSON Logs → Monthly Parquet Analysis Table
+
+## 1. Schema Mapping Section
+
+The raw telemetry from each monitoring station originates in one of three firmware versions (v1, v2, v3), with field names and types varying across variants. The target schema is fixed and defined as follows:
+
+| Target Column | Unit / Type | Source Field(s) | Resolution Rule |
+|--------------|------------|----------------|-----------------|
+| `station_id` | string | `station_id` (v1), `station_id` (v2, v3) | - For firmware v1: integer → string with zero-padded 4-digit format (`0001`, etc.)<br>- For firmware v2/v3: short string (e.g., `"S07"`) unchanged<br>- If field absent in raw data: fail with error on unknown variant |
+| `window_start` | timestamp (UTC, second precision) | `timestamp` (raw) | - All timestamps are parsed as ISO 8601 strings and converted to UTC.<br>- For station logging local time (identified by known offset), apply fixed UTC offset of +3 hours (e.g., UTC = local − 3).<br>- If timestamp field is missing or malformed: fail with error |
+| `wave_height_mean` | meters | `hs_mean` (v1), `wave_height_mean` (v2/v3) | - v1: `hs_mean` → meters<br>- v2/v3: `wave_height_mean` → meters<br>- If absent in raw data: value is missing, quality flag = "missing" |
+| `wave_height_max` | meters | `hs_max` (v1), `wave_height_max` (v2/v3) | - v1: `hs_max` → meters<br>- v-2/v3: `wave_height_max` → meters<br>- If absent in raw data: value is missing, quality flag = "missing" |
+| `period_dominant` | seconds | `tp_dominant` (v1), `period_dominant` (v2/v3) | - v1: `tp_dominant` → seconds<br>- v2/v3: `period_dominant` → seconds<br>- If absent in raw data: value is missing, quality flag = "missing" |
+| `wind_direction` | degrees from north (0–360) | `dir_wind` (v1), `dir_wind` (v2), `dir_wind_rad` (v3) | - v1/v2: `dir_wind` → degrees<br>- v3: `dir_wind_rad` → convert radians to degrees via `rad × 180/π`, then normalize mod 360<br>- If absent in raw data: value is missing, quality flag = "missing" |
+| `wind_speed` | m/s | `spd_wind` (v1), `spd_wind` (v2/v3) | - All variants share `spd_wind` → meters per second<br>- If absent: value is missing, quality flag = "missing" |
+| `tide_stage` | categorical (one of: "low", "rising", "mid", "falling", "high", "peak") | `tide_stage` (v1/v2/v3) | - Derived from raw tide gauge reading using published thresholds<br>- Thresholds are fixed constants (see Section 4)<br>- If raw field absent or invalid: fail with error |
+| `quality_flag` | categorical (one of: "good", "suspect", "corrected", "missing") | — | - Assigned per physical quantity based on cleaning rules below |
+
+> **Note**: The target schema does not include water temperature. Any record containing a `water_temperature` field (only in firmware v3 at offshore stations) is dropped from the output, and the presence of this field triggers an error if no known variant matches it.
+
+---
+
+## 2. Cleaning Rules Section
+
+The following domain-specific rules are applied to raw sensor readings to ensure physical plausibility and data integrity:
+
+| Rule | Parameters | Rationale |
+|------|-----------|---------|
+| **Wave height bounds** | - Max: 25 meters<br>- Min: 0 meters | Wave heights above 25 m or below 0 m are physically implausible at these coastal sites due to wave energy limits and local bathymetry. Such values are flagged as "suspect" rather than deleted, preserving potential storm event signals. |
+| **Spike detection** | - Threshold: >8 standard deviations from rolling one-hour median per station<br>- Spike sequence length: ≥3 consecutive samples | A spike is defined as a reading more than 8× the standard deviation above or below the one-hour rolling median of that station’s wave height at that time. Sequences of three or more such spikes are treated as connector noise (e.g., salt-crusted connectors). These values are replaced with the median value and flagged "corrected". Longer excursions (>3 samples) are retained but marked "suspect" to allow for real storm events. |
+| **Wind direction normalization** | - Range: 0°–360° from north | Wind direction is normalized modulo 360 degrees to ensure consistency across stations and analysis tools, avoiding directional ambiguity in wind vector calculations. |
+| **Local time correction** | - Fixed offset: +3 hours (UTC = local − 3) | One station (station ID "S12") logs timestamps in local time with a known fixed offset of UTC+3. This is applied only to that station; no dynamic DST handling is performed because the site has no daylight saving transitions and the group has confirmed this behavior via field logs. |
+| **Tide stage derivation** | - Thresholds (in meters):<br>  - low: <0.5 m<br>  - rising: 0.5–1.2 m<br>  - mid: 1.2–1.8 m<br>  - falling: 1.8–2.4 m<br>  - high: 2.4–3.0 m<br>  - peak: ≥3.0 m | These thresholds are derived from empirical tidal data and published in the group’s methods paper (see Section 4). The raw tide gauge reading is used to assign one of six categorical values. If the raw value is missing or invalid, a failure occurs. |
+
+---
+
+## 3. Gap Handling Policy
+
+Missing readings are handled with strict rules to preserve statistical validity:
+
+- **Gap representation**:  
+  - A gap is defined as a sequence of consecutive windows where a field (e.g., `wave_height_mean`) is absent in the raw data.
+  - The output table includes a `gap_mask` column (boolean) indicating whether any observation in that window was missing due to dropout. This mask is set to `true` if **any** field value is missing for that station-window pair.
+
+- **Gap length limits**:  
+  - No interpolation across gaps longer than **40 minutes** (i.e., 4 consecutive ten-minute windows).  
+  - Gaps exceeding this duration are treated as data loss and marked with a `gap_mask = true` in the output. The analysis stack degrades when such long gaps exist, so we enforce this limit to maintain statistical validity.
+
+- **Interpolation for shorter gaps**:  
+  - For gaps of ≤39 minutes (i.e., up to 3 consecutive windows), linear interpolation is applied across adjacent valid observations within the same station.
+  - All interpolated values are assigned a `quality_flag = "corrected"` to indicate they were derived from estimation rather than direct measurement.
+
+- **Null vs. absent field distinction**:  
+  - In raw JSON, sensor dropouts appear as `null` (JSON null).  
+  - If a firmware variant predates the sensor and does not include a field at all (e.g., no `hs_mean` in v1), then that field is absent from the schema.  
+  - The pipeline distinguishes between:  
+    - A missing value due to dropout (`null`) → flagged as "missing" with quality flag = "missing"  
+    - A field not present in firmware (absent by design) → fails with error, and no output row is generated for that record  
+  - This distinction is preserved in the final `quality_flag` per column.
+
+---
+
+## 4. Validation Invariants
+
+The output Parquet table must satisfy the following invariants at every stage:
+
+| Invariant | How Checked |
+|---------|-------------|
+| **No duplicate station-window pairs** | After grouping by `(station_id, window_start)`, check that all rows are unique using a hash of these two fields. Any duplicates trigger an error. |
+| **Window starts aligned to ten-minute boundaries** | All `window_start` timestamps must be multiples of 600 seconds (10 minutes). This is verified via modulo arithmetic: `(window_start % 600) == 0`. |
+| **Wind direction in range [0, 360)** | After normalization, all values are checked to satisfy `0 ≤ wind_direction < 360`. Any out-of-range value triggers an error. |
+| **Quality flags drawn only from closed set** | For each column, validate that the quality flag is one of: `"good"`, `"suspect"`, `"corrected"`, `"missing"` — no other values allowed. |
+| **All target columns present with correct units** | - `wave_height_mean` and `wave_height_max`: must be in meters<br>- `period_dominant`: seconds<br>- `wind_direction`: degrees from north (0–360)<br>- `wind_speed`: m/s<br>- `tide_stage`: one of six categorical values<br>- All fields must exist in the output row. |
+| **Row count reconciliation** | The total number of rows per station per month must equal:  
+  `(number of raw records for that day) × (10-minute window count)`  
+  - For example, if a day has 240 raw records and is split into 144 ten-minute windows (e.g., 24 hours / 10 min = 144), then output should have exactly 144 rows per station.  
+  - Any mismatch >1% triggers an error with diagnostic message: `"Row count mismatch for station X in month Y"` |
+
+---
+
+## 5. Reproducibility Requirements
+
+The transformation is designed to be fully reproducible and deterministic:
+
+- **Sorting before aggregation**: All input records are sorted by `station_id` then `window_start` (ascending) prior to any processing, ensuring consistent order across runs.
+  
+- **Fixed-precision decimal formatting**: All floating-point values (e.g., wave height, wind speed) are formatted with exactly 6 significant digits (i.e., `0.123456`) before Parquet serialization. This ensures numerical stability and avoids floating-point drift.
+
+- **Tie-breaking rule for identical timestamps**:  
+  - On some stations (e.g., S08), two independent wave sensors report independently at the same time, resulting in duplicate timestamps within a window.  
+  - In such cases, when two records have identical `station_id` and `window_start`, the one with **lower station ID** is prioritized (i.e., lexicographic tie-breaker). This ensures consistent output even under sensor-level duplication.
+
+- **Idempotency in nightly runs**:  
+  For a nightly run processing a day whose Parquet output already exists:  
+  - The pipeline skips **schema mapping and gap detection** stages if the input file is unchanged.  
+  - It recomputes only:  
+    - Cleaning rules (spike detection, bounds checking)  
+    - Wind direction normalization  
+    - Tide stage derivation  
+    - Quality flag assignment  
+  - This ensures that any new spikes or changes in sensor behavior are detected without reprocessing the same raw data.
+
+- **Schema evolution policy**:  
+  If a record contains fields not recognized by any known firmware variant (e.g., `water_temperature` with no v3 mapping, or `new_field_xyz`), the pipeline fails loudly with diagnostic:  
+  `"Unknown field set: {field_list}"`.  
+  - No rows are silently dropped.  
+  - The transformation does **not** guess mappings or infer schema evolution.  
+  - Any change to the target Parquet schema requires a new versioned schema file (e.g., `schema_v2.json`).  
+
+- **Per-stage logging**:  
+  For each stage of processing, the pipeline emits log entries with:  
+  - Input file path  
+  - Record count in (raw records)  
+  - Record count out (after filtering/cleaning)  
+  - Number of rows flagged by each rule (e.g., "spike corrected", "wave height suspect")  
+  - Wall-clock duration (in seconds)  
+
+> These logs are used by station technicians to detect anomalies — e.g., a sudden spike in "spike corrected" flags may indicate connector degradation.
+
+---
+
+## 6. Worked Example: Firmware v2 Record
+
+**Raw Input**: A single JSON record from firmware v2, recorded at station `S07`, timestamped as `"2024-03-15T09:08:00Z"` (UTC), with values:
+
+```json
+{
+  "station_id": "S07",
+  "timestamp": "2024-03-15T09:08:00Z",
+  "wave_height_mean": 1.2,
+  "wave_height_max": 1.5,
+  "period_dominant": 6.2,
+  "dir_wind": 45,
+  "spd_wind": 5.3,
+  "tide_stage": "rising"
+}
+```
+
+**Step-by-step transformation**:
+
+| Step | Field | Value | Action |
+|------|------|-------|--------|
+| **1. Schema mapping** | `station_id` | `"S07"` (string) | No change; v2 uses string IDs. |
+| | `window_start` | `"2024-03-15T09:08:00Z"` | Already in UTC → no correction needed. |
+| | `wave_height_mean` | 1.2 m | From `wave_height_mean` (v2) → meters → valid. |
+| | `wave_height_max` | 1.5 m | From `wave_height_max` (v2) → meters → valid. |
+| | `period_dominant` | 6.2 s | From `period_dominant` (v2) → seconds → valid. |
+| | `wind_direction` | 45° | From `dir_wind` → degrees → within [0,360). |
+| | `wind_speed` | 5.3 m/s | From `spd_wind` → meters per second → valid. |
+| | `tide_stage` | "rising" | Derived from thresholds: 1.2–1.8 m → "mid", but raw is "rising" → matches threshold → valid. |
+| **2. Cleaning rules** | Wave height bounds | 1.2 and 1.5 → both in [0,25] → no flag change. | No action. |
+| | Spike detection | Single reading → not a sequence of ≥3 samples → no spike detected. | No correction or flagging. |
+| | Wind direction normalization | 45° already in range → unchanged. | No action. |
+| **3. Gap handling** | All fields present → no nulls → gap_mask = false | No interpolation needed. |
+| **4. Quality flags** | All values valid and within bounds → all flags = "good" | Final quality flags: `good` for all columns. |
+
+**Final Output Row (Parquet)**:
+
+```parquet
+{
+  "station_id": "S07",
+  "window_start": "2024-03-15T09:08:00Z",
+  "wave_height_mean": 1.2,
+  "wave_height_max": 1.5,
+  "period_dominant": 6.2,
+  "wind_direction": 45.0,
+  "wind_speed": 5.3,
+  "tide_stage": "rising",
+  "quality_flag_wave_height_mean": "good",
+  "quality_flag_wave_height_max": "good",
+  "quality_flag_period_dominant": "good",
+  "quality_flag_wind_direction": "good",
+  "quality_flag_wind_speed": "good",
+  "quality_flag_tide_stage": "good",
+  "gap_mask": false
+}
+```
+
+> All values are in correct units, no flags are set to "suspect" or "corrected", and the row passes all validation checks.
+
+---
+
+## Appendix: Domain Constants
+
+- **Tide stage thresholds** (in meters):  
+  - low: <0.5  
+  - rising: 0.5–1.2  
+  - mid: 1.2–1.8  
+  - falling: 1.8–2.4  
+  - high: 2.4–3.0  
+  - peak: ≥3.0  
+
+- **Max wave height** (meters): 25  
+- **Min wave height** (meters): 0  
+- **Spike threshold**: >8 standard deviations from rolling one-hour median  
+- **Gap length limit**: 40 minutes (i.e., ≤3 consecutive ten-minute windows)  
+- **Local time offset**: UTC = local − 3 hours  
+
+> All domain constants are fixed and derived from published methods. No assumptions about future sensor behavior or environmental change are made.
+
+--- 
+
+*End of Specification Document*

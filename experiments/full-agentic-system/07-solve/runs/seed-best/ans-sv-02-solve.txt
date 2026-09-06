@@ -1,0 +1,56 @@
+### Phase 1 RULE SCAN
+This phase lists every rule in the task that changes state during an event or claim, including expiry, return, revocation, refill, promotion, fallback, source-ranking rules, and marks which event triggers it.
+
+1.  **Arrival Rule**: Triggers on `r1` through `r6`. Adds a request to the queue for processing.
+2.  **Grant/Partial/Deny Rule (State Change)**:
+    *   If Pool > 0: Grants `min(Ask, Pool)`. State changes: Pool decreases by grant amount; Request status becomes "Granted".
+    *   If Pool = 0: Denies request. State changes: Request status becomes "Denied"; List of denied IDs adds the ID.
+3.  **Expiry Rule (State Change)**: Triggers when a specific request (`r2`) completes. Returns `floor(Grant_Amount / 2)` to the pool immediately before the next event processing begins for that trigger's context. State changes: Pool increases by return amount; Grant record marked expired.
+4.  **Completion Rule**: Marks the current request as "Completed" after grant/deny logic and expiry logic are applied.
+
+### Phase 2 LEDGER WALK
+This phase applies events one at a time in strict arrival order, showing the state after each event (including immediate returns).
+
+**Initial State:** `Pool = 40`, `Granted_Sum = 0`, `Denied_List = []`.
+
+*   **Event r1 (Ask: 5)**
+    *   Logic: Pool (40) > Ask (5). Grant = 5.
+    *   Action: Pool -= 5.
+    *   State: `Pool = 35`, `Granted_Sum = 5`.
+
+*   **Event r2 (Ask: 8)**
+    *   Logic: Pool (35) > Ask (8). Grant = 8.
+    *   Action: Pool -= 8. Request Completed.
+    *   Trigger Expiry Rule for r2: Return = `floor(8 / 2)` = 4.
+    *   Action: Pool += 4.
+    *   State: `Pool = 35 - 8 + 4 = 31`, `Granted_Sum = 13`.
+
+*   **Event r3 (Ask: 12)**
+    *   Logic: Pool (31) > Ask (12). Grant = 12.
+    *   Action: Pool -= 12.
+    *   State: `Pool = 19`, `Granted_Sum = 25`.
+
+*   **Event r4 (Ask: 14)**
+    *   Logic: Pool (19) > Ask (14). Grant = 14.
+    *   Action: Pool -= 14.
+    *   State: `Pool = 5`, `Granted_Sum = 39`.
+
+*   **Event r5 (Ask: 17)**
+    *   Logic: Pool (5) < Ask (17). Grant = 5 (Partial).
+    *   Action: Pool -= 5. Request Completed.
+    *   State: `Pool = 0`, `Granted_Sum = 44`.
+
+*   **Event r6 (Ask: 21)**
+    *   Logic: Pool (0) == Ask (21). Condition for Denial met (Arriving to find pool at exactly zero).
+    *   Action: Request Denied. Add ID `r6` to denied list. No grant, no partial return logic applies here as it is a denial event.
+    *   State: `Pool = 0`, `Granted_Sum = 44`.
+
+**Final Totals:**
+*   `granted_units`: 44 (Sum of grants: 5 + 8 + 12 + 14 + 5)
+*   `denied`: ["r6"]
+*   `pool_left`: 0
+
+### Final Answer JSON
+```json
+{"granted_units": 44, "denied": ["r6"], "pool_left": 0}
+```

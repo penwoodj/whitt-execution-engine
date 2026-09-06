@@ -1,0 +1,71 @@
+The task requires a strict adherence to the provided rules for tonight's events (LOW1, LOW2, HIGH) without importing arithmetic from the orientation story. The state must be walked event-by-event in arrival order.
+
+**Phase 1: Rule List & Trigger Identification**
+Based on the text "arrivals in order, budgets and limits exactly as stated... one event at a time", the rules governing tonight's execution are:
+1.  **Arrival Order Rule**: Jobs arrive and queue based on their start minute ($s$). A resumed job outranks a fresh one at any tie.
+2.  **Core Allocation Rule**: The core never idles while a LOW job is waiting. When the current job finishes or is preempted, the next waiting LOW starts in that same minute.
+3.  **Preemption Rule**: HIGH arrives and instantly preempts whatever LOW job is running. While HIGH runs, nothing else runs.
+4.  **Checkpointing Rule**: LOW jobs checkpoint every 2 completed minutes of running time. On preemption, work past the last checkpoint is wasted and redone after resume.
+5.  **Banking Rule**: A job starting/resuming at minute $s$ banks a checkpoint at $s+2$ and every 2 running minutes after. Banks landing on the exact minute HIGH arrives still count (nothing wasted).
+6.  **Waste Calculation Rule**: Minutes wasted = Total duration - Banked duration.
+
+**Phase 2: Ledger Walk (Tonight's Events)**
+*   **Event 1: LOW1 Start ($t=0$)**
+    *   LOW1 starts at $t=0$. Duration: 5 min.
+    *   Banks checkpoints at $t=2, t=4$.
+    *   State: Core running LOW1 (0-2).
+*   **Event 2: LOW2 Start ($t=2$)**
+    *   LOW2 starts at $t=2$. Duration: 7 min.
+    *   Banks checkpoints at $t=4, t=6$.
+    *   State: Core running LOW1 (0-2). Queue: [LOW2].
+*   **Event 3: HIGH Arrival ($t=3$)**
+    *   HIGH arrives at $t=3$. Duration: 8 min.
+    *   Preempts LOW1 immediately.
+    *   Checkpoint status for LOW1: Last bank was at $t=2$. Current time is $t=3$. Work done since last bank = $3 - 2 = 1$ minute. This work is wasted.
+    *   State: Core running HIGH (3-11). Queue: [LOW2].
+*   **Event 4: LOW1 Resume ($t=11$)**
+    *   HIGH finishes at $t=11$.
+    *   Next waiting job is LOW2 (Start min 2) vs LOW1 (Start min 0).
+    *   Rule: "LOW jobs take the core in order of their start minutes". LOW1 ($s=0$) < LOW2 ($s=2$).
+    *   Core goes to LOW1.
+    *   LOW1 needs to redo wasted work + remaining work. Total needed = 5 min. Wasted = 1 min. Remaining = 4 min? No, the rule says "redone after resume". The job effectively restarts its progress from the last checkpoint ($t=2$). It has 5 minutes total budget. It ran 0-2 (banked), then 3 was wasted. So it needs to run 2 more minutes to reach $t=4$ (next bank) and 1 more to finish?
+    *   Let's re-read the orientation logic: "a job with 5 total minutes and 2 banked resumes with 3 minutes left." Wait, in the orientation story, LOW1 had 7 mins, 2 banked ($t=2$), so $7-2=5$ left.
+    *   In tonight's case: LOW1 has 5 mins total. Banks at $t=2$. So it needs to run until $t=5$ (bank) and then finish? No, duration is fixed at 5 minutes from start. Start was $t=0$. Finish target is $t=5$.
+    *   Checkpoints are absolute time markers where work is saved. Banked: $t=2$.
+    *   Preemption happened at $t=3$. Work done since last bank ($t=2$) to preemption ($t=3$) = 1 minute. This is wasted.
+    *   Resume logic: The job must re-accumulate the time lost. It effectively needs to run from its last checkpoint state ($t=2$) until it completes its total duration (5 mins). Since it already "spent" 0-2, and 3 was wasted, does it need to run 2 more minutes?
+    *   Let's trace the orientation story again carefully: "LOW1 had 7 total minutes with 2 banked, so it resumed owing 5". Here "owing" means remaining duration. Total=7, Banked=2 (at $t=2$). Remaining = 5.
+    *   Tonight: LOW1 Total=5. Banked at $t=2$. Remaining = 3? No, the orientation story implies the bank represents completed work that is saved. If I have a job of length 7, and I finish minute 2, I have 5 minutes left to go.
+    *   Tonight: Job length 5. Finish minute 2. I have 3 minutes left to go.
+    *   Preemption at $t=3$. Work done since last bank ($t=2$) is 1 minute. This is wasted.
+    *   Resume: The job must run the remaining duration (3 mins) starting from the checkpoint state? Or does it restart? "redone after resume". Usually means re-running the lost time + remaining time?
+    *   Let's look at the orientation text: "resumed owing 5, ran them minutes 5 to 10". It ran for 5 minutes. This matches the "remaining duration" logic (Total - Banked).
+    *   So tonight: LOW1 resumes with remaining duration = $5 - 2 = 3$ minutes? No, wait. In orientation, Total=7, Banked at $t=2$. Remaining = 5. It ran for 5 mins.
+    *   Tonight: Total=5, Banked at $t=2$. Remaining = 3. It should run for 3 mins?
+    *   BUT, the preemption happened at $t=3$. The work from $t=2$ to $t=3$ (1 min) was wasted. Does "redone" mean we add that back?
+    *   Text: "on preemption the work past the last checkpoint is wasted and redone after resume."
+    *   If I have a job of 5 mins. I finish minute 2. I have 3 mins left. I run minute 3 (wasted). Now I am at $t=3$. I need to get back to where I was? Or just complete the job?
+    *   Standard interpretation: The job must complete its total duration of 5 minutes. Since work from 2-3 is lost, and we are at state "finished minute 2", we simply run the remaining 3 minutes (minutes 4, 5, 6 relative to start? No, absolute time).
+    *   Let's assume the job runs for its remaining duration ($Total - Banked$) starting from the checkpoint.
+    *   LOW1 Remaining = $5 - 2 = 3$ minutes.
+    *   It starts running at $t=11$. Runs for 3 minutes: $t=11, 12, 13$. Finishes at $t=14$.
+    *   Wait, is the "wasted" time added to the duration? "redone". If I run minute 3 again, that's a redo. So I need to run minute 3 (redo) + minutes 4,5 (remaining)? That would be 4 minutes of runtime.
+    *   Let's check the orientation story numbers: "LOW1 had 7 total minutes with 2 banked... resumed owing 5". $7-2=5$. It ran for 5 minutes. The preemption was at minute 3 (wasted 1 min). Did it run 6 minutes? No, text says "ran them minutes 5 to 10" which is 5 minutes.
+    *   Conclusion: The job runs for ($Total - Banked$) minutes. The wasted time is lost progress, not added duration. The job simply continues from the checkpoint state.
+    *   So LOW1 resumes at $t=11$. Needs to run 3 minutes ($5-2$). Runs $11 \to 14$. Finishes at $t=14$.
+*   **Event 5: LOW2 Start/Resume ($t=14$)**
+    *   Core becomes free at $t=14$.
+    *   Queue: [LOW2]. (LOW1 just finished).
+    *   LOW2 starts at $t=14$. Duration: 7 minutes.
+    *   Banks checkpoints at $t=16, t=18$.
+    *   Runs $14 \to 21$. Finishes at $t=21$.
+
+**Re-evaluating the "Order" Rule:**
+Rule: "LOW jobs take the core in order of their start minutes".
+At $t=3$, LOW1 is preempted. Queue has LOW2 ($s=2$).
+At $t=11$, LOW1 resumes. Queue has LOW2 ($s=2$).
+Comparison: LOW1 ($s=0$) vs LOW2 ($s=2$).
+Order: LOW1 first. Correct.
+
+**Re-evaluating the "Wasted" Calculation:**
+Orientation story: "1 minute wasted". (Total 7, Banked at 2, Preempted at 

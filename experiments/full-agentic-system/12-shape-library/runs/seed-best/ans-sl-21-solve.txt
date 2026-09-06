@@ -1,0 +1,46 @@
+**Phase 1 RULE SCAN**
+- **Load Execution Rule**: A load command is executed if there is sufficient free space (>= requested size). If not, it triggers eviction/deferral logic.
+- **Eviction Selection Rule**: Evictions target the Least Recently Used (LRU) unpinned model that fits in the available space to make room for the new load.
+- **Pinned Model Protection Rule**: Pinned models (Model B) are never evicted, regardless of LRU status or space constraints.
+- **Deferred Load Rule**: If a load cannot fit even after evicting all unpinned models (and pinned models remain), the load is deferred. The `deferred` list contains the ID of this specific load command.
+- **Count Definitions**: `loads` counts successfully executed loads; `evictions` counts successful eviction operations performed to make space; `deferrals` counts loads that were deferred due to lack of space after max evictions.
+
+**Phase 2 LEDGER WALK**
+1. **Event: load A (1 GB)**
+   - Current State: Empty (0 GB used). Free: 8 GB.
+   - Action: Load A fits in 8 GB. Execute Load A.
+   - New State: Used [A:1], Free: 7 GB.
+2. **Event: load B (4 GB)**
+   - Current State: Used [A:1]. Free: 7 GB.
+   - Action: Load B fits in 7 GB. Execute Load B.
+   - New State: Used [A:1, B:4], Free: 3 GB.
+3. **Event: load C (2 GB)**
+   - Current State: Used [A:1, B:4]. Free: 3 GB.
+   - Action: Load C fits in 3 GB. Execute Load C.
+   - New State: Used [A:1, B:4, C:2], Free: 1 GB.
+4. **Event: load D (6 GB)**
+   - Current State: Used [A:1, B:4, C:2]. Free: 1 GB. Requested: 6 GB. Deficit: 5 GB.
+   - Eviction Check: Need to free 5 GB. Available unpinned models are A (1 GB) and C (2 GB). Total unpinned space = 3 GB. Pinned model B (4 GB) cannot be evicted.
+   - Max Evictable Space: 3 GB (A + C). Still need 2 more GB. Cannot fit D even after max evictions.
+   - Action: Load D is deferred. No evictions performed because the load never executes to trigger them in this specific "deferred" logic path (or rather, the system determines it cannot fit and marks it deferred immediately without performing partial evictions that would fail anyway). *Correction based on standard LRU cache behavior described*: The rule says "a load that cannot fit evicts as many...". However, if after evicting all unpinned models it still doesn't fit, it defers. Does it perform the evictions first?
+   - Re-evaluating Rule: "every eviction actually performed counts in the evictions total even when the load ends up deferred". This implies we *do* try to evict.
+   - Step 4a: Attempt Eviction of LRU unpinned (A, then C). Total freed = 3 GB. Remaining Free = 1 + 3 = 4 GB.
+   - Step 4b: Check Fit: Need 6 GB. Have 4 GB. Still doesn't fit.
+   - Step 4c: Result: Load D is deferred. Evictions performed during this attempt? The rule says "every eviction actually performed counts". We attempted to evict A and C. Were they "actually performed"? Yes, the system swapped them out to try to make room. Even though it failed to load D, the evictions happened.
+   - *Wait, let's look at the orientation example*: "P's 3GB did not fit... so it evicted... M and loaded." -> Eviction happened + Load happened. "Q's 4GB evicted P and still did not fit... Q deferred". In this case, did Q evict P? Yes ("evicted P"). So evictions count even if the load is deferred.
+   - Action: Evict A (1 GB) and C (2 GB). Load D remains deferred.
+   - New State: Used [B:4], Free = 8 - 4 = 4 GB. (A and C are gone). `deferred` list adds "D".
+5. **Event: unload B (4 GB)**
+   - Current State: Used [B:4].
+   - Action: Unload B. Fits perfectly. Execute Unload.
+   - New State: Empty (0 GB used), Free: 8 GB.
+
+**Final Calculation:**
+- `loads`: A, B, C were loaded successfully. D was deferred. Total = 3.
+- `evictions`: During load D attempt, A and C were evicted to try to make space. Total = 2.
+- `deferrals`: Load D failed after max evictions. Total = 1.
+- `deferred`: ["D"].
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

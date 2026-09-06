@@ -1,0 +1,56 @@
+The task requires processing two independent streams of events based on specific rules provided in the text. The first stream ("canary rollout") involves a sequence of observations with error rates against dynamic limits, resulting in a final state defined by `rollout_pct`, `stages_done`, and `status`. The second stream ("residency") involves loading/unloading models from memory cards with eviction policies, resulting in counts for `loads`, `evictions`, `deferrals`, and a list of `deferred` IDs.
+
+**Part A: Canary Rollout Analysis**
+*   **Rules:**
+    1.  Steps 1-5 limit: 2.0%. Steps 6-10 limit: 1.0%.
+    2.  Breach handling: If an observation breaches, it is spent. The rollout and stages hold the last completed stage's values. The limit tightens to 0.8% for remaining steps.
+    3.  Stop condition: A second breach stops everything with status `STOPPED`. One breach ends with status `PAUSED`. No breaches end with `DONE`.
+*   **Events (Observations):**
+    *   Step 1: Rate 0.4%. Limit 2.0%. Clean. Stage 1, Rollout 10%.
+    *   Step 2: Rate 0.6%. Limit 2.0%. Clean. Stage 2, Rollout 20%.
+    *   Step 3: Rate 0.9%. Limit 2.0%. Clean. Stage 3, Rollout 30%.
+    *   Step 4: Rate 1.2%. Limit 2.0%. Clean. Stage 4, Rollout 40%.
+    *   Step 5: Rate 1.4%. Limit 2.0%. Clean. Stage 5, Rollout 50%.
+    *   Step 6: Rate 1.9%. Limit 1.0% (Steps 6-10). **Breach**.
+        *   Action: Observation spent. State holds last completed stage (Step 5).
+        *   New Limit for remaining steps: 0.8%.
+        *   Current State: Rollout 50%, Stages 5.
+*   **Result:** There was exactly one breach. The list ends after Step 6. Status is `PAUSED`. Final values are from the last completed stage (Step 5).
+
+**Part B: Residency Analysis**
+*   **Rules:**
+    *   Models A, B, C, D with sizes 1, 2, 3, 4 GB respectively.
+    *   Model C is pinned and never evicted.
+    *   Eviction policy: LRU unpinned model.
+    *   Load cost: 30s (irrelevant for counts). Unload cost: 10s (irrelevant).
+    *   Deferral logic: If a load cannot fit after evicting all unpinned models, it is deferred.
+*   **Events:**
+    1.  `load A` (1 GB): Fits in empty space. Executed. Loads = 1. Evictions = 0.
+        *   State: [A(1), B(2), C(3), D(4)] -> Occupied: {A}. Free: 9GB.
+    2.  `load C` (3 GB): Fits. Executed. Loads = 2. Evictions = 0.
+        *   State: Occupied: {A, C}. Free: 7GB.
+    3.  `load D` (4 GB): Fits. Executed. Loads = 3. Evictions = 0.
+        *   State: Occupied: {A, C, D}. Free: 3GB.
+    4.  `unload D` (4 GB): Removes D. Loads = 3. Evictions = 0.
+        *   State: Occupied: {A, C}. Free: 7GB.
+*   **Result:** No evictions occurred because every load fit without needing to remove anything. No deferrals occurred.
+
+**Final JSON Construction**
+Part A: `rollout_pct`: 50, `stages_done`: 5, `status`: "PAUSED".
+Part B: `loads`: 3, `evictions`: 0, `deferrals`: 0, `deferred`: [].
+
+```json
+{
+  "part_a": {
+    "rollout_pct": 50,
+    "stages_done": 5,
+    "status": "PAUSED"
+  },
+  "part_b": {
+    "loads": 3,
+    "evictions": 0,
+    "deferrals": 0,
+    "deferred": []
+  }
+}
+```

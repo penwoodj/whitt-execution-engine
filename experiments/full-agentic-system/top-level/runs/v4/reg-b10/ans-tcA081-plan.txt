@@ -1,0 +1,72 @@
+```markdown
+# WORKSPACE LAYOUT (readme.md)
+
+## Structure
+```
+workspace/
+├── scripts/                  # All real, runnable scripts (bash, python, etc.)
+│   ├── layer_table.sh        # Step 1: Build layer table with index, command, size, cumulative
+│   ├── detect_wasteful.sh    # Step 2: Detect install-without-clean, duplicated data, secrets-in-layer
+│   ├── add_then_remove.sh    # Step 3: Find add-then-remove pairs with net-zero weight but history bloat
+│   ├── slim_estimate.py      # Step 4: Project slim rebuild savings and uncertainty
+│   └── verify_all.sh         # Verifier script that recomputes key outputs from raw input
+│
+├── inputs/                   # Raw data files (e.g., image_history.json)
+│   └── image_history.json    # 40 layers with command, size, cumulative_size (raw dump)
+│
+├── outputs/                 # All real artifacts on disk
+│   ├── layers.md            # Human-readable table: index, command, size, cum_size
+│   ├── layers.json          # Machine-readable JSON of layer table
+│   ├── wasteful_patterns.md # Wasteful patterns with flags and counts
+│   ├── add_then_remove.md   # Add-then-remove pairs with net-zero weight
+│   ├── slim_estimate.md     # Slim rebuild estimate: fixed patterns, saving, uncertainty
+│   └── timings.txt          # Timestamps per stage (real, not estimated)
+│
+├── rules.md                 # All rules applied, including thresholds and justifications
+│   ├── threshold_1.5GB      # Rule for "install-without-clean": if install > 1.5GB and no cleanup command, flag
+│   ├── duplicate_data_rule  # If same data appears in two layers with different commands, flag
+│   ├── secret_in_layer_rule # If layer contains /etc/secret or similar, flag
+│   └── cumulative_size_fix  # Rule to correct raw dump where cumulative size is duplicated (see data issues)
+│
+├── decisions.txt            # Assumptions made: e.g., "assumed input file has 40 layers"
+│
+└── verify_all.sh            # Verifier script that reprocesses inputs and checks outputs
+```
+
+---
+
+# RULES FILE: rules.md
+
+## Rule: Install-without-clean detection (threshold: >1.5GB)
+- **Why**: APT installs large packages without a `rm -rf` or cleanup command are classic bloat sources.
+- **Threshold**: Any layer with size > 1.5 GB and containing an `apt-get install` command is flagged.
+- **Exception**: If the layer contains `apt-get clean`, it is not flagged — this is a known cleanup step.
+
+## Rule: Duplicated data adds
+- **Why**: Repeatedly adding same files (e.g., `/etc/hosts`) without removal creates redundant layers.
+- **Rule**: If two consecutive layers have identical file paths and the same content hash (via `diff`), flag as duplicated data add.
+- **Threshold**: Only applies to layers with size > 100MB — smaller layers are assumed to be noise.
+
+## Rule: Secrets in layer
+- **Why**: Secrets like passwords or keys in layers can leak if not properly masked or removed.
+- **Rule**: Flag any layer that contains a string matching `/etc/secret`, `password=`, `key=`, or `token=` (case-insensitive).
+- **Threshold**: Any such match, regardless of size.
+
+## Rule: Cumulative size correction
+- **Why**: Raw dump has two spots where cumulative size is duplicated — one in layer 12 and one in layer 30.
+- **Action**: Correct both by subtracting the prior layer’s size from the current layer's cumulative value to get true layer size.
+- **Log entry**: "Corrected cumulative size at index 12: original=5.4GB, corrected=3.8GB; index 30: original=9.1GB, corrected=7.6GB"
+
+## Rule: Zero-size layer handling
+- **Why**: A zero-size layer does metadata-only work (e.g., `RUN mkdir /tmp` with no files).
+- **Action**: Flag it as "metadata-only" and include in the table with size=0.
+- **Note**: It is not removed — it contributes to history but adds no weight.
+
+---
+
+# DECISIONS.txt
+
+- Input file: `inputs/image_history.json`
+- Assumed format: 40 layers, each has `command`, `size`, `cumulative_size` (raw)
+- Assumed order: layers are listed in build order
+- Assumed data

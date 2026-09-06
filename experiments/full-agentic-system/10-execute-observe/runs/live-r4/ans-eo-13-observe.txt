@@ -1,0 +1,49 @@
+The task requires walking a specific state machine based on 6 observations (events) against defined limits for two stages. The final output must be a JSON object with `rollout_pct`, `stages_done`, and `status`.
+
+**Rule Analysis:**
+1.  **Limits:**
+    *   Steps 1-5: Limit = 2.0%.
+    *   Steps 6-10: Limit = 1.0%.
+    *   Post-Breach Tightening: If a breach occurs, the limit for remaining steps becomes 0.8%. (Note: The example shows this applies to the *next* observation).
+2.  **Stage Logic:**
+    *   A "clean" observation at position $N$ completes Stage $N$.
+    *   Rollout after clean = $10 \times N$.
+    *   A "breach" observation is spent (does not complete a stage, does not advance rollout).
+    *   State holds the last completed values.
+3.  **Status Logic:**
+    *   If list ends with exactly one breach: Status = `PAUSED`.
+    *   If list ends with no breaches: Status = `DONE`.
+    *   If a second breach occurs (or logic dictates stop): Status = `STOPPED`.
+
+**Event Walkthrough:**
+
+*   **Step 1:** Rate 0.5%. Limit 2.0%. Clean.
+    *   Completes Stage 1. Rollout = $10 \times 1 = 10$.
+*   **Step 2:** Rate 0.8%. Limit 2.0%. Clean.
+    *   Completes Stage 2. Rollout = $10 \times 2 = 20$.
+*   **Step 3:** Rate 2.1%. Limit 2.0%. Breach (2.1 > 2.0).
+    *   Observation spent. State holds last completed values (Stage 2, Rollout 20).
+    *   Trigger: "After any rollback the limit tightens to 0.8 for every remaining step."
+*   **Step 4:** Rate 0.6%. Limit 0.8% (Tightened from Step 3 breach). Clean.
+    *   Completes Stage 3? No, wait. The rule says "a clean observation completes the stage equal to its own position in the list".
+    *   Position is 4. Does it complete Stage 4? Yes.
+    *   Rollout = $10 \times 4 = 40$. Stages Done = 4.
+*   **Step 5:** Rate 0.7%. Limit 2.0% (No breach in Step 4). Clean.
+    *   Position is 5. Completes Stage 5? Yes.
+    *   Rollout = $10 \times 5 = 50$. Stages Done = 5.
+*   **Step 6:** Rate 0.9%. Limit 2.0% (No breach in Step 5). Clean.
+    *   Position is 6. Completes Stage 6? Yes.
+    *   Rollout = $10 \times 6 = 60$. Stages Done = 6.
+
+**Final State Check:**
+*   Total Breaches: 1 (at Step 3).
+*   List ended with exactly one breach.
+*   Status: `PAUSED`.
+*   Last completed stage values are from Step 6 (since Step 6 was clean and advanced the state).
+    *   Rollout = 60.
+    *   Stages Done = 6.
+
+**JSON Output:**
+```json
+{"rollout_pct": 60, "stages_done": 6, "status": "PAUSED"}
+```

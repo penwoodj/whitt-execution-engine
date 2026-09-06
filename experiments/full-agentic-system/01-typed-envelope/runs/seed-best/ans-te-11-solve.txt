@@ -1,0 +1,84 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event sequence, including limits, stages, status, and expiry logic.*
+
+1.  **Step Limit Rule**: Steps 1–5 allow up to 2.0% error; Steps 6–10 allow up to 1.0% error. (Triggered by arrival of observation at current step).
+2.  **Breach Definition**: If observed error rate > Step Limit, the event is a breach. (Triggered by comparison in Rule 1).
+3.  **Rollback Action**: Upon breach, rollout pauses and rolls back to the previous step number. (Triggered by breach confirmation).
+4.  **Observation Expiry**: The observation that caused the breach becomes "spent" and does not re-test against limits. (Triggered immediately upon breach).
+5.  **Tightened Limit Rule**: After any rollback, the limit for *every remaining step* tightens to 0.8%. (Triggered by completion of a rollback event).
+6.  **Stage Completion Rule**: A clean observation completes its current stage; rollout then advances to show 10% times that stage number. (Triggered by clean observation at end of stage).
+7.  **Resume Logic**: After a rollback, the climb resumes from the next observation (the one after the spent breach). (Triggered by arrival of next valid observation).
+8.  **Second Breach Rule**: A second breach stops everything; status becomes STOPPED; rollout holds current step. (Triggered by second breach confirmation).
+9.  **Completion Rule**: If no breach occurs throughout the list, status is DONE and climb finishes at final calculated percentage. (Triggered by end of event list with clean state).
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events one at one in strict arrival order.*
+
+**Initial State:** Step = 1, Limit = 2.0%, Stages Done = 0, Status = RUNNING.
+
+**Event 1: Observation 0.3% arrives.**
+*   Current Step: 1.
+*   Limit Check: 0.3 <= 2.0 (Clean).
+*   Stage Logic: This is the first observation of Stage 1. It completes Stage 1.
+*   State Update: Rollout advances to show `10% * 1 = 10%`. Stages Done increments to 1. Next Step becomes 2.
+*   **State After Event 1:** `rollout_pct`: 10, `stages_done`: 1, `status`: "RUNNING" (implicit).
+
+**Event 2: Observation 0.5% arrives.**
+*   Current Step: 2.
+*   Limit Check: 0.5 <= 2.0 (Clean).
+*   Stage Logic: This is the second observation of Stage 1? No, rule says "every observation carries the next stage number in line". Wait, re-reading Rule 6 & Stage Numbering: "a clean observation completes its stage and the rollout then shows 10 percent times that stage number".
+    *   Let's trace carefully. "Stage numbering: every observation carries the next stage number in line".
+    *   Observation 1 (0.3): Carries Stage 1? Or does it complete Stage 1 to move to Stage 2?
+    *   Text: "a clean observation completes its stage and the rollout then shows 10 percent times that stage number".
+    *   Interpretation A: Each observation is a distinct step in the climb. The "stage" counter increments with each successful completion.
+    *   Let's re-read: "climbs in 10 percent steps... one observed error rate per step."
+    *   "Stage numbering: every observation carries the next stage number in line". This implies Observation $N$ corresponds to Stage $N$.
+    *   Event 1 (Obs 1): Carries Stage 1. Clean. Completes Stage 1. Rollout shows $10 \times 1 = 10\%$.
+    *   Event 2 (Obs 2): Carries Stage 2. Limit for Step 2 is still 2.0%. 0.5 <= 2.0. Clean. Completes Stage 2. Rollout shows $10 \times 2 = 20\%$.
+*   State Update: `rollout_pct`: 20, `stages_done`: 2.
+
+**Event 3: Observation 0.8% arrives.**
+*   Current Step: 3 (Carries Stage 3).
+*   Limit Check: 0.8 <= 2.0 (Clean).
+*   State Update: Completes Stage 3. Rollout shows $10 \times 3 = 30\%$. `stages_done`: 3.
+
+**Event 4: Observation 1.1% arrives.**
+*   Current Step: 4 (Carries Stage 4).
+*   Limit Check: 1.1 <= 2.0 (Clean).
+*   State Update: Completes Stage 4. Rollout shows $10 \times 4 = 40\%$. `stages_done`: 4.
+
+**Event 5: Observation 1.3% arrives.**
+*   Current Step: 5 (Carries Stage 5).
+*   Limit Check: 1.3 <= 2.0 (Clean).
+*   State Update: Completes Stage 5. Rollout shows $10 \times 5 = 50\%$. `stages_done`: 5.
+
+**Event 6: Observation (implied next) arrives? Wait, the list ends.**
+The input list is: "0.3, 0.5, 0.8, 1.1, 1.3 percent."
+There are exactly 5 observations listed.
+Let's re-evaluate the "Step" vs "Stage" logic and the limits.
+Limits: Steps 1-5 allow 2.0%. Steps 6-10 allow 1.0%.
+We have processed 5 observations (Steps 1 through 5). All were clean.
+Current State after Event 5: `rollout_pct` = 50, `stages_done` = 5. Status is effectively "RUNNING" but no more events are coming.
+
+**End of List Logic:**
+Rule: "if the list ends with no breach the close is DONE."
+Since all 5 observations were clean (no breaches occurred), the status transitions to DONE.
+The rollout percentage remains at the last calculated value: 50%.
+Stages done remains 5.
+
+**Final Verification of Rules:**
+*   Did any limit breach occur? No. Max observed was 1.3%, max allowed in steps 1-5 is 2.0%.
+*   Did a rollback occur? No.
+*   Did the tightened limit (0.8%) apply? No, because no rollback happened to trigger it.
+*   Is there a second breach? No.
+
+**Final State Construction:**
+*   `rollout_pct`: 50 (Integer N).
+*   `stages_done`: 5 (Integer N).
+*   `status`: "DONE".
+
+```json
+{"rollout_pct": 50, "stages_done": 5, "status": "DONE"}
+```

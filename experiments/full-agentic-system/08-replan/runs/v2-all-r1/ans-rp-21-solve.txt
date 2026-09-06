@@ -1,0 +1,110 @@
+Here is the step-by-step derivation of the state based on the rules and events provided in the task.
+
+### Phase 1: Rule List Analysis
+We identify the rules governing state changes (loads, evictions, deferrals) as described in the text. The order of application follows the "higher in the list" rule mentioned in the discipline section.
+
+1.  **Load Arrival & Fit Check**: When a load arrives, check if it fits in available space (`capacity - current_loads`).
+    *   If it fits: Add to `current_loads`. No eviction needed.
+    *   If it does not fit exactly (space < model size): Proceed to Eviction Phase.
+    *   Note: "Loads cost 30s, unloads 10s" are metadata/penalties, but the core logic is capacity management. The text implies these might be counters or costs, but usually, in such problems, unless explicitly summed into a result key like `cost`, they are ignored for the final JSON. However, looking at the previous failed attempt note and the specific keys requested (`loads`, `evictions`, `deferrals`), we focus on counts.
+2.  **Eviction Logic (If Load Too Big)**: If the load cannot fit:
+    *   Identify "unpinned" models currently resident.
+    *   Evict the Least Recently Used (LRU) unpinned model(s).
+    *   Repeat eviction until enough space exists to hold the new load OR no unpinned models remain.
+    *   Count each successful eviction towards `evictions`.
+3.  **Deferred Load Logic**: If after exhausting all unpinned evictions, there is still not enough room (i.e., only pinned models remain and they don't fit):
+    *   Mark the current load as "deferred".
+    *   Increment `deferrals` count.
+    *   Store the load ID in the `deferred` list.
+    *   The load does **not** enter `current_loads`.
+4.  **Unload Logic**: When an unload event occurs:
+    *   If the model is resident: Remove from `current_loads`, free up space, increment unloads counter (metadata).
+    *   If the model is not resident: No-op.
+
+### Phase 2: Ledger Walk
+We apply the events to the specific scenario: **8GB card**, Models A(1), B(4), C(2), D(6). B is pinned.
+
+**Initial State:**
+*   Capacity: 8 GB
+*   Current Load: 0 GB
+*   Resident Set: {} (Empty)
+*   Pinned Models: {B}
+*   Evictions Count: 0
+*   Deferrals Count: 0
+*   Deferred List: []
+
+**Event 1: Load A (1 GB)**
+*   Check Fit: Available = 8 - 0 = 8. Required = 1.
+*   Fits? Yes.
+*   Action: Add A to resident set.
+*   Current Load: 1 GB (Resident: {A})
+
+**Event 2: Load B (4 GB)**
+*   Check Fit: Available = 8 - 1 = 7. Required = 4.
+*   Fits? Yes.
+*   Action: Add B to resident set.
+*   Current Load: 5 GB (Resident: {A, B}. Note: B is pinned).
+
+**Event 3: Load C (2 GB)**
+*   Check Fit: Available = 8 - 5 = 3. Required = 2.
+*   Fits? Yes.
+*   Action: Add C to resident set.
+*   Current Load: 7 GB (Resident: {A, B, C}).
+
+**Event 4: Load D (6 GB)**
+*   Check Fit: Available = 8 - 7 = 1. Required = 6.
+*   Fits? No (1 < 6).
+*   Action: Trigger Eviction Logic.
+    *   Identify Unpinned Residents: {A, C} (B is pinned).
+    *   Evict LRU Unpinned: Assume arrival order A -> C makes A the LRU of the unpinned set? Or strictly "Least Recently Touched"? In standard OS caching without explicit timestamps in the prompt, we assume FIFO/LRU based on load time. A was loaded at Event 1, C at Event 3. A is older than C.
+    *   Evict A (1 GB).
+        *   Evictions Count: 1.
+        *   Current Load becomes: 7 - 1 = 6 GB.
+    *   Check Fit Again: Available Space = Capacity (8) - Current Load (6) = 2 GB? Wait, logic check:
+        *   If we evict A (size 1), the slot opens up. The total capacity is fixed at 8.
+        *   Resident before eviction: {B(4), C(2)} -> Size 6. Free space: 2.
+        *   We need to load D(6). We have 2 free space. Still not enough?
+        *   Let's re-read the "fit" logic carefully. Usually, `Available` = `Capacity` - `Sum(Size of Resident)`.
+        *   Before Eviction: Resident {A, B, C}. Sizes 1+4+2=7. Available=1. Need 6. Deficit = 5.
+        *   Evict A (Size 1). New Sum = 6. Available = 2.
+        *   Is 2 >= 6? No.
+        *   Are there other unpinned models to evict? Yes, C is unpinned.
+        *   Evict C (Size 2).
+            *   Evictions Count: 2.
+            *   New Sum = 4 (Only B remains). Available = 4.
+    *   Check Fit Again: Is 4 >= 6? No.
+    *   Are there other unpinned models? No (B is pinned, A and C are evicted).
+    *   State after exhausting evictions: Resident {B(4)}. Sum=4. Available=4.
+    *   Can we load D(6)? No. 4 < 6.
+    *   Result: The load cannot fit even after all unpinned evictions.
+*   Action: Trigger Deferral Logic.
+    *   Mark Load D as deferred.
+    *   Increment Deferrals Count: 1.
+    *   Add ID "D" to Deferred List.
+
+**Event 5: Unload B (4 GB)**
+*   Check Resident Status: Is B in resident set? Yes ({B}).
+*   Action: Remove B from resident set.
+    *   Current Load: 4 - 4 = 0 GB.
+    *   Resident Set: {} (Empty).
+    *   Space available is now full 8GB again.
+
+**Final State Calculation:**
+*   **Loads**: This key likely refers to the total number of successful loads processed in the stream? Or the current count? The JSON schema example `{"loads": N}` usually implies a count metric derived from the process (e.g., "Total Loads Attempted" or "Current Loaded Models"). Given the keys `evictions` and `deferrals` are counts, `loads` is ambiguous.
+    *   Interpretation A: Total number of load events processed successfully? No, D failed. So 3 (A, B, C).
+    *   Interpretation B: Current number of models loaded in memory? After Unload B, resident set is empty. Count = 0.
+    *   Let's look at the "previous attempt" context or standard problem types. Often `loads` refers to the count of items currently held. If the stream ends with an empty cache, it is 0. However, sometimes it refers to the number of load operations performed.
+    *   Re-evaluating the text: "Request stream: ... unload B". The system processes these.
+    *   Let's assume `loads` means **Current Loaded Count** (standard state reporting). After Event 5, Resident Set is empty. So N=0.
+    *   Alternative interpretation: Maybe `loads` counts how many times a load was accepted? A(1), B(4), C(2) = 3. D deferred. Unload doesn't count as load.
+    *   Let's check the constraints again. "one line per event... showing state after".
+    *   If I report `loads: 0`, it represents the cache size. If I report `loads: 3`, it represents operations. Given `evictions` and `deferrals` are counters, `loads` is most likely a counter of successful load events in this specific context (since "current loads" would be 0 which might be trivial). BUT, looking at the "orientation example", they track state.
+    *   Let's reconsider the definition of "Load". Is it an operation or a state? In many similar coding interview problems ("Cache"), `size` is current items. Here the key is plural `loads`. Could it be total number of load events attempted that succeeded? Or just the count of loaded items?
+    *   Let's look at the phrase "Request stream: ...".
+    *   If I assume `loads` = Current Cache Size: Value is 0.
+    *   If I assume `loads` = Total Successful Load Operations: Value is 3 (A, B, C).
+    *   Which is more consistent with `evictions` (total count) and `deferrals` (total count)? `evictions` counts events. `deferrals` counts events. It is highly probable `loads` also counts **successful load operations**.
+    *   Let's verify the "deferred" key. It expects a list of IDs. D was deferred. List: ["D"].
+
+    *Decision*: In state reporting for streams, metrics like `evictions` and `deferrals` are cumulative counters. Therefore `loads` is almost certainly the **cumulative count of successful load events**.
+   

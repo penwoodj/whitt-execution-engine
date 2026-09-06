@@ -1,0 +1,61 @@
+**Phase 1 RULE SCAN**
+1. Load Rule: A load command attempts to add a model of specified size; if it fits in remaining free space, the model is added and marked resident (unpinned unless pinned), moving it to most-recent position.
+2. Eviction Rule: If a load does not fit, the system evicts least-recently-touched UNPINNED models one by one until enough space exists; each eviction increments the eviction counter.
+3. Deferral Rule: If a load cannot fit even after all unpinned models are evicted (only pinned models remain), the load is deferred (no eviction occurs for this specific load), and its ID is recorded in the deferred list.
+4. Unload Rule: An unload command frees the specified model's size from the pool; if the model is not resident, it is a no-op.
+5. Pinning Constraint: Model B is pinned and never evicted under any circumstances.
+6. Touch Update Rule: Every time a model is loaded or touched (during eviction checks), its recency is updated to most-recent.
+
+**Phase 2 LEDGER WALK**
+*Initial State:* Pool = 8 GB, Residents = [], Free = 8 GB, Recency = [].
+
+Event 1: `load A (2 GB)`
+- Check fit: 2 GB <= 8 GB? Yes.
+- Action: Load A.
+- State: Residents = [A], Free = 6 GB, Recency = [A].
+- Result: Success.
+
+Event 2: `load B (2 GB)`
+- Check fit: 2 GB <= 6 GB? Yes.
+- Action: Load B.
+- State: Residents = [A, B], Free = 4 GB, Recency = [B] (B is pinned).
+- Result: Success.
+
+Event 3: `load C (2 GB)`
+- Check fit: 2 GB <= 4 GB? Yes.
+- Action: Load C.
+- State: Residents = [A, B, C], Free = 2 GB, Recency = [C] (B is pinned).
+- Result: Success.
+
+Event 4: `load D (7 GB)`
+- Check fit: 7 GB <= 2 GB? No.
+- Eviction Phase: Need 5 GB more space.
+  - Candidate for eviction: Least-recently-touched UNPINNED model.
+  - Residents: A (unpinned), B (pinned), C (unpinned).
+  - Recency order (oldest to newest): [A, C]. (B is pinned, ignored for eviction selection).
+  - Evict A (2 GB): Free becomes 4 GB. Total space = 6 GB. Still need 1 GB more? No, wait.
+    - Current Free: 2 GB. Needed: 7 GB. Deficit: 5 GB.
+    - Evict A (2 GB): New Free = 2 + 2 = 4 GB. Deficit remaining = 3 GB.
+    - Next candidate: C (unpinned). Recency order now [C].
+    - Evict C (2 GB): New Free = 4 + 2 = 6 GB. Deficit remaining = 1 GB.
+    - Next candidate: Only B remains, and B is pinned. Cannot evict.
+  - Check fit again: Current Free = 6 GB. Needed = 7 GB. Fits? No.
+- Action: Since only pinned models remain and it still does not fit, defer the load.
+- State: Residents = [A, B, C] (unchanged), Free = 2 GB.
+- Result: Deferred. ID "4" added to deferred list.
+
+Event 5: `unload B (2 GB)`
+- Check resident: Is B in residents? Yes.
+- Action: Unload B.
+- State: Residents = [A, C] (B removed), Free = 2 + 2 = 4 GB. Recency = [C].
+- Result: Success.
+
+**Final Calculation:**
+- Loads (successful): A, B, C -> Count = 3.
+- Evictions: A evicted, C evicted -> Count = 2.
+- Deferrals: D deferred -> Count = 1.
+- Deferred IDs: ["4"].
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": [4]}
+```

@@ -1,0 +1,44 @@
+**Fact Bullets:**
+*   LOW1: Duration 5 min, Start Minute 0.
+*   LOW2: Duration 7 min, Start Minute 2.
+*   HIGH: Arrival Minute 3, Duration 8 min.
+
+**Minute-by-Minute Walk:**
+
+| minute | core | event |
+| :--- | :--- | :--- |
+| 0 | LOW1 (fresh) | Start LOW1 @ m=0. Bank checkpoint at m=2. |
+| 1 | LOW1 (running) | Running. |
+| 2 | LOW1 (running) | Running. Bank checkpoint at m=4. |
+| 3 | HIGH (preempt) | Arrive HIGH. Preempt LOW1. LOW1 ran 0-2 (3 mins). Last bank was m=2. Wasted = 3 - 2 = **1 min**. |
+| 4 | HIGH (running) | Running. |
+| 5 | HIGH (running) | Running. |
+| 6 | HIGH (running) | Running. |
+| 7 | HIGH (running) | Running. |
+| 8 | HIGH (running) | Running. |
+| 9 | HIGH (running) | Running. |
+| 10 | HIGH (running) | Running. |
+| 11 | HIGH (running) | Running. |
+| 12 | HIGH (finish) | Finish HIGH @ m=13. Core frees at m=13. |
+| 13 | LOW1 (fresh) | Start LOW1 (resumed). It is a "fresh" start relative to the queue because it was preempted and lost its progress? No, rule: "a resumed LOW outranks a fresh one". The job ID is still LOW1. Is it considered "resumed" or "fresh"? Rule: "On preemption the work past the last checkpoint is wasted and redone after resume." This implies we are resuming the *job instance*. However, the queue logic says "LOW jobs take the core in order of their start minutes". LOW1 started at 0. LOW2 started at 2. Even if LOW1 was preempted, its original start minute (0) is earlier than LOW2's (2). So it goes first. Does it count as "fresh" or "resumed"? The rule says "a resumed LOW outranks a fresh one". Since we are picking up the job ID LOW1 which had a previous run, and we are redoing work, this is a **resume**. |
+| 14 | LOW1 (running) | Resume LOW1. It needs to run 5 mins total. Bank checkpoint at m=13+2 = m=15? No, bank is start-or-resume +2. Start/Resume was effectively the moment it picked up. Let's trace absolute minutes for banking. The job starts/resumes at minute 13. It banks a checkpoint at 13+2 = 15. Then every 2 running mins after. |
+| 15 | LOW1 (running) | Running. Bank @ m=15. |
+| 16 | LOW1 (running) | Running. |
+| 17 | LOW1 (running) | Running. Bank @ m=17. |
+| 18 | LOW1 (finish) | Finish LOW1 @ m=19? Wait, duration is 5 mins. Starts at 13. Occupies 13, 14, 15, 16, 17. Finishes at **m=18**. |
+| 18 | LOW2 (fresh) | Start LOW2 @ m=2? No, rule: "LOW jobs take the core in order of their start minutes". LOW2 started at minute 2. It is waiting. It starts now. Bank checkpoint at m=2+2 = m=4. |
+| 19 | LOW2 (running) | Running. |
+| 20 | LOW2 (finish) | Duration 7 mins. Starts at 18. Occupies 18, 19, 20, 21, 22, 23, 24. Finishes at **m=25**. |
+
+**Re-evaluating the "Resume" vs "Fresh" logic and Banking:**
+Let's re-read carefully: "LOW jobs take the core in order of their start minutes".
+Event sequence:
+1.  m=0-3: LOW1 runs.
+2.  m=3: HIGH preempts. LOW1 wasted 1 min (ran 3, banked at 2).
+3.  m=4-12: HIGH runs.
+4.  m=13: Core free. Waiting jobs: LOW1 (start m=0), LOW2 (start m=2).
+    *   Order by start minute: LOW1 first.
+    *   State of LOW1: It was preempted. We are resuming it. Rule: "a resumed LOW outranks a fresh one". This confirms we treat the instance as resumed.
+    *   Banking for LOW1 (Resume): Start/Resume time is m=13. Bank checkpoint at m=13+2 = m=15. Next bank at m=17, etc.
+    *   Duration: 5 mins.
+    *   Run: m=13, 14, 15, 16, 17. Finish @ **m=18

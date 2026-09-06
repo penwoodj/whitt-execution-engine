@@ -1,0 +1,62 @@
+Based on the strict rules of the "tonight" scenario (ignoring the orientation story numbers but following its logical shape), here is the step-by-step execution:
+
+**Scenario Parameters:**
+*   **Card Size:** 8 GB
+*   **Models & Sizes:** A=1, B=4, C=2, D=6.
+*   **Pinned Status:** B is pinned (never evicted). A, C, D are unpinned.
+*   **Rules:**
+    1.  Load fits if `Current Used + Model Size <= Card Size`.
+    2.  If load cannot fit: Evict least-recently-touched (LRT) *unpinned* models until space is found or only pinned models remain.
+    3.  If only pinned models remain and space still not found -> **Deferral**.
+
+**Event Walk:**
+
+1.  **Event: Load A (1 GB)**
+    *   Current Used: 0. Required: 1. Space available: 8.
+    *   Action: Fits immediately.
+    *   State: {A(1)} | Used: 1 | LRT Order: [A]
+
+2.  **Event: Load B (4 GB)**
+    *   Current Used: 1. Required: 4. Space available: 7.
+    *   Action: Fits immediately ($1+4=5 \le 8$).
+    *   State: {A(1), B(4)} | Used: 5 | LRT Order: [A, B] (Assuming arrival order determines LRT for unpinned; B is pinned so it doesn't affect eviction logic until necessary).
+
+3.  **Event: Load C (2 GB)**
+    *   Current Used: 5. Required: 2. Space available: 3.
+    *   Action: Fits immediately ($5+2=7 \le 8$).
+    *   State: {A(1), B(4), C(2)} | Used: 7 | LRT Order: [A, C] (B is pinned and ignored for eviction selection).
+
+4.  **Event: Load D (6 GB)**
+    *   Current Used: 7. Required: 6. Space available: 1.
+    *   Action: Does not fit ($7+6=13 > 8$).
+    *   Eviction Logic: Need to free at least $13-8=5$ GB (or effectively make room for D).
+        *   Candidate to evict: A (Size 1, Unpinned) or C (Size 2, Unpinned).
+        *   LRT Order: A arrived before C. So **A** is Least Recently Touched.
+    *   Eviction Step 1: Evict A (1 GB).
+        *   New Used: $7-1=6$.
+        *   Check Fit: $6+6=12 > 8$. Still does not fit. Need to free more.
+    *   Eviction Step 2: Next unpinned LRT is **C** (Size 2).
+        *   Evict C (2 GB).
+        *   New Used: $6-2=4$.
+        *   Check Fit: $4+6=10 > 8$. Still does not fit. Need to free more.
+    *   Remaining Models: B (Pinned, Size 4), D (Unpinned, but being loaded).
+    *   Eviction Step 3: Are there other unpinned models? No. Only B remains (and it is pinned).
+    *   Condition Met: "if only pinned models remain and it still does not fit it defers".
+    *   Action: **Deferral**. D cannot be loaded now.
+
+5.  **Event: Unload B (4 GB)**
+    *   Current Resident Set: {A, B, C} -> Wait, A and C were evicted in step 4?
+    *   Correction on Step 4 State: After deferring D, the resident set remains what it was before the failed load attempt. The eviction attempts happen virtually to check feasibility. If it defers, no changes occur to the resident set.
+    *   Resident Set at start of Event 5: {A(1), B(4), C(2)}. Used: 7.
+    *   Action: Remove B (4 GB).
+    *   State: {A(1), C(2)} | Used: $7-4=3$.
+
+**Final Counts:**
+*   **Loads Completed:** A, B, C loaded successfully. D deferred. Count = 3.
+*   **Evictions:** None occurred permanently (virtual evictions in step 4 did not commit because the load was defered). Count = 0.
+*   **Deferrals:** D could not fit and only pinned models remained. Count = 1.
+*   **Deferred List:** ["D"].
+
+```json
+{"loads": 3, "evictions": 0, "deferrals": 1, "deferred": ["D"]}
+```

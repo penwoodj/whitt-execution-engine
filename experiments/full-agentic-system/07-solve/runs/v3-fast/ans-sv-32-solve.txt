@@ -1,0 +1,74 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the "Residency Discipline" constraints (which override general memory rules regarding expiry returns), here are the active rules for tonight's stream:
+
+1.  **Capacity Rule**: A load of size $S$ fits if `current_free_memory` $\ge S$.
+2.  **LRU Eviction Rule**: If a load does not fit, evict the Least-Recently-Touched (LRT) *unpinned* model(s) one at a time until space is available or only pinned models remain. Each eviction increments the `evictions` counter.
+3.  **Deferred Load Rule**: If after exhausting all unpinned models the load still does not fit, the load is deferred. Increment `deferrals`, record the ID in `deferred`. No further evictions occur for this specific load attempt.
+4.  **Recency Update Rule**: Upon any successful load or eviction of a model, that model's recency is updated to "Most Recent".
+5.  **Unload Rule**: Unloading a resident frees its size immediately. If the model is not resident, it is a no-op.
+
+*Note on Expiry/Returns*: The prompt explicitly states in the "EXPIRY DISCIPLINE" section that returns land *before* the next request and are based on granted amounts. However, the provided event stream (`load A`, `load C`, `load D`, `unload D`) contains **no expiry events**. Therefore, no return rules trigger during this specific walk.
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State**:
+*   Card Size: 8 GB
+*   Residents: {} (Empty)
+*   Free Space: 8 GB
+*   Recency List: [] (Oldest to Newest)
+*   Counts: loads=0, evictions=0, deferrals=0, deferred=[]
+
+**Event 1: `load A` (Size 1 GB)**
+*   **Check**: Fits? Yes ($8 \ge 1$).
+*   **Action**: Load Model A.
+*   **State Update**:
+    *   Residents: {A}
+    *   Free Space: $8 - 1 = 7$ GB
+    *   Recency List: [A] (Most Recent)
+*   **Log Line**: `load A -> resident {A} free 7 recency {A}`
+
+**Event 2: `load C` (Size 3 GB)**
+*   **Check**: Fits? Yes ($7 \ge 3$).
+*   **Action**: Load Model C. Note: Model C is pinned.
+*   **State Update**:
+    *   Residents: {A, C}
+    *   Free Space: $7 - 3 = 4$ GB
+    *   Recency List: [C] (Most Recent), [A] (Oldest) -> Order: A, C? No, LRU logic puts the newly touched item at the end. So list is `[A, C]`. Wait, standard LRU: Newest is last. Touching C makes it newest. List becomes `[A, C]`.
+    *   Recency Check: A was touched first (Event 1). C is touched second (Event 2). Order Oldest->Newest: [A, C].
+*   **Log Line**: `load C -> resident {A, C} free 4 recency {A, C}`
+
+**Event 3: `load D` (Size 4 GB)**
+*   **Check**: Fits? No ($4 > 4$ is false? Wait. Free is 4. Size is 4. $4 \ge 4$. Yes, it fits exactly).
+    *   Calculation: Current Free = 4 GB. Request = 4 GB. $4 - 4 = 0$. Fits perfectly.
+*   **Action**: Load Model D. Note: Model C remains pinned.
+*   **State Update**:
+    *   Residents: {A, C, D}
+    *   Free Space: $4 - 4 = 0$ GB
+    *   Recency List: [A, C] -> Touch D makes it newest. Order Oldest->Newest: [A, C, D].
+*   **Log Line**: `load D -> resident {A, C, D} free 0 recency {A, C, D}`
+
+**Event 4: `unload D` (Size 4 GB)**
+*   **Check**: Is D resident? Yes.
+*   **Action**: Unload Model D.
+*   **State Update**:
+    *   Residents: {A, C}
+    *   Free Space: $0 + 4 = 4$ GB
+    *   Recency List: [A, C] (D removed).
+*   **Log Line**: `unload D -> resident {A, C} free 4 recency {A, C}`
+
+**Final Totals Calculation**:
+*   Successful Loads (`loads`): A, C, D were loaded. Count = 3.
+*   Evictions (`evictions`): None occurred (all loads fit). Count = 0.
+*   Deferrals (`deferrals`): None occurred. Count = 0.
+*   Deferred IDs (`deferred`): Empty list.
+
+---
+
+### Final Answer
+
+```json
+{"loads": 3, "evictions": 0, "deferrals": 0, "deferred": []}
+```

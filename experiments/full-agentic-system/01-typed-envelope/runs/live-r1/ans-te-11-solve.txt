@@ -1,0 +1,103 @@
+### Phase 1 RULE SCAN
+This phase lists every rule in the task that changes state during the event or claim list, along with the specific trigger.
+
+1. **Rule: Step Limit Check** (Triggered by: Every Observation Arrival)
+   - Logic: Compare observed error rate against the current step's limit. Limits are 2.0% for steps 1-5 and 1.0% for steps 6-10. If breached, trigger rollback logic; otherwise, mark stage complete and update rollout percentage.
+
+2. **Rule: Rollback Logic** (Triggered by: Breach)
+   - Action: Pause climb, revert to previous step number. The current observation is marked "spent".
+   - Side Effect: Limit for *every remaining step* tightens to 0.8%.
+
+3. **Rule: Stage Progression & Rollout Calculation** (Triggered by: Clean Observation)
+   - Action: Increment stage counter ($S$). Update rollout percentage = $10 \times S$.
+   - Note on Post-Rollback Resumption: If resuming, the next clean observation completes the *next* stage number after the one held during rollback.
+
+4. **Rule: Double-Breach Termination** (Triggered by: Second Breach)
+   - Action: Status becomes "STOPPED". Hold current step number. Stop all further processing.
+
+5. **Rule: Completion Logic** (Triggered by: Successful completion of Step 10)
+   - Action: If no breaches occur and steps are exhausted, Status becomes "DONE".
+
+---
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at one in strict arrival order.
+
+**Initial State:**
+- `current_step`: 1
+- `stages_done`: 0
+- `rollout_pct`: 0
+- `status`: "RUNNING" (implicit)
+- `limit_type`: Standard (2.0% for step 1, etc.)
+
+**Event 1: Observation Step 1 (Rate: 0.3%)**
+- Current Step: 1
+- Applicable Limit: Steps 1-5 allow up to 2.0%.
+- Check: $0.3 \leq 2.0$. Result: PASS.
+- State Update: Stage 1 is clean and completed.
+- Calculate Rollout: $10\% \times 1 = 10\%$.
+- New State: `current_step`=2, `stages_done`=1, `rollout_pct`=10.
+
+**Event 2: Observation Step 2 (Rate: 0.5%)**
+- Current Step: 2
+- Applicable Limit: Steps 1-5 allow up to 2.0%.
+- Check: $0.5 \leq 2.0$. Result: PASS.
+- State Update: Stage 2 is clean and completed.
+- Calculate Rollout: $10\% \times 2 = 20\%$.
+- New State: `current_step`=3, `stages_done`=2, `rollout_pct`=20.
+
+**Event 3: Observation Step 3 (Rate: 0.8%)**
+- Current Step: 3
+- Applicable Limit: Steps 1-5 allow up to 2.0%.
+- Check: $0.8 \leq 2.0$. Result: PASS.
+- State Update: Stage 3 is clean and completed.
+- Calculate Rollout: $10\% \times 3 = 30\%$.
+- New State: `current_step`=4, `stages_done`=3, `rollout_pct`=30.
+
+**Event 4: Observation Step 4 (Rate: 1.1%)**
+- Current Step: 4
+- Applicable Limit: Steps 1-5 allow up to 2.0%.
+- Check: $1.1 \leq 2.0$. Result: PASS.
+- State Update: Stage 4 is clean and completed.
+- Calculate Rollout: $10\% \times 4 = 40\%$.
+- New State: `current_step`=5, `stages_done`=4, `rollout_pct`=40.
+
+**Event 5: Observation Step 5 (Rate: 1.3%)**
+- Current Step: 5
+- Applicable Limit: Steps 1-5 allow up to 2.0%.
+- Check: $1.3 \leq 2.0$. Result: PASS.
+- State Update: Stage 5 is clean and completed.
+- Calculate Rollout: $10\% \times 5 = 50\%$.
+- New State: `current_step`=6, `stages_done`=5, `rollout_pct`=50.
+
+*(End of observed events list)*
+
+**Final State Calculation:**
+- The input list contains exactly 5 observations (Step 1 through Step 5).
+- All 5 passed their respective limits.
+- No breaches occurred. Therefore, no rollbacks occurred and the tight limit rule was never triggered.
+- Since the event list ends after Step 5 is successfully completed, we do not proceed to hypothetical steps 6-10 unless new events were provided. The rollout stops exactly where the data stopped, having fully completed Stage 5.
+- `rollout_pct`: 50 (from $10 \times 5$)
+- `stages_done`: 5
+- `status`: Since no breach happened and the process didn't hit a hard stop condition defined in the rules (like "STOPPED"), but rather finished its input stream, we evaluate the status based on the completion of the last observed event. The rule says: "no breach at all and the climb finishes with status DONE". However, strictly speaking, has it "finished" or just paused due to lack of inputs?
+    - Re-reading termination rules: "a second breach stops everything... STOPPED". "no breach at all and the climb finishes with status DONE".
+    - The input list is finite. In simulation logic, if the stream ends without a breach event triggering a halt *within* the stream, and we are asked for the state of the rollout *after* these events:
+    - If the system waits for Step 10 to declare "DONE", the current state is technically "RUNNING" or "PAUSED" until completion. However, looking at the specific status options provided in the contract: `"PAUSED" | "STOPPED" | "DONE"`.
+    - Is there a rule that says "If inputs end, status is PAUSED"? The text says "a breach pauses...". It doesn't explicitly state what happens if the input list ends naturally.
+    - However, let's re-read the "Stage numbering" and "Rollout" rules carefully. "after a clean observation completes its stage and the rollout then shows 10 percent times that stage number". We have completed Stage 5.
+    - If we assume the "climb" is a continuous process and we just received data up to step 5, the system is waiting for the next observation (Step 6). The status cannot be "DONE" because Step 6 hasn't been observed/processed yet to confirm final success across all steps.
+    - Does it default to PAUSED? The text defines PAUSED specifically as a result of a breach ("A breach pauses..."). It does not define a natural stop due to end-of-input list as PAUSED.
+    - *Correction*: In many such strict ledger tasks, if the input stops and no termination condition (Breach 1st or Breach 2nd) is met, but the full sequence isn't finished, the state often remains in the active phase. But we only have "DONE", "STOPPED", and "PAUSED".
+    - Let's look at the "Orientation" example: "the window closed before any resume observation arrived." This implies a pause/hold state when not actively climbing or if inputs stop? No, that was specific to a breach scenario.
+    - Let's reconsider the definition of PAUSED in the text: "a breach pauses the climb". Is there another way to pause?
+    - Actually, usually in these prompts, if the list ends without a second breach (STOPPED) and not all steps are done to declare DONE automatically at Step 10, but simply because inputs ran out... wait. The prompt asks for the state *after* the events.
+    - If I stop at Step 5, have I finished? No. Am I stopped by a rule? No. So am I paused by a breach? No.
+    - Is it possible the status is implicitly "DONE" if we treat the provided list as the complete universe of truth for this run and assume no future steps exist? The prompt says "observed error rates by step, in order: ...". It implies these are the only observations. If there are no more observations, can we say it's done?
+    - Let's look at the constraints again. "a breach pauses... a second breach stops... no breach at all and the climb finishes with status DONE."
+    - The phrase "the climb finishes" usually implies reaching the end of the intended scope (Step 10). We are at Step 5.
+    - However, without an explicit "STOPPED" or "PAUSED" trigger from a breach, and assuming the standard interpretation where the system waits for the next step:
+    - Perhaps I missed a rule? "limits: steps 1 through 5 may show up to 2.0 percent". We are at Step 5 just finished. The next would be Step 6 (limit 1.0%).
+    - If the input stops, and no breach occurred, is the status "DONE"? Unlikely if steps remain. Is it "PAUSED"? Only triggered by breach in the text provided?
+    - Let's re-read carefully: "a breach pauses the climb... a second breach stops everything". There is no rule for natural pause.
+    - Maybe the "Orientation" note implies something? No, that was different numbers.
+    - Could the status be determined by whether the *total* process is considered complete? If the task

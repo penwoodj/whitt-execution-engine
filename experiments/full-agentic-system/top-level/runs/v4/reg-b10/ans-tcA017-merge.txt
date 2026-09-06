@@ -1,0 +1,38 @@
+Phase 1 RULE SCAN:
+
+- Rule: On arrival of an event with a key that already has a record, if the payload is identical to the existing one, suppress the retry and mark as healthy duplicate. Triggered by: order arrival with matching key and payload.
+- Rule: On arrival of an event with a key that already has a record, if the payload differs, flag as suspicious collision and trigger human review. Triggered by: order arrival with same key but different payload.
+- Rule: Upon detection of a key with five or more distinct payloads, mark all such entries for manual audit and log in flagged-collisions.csv. Triggered by: group-by-key aggregation showing ≥5 unique payloads per key.
+- Rule: When a key appears with the same order payload under two different keys, flag both records as collision and record in flagged-collisions.csv. Triggered by: cross-key payload match detection during grouping.
+- Rule: If any key has more than one entry with identical payload but different timestamps (within 10 minutes), classify as potential clock-skew and log the entries. Triggered by: timestamp-based delta check on same-payload entries.
+- Rule: On completion of group-by-key analysis, count total suppressed duplicates and report percentage of original attempts that were suppressed. Denominator is total number of order attempts (raw input rows). Triggered by: post-grouping suppression tally.
+- Rule: If a key has more than one entry with the same payload but different order IDs, trigger collision flag and log in flagged-collisions.csv. Triggered by: duplicate payload across distinct order IDs.
+- Rule: On detection of any row where a key appears with five or more payloads (including duplicates), emit an error message stating "key has ≥5 payloads" and halt processing. Triggered by: group-by-key count exceeding 4.
+- Rule: If the number of suspicious collisions exceeds 10% of total order attempts, trigger alert and log in logs.txt. Denominator is total input rows. Triggered by: collision count > (total_rows × 0.10).
+- Rule: On any row where a key appears with a payload that matches an existing one but the timestamp is more than 30 minutes apart, flag as potential data drift and log in logs.txt. Triggered by: timestamp delta > 30 minutes.
+- Rule: If two different keys map to the same order payload (same content), mark both entries as collision and include in flagged-collisions.csv. Triggered by: payload-level cross-key match detection.
+- Rule: After all events are processed, compute collision frequency over time (per day) and output actual daily counts with cumulative totals. Triggered by: chronological ordering of order events.
+- Rule: If any stage produces a result that contradicts the stated background (e.g., key appears with five payloads but not in input), report contradiction explicitly in logs.txt. Triggered by: data inconsistency check against background claim.
+- Rule: On final output generation, verify all numbers using a standalone verifier script that reprocesses raw inputs and computes counts independently. Triggered by: post-processing stage.
+- Rule: If the verifier finds any mismatch between computed values and stored outputs, exit with non-zero status and log error in verification.log. Triggered by: verifier script execution result.
+- Rule: When a rule is triggered and conflicts with an input row (e.g., rule says "flag" but row has no variation), include both the row and the rule in flagged-output.json. Triggered by: rule-row disagreement during processing.
+
+Phase 2 LEDGER WALK:
+
+- [09:14:03] Event: Order A, key=K1, payload={id:1, items:[], amount:50}, timestamp=2024-04-01T09:14:03Z → State: K1 → {entry:1, payload:{id:1, items:[], amount:50}, status:new}
+- [09:14:06] Event: Order B, key=K2, payload={id:2, items:["mug"], amount:75}, timestamp=2024-04-01T09:14:06Z → State: K2 → {entry:1, payload:{id:2, items:["mug"], amount:75}, status:new}
+- [09:14:10] Event: Order C, key=K1, payload={id:1, items:[], amount:50}, timestamp=2024-04-01T09:14:10Z → State: K1 → {entry:2, payload:{id:1, items:[], amount:50}, status:healthy duplicate (same key, same payload)}
+- [09:14:13] Event: Order D, key=K3, payload={id:3, items:["book"], amount:100}, timestamp=2024-04-01T09:14:13Z → State: K3 → {entry:1, payload:{id:3, items:["book"], amount:100}, status:new}
+- [09:14:15] Event: Order E, key=K2, payload={id:2, items:["mug"], amount:75}, timestamp=2024-04-01T09:14:15Z → State: K2 → {entry:2, payload:{id:2, items:["mug"], amount:75}, status:healthy duplicate (same key, same payload)}
+- [09:14:18] Event: Order F, key=K1, payload={id:1, items:[], amount:50}, timestamp=2024-04-01T09:14:18Z → State: K1 → {entry:3, payload:{id:1, items:[], amount:50}, status:healthy duplicate (same key, same payload)}
+- [09:14:21] Event: Order G, key=K4, payload={id:4, items:["pen"], amount:20}, timestamp=2024-04-01T09:14:21Z → State: K4 → {entry:1, payload:{id:4, items:["pen"], amount:20}, status:new}
+- [09:14:25] Event: Order H, key=K3, payload={id:3, items:["book"], amount:100}, timestamp=2024-04-01T09:14:25Z → State: K3 → {entry:2, payload:{id:3, items:["book"], amount:100}, status:healthy duplicate (same key, same payload)}
+- [09:14:28] Event: Order I, key=K5, payload={id:5, items:["note"], amount:15}, timestamp=2024-04-01T09:14:28Z → State: K5 → {entry:1, payload:{id:5, items:["note"], amount:15}, status:new}
+- [09:14:32] Event: Order J, key=K6, payload={id:6, items:["paper"], amount:30}, timestamp=2024-04-01T09:14:32Z → State: K6 → {entry:1, payload:{id:6, items:["paper"], amount:30}, status:new}
+- [09:14:35] Event: Order K, key=K7, payload={id:7, items:["tape"], amount:8}, timestamp=2024-04-01T09:14:35Z → State: K7 → {entry:1, payload:{id:7, items:["tape"], amount:8}, status:new}
+- [09:14:38] Event: Order L, key=K2, payload={id:2, items:["mug"], amount:75}, timestamp=2024-04-01T09:14:38Z → State: K2 → {entry:3, payload:{id:2, items:["mug"], amount:75}, status:healthy duplicate (same key, same payload)}
+- [09:14:41] Event: Order M, key=K1, payload={id:1, items:[], amount:50}, timestamp=2024-04-01T09:14:41Z → State: K1 → {entry:4, payload:{id:1, items:[], amount:50}, status:healthy duplicate (same key, same payload)}
+- [09:14:44] Event: Order N, key=K8, payload={id:8, items:["pen"], amount:20}, timestamp=2024-04-01T09:14:44Z → State: K8 → {entry:1, payload:{id:8, items:["pen"], amount:20}, status:new}
+- [09:14:47] Event: Order O, key=K3, payload={id:3, items:["book"], amount:100}, timestamp=2024-04-01T09:14:47Z → State: K3 → {entry:3, payload:{id:3, items:["book"], amount:100}, status:healthy duplicate (same key, same payload)}
+- [09:14:50] Event: Order P, key=K2, payload={id:2, items:["mug"], amount:75}, timestamp=2024-04-01T09:14:50Z → State: K2 → {entry:4, payload:{id:2, items:["mug"], amount:75}, status:healthy duplicate (same key, same payload)}
+- [

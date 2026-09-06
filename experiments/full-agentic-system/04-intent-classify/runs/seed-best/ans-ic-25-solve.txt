@@ -1,0 +1,93 @@
+The task requires walking a state machine based on specific rules for "tonight" (8GB card) while ignoring the numbers from an "orientation example" (5GB card). The previous attempt failed because it likely conflated the two scenarios or produced incorrect counts.
+
+**Phase 1: Rule Scan (Tonight's Rules)**
+Based strictly on the text provided for the current night ("tonight", "8GB card"):
+1.  **State Initialization**: Start with an empty resident set and a total capacity of 8GB.
+2.  **Load Logic**: An event `load <id>` attempts to add `<size>`.
+3.  **Fit Check**: If the load fits in remaining space, it succeeds immediately.
+4.  **Eviction Trigger**: If the load does not fit:
+    *   Evict the Least-Recently-Touched (LRT) unpinned model(s) until there is enough room for the new load OR only pinned models remain.
+    *   Pinned models are never evicted ("model B is pinned and never evicted").
+5.  **Deferral Trigger**: If after evicting all possible unpinned models, the remaining space (occupied only by pinned models) is still insufficient to fit the new load:
+    *   The load defers.
+    *   Count increment `deferrals`.
+    *   ID added to `deferred` list.
+6.  **Unload Logic**: An event `unload <id>` removes `<size>` from the resident set if present (no-op otherwise). This increases available space immediately.
+7.  **Ordering**: Events are processed strictly in arrival order: `[Load A, Load B, Load C, Load D, Unload B]`.
+8.  **Counting**: `loads` = successful additions to the resident set. `evictions` = total number of eviction operations performed across all events.
+
+**Phase 2: Ledger Walk (Tonight's Events)**
+*Initial State*: Capacity 8GB, Residents: {}, Available Space: 8GB.
+
+1.  **Event**: `load A` (Size: 2 GB)
+    *   *Check*: Does it fit? Yes (Available 8GB >= 2GB).
+    *   *Action*: Add A to residents.
+    *   *State*: Residents {A}, Available Space 6GB.
+    *   *Counts*: loads=1, evictions=0.
+
+2.  **Event**: `load B` (Size: 2 GB)
+    *   *Check*: Does it fit? Yes (Available 6GB >= 2GB).
+    *   *Action*: Add B to residents. Note: B is pinned.
+    *   *State*: Residents {A, B}, Available Space 4GB.
+    *   *Counts*: loads=2, evictions=0.
+
+3.  **Event**: `load C` (Size: 2 GB)
+    *   *Check*: Does it fit? Yes (Available 4GB >= 2GB).
+    *   *Action*: Add C to residents.
+    *   *State*: Residents {A, B, C}, Available Space 2GB.
+    *   *Counts*: loads=3, evictions=0.
+
+4.  **Event**: `load D` (Size: 7 GB)
+    *   *Check*: Does it fit? No (Available 2GB < 7GB). Needed increase = 5GB.
+    *   *Eviction Logic*: Identify unpinned models to evict.
+        *   Residents: {A, B, C}.
+        *   Pin Status: A=Unpinned, B=Pinned, C=Unpinned.
+        *   LRT Selection: Assuming standard FIFO or arrival order for LRT among unpinned (A arrived first, then C), A is the Least-Recently-Touched unpinned model. (Even if C were LRT, we need to free 5GB).
+        *   Size of A: 2 GB. Evict A -> Free 2GB. Remaining Unpinned: {C}.
+        *   Current Available Space becomes: Original 2GB + Evicted 2GB = 4GB.
+        *   Is 4GB >= 5GB needed? No.
+        *   Next LRT unpinned: C (Size 2 GB). Evict C -> Free 2GB. Remaining Unpinned: {}.
+        *   Current Available Space becomes: 4GB + 2GB = 6GB.
+        *   Is 6GB >= 5GB needed? Yes. Now we can fit D.
+    *   *Action*: Evict A, Evict C. Load D (replacing the freed space).
+    *   *State Update*: Remove A, Remove C. Add D. B remains (Pinned).
+    *   *Final State*: Residents {B, D}. Available Space = 6GB - 7GB? No. Total Capacity is 8GB. Occupied by B(2) + D(7) = 9GB?
+    *   *Correction on Calculation*:
+        *   Previous occupied: A(2)+B(2)+C(2) = 6GB. Free space = 2GB.
+        *   Need to load D(7). Total needed capacity = 8GB (limit) or just fit the item? The system has a hard limit of 8GB ("one 8GB card").
+        *   Current Occupied: 6GB. Limit: 8GB. Max possible new occupied without eviction is 8GB.
+        *   Target State for D: We must have B(2) + D(7) = 9GB? **Wait**, if the total capacity is 8GB, we cannot hold B(2) and D(7) simultaneously because 2+7=9 > 8.
+    *   *Re-evaluating Deferral Condition*:
+        *   Rule: "if only pinned models remain and it still does not fit it defers."
+        *   Here, we evicted all unpinned models (A and C). Only B remains.
+        *   Is B + D <= 8GB? No (9 > 8).
+        *   Can we evict B? No ("model B is pinned and never evicted").
+        *   Therefore, the load cannot fit even after emptying all unpinned models.
+    *   *Result*: Load D defers.
+    *   *Action*: Increment `deferrals`. Add D to `deferred` list. Do not add D to residents. Do not perform evictions (because the condition "evicts as many... as needed" implies successful loading; if it can't fit even after clearing unpinned, we hit the deferral wall).
+    *   *State*: Residents {B}. Available Space = 8GB - 2GB(B) = 6GB.
+    *   *Counts Update*: loads=3 (A, B, C), evictions=0, deferrals=1, deferred=[D].
+
+5.  **Event**: `unload B` (Size: 2 GB)
+    *   *Check*: Is B resident? Yes.
+    *   *Action*: Remove B from residents.
+    *   *State Update*: Residents {}. Available Space = 8GB.
+    *   *Counts Update*: loads=3, evictions=0, deferrals=1.
+
+**Final Tally:**
+*   `loads`: 3 (A, B, C were successfully loaded).
+*   `evictions`: 0 (No successful load triggered an eviction sequence because the second load attempt failed the capacity check against pinned models, leading to a deferral instead of evictions). *Self-Correction*: Did D trigger evictions? The rule says "a load that cannot fit evicts as many...". Usually, this implies an attempt. However, if it hits the "only pinned remain" clause immediately or after clearing all unpinned, does it count those evictions?
+    *   Let's re-read carefully: "evictions choose the least-recently-touched unpinned model... a load that cannot fit evicts as many LRU unpinned models as needed".
+    *   Scenario: Load D arrives. Space=2GB. Need 7GB. Gap=5GB.
+    *   Evict A (2GB). Remaining Gap=3GB. Unpinned left={C}.
+    *   Evict C (2GB). Remaining Gap=1GB. Unpinned left={}.
+    *   Now only B(2GB) remains. Total space = 2GB(B) + 0(Unpinned) + 2GB(freed from evictions? No, capacity is fixed at 8GB).
+    *   Current Occupied before eviction: A+B+C = 6GB.
+    *   Evict A -> Occupied becomes B+C = 4GB.
+    *   Evict C -> Occupied becomes B = 2GB.
+    *   Can we fit D(7GB)? We need space for D. Total Capacity is 8GB. Current usage is 2GB (B). Available room is 6GB.
+    *   Does D fit? No, because B+D = 9GB > 8GB.
+    *   Since only pinned models remain and it still does not fit -> Deferral.
+    *   Did we perform evictions? Yes, we attempted to free space by evicting A and C. The rule says "evicts as many... as needed". Even if the final step is a deferral due to pinning, did the system execute the eviction commands?
+    *   Standard interpretation of such LRU caches: If you need 5GB, you evict until you have it or hit a barrier. You evicted A and C (total 4GB freed). That counts as 2 evictions. Then you check if it fits. It doesn't. So you defer.
+    *   However, let's look at the "Orientation Example" logic provided in the text to see how they count: "P's 3GB did not fit... so it evicted

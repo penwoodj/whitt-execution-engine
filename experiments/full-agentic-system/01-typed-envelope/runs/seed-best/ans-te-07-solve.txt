@@ -1,0 +1,119 @@
+### Phase 1 RULE SCAN
+1. **Stage Completion Rule**: A clean observation at position $N$ completes Stage $N$.
+2. **Rollout Calculation Rule**: Upon completing a stage, rollout becomes $10 \times (\text{Completed Stage Number})$.
+3. **Limit Assignment Rule (Steps 1-5)**: Limit is 2.0% for observations at positions 1 through 5.
+4. **Limit Assignment Rule (Steps 6-10)**: Limit is 1.0% for observations at positions 6 through 10.
+5. **Breach Handling Rule**: If Rate > Limit, the observation is spent (no stage completion), and the system holds the last completed state. The limit tightens to 0.8% for all *remaining* steps.
+6. **Termination Rule (Second Breach)**: A second breach immediately sets status to STOPPED, holding the current state at the moment of failure.
+7. **Termination Rule (End of List with One Breach)**: If the list ends after exactly one breach, status is PAUSED, holding the last completed stage's values.
+8. **Completion Rule (No Breaches)**: If no breaches occur and the list ends, status is DONE.
+
+### Phase 2 LEDGER WALK
+
+**Event 1**
+- Position: 1
+- Rate: 0.5%
+- Limit: 2.0% (Step 1)
+- Verdict: Clean
+- State Update: Stage completed = 1, Rollout = 10
+
+**Event 2**
+- Position: 2
+- Rate: 0.8%
+- Limit: 2.0% (Step 2)
+- Verdict: Clean
+- State Update: Stage completed = 2, Rollout = 20
+
+**Event 3**
+- Position: 3
+- Rate: 2.1%
+- Limit: 2.0% (Step 3)
+- Verdict: Breach (2.1 > 2.0)
+- State Update: No stage completed, Rollout holds at 20, Status pending termination rules.
+
+**Event 4**
+- Position: 4
+- Rate: 0.6%
+- Limit: 0.8% (Tightened after previous breach applies to remaining steps)
+- Verdict: Clean (0.6 <= 0.8)
+- State Update: Stage completed = 4, Rollout = 40
+
+**Event 5**
+- Position: 5
+- Rate: 0.7%
+- Limit: 0.8% (Tightened limit applies)
+- Verdict: Clean (0.7 <= 0.8)
+- State Update: Stage completed = 5, Rollout = 50
+
+**Event 6**
+- Position: 6
+- Rate: 0.9%
+- Limit: 1.0% (Original limit for Step 6 applies; note: breach rule tightens remaining steps *if* a breach occurred previously, but the text says "after any rollback the limit tightens to 0.8". Here we are in the same rollout sequence after a previous breach, so does the limit stay 1.0 or drop to 0.8? Re-reading Rule 5: "after any rollback the limit tightens to 0.8 for every remaining step." The "rollback" refers to the state holding due to a breach. Since Event 3 was a breach, the system is in a "rolled back/holding" state relative to the ideal climb? Or does it mean future limits are capped at 0.8?
+*Correction on Rule Interpretation*: The text says "after any rollback... limit tightens". In the orientation example: Pos 1 clean (Stage 1). Pos 2 clean (Stage 2). Pos 3 breach -> holds Stage 2, limit tightens to 0.8 for *next*. Pos 4 clean under 0.8 -> completes Stage 4 (skipping 3).
+Applying this logic here:
+- Event 1: Clean -> Stage 1, Rollout 10. Limit base 2.0.
+- Event 2: Clean -> Stage 2, Rollout 20. Limit base 2.0.
+- Event 3: Breach (2.1 > 2.0). Spend event. Hold State at Stage 2 (Rollout 20). **Limit tightens to 0.8 for remaining steps**.
+- Event 4: Rate 0.6 vs Tightened Limit 0.8. Clean. Completes Stage 4 (skipping 3). Rollout = $10 \times 4 = 40$.
+- Event 5: Rate 0.7 vs Tightened Limit 0.8. Clean. Completes Stage 5. Rollout = $10 \times 5 = 50$.
+- Event 6: Position 6. Is the limit for Pos 6 the original (1.0) or the tightened (0.8)? The rule says "for every remaining step". Since a breach occurred, the condition "after any rollback" is met. Therefore, the limit for Step 6 is 0.8%.
+- Event 6 Check: Rate 0.9% vs Limit 0.8%. Result: Breach.
+
+**Final State Determination**:
+We have had exactly one breach (at Event 3).
+The list ended at Event 6.
+Rule 7 applies: "exactly one breach and the list ends: status PAUSED with the last completed stage's values."
+Last completed stage was Stage 4 (achieved at Event 5, skipping the spent position 3? No, wait.
+Let's re-trace the stage numbering carefully.
+Rule: "a clean observation completes the stage equal to its own position in the list... breaches do not shift the count".
+- Pos 1 Clean -> Completes Stage 1.
+- Pos 2 Clean -> Completes Stage 2.
+- Pos 3 Breach -> Spent. Does not complete Stage 3. Count remains at 2? Or does it skip?
+Rule: "the rollout then shows 10 percent times that stage number... a clean observation completes the stage equal to its own position".
+Orientation Example Logic:
+Pos 1 Clean -> Stage 1, Rollout 10.
+Pos 2 Clean -> Stage 2, Rollout 20.
+Pos 3 Breach -> Spent. Holds last completed (Stage 2).
+Pos 4 Clean -> "it carries stage 4 by position... rollout jumps to 40".
+This implies the stage number is determined strictly by the *current* observation's position index if it cleans, regardless of skipped numbers? Or does "carries stage 4" mean it completes Stage 4 because it is at Position 4 and clean? Yes. "completes the stage equal to its own position".
+So:
+Pos 1 Clean -> Completes Stage 1.
+Pos 2 Clean -> Completes Stage 2.
+Pos 3 Breach -> Spent. (No Stage 3 completed). Current State = Stage 2.
+Pos 4 Clean -> Position is 4. Rule: "completes the stage equal to its own position". So it completes Stage 4. (It skips completing a hypothetical Stage 3). Rollout becomes $10 \times 4 = 40$.
+Pos 5 Clean -> Position is 5. Completes Stage 5. Rollout becomes $10 \times 5 = 50$.
+Pos 6 Breach -> Position is 6. Rate 0.9 > Limit (Tightened to 0.8). Breach occurs.
+Count of breaches: 2?
+Wait, let's re-evaluate the "Exactly one breach" condition in Rule 7 vs Rule 6.
+Rule 6: "a second breach stops everything with status STOPPED".
+Did we have a second breach?
+Sequence:
+1. Clean (0 breaches)
+2. Clean (0 breaches)
+3. Breach (1 breach). State held at Stage 2. Limit -> 0.8.
+4. Clean (Rate 0.6 <= 0.8). No new breach. Total breaches = 1.
+5. Clean (Rate 0.7 <= 0.8). No new breach. Total breaches = 1.
+6. Rate 0.9. Limit?
+Is the limit for Step 6 still 1.0 or is it tightend to 0.8?
+Text: "after any rollback the limit tightens to 0.8 for every remaining step."
+"Rollback" here refers to the state freeze after a breach. Since Event 3 caused a freeze/rollback, *all* subsequent steps use 0.8%.
+So Step 6 Limit = 0.8%.
+Event 6 Rate (0.9%) > Limit (0.8%). -> Breach #2.
+Total breaches = 2.
+Result: Rule 6 triggers. Status = STOPPED.
+Hold values of the last completed stage.
+Last *completed* stage was Stage 5 (at Pos 5).
+Wait, did Pos 4 complete Stage 4? Yes ("carries stage 4 by position").
+Did Pos 5 complete Stage 5? Yes.
+So at start of Event 6, state is: Rollout 50, Stages Done 5.
+Event 6 breaches.
+Status becomes STOPPED.
+Values held: Last completed stage = 5. Rollout = 50.
+
+Let's double check the "Exactly one breach" clause in Rule 7.
+Rule 7 says: "exactly one breach and the list ends".
+We have two breaches (Pos 3 and Pos 6). So Rule 6 applies, not Rule 7.
+Status = STOPPED.
+Values: Rollout 50, Stages Done 5.
+
+Let's re-read the orientation example to ensure "remaining steps" logic is consistent with my derivation of Stage

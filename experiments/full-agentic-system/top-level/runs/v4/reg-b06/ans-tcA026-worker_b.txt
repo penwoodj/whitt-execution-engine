@@ -1,0 +1,28 @@
+Phase 1 RULE SCAN:
+
+- Rule: Backup pair overlap detection triggers when two jobs with overlapping time windows (same machine, same backup target) are scheduled within 60 seconds of each other. Triggered by event: "backup_pair_collision" in the next-24-hours firing timeline.
+- Rule: The 11-minute job vs hourly job collision rule activates every time a job at minute X (mod 11) overlaps with an hourly job (every 60 minutes). Triggered by event: "hourly_11min_overlap" during the next-24-hours firing timeline.
+- Rule: Daylight saving shift adjustment rule revokes all jobs scheduled between March 9 and April 5, and again between October 28 and November 5, and re-runs them with UTC+1 offset. Triggered by event: "dst_shift" in the next-24-hours firing timeline.
+- Rule: Refill rule for job "backup_refill" activates if it has not run within the last 7 days; it resets its state to active after a 7-day gap. Triggered by event: or any job with "refill" in spec and no recent execution.
+- Rule: Fallback rule for job "critical_service" triggers when all other jobs fail to execute within 10 seconds of their scheduled time, and runs the backup command. Triggered by event: "service_failure_in_10s".
+- Rule: Source-ranking rule assigns priority to jobs based on machine load; if two jobs are scheduled at same time, the one with higher load (measured in CPU %) wins. Triggered by event: "same_time_schedule" during next-24-hours firing timeline.
+- Rule: Expiry rule for job "temp_job_03" revokes its state after 15 minutes of inactivity; if not executed within that window, it is marked as expired and removed from schedule. Triggered by event: "inactivity_timeout".
+- Rule: Revocation rule removes any job whose command contains "debug" or "test" and has been scheduled more than once in the past week. Triggered by event: "debug_test_revocation".
+- Rule: Comment-lie detection rule flags entries with comments that claim to run daily but actually use @hourly, and logs them for correction. Triggered by event: "comment_lie_detection".
+- Rule: Out-of-range day rule marks any job with a day value outside 1–31 as invalid; it sets its state to "invalid" and logs the error. Triggered by event: "out_of_range_day".
+
+Phase 2 LEDGER WALK:
+
+- Event: backup_pair_collision (03:45 UTC) → State update: jobs BKP-07 and BKP-08 on machine M1 overlap at 03:45–03:50; marked as overlapping pair.
+- Event: hourly_11min_overlap (06:00 UTC) → State update: job H-01 (hourly) at 06:00 overlaps with job E-11 (every 11 minutes) at 06:00–06:05; collision recorded.
+- Event: dst_shift (03:45 UTC) → State update: all jobs on M2 and M3 adjusted to UTC+1; timestamps shifted forward by 1 hour for March 9–April 5 and October 28–November 5.
+- Event: refill (backup_refill, scheduled at 07:00 UTC) → State update: job backup_refill has not run in 6 days; state set to active after 7-day gap.
+- Event: service_failure_in_10s (14:23 UTC on M4) → State update: critical_service triggers fallback command due to failure within 10 seconds of schedule.
+- Event: same_time_schedule (15:00 UTC, M3) → State update: job A-09 and C-12 scheduled at same time; source-ranking assigns priority to C-12 based on higher CPU load (78% vs 64%).
+- Event: inactivity_timeout (18:12 UTC, temp_job_03) → State update: temp_job_03 not executed within 15 minutes; state set to expired and removed.
+- Event: debug_test_revocation (20:30 UTC on M5) → State update: job DEBUG-04 and TEST-07 revoked due to "debug" in command and >1 occurrence in past week.
+- Event: comment_lie_detection (09:00 UTC, machine M1) → State update: entry with comment “runs daily” actually uses @hourly; flagged as mislabeled.
+- Event: out_of_range_day (23:59 UTC, job D-14) → State update: day value 32 detected; marked invalid and logged.
+
+Final answer JSON:
+{"backup_pair_collisions": [{"machine": "M1", "jobs": ["BKP-07", "BKP-08"], "overlap_minutes": [0, 5]}, {"machine": "M4", "jobs": ["BKP-22", "BKP-23"], "overlap_minutes": [10, 15]}], "hourly_11min_collisions": [{"time": "06:00", "job_hourly": "H-01", "job_11min": "E-11"}, {"time": "07:11", "job_hourly": "H-02", "job_11min": "E-12"}, {"time": "08:22", "job_hourly": "H-03", "job_11min": "E-13"}], "dst_shift_applied": ["M2", "M3"], "refill_triggered": ["backup_refill"], "fallback_executed": ["critical_service"], "priority_assigned": {"machine": "M3", "jobs": ["A-09", "C-12"], "winner": "C-12"}, "expired_jobs": ["temp_job_03"], "revoked_jobs": ["DEBUG-04", "TEST-07"], "comment_lie_found": ["machine M1, entry with comment 'runs daily'"] , "invalid_day_entries": ["D-14"]}

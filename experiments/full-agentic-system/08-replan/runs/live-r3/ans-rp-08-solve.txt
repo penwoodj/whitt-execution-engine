@@ -1,0 +1,53 @@
+The task requires walking a specific state machine based on 5 observations (events) with strict rules regarding limits, breaches, stage progression, and final status. The provided text contains an orientation example which must be used for shape verification but not for values.
+
+**Phase 1: Rule List & State Logic**
+Based on the "whole law" described in the text, here are the effective rules applied to tonight's events:
+1.  **Limit Definition**: Steps 1-5 have a limit of 2.0%. Steps 6-10 have a limit of 1.0%. (Tonight has exactly 5 steps).
+2.  **Breach Condition**: If `rate > limit`, the observation is a breach.
+3.  **Clean Observation Logic**: If clean (`rate <= limit`), the stage completed equals the position in the list, and the rollout becomes `10 * stage`.
+4.  **Breached Observation Logic**: If breached, the observation is spent (no state change for stage/rollout). The limit tightens to 0.8% for all remaining steps.
+5.  **Termination Conditions**:
+    *   Exactly one breach and list ends -> Status `PAUSED`.
+    *   No breach at all -> Status `DONE`.
+    *   Two or more breaches -> Status `STOPPED` (at the last completed stage).
+
+**Phase 2: Ledger Walk (Event by Event)**
+
+*   **Step 1**: Rate 0.4%. Limit 2.0%. Clean. Stage becomes 1, Rollout becomes 10.
+*   **Step 2**: Rate 1.9%. Limit 2.0%. Clean. Stage becomes 2, Rollout becomes 20.
+*   **Step 3**: Rate 0.5%. Limit 2.0%. Clean. Stage becomes 3, Rollout becomes 30.
+*   **Step 4**: Rate 2.2%. Limit 2.0%. Breach (2.2 > 2.0). Observation spent. Limit tightens to 0.8% for remaining steps. State remains at last completed: Stage 3, Rollout 30.
+*   **Step 5**: Rate 0.6%. Limit 0.8% (tightened from previous breach). Clean (0.6 <= 0.8). Observation completes. Since this is the 5th position and it was clean, does it advance stage to 5?
+    *   *Re-evaluating Rule 3*: "a clean observation completes the stage equal to its own position in the list".
+    *   Step 4 was a breach (spent). It did not complete.
+    *   Step 5 is clean. Its position is 5. Therefore, it completes Stage 5. Rollout becomes `10 * 5 = 50`.
+
+*Wait, let's re-read the orientation example logic carefully to ensure "position" implies sequential completion or just index.*
+Orientation Example:
+Pos 3 rolled 2.5 (Breach). Spent. State held at Pos 2 values (Stage 2, Rollout 20). Limit tightened.
+Pos 4 rolled 0.5 (Clean). "it carries stage 4 by position... so the rollout jumps to 40 and stages to 4".
+This confirms that a clean observation at Position N advances Stage to N, regardless of previous breaches being spent. The breach does not reset the counter; it just skips its own completion.
+
+Let's re-walk Step 5 with this confirmed logic:
+*   **Step 1**: Clean -> Stage 1, Rollout 10.
+*   **Step 2**: Clean -> Stage 2, Rollout 20.
+*   **Step 3**: Clean -> Stage 3, Rollout 30.
+*   **Step 4**: Breach (2.2 > 2.0). Spent. Limit tightens to 0.8%. State: Stage 3, Rollout 30.
+*   **Step 5**: Rate 0.6%. Current Limit 0.8%. Clean (0.6 <= 0.8). Position is 5. Completes Stage 5. Rollout becomes 50.
+
+Total Breaches: 1 (at Step 4).
+List Ends after Step 5.
+Condition: "Exactly one breach and the list ends".
+Resulting Status: `PAUSED`.
+
+Final State Values:
+Rollout: 50
+Stages Done: 5
+
+**Phase 3: Final JSON Construction**
+Keys required: `rollout_pct`, `stages_done`, `status`.
+Values: `50`, `5`, `"PAUSED"`.
+
+```json
+{"rollout_pct": 50, "stages_done": 5, "status": "PAUSED"}
+```

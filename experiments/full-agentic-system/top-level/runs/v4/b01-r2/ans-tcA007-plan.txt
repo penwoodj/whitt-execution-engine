@@ -1,0 +1,35 @@
+### Step 1: Initialize Workspace & Layout
+**Rule:** Create `/tmp/opencode/alert-run` with subdirectories `raw/`, `processed/`, `logs/`, `scripts/`, and `reports/`. Write a `README.md` documenting the layout, execution order, and dependency-free constraint.
+**Formula:** `mkdir -p /tmp/opencode/alert-run/{raw,processed,logs,scripts,reports}` && `cat > /tmp/opencode/alert-run/README.md << 'EOF'`
+
+### Step 2: Ingest Raw Data & Handle Timestamp Dispositions
+**Rule:** Read all input files into `raw/`. For each row with a timestamp in format A (e.g., ISO) or B (e.g., Unix), normalize to ISO. If timestamps are out of order relative to ingestion, flag the specific row ID and original timestamp in a log file; do not reorder data silently.
+**Formula:** `python3 /tmp/opencode/alert-run/scripts/ingest.py --input-dir raw --output-dir processed --log-file logs/timestamp-disposition.log`
+
+### Step 3: Group Alerts into Incidents (Template + Time Proximity)
+**Rule:** Define "Time Proximity" as alerts sharing the same `message_template` and occurring within a 5-minute window. Group by template first, then apply sliding window clustering to merge overlapping time spans for the same template. Output one incident per unique cluster ID.
+**Formula:** `python3 /tmp/opencode/alert-run/scripts/group_incidents.py --input-dir processed --output-dir processed/incidents.json --rule-file rules.md`
+
+### Step 4: Identify Noise Makers (>10 Alerts)
+**Rule:** Filter the grouped incidents to find those where the total alert count exceeds 10. These are "Noise Makers". Record their Incident ID, Template, and Total Count.
+**Formula:** `python3 /tmp/opencode/alert-run/scripts/identify_noise.py --input-dir processed/incidents.json --output-dir reports/noise-makers.json`
+
+### Step 5: Severity Normalization Pass (All-Caps Typo Handling)
+**Rule:** Map all severity strings to a canonical set {critical, warning, info}. Specifically, detect any string containing "CRITICAL" in all-caps with a trailing typo or extra space and normalize it to `critical`, logging the correction in `logs/severity-corrections.log`.
+**Formula:** `python3 /tmp/opencode/alert-run/scripts/normalize_severity.py --input-dir processed/incidents.json --output-dir processed/incidents_normalized.json --log-file logs/severity-corrections.log`
+
+### Step 6: Compute Incident Metrics (Count, Span, Blast Radius)
+**Rule:** For each incident, calculate: `alert_count`, `time_span_seconds` (max_timestamp - min_timestamp), and `service_blast_radius` (unique count of distinct service names). Handle edge cases where span is zero or services are empty.
+**Formula:** `python3 /tmp/opencode/alert-run/scripts/compute_metrics.py --input-dir processed/incidents_normalized.json --output-dir reports/metrics.json`
+
+### Step 7: Generate Storm Report & JSON with Rules Documentation
+**Rule:** Create `storm-report.md` containing the summary of incidents, noise makers, and severity corrections. Create `storm.json` as the structured data export. Write/update `rules.md` in the workspace root to document all thresholds (5-min window, >10 count) and normalization logic used.
+**Formula:** `python3 /tmp/opencode/alert-run/scripts/generate_report.py --metrics-dir reports/metrics.json --noise-dir reports/noise-makers.json --output-reports-dir reports/`
+
+### Step 8: Verification & Conservation Check
+**Rule:** Run an independent verification script that recomputes the total number of alerts from raw input and compares it against the sum of alerts in `storm.json` (kept) + rejected logs. Ensure conservation holds (Input == Output). If mismatch, exit with non-zero code and print error details.
+**Formula:** `python3 /tmp/opencode/alert-run/scripts/verify_conservation.py --raw-dir raw --output-json reports/storm.json --log-file logs/verification.log`
+
+### Step 9: Final Timing Table & One-Liner Summary
+**Rule:** Generate a markdown table listing the start/end timestamp and duration for each of the 9 stages. Append a single line summarizing the most surprising data contradiction or finding (e.g., "The 'CRITICAL' typo was found in 1 alert but caused no grouping delay").
+**Formula:** `python3 /tmp/opencode/alert-run/scripts/timing_summary.py --logs-dir logs --output-file reports/timing-table.md`

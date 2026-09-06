@@ -1,0 +1,175 @@
+case_id: flg-06-se-gen-b-f1p
+meta:
+  domain: software-eng
+  archetype: generate-artifact
+  complexity: B
+  class: F1-persist
+  source: case-matrix row 6 (se-gen-b-f1p)
+  words_prompt: ~1120
+task:
+  prompt: |
+    You are embedded as the code-generation specialist inside a platform
+    engineering team responsible for "Iridium", a mid-stage logistics
+    orchestration SaaS. The service moves roughly forty thousand shipment
+    records per day through a pipeline of ingest queues, a normalization
+    stage, a rules engine, and a notification fan-out layer. The team has
+    recently completed a migration of the ingest tier from a legacy Python
+    monolith consumer to Rust workers, and the last remaining component of
+    the old system is a set of ad-hoc reconciliation scripts that operators
+    used to run by hand at the end of each business day. Leadership wants
+    those scripts replaced with a properly engineered Rust binary that can
+    be scheduled, audited, and owned on-call.
+
+    Your assignment for this task is to produce a complete design document
+    plus a reference implementation of the core library crate for the new
+    reconciliation tool, to be named "iridium-recon". The deliverable is a
+    single Markdown document that contains, in order: a short architecture
+    overview that justifies the choice of crate layout; the public API
+    surface of the library expressed as Rust module and trait definitions
+    with doc comments; a walk-through of the reconciliation algorithm as
+    pseudo-code annotated with complexity bounds; a section on error
+    taxonomy and the failure modes each error class guards against; a
+    testing strategy section that explains how property-based tests will
+    exercise the drift detector; and finally an appendix that lists every
+    assumption the implementation makes about the surrounding system.
+
+    Functional requirements for the reconciler are as follows. The tool
+    reads two streams of shipment events: a primary stream produced by the
+    Rust ingest tier, and a secondary stream produced by the carrier
+    integration layer, which is known to lag the primary by anywhere from
+    zero to ninety seconds and to occasionally emit duplicates when its
+    upstream retries. The reconciler must pair events from the two streams
+    by shipment identifier and by event fingerprint, tolerate the lag by
+    using a configurable watermark window, flag any primary event with no
+    secondary counterpart after the watermark closes as "orphaned", flag
+    any secondary event with no primary counterpart as "ghosted", and
+    produce a structured reconciliation report grouping findings by
+    carrier and by hour. The report must be deterministic: two runs over
+    the same input windows must produce byte-identical output, because the
+    audit team diffs the reports in CI.
+
+    Non-functional requirements matter equally. The library must be
+    async-first, built on tokio, with no blocking calls on the runtime
+    threads. It must stream inputs rather than materializing entire
+    windows in memory, because some historical backfills span weeks of
+    data. It must expose its metrics through the team's existing
+    prometheus-compatible facade rather than a new dependency. It must
+    keep the public API stable across the v0 series as defined by the
+    team's semantic versioning policy, which means every public item needs
+    an explicit stability annotation. And it must compile without warnings
+    under the workspace lints, which deny missing docs, deny unwraps in
+    library code, and deny calls to unwrap_or_expect-style combinators on
+    option types in anything other than tests.
+
+    The event schemas are as follows. A primary event carries a ULID, the
+    shipment identifier, an event kind from a closed enumeration of twelve
+    kinds, a monotonic sequence number assigned by the ingest tier, a
+    payload digest computed as a SHA-256 truncation to sixteen hex
+    characters, and a timestamp in RFC 3339 format with millisecond
+    precision. A secondary event carries the same fields plus a carrier
+    code and a retry indicator that is set when the carrier integration
+    believes it may have re-sent an event. The schemas live in the
+    platform's shared types crate, and your library must consume them from
+    there rather than redefining them.
+
+    Interfaces to surrounding infrastructure are prescribed. Object
+    storage access goes through the team's storage facade trait, which
+    your code must not bypass. Queue access, if you propose any
+    consumption directly from queues rather than reading from object
+    storage snapshots, must go through the messaging facade trait.
+    Configuration loading must use the platform config loader, which
+    resolves values from a layered chain of defaults, file, environment,
+    and overrides supplied on the command line for the binary. Secrets are
+    never accessed directly by library code.
+
+    For the testing strategy section, the team wants property-based tests
+    for the pairing logic: generators that produce paired streams with
+    injected lag, duplicates, and dropouts, with the property that the
+    detector finds exactly the injected anomalies and nothing else. The
+    walkthrough should explain how shrunk counterexamples from those
+    properties map back to watermark or fingerprint bugs. Include a brief
+    note on how to keep the deterministic-output requirement honest given
+    that hashing map iteration order is not stable by default.
+
+    Assumptions you may rely on: the ingest tier guarantees at-most-once
+    emission per sequence number on the primary stream; the secondary
+    stream is at-least-once with the retry indicator hint; timestamps on
+    the primary are trustworthy to within one second, while secondary
+    timestamps reflect carrier clocks and may skew by up to five minutes;
+    historical backfills arrive as immutable object storage snapshots
+    partitioned by hour; and the on-call rotation prefers fail-fast
+    behavior with clear error output over retry loops inside the library
+    itself.
+
+    OPERATIONAL CONTEXT (binding on the document). The reconciliation
+    tool ships inside the platform workspace on the team's standard
+    six-week release cadence, and the design document must state which
+    parts of the deliverable land in week bands: weeks one and two for
+    the crate skeleton and trait surface, weeks three and four for the
+    pairing engine and property tests, weeks five and six for the
+    metrics integration and the deterministic-output hardening. The
+    document must include a metadata header listing the owning team,
+    the review roster, the target release train, and the document
+    status vocabulary the team uses: draft, in-review, approved,
+    superseded. It must close with a hand-off checklist naming every
+    downstream consumer of the document — the reviewers, the on-call
+    rotation, the tooling team that owns the shared types crate, and
+    the storage facade owners — with the specific sections each
+    consumer must sign off on before the status can move to approved.
+    Where the week-band plan and the hard dependency on the shared
+    types crate conflict, the document must surface the conflict
+    rather than quietly reordering the bands.
+
+    The document must be written for two audiences at once: the reviewers
+    on the platform team who will approve the design, and the on-call
+    engineers who will operate the tool. Where those audiences conflict,
+    prefer operational clarity. Where the requirements above leave room
+    for interpretation, state the interpretation explicitly rather than
+    resolving it silently. The team values documents that are specific
+    enough to implement from without further meetings, and reviewers have
+    been asked to reject documents that hedge.
+  expected_schema:
+    type: object
+    required:
+      - architecture_overview
+      - public_api
+      - algorithm_walkthrough
+      - error_taxonomy
+      - testing_strategy
+      - assumptions
+    properties:
+      architecture_overview: { type: string }
+      public_api: { type: string }
+      algorithm_walkthrough: { type: string }
+      error_taxonomy: { type: string }
+      testing_strategy: { type: string }
+      assumptions: { type: array, items: { type: string } }
+  output_contract: |
+    JSON object, one key per document section. Section values are prose
+    or Rust code blocks as strings; assumptions is an array of strings.
+failure:
+  class: F1-persist
+  injection_profile:
+    attempts_failed: [1, 2, 3]
+    notes: |
+      F1 confidence/hallucination signature persists across all three
+      attempts. Attempt 1: output confident but introduces an invented
+      facade method and an invented config key; attempt 2 after
+      corrective_prompt heal: output improves wording but still cites the
+      invented facade method plus a new invented CLI flag; attempt 3
+      after second corrective_prompt heal: output swaps one hallucination
+      for another (invented metrics helper) while retaining the original
+      invented facade method. Confidence stays inflated (0.62-0.71) and
+      hallucination_keys persist in every attempt, so R never clears theta
+      and the workflow exhausts the attempt budget.
+  signals: [hallucination_keys, confidence_degraded]
+expected:
+  final: final_fail
+  path: [attempt, classify, heal_corrective_prompt, attempt, classify, heal_corrective_prompt, attempt, classify, final_fail, report]
+  attempts_to_success: null
+oracle:
+  llm_calls:
+    worker: 3
+    heavy: 0
+    judge: 0
+  gate_flags: { need_replan: false, need_judge: false, budget_exhausted: true }

@@ -1,0 +1,63 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event or claim list.*
+
+1.  **Grant Rule**: A request arriving at a non-zero pool is granted `min(ask, current_pool)`, reducing the pool by that amount; if the ask exceeds the remaining pool, it is still a "granted" (partial) request, not denied.
+2.  **Denial Rule**: A request arriving when the pool is exactly zero is denied and listed by ID; this state change adds an ID to the `denied` list.
+3.  **Expiry Trigger Rule**: Upon completion of a specific request (the trigger), any grant associated with that request expires.
+4.  **Return Calculation Rule**: The expired grant returns `floor(granted_amount / 2)` tokens to the pool immediately before the next event is processed.
+5.  **Pool State Update Rule**: The pool balance updates sequentially: first by subtraction (grant/deny), then by addition (return), resulting in a new state for the subsequent event.
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order.*
+
+**Initial State:** Pool = 60, Granted = 0, Denied = []
+
+1.  **Event r1 arrives (Ask: 6)**
+    *   Rule Applied: Grant Rule.
+    *   Action: Grant `min(6, 60) = 6`. Pool becomes $60 - 6 = 54$.
+    *   State after event: Pool=54, Granted=6 (r1).
+
+2.  **Event r2 arrives (Ask: 10)**
+    *   Rule Applied: Grant Rule.
+    *   Action: Grant `min(10, 54) = 10`. Pool becomes $54 - 10 = 44$.
+    *   State after event: Pool=44, Granted=6 (r1), 10 (r2).
+
+3.  **Event r3 arrives (Ask: 12)**
+    *   Rule Applied: Grant Rule.
+    *   Action: Grant `min(12, 44) = 12`. Pool becomes $44 - 12 = 32$.
+    *   State after event: Pool=32, Granted=6 (r1), 10 (r2), 12 (r3).
+
+4.  **Event r4 arrives (Ask: 15)**
+    *   Rule Applied: Grant Rule.
+    *   Action: Grant `min(15, 32) = 15`. Pool becomes $32 - 15 = 17$.
+    *   State after event: Pool=17, Granted=6 (r1), 10 (r2), 12 (r3), 15 (r4).
+
+5.  **Event r5 arrives (Ask: 19)**
+    *   Rule Applied: Grant Rule.
+    *   Action: Grant `min(19, 17) = 17` (Partial grant). Pool becomes $17 - 17 = 0$.
+    *   State after event: Pool=0, Granted=6 (r1), 10 (r2), 12 (r3), 15 (r4), 17 (r5).
+
+6.  **Event r6 arrives (Ask: 21)**
+    *   Rule Applied: Denial Rule & Expiry Trigger Rule.
+    *   Action A (Denial): Pool is 0, so r6 is denied. Denied list adds "r6".
+    *   Action B (Expiry): The trigger request completing is **r5**. The grant for r5 expires.
+        *   Return amount: `floor(17 / 2) = 8`.
+        *   Pool becomes $0 + 8 = 8$.
+    *   State after event: Pool=8, Granted=[6, 10, 12, 15], Denied=["r6"].
+
+7.  **Event r7 arrives (Ask: 24)**
+    *   Rule Applied: Grant Rule.
+    *   Action: Grant `min(24, 8) = 8`. Pool becomes $8 - 8 = 0$.
+    *   State after event: Pool=0, Granted=[6, 10, 12, 15], Denied=["r6"].
+
+*Note on r1 expiry:* The prompt states "the grant for r1 expires after request r2 completes". However, the task rules explicitly state "grants never return any other way" and "only that one grant ever returns". Since no event triggered an expiry for r1 (no rule forces it to expire upon r2's arrival), r1 remains in the granted list. The only active expiry logic is tied to the specific trigger mechanism described ("expiry sentence names exactly one request id").
+
+**Final Totals:**
+*   **Granted Units**: $6 + 10 + 12 + 15 + 17 + 8 = 68$.
+    *(Note: r6 was denied, so it contributes 0. r7 contributed 8).*
+*   **Denied List**: ["r6"].
+*   **Pool Left**: 0.
+
+```json
+{"granted_units": 68, "denied": ["r6"], "pool_left": 0}
+```

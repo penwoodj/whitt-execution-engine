@@ -1,0 +1,122 @@
+### Phase 1 RULE SCAN
+*Listing rules that change state during the event sequence, triggered by arrivals, completions, or preemptions.*
+
+1. **Arrival Rule**: HIGH job arrives at minute 4; triggers core allocation to HIGH immediately (blocking all LOWs).
+2. **Completion Rule**: LOW1 finishes its first 2 minutes at minute 2; triggers creation of a "bank" (checkpoint) saving state up to minute 2.
+3. **Arrival Rule**: LOW2 starts execution at minute 1; enters the queue as an active job with start-time priority rank 1.
+4. **Completion Rule**: LOW1 finishes its second running minute at minute 4; triggers creation of a "bank" (checkpoint) saving state up to minute 4.
+5. **Preemption Rule**: HIGH completes at minute 8; triggers release of the core back to the queue for pending LOW jobs.
+6. **Resumption Rule**: LOW1 resumes execution after HIGH departs (minute 8); restores state from checkpoint made at minute 4, skipping work done between minutes 4 and 8 (which was wasted).
+7. **Completion Rule**: LOW1 finishes remaining work; triggers final completion event for LOW1.
+8. **Arrival/Start Rule**: LOW2 starts execution after LOW1 completes; enters queue as active job with start-time priority rank 2.
+9. **Completion Rule**: LOW2 finishes its work; triggers final completion event for LOW2.
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events strictly in arrival order, updating state line-by-line.*
+
+**Minute 0: Start Event**
+- **Event**: LOW1 starts at minute 0.
+- **State Update**: Core occupied by LOW1. `LOW1_elapsed` = 0/5. `LOW2_status` = Waiting (Start=1). `HIGH_status` = None.
+
+**Minute 1: Start Event**
+- **Event**: LOW2 arrives and starts at minute 1.
+- **State Update**: Core occupied by LOW1. `LOW1_elapsed` = 1/5. `LOW2_elapsed` = 0/2 (Running). *Note: Only one job runs on the core.*
+
+**Minute 2: Completion Event**
+- **Event**: LOW1 reaches end of minute 2.
+- **State Update**: `LOW1_elapsed` becomes 2. Checkpoint created for LOW1 at minute 2. LOW1 continues running (needs 3 more mins). Core still occupied by LOW1.
+
+**Minute 3: Idle/Running Event**
+- **Event**: Time passes.
+- **State Update**: `LOW1_elapsed` = 3/5. `LOW2_elapsed` = 1/2. Both jobs are waiting or running? Wait, rule says "while HIGH runs nothing else runs". LOWs do not run simultaneously on one core. At minute 3, only LOW1 is active (started at min 0). LOW2 is queued but cannot start because LOW1 holds the core and hasn't finished.
+- **Correction**: Re-evaluating concurrency. The task implies a single core ("one core tonight"). Therefore, jobs run sequentially unless preempted.
+    - Min 0: LOW1 starts.
+    - Min 1: LOW2 arrives (Start=1). Can it start? "LOW jobs take the core in order of their start minutes... a LOW whose start minute arrives while the core is busy simply waits." -> **LOW2 waits**.
+    - Min 2: LOW1 finishes minute 2. Checkpoint created. LOW1 continues.
+
+**Minute 4: Arrival & Completion Event (Critical Tie-Breaker)**
+- **Events**:
+    1. LOW1 completes its running minute ending at minute 4 (Total elapsed = 4).
+    2. HIGH arrives at minute 4 and requests the core.
+- **State Update Logic**:
+    - LOW1 checkpointed at minute 2. Work done: min 0-1, min 2-3, min 4-start. Total continuous run from 0 to 4 is 4 minutes. Checkpoint covers 0-2. Wait, rule says "checkpoint lands the instant a LOW job finishes its 2nd running minute".
+        - Run 1: Min 0->1 (Done). Min 1->2 (Done). At T=2, Checkpoint #1 saved. Remaining needed: 3 mins.
+        - Run 2: Starts T=2? No, core busy until T=4? Wait, LOW1 runs continuously.
+        - Let's trace minutes strictly for a single thread (LOW1):
+            - T=0 to T=1: Minute 1 done.
+            - T=1 to T=2: Minute 2 done. **Checkpoint created at T=2**. Saved progress = 2 mins. Need 3 more.
+            - T=2 to T=3: Minute 3 done.
+            - T=3 to T=4: Minute 4 done. **Checkpoint created at T=4**? Rule: "checkpoint lands the instant a LOW job finishes its 2nd running minute". Does it checkpoint every 2 minutes? Yes ("every 2 completed minutes"). So at T=4, another checkpoint is saved (Total progress = 4 mins).
+    - HIGH arrives at T=4.
+    - **Conflict**: LOW1 wants to run minute 5. HIGH wants the core now.
+    - **Rule Application**: "HIGH ... instantly preempting whatever LOW job is running".
+    - **State Update**: Core switches from LOW1 to HIGH immediately at T=4.
+    - **Waste Calculation**: LOW1 had checkpointed at T=4 (instantly before/during swap). The rule says: "a bank that lands on the arrival minute is safe and nothing is wasted". Since LOW1 finished its 2nd running minute *at* minute 4, a bank landed. Even if we consider the exact instant, the text explicitly saves banks landing on arrival minutes.
+    - **Current State**: `LOW1_progress` = 4 (Saved). `HIGH_elapsed` = 0. Core occupied by HIGH. LOW2 is still waiting (started at T=1, but core was busy with LOW1 since T=1 until now? No, if LOW1 runs continuously from T=0 to T=4, LOW2 waited the whole time T=1..T=4).
+
+**Minute 5: Running Event**
+- **Event**: HIGH runs minute 1 (ends at T=5).
+- **State Update**: `HIGH_elapsed` = 1. Core busy.
+
+**Minute 6: Running Event**
+- **Event**: HIGH runs minute 2 (ends at T=6).
+- **State Update**: `HIGH_elapsed` = 2. Core busy.
+
+**Minute 7: Running Event**
+- **Event**: HIGH runs minute 3 (ends at T=7).
+- **State Update**: `HIGH_elapsed` = 3. Core busy.
+
+**Minute 8: Completion & Release Event**
+- **Event**: HIGH finishes its work (ran 4 mins total? Task says "runs 4 minutes to completion").
+    - Start T=4.
+    - Min 1 ends T=5.
+    - Min 2 ends T=6.
+    - Min 3 ends T=7.
+    - Min 4 ends T=8.
+- **State Update**: HIGH finishes at T=8. Core becomes free.
+
+**Minute 8+ : Resumption Event (Low1 resumes)**
+- **Event**: Core released to LOW queue. Pending jobs: LOW2 (Start=1), LOW1 (Start=0).
+- **Rule**: "LOW jobs take the core in order of their start minutes".
+    - LOW1 Start = 0.
+    - LOW2 Start = 1.
+    - Order: LOW1 resumes, then LOW2.
+- **State Update for LOW1**: Resumes at T=8. Last checkpoint was at T=4 (progress=4). Total length=5. Work remaining = 1 minute.
+- **Action**: LOW1 runs the final minute (T=8 to T=9).
+
+**Minute 9: Completion Event**
+- **Event**: LOW1 finishes its last minute.
+- **State Update**: LOW1 Complete at T=9. `LOW1_elapsed` = 5 (Restored from checkpoint + new run).
+- **Queue Status**: LOW2 is next in line.
+
+**Minute 9+ : Start Event (Low2 starts)**
+- **Event**: Core free. LOW2 (Start=1) has been waiting since T=1. It now gets the core.
+- **State Update**: LOW2 starts running at T=9. Duration = 2 minutes.
+
+**Minute 10: Running Event**
+- **Event**: LOW2 runs minute 1 (ends T=10).
+- **State Update**: `LOW2_elapsed` = 1/2.
+
+**Minute 11: Completion Event**
+- **Event**: LOW2 finishes minute 2.
+- **State Update**: LOW2 Complete at T=11.
+
+---
+
+### Final Calculation & Verification
+
+**Completion Order**:
+1.  **LOW1**: Finished at Minute 9 (T=9).
+2.  **LOW2**: Finished at Minute 11 (T=11).
+    - Order: `["LOW1", "LOW2"]`.
+
+**Wasted Minutes**:
+-   LOW1 Checkpoints:
+    -   T=2: Saved progress 0->2. (Safe)
+    -   T=4: Saved progress 2->4. (Safe, because HIGH arrives exactly at T=4).
+-   Work lost by LOW1:
+    -   LOW1 needs to finish at T=5 total.
+    -   At T=8 (when it resumes), it has completed 0->4 via checkpoints? Or did it run continuously?
+    -   If LOW1 ran continuously from T=0 to T=4, it finished minutes 1, 2, 3, 4. Total 4 mins done. Check

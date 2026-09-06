@@ -1,0 +1,467 @@
+# Iridium Reconciliation Tool Design Document  
+**Project**: `iridium-recon`  
+**Owning Team**: Platform Engineering – Logistics Orchestration  
+**Review Roster**:  
+- Alex Chen (Lead Architect)  
+- Maya Patel (Data Integrity Lead)  
+- Jordan Lee (Operations & On-Call)  
+- Samira Ndiaye (Platform Tooling)  
+
+**Target Release Train**: v1.0.0 (Six-week release cadence)  
+
+**Document Status**: *Draft*  
+
+---
+
+## Week-Band Plan
+
+| Week | Deliverable |
+|------|-------------|
+| 1–2 | Crate skeleton, public API surface, trait definitions, core module layout |
+| 3–4 | Pairing engine implementation, property-based testing framework, anomaly detection logic |
+| 5–6 | Metrics integration (Prometheus), deterministic output hardening, on-call operational guidance |
+
+> **Note**: The shared types crate (`iridium-types`) is a *hard dependency* and must be stable at the time of this design. Its schema evolution is not anticipated in this release band. Any changes to event schemas or field semantics will require a new release cycle and must be coordinated with Samira Ndiaye prior to implementation.
+
+---
+
+## Architecture Overview
+
+The `iridium-recon` library is designed as a **stateless, async-first reconciliation engine** that operates on two input streams: the primary (ingest-tier) stream and the secondary (carrier-integration) stream. The architecture leverages Rust’s ownership model and zero-cost abstractions to avoid memory bloat during long-running backfills—critical given historical data spans weeks.
+
+### Why This Layout?
+
+- **Crate Structure**: A modular, trait-driven design ensures composability with downstream consumers (e.g., CLI tools, CI pipelines).
+- **Async-first**: All I/O is driven via `tokio` futures; no blocking calls are permitted on runtime threads.
+- **Streaming Input**: Events are processed in a sliding window fashion using a configurable watermark, avoiding materialization of full historical windows.
+- **Determinism**: The core pairing logic uses stable iteration order over hash maps (via `HashMap::keys()` and deterministic insertion), with all event comparisons based on immutable, canonical fields.
+- **No External Dependencies**: Metrics are exposed via the existing Prometheus facade; no new dependencies are introduced.
+
+This layout satisfies both functional requirements (anomaly detection, watermark tolerance) and non-functional constraints (determinism, async safety, warning-free compilation).
+
+---
+
+## Public API Surface
+
+```rust
+// src/lib.rs
+pub use crate::config::{Config, ConfigError};
+pub use crate::event::{PrimaryEvent, SecondaryEvent};
+pub use crate::recon::{ReconciliationReport, ReconcileResult};
+
+/// The main reconciliation engine.
+///
+/// This trait defines the public interface for running a reconciliation pass over two event streams.
+/// It is designed to be called once per time window (e.g., hourly).
+pub trait Reconciler {
+    /// Runs reconciliation on a primary and secondary stream within a given time window.
+    ///
+    /// # Arguments
+    /// * `primary_stream` – A streaming iterator of primary events from the ingest tier.
+    /// * `secondary_stream` – A streaming iterator of secondary events from carrier integration.
+    /// * `config` – Configuration governing watermark, fingerprinting, and output formatting.
+    ///
+    /// # Returns
+    /// A `ReconcileResult` containing a deterministic reconciliation report.
+    ///
+    /// # Panics
+    /// Never. All errors are returned via `Result`.
+    fn reconcile(
+        &self,
+        primary_stream: impl Iterator<Item = PrimaryEvent>,
+        secondary_stream: impl Iterator<Item = SecondaryEvent>,
+        config: &Config,
+    ) -> Result<ReconcileResult, ReconciliationError>;
+}
+
+/// Configuration for the reconciliation engine.
+#[derive(Debug, Clone)]
+pub struct Config {
+    /// Watermark duration in seconds (default: 90s).
+    pub watermark_seconds: u64,
+
+    /// Fingerprint field to use for event matching; defaults to `event_kind` and `payload_digest`.
+    pub fingerprint_fields: Vec<String>,
+
+    /// Time window boundaries (inclusive start, exclusive end) in RFC3339 format.
+    pub time_window: TimeWindow,
+
+    /// Carrier codes to include in the report (empty = all).
+    pub carriers_to_include: Vec<String>,
+}
+
+/// A time window defined by start and end timestamps.
+#[derive(Debug, Clone)]
+pub struct TimeWindow {
+    pub start: chrono::DateTime<chrono::Utc>,
+    pub end: chrono::DateTime<chrono::Utc>,
+}
+
+/// The result of a reconciliation run.
+///
+/// This is the structured output that will be diffed in CI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReconcileResult {
+    /// Grouped findings by carrier and hour.
+    pub report: Vec<ReportEntry>,
+
+    /// Summary statistics.
+    pub summary: SummaryStats,
+}
+
+/// A single entry in the reconciliation report.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReportEntry {
+    pub carrier_code: String,
+    pub hour: chrono::NaiveDateTime,
+    pub findings: Vec<Finding>,
+}
+
+/// An individual anomaly detected during reconciliation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Finding {
+    OrphanedPrimary { shipment_id: ULID, event_kind: EventKind },
+    GhostedSecondary { shipment_id: ULID, carrier_code: String },
+}
+
+/// Summary statistics for the run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SummaryStats {
+    pub total_orphaned: u64,
+    pub total_ghosted: u64,
+    pub total_events_primary: u64,
+    pub total_events_secondary: u64,
+}
+
+/// Error types that can occur during reconciliation.
+#[derive(Debug, Clone)]
+pub enum ReconciliationError {
+    /// Invalid configuration (e.g., negative watermark).
+    ConfigInvalid { field: String, message: String },
+
+    /// Failed to parse a timestamp from an event.
+    TimestampParseError { event_id: ULID, source: String },
+
+    /// Event fingerprint mismatch due to schema drift or data corruption.
+    FingerprintMismatch {
+        primary_event: PrimaryEvent,
+        secondary_event: SecondaryEvent,
+    },
+
+    /// Input stream exhausted before watermark closed (e.g., early termination).
+    StreamExhausted,
+
+    /// Internal error in pairing logic (e.g., hash map overflow, state inconsistency).
+    PairingFailure { reason: String },
+}
+
+/// Event kind enum from shared types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EventKind {
+    ShipmentCreated,
+    ShipmentUpdated,
+    ShipmentShipped,
+    ShipmentDelivered,
+    ShipmentFailed,
+    ShipmentCancelled,
+    ShipmentReopened,
+    ShipmentRescheduled,
+    ShipmentRefunded,
+    ShipmentSplit,
+    ShipmentMerged,
+    ShipmentVoided,
+}
+
+impl EventKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EventKind::ShipmentCreated => "shipment_created",
+            EventKind::ShipmentUpdated => "shipment_updated",
+            EventKind::ShipmentShipped => "shipment_shipped",
+            EventKind::ShipmentDelivered => "shipment_delivered",
+            EventKind::ShipmentFailed => "shipment_failed",
+            EventKind::ShipmentCancelled => "shipment_cancelled",
+            EventKind::ShipmentReopened => "shipment_reopened",
+            EventKind::ShipmentRescheduled => "shipment_rescheduled",
+            EventKind::ShipmentRefunded => "shipment_refunded",
+            EventKind::ShipmentSplit => "shipment_split",
+            EventKind::ShipmentMerged => "shipment_merged",
+            EventKind::ShipmentVoided => "shipment_voided",
+        }
+    }
+}
+
+/// Shared types from the platform's `iridium-types` crate.
+pub use iridium_types::{
+    PrimaryEvent as SharedPrimaryEvent,
+    SecondaryEvent as SharedSecondaryEvent,
+    ULID,
+    EventKind,
+};
+```
+
+> **Stability Note**: All public items are marked with `#[stable(feature = "recon_v0", since = "0.1.0")]` to ensure backward compatibility across the v0 series.
+
+---
+
+## Reconciliation Algorithm (Pseudo-Code with Complexity Bounds)
+
+```rust
+// Input: primary_stream, secondary_stream, config
+
+// Precondition: Both streams are sorted by timestamp; timestamps are in UTC.
+// Watermark = config.watermark_seconds seconds after window end.
+
+// Step 1: Define time window boundaries
+start_time ← config.time_window.start
+end_time ← config.time_window.end
+watermark ← end_time - (config.watermark_seconds as Duration)
+
+// Step 2: Initialize state
+primary_map: HashMap<ULID, PrimaryEvent> = {}
+secondary_map: HashMap<(ULID, EventKind, PayloadDigest), SecondaryEvent> = {}
+
+// Step 3: Process primary stream in order of timestamp
+for event in primary_stream:
+    if event.timestamp > end_time:
+        break
+
+    // Only accept events within the window or before watermark
+    if event.timestamp < start_time:
+        continue
+
+    // Insert into primary map by ULID
+    primary_map.insert(event.ulid, event);
+
+// Step 4: Process secondary stream in order of timestamp
+for event in secondary_stream:
+    if event.timestamp > end_time:
+        break
+
+    if event.timestamp < start_time:
+        continue
+
+    // Skip if retry indicator is set and this is a duplicate (we use fingerprint to detect)
+    if event.retry_indicator && event.fingerprint_matches(primary_map.get(&event.ulid)) {
+        continue;  // skip known duplicates
+    }
+
+    // Insert into secondary map by (ULID, kind, digest)
+    let key = (event.ulid, event.kind, event.payload_digest);
+    secondary_map.insert(key, event);
+
+// Step 5: Detect anomalies
+orphaned_events: Vec<Finding> = []
+ghosted_events: Vec<Finding> = []
+
+for (ulid, primary_event) in primary_map.iter() {
+    if !secondary_map.contains_key(&(ulid, primary_event.kind, primary_event.payload_digest)) {
+        orphaned_events.push(Finding::OrphanedPrimary {
+            shipment_id: ulid,
+            event_kind: primary_event.kind,
+        });
+    }
+}
+
+for (key, secondary_event) in secondary_map.iter() {
+    if !primary_map.contains_key(&key.0) {
+        ghosted_events.push(Finding::GhostedSecondary {
+            shipment_id: key.0,
+            carrier_code: secondary_event.carrier_code.clone(),
+        });
+    }
+}
+
+// Step 6: Group findings by carrier and hour
+report_entries = group_by_carrier_and_hour(
+    orphaned_events, ghosted_events,
+    config.carriers_to_include
+)
+
+return ReconcileResult {
+    report: report_entries,
+    summary: SummaryStats {
+        total_orphaned: orphaned_events.len(),
+        total_ghosted: ghosted_events.len(),
+        total_events_primary: primary_map.len() as u64,
+        total_events_secondary: secondary_map.len() as u64,
+    }
+}
+```
+
+### Complexity Analysis
+
+| Operation | Time Complexity | Space Complexity |
+|--------|------------------|-------------------|
+| Stream iteration (primary + secondary) | O(N + M), where N = # primary events, M = # secondary events | O(N + M) — maps store event state |
+| Fingerprint comparison | O(1) per lookup (hash-based) | O(1) amortized |
+| Anomaly detection | O(N + M) | O(1) extra space beyond maps |
+| Final grouping | O(K), where K = # unique carriers × hours | O(1) |
+
+> **Note**: The algorithm is **deterministic** because:
+> - All event comparisons use immutable, canonical fields (`ulid`, `event_kind`, `payload_digest`).
+> - Hash map iteration order is stabilized via deterministic insertion (insertion order preserved by `HashMap` when keys are stable and hash values are consistent).
+
+---
+
+## Error Taxonomy & Failure Modes
+
+| Error Class | What It Guards Against | How It Is Detected |
+|-----------|------------------------|--------------------|
+| `ConfigInvalid` | Invalid or out-of-bounds configuration (e.g., negative watermark) | Validation during config parsing |
+| `TimestampParseError` | Corrupted event timestamps in input streams | Parsing fails on malformed RFC3339 strings |
+| `FingerprintMismatch` | Data corruption or schema drift between primary and secondary events | Event kind/digest mismatch during pairing |
+| `StreamExhausted` | Secondary stream ends before watermark closes (e.g., lagged carrier) | Early termination of secondary stream |
+| `PairingFailure` | Internal state inconsistency (e.g., hash map overflow, race condition) | Unrecoverable logic error in pairing loop |
+
+> **Operational Impact**:
+> - All errors are surfaced to the operator with clear context and actionable feedback.
+> - The tool does not retry internally; it fails fast per on-call preference.
+
+---
+
+## Testing Strategy: Property-Based Tests
+
+### Goal
+Verify that the reconciliation engine detects *exactly* the injected anomalies (orphaned, ghosted) and no others under all combinations of lag, duplicates, and dropouts.
+
+### Test Generators
+
+We define property-based generators using `proptest`:
+
+```rust
+// Generator: paired streams with lag, duplicates, dropouts
+prop! {
+    fn primary_secondary_with_lag() -> (Vec<PrimaryEvent>, Vec<SecondaryEvent>) {
+        let mut primary = vec![];
+        let mut secondary = vec![];
+
+        // Generate events in chronological order
+        for i in 0..100 {
+            let timestamp = Utc::now() - Duration::seconds(i as i64);
+            primary.push(PrimaryEvent {
+                ulid: ULID::new(),
+                event_kind: EventKind::ShipmentCreated,
+                sequence_number: i,
+                payload_digest: "a1b2c3d4".to_string(),
+                timestamp: timestamp.to_rfc3339(),
+            });
+
+            // Inject lag (0 to 90 seconds)
+            if i % 5 == 0 {
+                let lag = rand::random::<u64>() % 90;
+                let delayed_timestamp = timestamp + Duration::seconds(lag as i64);
+                secondary.push(SecondaryEvent {
+                    ulid: ULID::new(),
+                    event_kind: EventKind::ShipmentCreated,
+                    payload_digest: "a1b2c3d4".to_string(),
+                    carrier_code: "USPS".to_string(),
+                    retry_indicator: false,
+                    timestamp: delayed_timestamp.to_rfc3339(),
+                });
+            }
+        }
+
+        // Inject duplicates (secondary only)
+        if rand::random::<bool>() {
+            secondary.push(secondary.last().unwrap().clone());
+        }
+
+        // Inject dropouts
+        if rand::random::<bool>() {
+            primary.pop();
+        }
+
+        (primary, secondary)
+    }
+}
+```
+
+### Property
+
+```rust
+prop_assert! {
+    for (primary, secondary) in primary_secondary_with_lag() {
+        let config = Config { watermark_seconds: 90, ..Default::default() };
+        let result = reconciler.reconcile(primary.iter(), secondary.iter(), &config);
+        
+        // Property: All injected anomalies are detected
+        assert!(result.is_ok());
+        
+        let report = result.unwrap().report;
+        
+        // Orphaned events must be exactly those with no secondary match after watermark
+        let orphaned_count = count_orphaned(&report);
+        assert_eq!(orphaned_count, 1); // injected via dropout
+        
+        // Ghosted events must be exactly those with primary but no secondary
+        let ghosted_count = count_ghosted(&report);
+        assert_eq!(ghosted_count, 0); // no ghosted in this case
+    }
+}
+```
+
+### Shrunk Counterexamples
+
+When a property fails:
+- The test framework returns a **shrunk counterexample** (minimal input that violates the property).
+- This maps directly to:
+  - A **watermark too short**: events beyond watermark are not processed.
+  - A **fingerprint mismatch**: event kind or digest differs from primary, causing false orphaning.
+  - A **duplicate not handled**: secondary event with same fingerprint is accepted as valid.
+
+> Example: If a ghosted event appears due to a duplicate, the shrunk input will show:
+> - Two identical events (same ULID, kind, digest) in secondary stream
+> - Only one primary event exists
+> → This reveals that the retry indicator was not used correctly.
+
+### Determinism Hardening
+
+To ensure deterministic output despite hashing map iteration order:
+
+1. **Stable insertion order**: Events are inserted into maps using `ULID` as key and `event_kind`, `digest` as secondary hash.
+2. **Hash map iteration order**: We use `HashMap::keys()` in a stable, canonical order (by ULID).
+3. **No randomization** in event processing or grouping.
+
+> This ensures that two runs over the same input produce byte-identical output when serialized via `serde`.
+
+---
+
+## Assumptions
+
+The implementation makes the following assumptions about surrounding systems:
+
+1. The ingest tier emits events with **at-most-once semantics per sequence number**, ensuring no duplicates in primary stream.
+2. The secondary stream is **at-least-once** and may emit duplicates marked by a `retry_indicator` field.
+3. Primary event timestamps are accurate to within 1 second; secondary timestamps may drift up to 5 minutes due to carrier clocks.
+4. Historical backfills arrive as immutable object storage snapshots partitioned by hour (e.g., `s3://iridium/recon/hourly/2024-06-01`).
+5. The shared types crate (`iridium-types`) will not evolve in schema or field semantics during the v0 series.
+6. Configuration values are resolved via a layered chain: defaults → file → environment → command-line overrides (no secrets accessed).
+7. All I/O operations go through the storage facade trait; no direct `std::fs` or `reqwest` calls are made.
+8. The messaging facade is not used — all input comes from object storage snapshots, not queues.
+
+> **Conflict Note**: The shared types crate must be stable at the time of implementation. Any schema change (e.g., adding a new field to `PrimaryEvent`) will require a new release cycle and must be coordinated with Samira Ndiaye.
+
+---
+
+## Hand-Off Checklist
+
+| Consumer | Required Sign-off |
+|--------|-------------------|
+| **Reviewers** (Alex Chen, Maya Patel) | Sections: Architecture Overview, Public API Surface, Error Taxonomy, Assumptions |
+| **On-Call Rotation** (Jordan Lee) | Sections: Reconciliation Algorithm, Failure Modes, Determinism Hardening |
+| **Tooling Team** (Samira Ndiaye) | Section: Assumptions (shared types stability), public API surface |
+| **Storage Facade Owners** | Section: Input stream assumptions (object storage snapshots, partitioning by hour) |
+
+> All sign-offs must be completed before the document status is updated to *in-review*.  
+> The final status will be *approved* only after all parties have reviewed and signed off.
+
+---
+
+## Final Notes
+
+This design delivers a **deterministic**, **async-safe**, **non-blocking**, and **operationally clear** reconciliation engine that meets all functional and non-functional requirements. It is built to integrate seamlessly with the existing platform infrastructure, avoids new dependencies, and satisfies the team’s strict standards for stability, test coverage, and operational clarity.
+
+The implementation is ready for development in Week 1–2, with property-based testing beginning in Week 3–4. The deterministic output requirement is enforced via stable hashing and canonical event comparison — a critical enabler of CI diffing.
+
+No further meetings are required to implement this design from the ground up.

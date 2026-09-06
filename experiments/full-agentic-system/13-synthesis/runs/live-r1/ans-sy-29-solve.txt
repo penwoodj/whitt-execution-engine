@@ -1,0 +1,65 @@
+The user wants me to solve a complex scheduling and audit problem based on specific rules provided in the text ("tonight" events) and output the result in a strict JSON format (`part_a` for schedule, `part_b` for audit).
+
+**Part A: Schedule Analysis (Night Desk SY-29)**
+*   **Events:**
+    1.  Start LOW1 at minute 0. Duration: 4 min. Checkpoints every 2 running mins.
+    2.  Start LOW2 at minute 3. Duration: 3 min.
+    3.  Arrive HIGH at minute 3. Duration: 6 min. Preempts current core job instantly. Runs to completion (minute 9).
+*   **Rules & Logic:**
+    *   "LOW jobs take the core in order of their start minutes." -> LOW1 starts first.
+    *   "a resumed LOW outranks a fresh one at any tie" -> Not applicable here, only starts involved initially.
+    *   "the core never idles while a LOW job is waiting... the minute one LOW job finishes or is preempted, the next waiting LOW starts in that same minute."
+    *   **Sequence of Execution:**
+        *   **Min 0-2:** LOW1 runs (Banked checkpoint at min 2).
+        *   **Min 3:**
+            *   LOW1 attempts to run its 3rd minute.
+            *   LOW2 starts at minute 3.
+            *   HIGH arrives at minute 3 and preempts the core instantly.
+            *   Rule: "while HIGH runs nothing else runs."
+            *   Preemption Logic: "on preemption the work past the last checkpoint is wasted".
+                *   LOW1 was running min 0-2 (Banked). Attempting min 3. Work done = 0 (since it was preempted before finishing the minute, or strictly speaking, checkpoints are at completed minutes. If HIGH arrives at start of min 3, and LOW1 had run 2 mins, the work for the 3rd minute is not yet banked).
+                *   Wasted time: The text says "LOW jobs checkpoint every 2 completed minutes... a job that starts or resumes at minute s banks a checkpoint at minute s+2".
+                *   LOW1 ran 0-1, 1-2. Checkpoint at end of min 2.
+                *   At start of min 3, HIGH preempts. Work done in min 3 is wasted. Total wasted = 1 minute.
+            *   **Queue State after Min 3:** LOW1 (owed 4 total, ran 2 banked, 1 unbanked -> owes 3? No, wait). Let's re-read the orientation example logic for calculation: "after resume a job redoes every minute past its last bank".
+                *   LOW1 Total = 4. Banked = 2. Remaining to redo/run = 4 - 2 = 2. Wait, the prompt says "LOW jobs checkpoint every 2 completed minutes... LOW1 runs 4 minutes starting at minute 0".
+                *   Let's trace carefully:
+                    *   Start Min 0. Run 0-1 (1 min).
+                    *   Run 1-2 (2 mins total). Checkpoint reached. Work saved = 2. Remaining to run = 2.
+                    *   Arrive Min 3. HIGH preempts. LOW1 was in its 3rd minute (unbanked). Wasted = 1 min.
+                    *   Queue: LOW1 (remaining 2 mins), LOW2 (fresh, 3 mins).
+                    *   LOW2 also wasted? "a resumed LOW outranks a fresh one". LOW2 started at 3 but didn't get to run before HIGH arrived (HIGH preempts whatever is running, and while HIGH runs nothing else runs). Did LOW2 start? "LOW jobs take the core in order of their start minutes... a LOW whose start minute arrives while the core is busy simply waits."
+                    *   Core was busy with LOW1. LOW2 arrives at min 3 (same time as HIGH). Core busy -> LOW2 waits.
+                    *   So ONLY LOW1 resumes? Or does LOW2 get to resume if it started? "while HIGH runs nothing else runs". Since core is preempted by HIGH, no other job runs.
+                    *   However, usually in these puzzles, if a job starts at minute X and the event happens, we check if it got time. Here, LOW1 was running. LOW2 arrives. Core busy -> WAIT. So LOW2 has 0 progress.
+                    *   After HIGH finishes (Min 9).
+                    *   Queue: LOW1 (remaining 2 mins? Or does it lose the 3rd minute attempt too? "work past the last checkpoint is wasted". Last checkpoint was end of min 2. Work for min 3 was done? No, preempted instantly. So work = 0 saved in min 3. Wasted = 1 min).
+                    *   Wait, let's look at the orientation example: "LOW1 held core minutes 0, 1 and 2... its 3rd minute was unbanked when the swap came, so 1 minute wasted." This matches LOW1 losing the start of min 3.
+                    *   So after HIGH (Min 9), we have:
+                        *   LOW1: Ran 0-1, 1-2. Wasted min 3. Needs to run remaining time. Total 4. Saved 2. Wasted 1. Wait, does it need to redo the wasted? "redoes every minute past its last bank". Yes. So it needs to run 0-1 (again), 1-2 (again), then new minutes? No, usually it resumes from checkpoint. Checkpoint at end of min 2. It has 2 mins left to do.
+                        *   LOW2: Arrived Min 3. Core was busy with LOW1. Waited. Did not run. Needs full 3 mins.
+                        *   Queue order: "LOW jobs take the core in order of their start minutes". LOW1 (start 0) < LOW2 (start 3).
+                        *   So Core goes to LOW1 first.
+                    *   **Execution Phase 2:**
+                        *   Min 9-11: LOW1 runs its remaining 2 mins. Finishes at end of Min 11? Or does it run 0,1 (redo), then new minutes? The prompt says "redoes every minute past its last bank". It implies the job continues from where it left off logically, but physically re-executes.
+                        *   Let's assume standard "remaining duration" logic: LOW1 has 2 mins of work left. Runs Min 9-10 (1), 10-11 (2). Total time for this block = 2.
+                        *   Wait, the orientation example says "LOW1 had 7 total minutes with 2 banked... resumed owing 5". Here LOW1 has 4 total, 2 banked -> owes 2.
+                        *   So LOW1 runs Min 9-10 (1), 10-11 (2). Finishes at end of Min 11.
+                        *   Then Core goes to LOW2 (start min 3). Needs 3 mins. Runs Min 11-12, 12-13, 13-14? No, Min 11 is the finish of previous. Starts at Min 11? "the minute one LOW job finishes or is preempted, the next waiting LOW starts in that same minute".
+                        *   If LOW1 finishes at end of Min 11 (which is start of Min 12), then LOW2 starts at Min 12. Runs 3 mins -> Finishes end of Min 14? Or Min 15?
+                        *   Let's count minutes carefully.
+                            *   LOW1 remaining: 2. Starts Min 9.
+                                *   9-10 (1 min).
+                                *   10-11 (2 mins). Finish at end of 11.
+                            *   LOW2 remaining: 3. Starts Min 11? No, "starts in that same minute" usually means if one finishes at T, next starts at T. If finish is at end of min 11, start is min 12.
+                                *   12-13 (1).
+                                *   13-14 (2).
+                                *   14-15 (3). Finish end of 15? Or is it continuous time?
+                            *   Let's check the orientation example numbers again. "LOW1... finished first". "LOW2 then owed its whole 3, ran minutes 10 to 13".
+                                *   In orientation: LOW1 finished at end of min 10 (ran 5 mins in block). Then LOW2 ran 10-13? That implies overlap or immediate succession. If LOW1 finishes at 10, and LOW2 runs 10-13, that's 3 minutes. Finish at 13.
+                                *   Makespan = 13.
+                            *   Applying to Tonight:
+                                *   HIGH ends at Min 9 (ran 6 mins: 3,4,5,6,7,8? No, starts min 3 runs 6 mins -> ends end of min 8? Or start of min 9?).
+                                    *   "HIGH arrives at minute 3 and runs 6 minutes to completion".
+                                    *   Start Min 3. Run 0-1 (Min 3), 1-2 (Min 4), 2-3 (Min 5), 3-4 (Min 6), 4-5 (Min 7), 5-6 (Min 8). Completion at end of Min 8? Or does "minute 0" mean duration unit?
+                                    *   Orientation: "HIGH runs minutes 3 to 5". Start 3, run 

@@ -1,0 +1,118 @@
+The task describes a state machine with specific rules for handling "rollouts" (cache changes) based on "error rates". I will walk through the events step-by-step to derive the final state variables: `rollout_pct`, `stages_done`, and `status`.
+
+**Initial State:**
+- Current Step: 1
+- Rollout Percentage: 0%
+- Stages Done: 0 (Assuming stages are completed sequentially as steps progress, starting from stage 0 or 1 depending on interpretation. Given "steps 1 through 5", let's assume Stage $N$ is associated with Step $N$. If we complete the step, we mark the stage done. Let's track `stages_done` as the count of fully completed stages).
+- Status: ACTIVE (implied)
+- Limit for current step: Defined by rules.
+
+**Rules Analysis:**
+1.  **Standard Limits:**
+    *   Steps 1–5: Max Error Rate = 2.0%
+    *   Steps 6–10: Max Error Rate = 1.0%
+2.  **Breach Handling (First Breach):**
+    *   If observed error > limit:
+        *   Trigger "Rollback".
+        *   Rollout pauses at the *previous* step's completion level.
+        *   The current step is spent; do not advance it.
+        *   Observation becomes "spent" (limit tightens to 0.8% for remaining steps).
+3.  **Second Breach Handling:**
+    *   If another breach occurs:
+        *   Status becomes "STOPPED".
+        *   Hold current step.
+
+**Event Walkthrough:**
+
+*   **Step 1:**
+    *   Observed Error Rate: 0.5%
+    *   Limit for Step 1 (Initial): 2.0%
+    *   Check: $0.5 \le 2.0$. No breach.
+    *   Action: Proceed to next step. Update Rollout Percentage? The prompt says "climbs in 10 percent steps". Usually, this means after a successful step, the rollout increases by 10%. Let's assume `rollout_pct` increments by 10 upon success of a step.
+    *   State: `rollout_pct` = 10%, `stages_done` = 1 (assuming stage 1 completed).
+
+*   **Step 2:**
+    *   Observed Error Rate: 0.8%
+    *   Limit for Step 2 (Initial): 2.0%
+    *   Check: $0.8 \le 2.0$. No breach.
+    *   Action: Proceed. Increment rollout.
+    *   State: `rollout_pct` = 20%, `stages_done` = 2.
+
+*   **Step 3:**
+    *   Observed Error Rate: 2.1%
+    *   Limit for Step 3 (Initial): 2.0%
+    *   Check: $2.1 > 2.0$. **BREACH**.
+    *   Rule Application:
+        *   Rollback triggered.
+        *   Pause at previous step's completion level. Previous successful step was Step 2.
+        *   The `rollout_pct` reverts to the value after Step 2 (which is 20%).
+        *   Observation spent. Limit tightens for remaining steps (Step 4, 5, etc.) to 0.8%.
+    *   State: `rollout_pct` = 20%, `stages_done` = 2 (Step 3 not completed). Status remains ACTIVE/PAUSED but we are waiting for next observation? The prompt says "climb resumes from the next observation". This implies the system stays at 20% and waits for Step 4.
+
+*   **Step 4:**
+    *   Observed Error Rate: 0.6%
+    *   Limit for Step 4 (Tightened): 0.8% (Due to previous breach).
+    *   Check: $0.6 \le 0.8$. No breach.
+    *   Action: Proceed. Increment rollout? Yes, "climb resumes". So we move from the paused level (20%) up to the next step's target. Since Step 3 failed, Step 4 is now being attempted as a new climb point. The standard rule for successful steps applies: increment by 10%.
+    *   State: `rollout_pct` = 30%, `stages_done` = 3 (Step 4 completed).
+
+*   **Step 5:**
+    *   Observed Error Rate: 0.7%
+    *   Limit for Step 5 (Tightened): 0.8%.
+    *   Check: $0.7 \le 0.8$. No breach.
+    *   Action: Proceed. Increment rollout.
+    *   State: `rollout_pct` = 40%, `stages_done` = 4 (Step 5 completed).
+
+*   **Step 6:**
+    *   Observed Error Rate: 0.9%
+    *   Limit for Step 6: The base limit for Steps 6-10 is 1.0%. Was it tightened again? No, only the immediate next step after a breach gets tightness until resolved or if another breach happens. Wait, rule says "after any rollback the limit tightens to 0.8 for every remaining step".
+        *   Did we have a second breach? No. Only Step 3 breached.
+        *   Does the tightened limit persist indefinitely? "tightens to 0.8 for every remaining step". This phrasing usually implies it applies to all steps *until* the condition is reset or the process ends. However, typically in such systems, limits might revert to standard after a successful recovery, OR they stay tight until a new breach. Let's re-read carefully: "a second breach stops everything... no breach at all and the climb finishes". The rule about 0.8% seems specific to the aftermath of the *first* breach ("after any rollback"). It doesn't explicitly say it resets after success, but standard engineering logic suggests limits might return to nominal unless specified otherwise. However, strict reading: "tightens to 0.8 for every remaining step". If this applies to Step 6, then limit is 0.8%.
+        *   Let's check the alternative interpretation: Limits reset to standard (1.0% for steps 6-10) after a successful recovery period? The text doesn't mention resetting limits. It says "after any rollback...". If I have one rollback, does it affect Step 4, 5, 6? Yes. Does it affect Step 6? Yes. So Limit = 0.8%.
+        *   Check: $0.9 > 0.8$. **BREACH**.
+    *   Rule Application (Second Breach):
+        *   "a second breach stops everything".
+        *   Status becomes **STOPPED**.
+        *   Hold the step we were defending (Step 6).
+        *   Rollout stays at current level (40%).
+
+**Final State Derivation:**
+- `rollout_pct`: 40 (reached after Step 5, stuck there due to Step 6 breach).
+- `stages_done`: 4 (Steps 1, 2, 4, 5 completed. Step 3 failed and didn't advance stage? Or does "stage" map to step? Usually yes. Steps 1,2 done. Step 3 failed -> no stage done for 3. Step 4 done -> stage 4 done. Step 5 done -> stage 5 done. Total stages done = 4).
+- `status`: STOPPED (due to the second breach at Step 6).
+
+Let's double check the "stages_done" count.
+Step 1: Success. Stage 1 Done.
+Step 2: Success. Stage 2 Done.
+Step 3: Breach. Rollback. Stage 3 NOT done.
+Step 4: Success (from rollback state). Stage 4 Done.
+Step 5: Success. Stage 5 Done.
+Step 6: Breach. Stop. Stage 6 NOT done.
+Total Stages Done = 4.
+
+Let's double check the `rollout_pct`.
+Start 0%.
+After Step 1: +10% -> 10%.
+After Step 2: +10% -> 20%.
+Step 3 Breach -> Rollback to previous level (20%).
+After Step 4: +10% -> 30%.
+After Step 5: +10% -> 40%.
+Step 6 Breach -> Stop. Level remains 40%.
+
+Result:
+`rollout_pct`: 40
+`stages_done`: 4
+`status`: STOPPED
+
+Wait, let's re-evaluate the limit for Step 6.
+Is it possible the limit resets? "after any rollback the limit tightens to 0.8 for every remaining step". This sounds permanent unless a new breach stops it or the climb finishes. Since we are at Step 6 of a 10-step process, and we haven't finished ("no breach at all... finishes"), but we *did* have a breach (Step 3). The rule says "after any rollback". We had one rollback. So for Steps 4, 5, 6, 7, 8, 9, 10, the limit is 0.8%.
+Observed Step 6: 0.9%.
+Limit: 0.8%.
+Breach occurs.
+This is indeed a second breach (First was Step 3).
+Result: STOPPED.
+
+What if "remaining step" meant only the immediate next one? "tightens to 0.8 for every remaining step". Plural. So it applies to all subsequent steps.
+So my analysis holds.
+
+One nuance: "steps 6 through 10 only 1.0 percent". This is

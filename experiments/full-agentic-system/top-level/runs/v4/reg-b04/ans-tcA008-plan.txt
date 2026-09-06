@@ -1,0 +1,57 @@
+### PLAN FIRST: Steps & Formulas/Rules
+
+1.  **Workspace Initialization**: Create `/tmp/opencode/timeline-run` with subdirectories `scripts/`, `outputs/`. Write `rules.md`, `decisions.md`, `README.md`.
+2.  **Data Generation (Deterministic)**: Use Python `random.seed(42)` to generate 6 service logs (`svc_a.log`...`svc_f.log`) containing ~150 lines each, embedding specific anomalies (UTC vs Local timestamps, missing gap in `svc_c`, error messages).
+3.  **Log Parsing & Normalization**: Write `scripts/parse_logs.py`. Rule: Parse timestamp, level, message. Detect timezone offset from string pattern (`+HHMM` or `-HHMM`). Convert all to UTC epoch seconds. Log corrections explicitly.
+4.  **Chronological Merge**: Write `scripts/merge_stream.py`. Sort normalized lines by UTC epoch. Attach original filename and line number as metadata. Output: `outputs/stream.txt`.
+5.  **Event Detection Logic**: Write `scripts/detect_events.py`. Rule: Scan stream for keywords (`DETECTED`, `MITIGATION_1_FAIL`, `MITIGATION_2_OK`, `RESOLVED`). Extract exact lines. Identify the "Detection Moment" (first alert), "Mitigation Attempt One", "Mitigation Two".
+6.  **Bucketing Analysis**: Write `scripts/bucket_chart.py`. Rule: Bin stream into 5-minute UTC windows. Count events per bin. Output: `outputs/activity_buckets.txt` and a simple ASCII chart.
+7.  **Timeline Construction**: Write `scripts/build_timeline.py`. Rule: Filter stream for only event-related lines (from step 5) + the specific anomaly corrections from step 3. Format as Markdown table (`timeline.md`) and JSON (`timeline.json`). Include source ref.
+8.  **Verification Script**: Write `scripts/verify.py`. Logic: Re-read raw logs, re-apply normalization rules independently of pipeline code, re-count events, re-calculate bucket sums. Compare against `outputs` files. Exit 0 if match, 1 otherwise with specific mismatch report.
+9.  **Final Report Generation**: Write `scripts/report_gen.py`. Aggregate stats from artifacts. Output `outputs/final_report.md` containing paths, timings, and summary findings.
+
+---
+
+### EXECUTION: End-to-End Processing Exercise
+
+I will now execute the Python script that performs all these steps deterministically within `/tmp/opencode/timeline-run`. This single script handles data generation, parsing, merging, detection, bucketing, timeline building, verification logic (internal check), and report generation.
+
+```python
+#!/usr/bin/env python3
+"""
+timeline-run: Deterministic Incident Timeline Reconstruction Exercise.
+Handles 6 services, mixed timezones, gaps, and specific incident events.
+Fully self-contained in /tmp/opencode/timeline-run.
+"""
+
+import os
+import sys
+import json
+import re
+import random
+from datetime import datetime, timedelta, timezone
+from collections import defaultdict
+
+# CONFIGURATION
+WORKSPACE = "/tmp/opencode/timeline-run"
+SEED = 42
+DURATION_MINUTES = 90
+START_TIME_STR = "2023-10-27T10:00:00" # Base start for local time calculations
+
+# INCIDENT EVENTS (Hardcoded into generation to ensure the 'incident' exists)
+INCIDENT_START_EPOCH_OFFSET_MINUTES = 45   # Incident starts 45 mins after global start
+MITIGATION_1_FAIL_EPOCH_OFFSET_MINUTES = 60 # Fails 15 mins later
+MITIGATION_2_OK_EPOCH_OFFSET_MINUTES = 75   # Works 15 mins later
+
+# SERVICE CONFIGS (Timezone offsets in minutes)
+SERVICES = {
+    "svc_a": {"tz_offset_min": 0, "lines": 45},      # UTC
+    "svc_b": {"tz_offset_min": -300, "lines": 45},   # EST (-5h)
+    "svc_c": {"tz_offset_min": 180, "lines": 45},    # IST (+3h) - Has the gap
+    "svc_d": {"tz_offset_min": 60, "lines": 45},     # CET (+1h)
+    "svc_e": {"tz_offset_min": -240, "lines": 45},   # PST (-4h)
+    "svc_f": {"tz_offset_min": 300, "lines": 45},    # JST (+9h)
+}
+
+# LEVELS AND MESSAGES FOR GENERATION
+LEVEL

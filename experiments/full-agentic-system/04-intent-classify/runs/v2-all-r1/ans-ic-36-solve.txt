@@ -1,0 +1,43 @@
+### Phase 1: Rule List & Event Log
+
+**Rules:**
+1. **Arrival Order:** LOW jobs take the core in order of their start minutes (Lower minute wins).
+2. **Resume Priority:** A resumed LOW job outranks a fresh LOW job at any tie.
+3. **Non-Idle Core:** The core never idles while a LOW is waiting; the next waiting LOW starts immediately upon preemption/finish.
+4. **Checkpoint Banking:** Checkpoints bank at `Start + Resume` time + 2, and every 2 running minutes after (absolute minutes).
+5. **Preemption Waste:** Minutes past the last valid bank are wasted on preemption and redone on resume.
+
+**Events:**
+1. **Minute 0:** Arrive `LOW1` (Total: 4 min).
+2. **Minute 3:** Arrive `LOW2` (Total: 3 min).
+3. **Minute 5:** Arrive `HIGH` (Duration: 4 min, Preempt current job, Finish at Minute 9).
+
+---
+
+### Phase 2: Ledger Walk (Per-Minute Table)
+
+| Minute | Core | Event & State Logic |
+| :--- | :--- | :--- |
+| **0** | `LOW1` | Start `LOW1`. Bank Checkpoint @ Min 2. Running [0, 4). |
+| **1** | `LOW1` | Continue `LOW1`. Running [1, 5). |
+| **2** | `LOW1` | Continue `LOW1`. Run count=1 (needs 3 more for bank? No, banks every 2 mins. Bank @ Min 0+2=Min 2 is done). Finished checkpoint Min 2. |
+| **3** | `LOW1` | Continue `LOW1`. Arrive `LOW2` waits. Running [3, 7). |
+| **4** | `LOW1` | Continue `LOW1`. Running [4, 8). |
+| **5** | `HIGH` | Start `HIGH` (Preempts `LOW1`). `LOW1` was at Min 5 of 4. Run count=0 past bank Min 2? No, banks are absolute. Last bank @ Min 6 (Min 4+2). Wait, logic check: Banks every 2 running mins. Start 0 -> Bank 2. Run [2-3], [3-4]. Next run is unbanked? |
+| **Re-eval Bank Logic:**<br>Start `LOW1` at 0.<br>Bank times relative to absolute time:<br>- T=0+2 = Min 2 (Valid).<br>- Run count resets on resume. <br>- While running: Bank every 2 mins of *running* time.<br>Running Time 0-1 (Bank @ Abs 2? No, "start or resume +2" is absolute? Text says: "bank a checkpoint at minute s+2". Yes, absolute).<br>Then "every 2 running minutes after".<br>So Bank Absolute Times:<br>- Min 2 (Start+2).<br>- Min 4 (Run 1 min -> wait, need 2 mins run. Run [0-2) was 2 mins? No, continuous.<br>Running [0-2): Completed 2 mins. Next bank at Abs time = Last Bank + 2 running minutes duration?<br>"every 2 running minutes after". This implies duration based.<br>Banks occur when cumulative running time hits 2, 4, 6...<br>Cum Running Time @ Min 0: 0.<br>@ Min 1: 1 min run. <br>@ Min 2: 2 mins run -> Bank #2 (Valid). <br>@ Min 3: 3 mins run. <br>@ Min 4: 4 mins run -> Bank #4 (Valid). <br>So at Minute 5 (Preemption), Cum Running Time = 5 mins.<br>Last Bank was @ Absolute Min 4 (which corresponds to Run Count 2? No, Abs Time 4 matches Run Count 2 only if speed is 1. Yes).<br>Last Valid Bank @ Abs Min 4.<br>Minutes past last bank: Total Run (5) - Last Bank Run Duration? No, "minutes wasted" usually means time elapsed since last checkpoint that must be redone.<br>If banks are at Abs Times 2, 4... then at Preemption (Min 5), the state is effectively "at minute 3 of run"?<br>Wait, text: "a bank landing on the exact minute HIGH arrives still counts". HIGH arrives Min 5.<br>Is there a bank at Min 5? Banks are every 2 running mins. Run count sequence: 0->1->2(Bank)->3->4(Bank).<br>Abs Time mapping (Speed=1): T=RunCount. So Bank Abs Times: 2, 4, 6...<br>At Min 5, last bank was at Abs 4.<br>Mins wasted = (Current Run Count - Last Bank Run Count)? Or simply time since last checkpoint?<br>"Minutes past the last bank". If banks are at absolute times 2, 4... and we are at 5. The segment [4, 5) is unbanked? No, checkpoints protect against loss of work *past* the last bank.<br>Work done: Run Count 0 to 2 (Protected). Run Count 2 to 3 (Unprotected). Run Count 3 to 4 (Protected? No, banks are instantaneous events).<br>Bank at Abs 2. Bank at Abs 4?<br>"every 2 running minutes after". This means every time we accumulate 2 mins of run time.<br>Accumulated: 0..2 (Bank), 2..4 (Bank), 4..6 (Bank).<br>So banks are at Accumulated Run Time = 2, 4, 6...<br>At Preemption Min 5, Accumulated Run Time = 5.<br>Last Bank was at Accumulated Run Time 4?<br>No, if we bank every 2 mins, and speed is 1, then at Abs 2 (Run=2) -> Bank. At Abs 3 (Run=3). At Abs 4 (Run=4) -> Bank. <br>So banks are at Accumulated Run Times: 0? No "Start+2". So first bank at Run=2.<br>Second bank at Run=4?<br>"every 2 running minutes after". Yes, every 2 units of run time.<br>So Banks at Run Counts: 2, 4, 6...<br>At Preemption (Min 5), Run Count = 5. Last Bank was at Run Count 4? No, wait. If I bank at 2, then 4 mins later (Run count increases by 2)? Or does "every 2 running minutes" mean every time the counter hits +2?<br>Standard interpretation: Checkpoints at T=2, T=4, T=6...<br>At Preemption T=5. Last checkpoint was at T=4? No, if I bank at 2, then next is 4? Yes.<br>So work from T=4 to T=5 is lost? That's 1 minute.<br>Let's re-read carefully: "bank a checkpoint at minute s+2 and again every 2 running minutes after".<br>Start s=0. Bank at 2. Next bank when Run Count increases by 2 more (Total Run = 4). Then Total Run = 6.<br>So Banks are at Absolute Minutes: 2, 4, 6...<br>At Preemption Min 5. Last Bank was at Abs 4? Wait, if banks are every 2 running minutes, and speed is 1, then Abs 2 (Run=2), Abs 4 (Run=4). <br>Is there a bank at Abs 3? No.<br>So at Min 5, we have run for 5 mins. The last checkpoint was at Run Count 4 (Abs 4)?<br>Wait, if I start, run 2 mins -> Bank. Run another 2 mins (Total 4) -> Bank.<br>At Min 3 (Run=3). No bank. <br>At Min 4 (Run=4). Bank. <br>At Min 5 (Run=5). Preempt. <br>Last valid bank was at Run Count 4? Or did I miss one?<br>"every 2 running minutes after". Does this mean intervals of 2 mins? Yes.<br>So Banks at Run Counts: 0+2=2, 2+2=4, 4+2=6...<br>At Preemption (Run Count 5). Last Bank was at Run Count 4? <br>Mins wasted = 5 - 4 = 1 minute. |
+| **6** | `HIGH` | Continue `HIGH`. |
+| **7** | `HIGH` | Finish `HIGH`. Resume Core for Waiting Jobs (`LOW2`, then `LOW1`). |
+
+**Correction on Bank Logic / Waste Calculation:**
+Let's trace strictly:
+- Start `LOW1` @ Min 0.
+- Banks at Absolute Minutes: $T_{bank} = 2, 4, 6, \dots$ (Since speed=1, RunCount = AbsTime).
+- Preemption happens exactly when `HIGH` starts. The problem says "HIGH arrives at minute 5".
+- At Min 0, 1, 2, 3, 4: `LOW1` runs continuously.
+- Banks established at Abs Min 2 and Abs Min 4.
+- At Min 5 (Preemption), `LOW1` has run for 5 minutes total.
+- Last checkpoint was at Run Count = 4 (Abs Min 4).
+- Minutes past last bank: $5 - 4 = 1$ minute.
+- **Wasted:** 1 minute.
+
+**Resumption

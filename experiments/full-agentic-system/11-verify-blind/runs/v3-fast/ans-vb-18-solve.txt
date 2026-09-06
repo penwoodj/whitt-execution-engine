@@ -1,0 +1,97 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the specific constraints provided (including the "EXPIRY DISCIPLINE" note which overrides general text regarding partials), here are the rules that change state during the event sequence:
+
+1.  **Arrival Rule**: Triggers on every new request arrival; initializes `attempts` to 0, `wait_s` to 0, and sets `budget` to the initial value (36).
+2.  **Attempt Cost Rule**: Applies immediately after an attempt is made; increments `attempts` by 1 and subtracts 2 from `budget`.
+3.  **Wait Rule**: Applies if the attempt fails; adds the current wait duration to `wait_s`, then doubles the wait duration for the next potential failure.
+4.  **Success Rule**: Applies when an attempt succeeds (after exactly 2 failures); stops processing further retries for this job instance.
+5.  **Budget Double Rule**: Applies if `budget` < 0 after costs; doubles the `budget` value and resets the suppression flag to false, allowing re-evaluation of the current spend against the new budget.
+6.  **Suppression Rule**: Applies if `budget` remains negative even after doubling (or if not doubled); sets `suppressed` to true and halts further processing for this job instance.
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   `attempts`: 0
+*   `wait_s`: 0
+*   `budget`: 36
+*   `suppressed`: false
+*   `failures_count`: 0 (internal counter for success condition)
+
+**Event 1: Arrival of Request**
+*   *Action*: Job starts.
+*   *State Change*: None to counters yet, but job is active.
+*   *Current State*: `attempts`=0, `wait_s`=0, `budget`=36, `suppressed`=false.
+
+**Event 2: Attempt 1 Execution (Fail)**
+*   *Action*: First attempt runs and fails.
+*   *Rule Applied*: **Attempt Cost Rule**.
+    *   `attempts` becomes 1.
+    *   Spend = 2.
+    *   `budget` = 36 - 2 = 34.
+*   *Rule Applied*: **Wait Rule** (since failed).
+    *   Wait duration = 2s.
+    *   `wait_s` becomes 0 + 2 = 2.
+    *   Next wait duration doubles to 4s.
+*   *Current State*: `attempts`=1, `wait_s`=2, `budget`=34, `suppressed`=false.
+
+**Event 3: Attempt 2 Execution (Fail)**
+*   *Action*: Second attempt runs and fails.
+*   *Rule Applied*: **Attempt Cost Rule**.
+    *   `attempts` becomes 2.
+    *   Spend = 2.
+    *   `budget` = 34 - 2 = 32.
+*   *Rule Applied*: **Wait Rule** (since failed).
+    *   Wait duration = 4s.
+    *   `wait_s` becomes 2 + 4 = 6.
+    *   Next wait duration doubles to 8s.
+*   *Current State*: `attempts`=2, `wait_s`=6, `budget`=32, `suppressed`=false.
+
+**Event 4: Attempt 3 Execution (Success)**
+*   *Action*: Third attempt runs and succeeds. The job completes.
+*   *Rule Applied*: **Attempt Cost Rule**.
+    *   `attempts` becomes 3.
+    *   Spend = 2.
+    *   `budget` = 32 - 2 = 30.
+*   *Rule Applied*: **Success Rule**.
+    *   Job terminates successfully. No wait is added for a successful attempt in this context (wait only applies "after each failed attempt").
+*   *Current State*: `attempts`=3, `wait_s`=6, `budget`=30, `suppressed`=false.
+
+**Final Reconciliation:**
+*   Total Spend = 2 (Attempt 1) + 4 (Wait 1) + 2 (Attempt 2) + 8 (Wait 2) + 2 (Attempt 3) = 18?
+    *   *Correction on Logic*: The prompt states "every attempt costs 2 and every wait second costs 1".
+    *   Let's re-calculate strictly based on the text: "after each failed attempt the retry waits, then runs."
+    *   Sequence:
+        1.  Arrive.
+        2.  Attempt 1 (Cost 2). Fail. Wait 2s (Cost 2*1=2). Total Spend so far: 4. Budget: 36-4=32.
+        3.  Attempt 2 (Cost 2). Fail. Wait 4s (Cost 4*1=4). Total Spend so far: 4+2+4=10. Budget: 32-2-4=26? No, wait cost is added to spend *before* checking budget for the next step or included in the total `budget_after` calculation at the end.
+        4.  Let's trace `budget` strictly as a running balance of (Initial - Sum(Costs)).
+            *   Start: 36.
+            *   After Atmpt 1 Cost (-2): 34.
+            *   After Wait 1 Cost (-2): 32.
+            *   After Atmpt 2 Cost (-2): 30.
+            *   After Wait 2 Cost (-4): 26.
+            *   After Atmpt 3 Cost (-2): 24.
+    *   Wait, the prompt says "the job needs 2 failed attempts before the 3th succeeds".
+    *   Does the successful attempt incur a wait? No ("after each **failed** attempt").
+    *   So costs are:
+        *   Atmpt 1: -2
+        *   Wait 1 (2s): -2
+        *   Atmpt 2: -2
+        *   Wait 2 (4s): -4
+        *   Atmpt 3: -2
+    *   Total Spend = 2 + 2 + 2 + 4 + 2 = 12.
+    *   Final Budget = 36 - 12 = 24.
+    *   Is budget negative? No (24 > 0). Suppression does not fire.
+
+**Final State Values:**
+*   `attempts`: 3
+*   `wait_s`: 2 + 4 = 6
+*   `budget_after`: 24
+*   `suppressed`: false
+
+```json
+{"attempts": 3, "wait_s": 6, "budget_after": 24, "suppressed": false}
+```

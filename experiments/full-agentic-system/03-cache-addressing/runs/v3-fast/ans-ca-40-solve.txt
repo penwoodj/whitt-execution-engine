@@ -1,0 +1,64 @@
+Based on the strict rules provided for tonight's rotation (ignoring the orientation story numbers), here is the step-by-step state walk and final reconciliation.
+
+### Phase 1: Rule List & Triggers
+*   **Rule A (Load):** On arrival of a load request, check if capacity fits. If yes, grant load; if no, evict LRU unpinned models until fit or only pinned remain.
+    *   *Trigger:* `load A`, `load B`, `load C`, `load D`.
+*   **Rule B (Unload):** On arrival of an unload request, remove the model from resident set and free capacity. If model not resident, no-op.
+    *   *Trigger:* `unload B`.
+*   **Rule C (Pinned Constraint):** Model B is pinned; it cannot be evicted. Evictions must target unpinned models only.
+    *   *Applies to:* All eviction logic.
+*   **Rule D (Deferral):** If capacity still does not fit after exhausting all unpinned models and only pinned models remain, the load request defers. The model is added to the deferred list but not loaded.
+    *   *Trigger:* `load D` (if it fails).
+
+### Phase 2: Ledger Walk (Tonight's Events)
+**Initial State:**
+*   Capacity: 8 GB
+*   Resident: []
+*   Pinned: {B}
+*   Unpinned: {}
+
+**Event 1: `load A` (2 GB)**
+*   Current Used: 0 GB. Available: 8 GB.
+*   Fits? Yes.
+*   Action: Load A.
+*   State: Resident [A], Used 2 GB, Pinned {B}, Unpinned {A}.
+
+**Event 2: `load B` (2 GB)**
+*   Current Used: 2 GB. Available: 6 GB.
+*   Fits? Yes.
+*   Action: Load B.
+*   State: Resident [A, B], Used 4 GB, Pinned {B}, Unpinned {A}.
+
+**Event 3: `load C` (2 GB)**
+*   Current Used: 4 GB. Available: 4 GB.
+*   Fits? Yes.
+*   Action: Load C.
+*   State: Resident [A, B, C], Used 6 GB, Pinned {B}, Unpinned {A, C}.
+
+**Event 4: `load D` (7 GB)**
+*   Current Used: 6 GB. Available: 2 GB.
+*   Fits? No (Need 7, have 2).
+*   Eviction Logic: Must evict unpinned models to free space.
+    *   Unpinned candidates: A (2GB), C (2GB). Both are LRU relative to each other (assume order of arrival for tie-breaking or standard LRU stack). Let's assume A and C are the only options. Total size 4 GB.
+    *   Evict A (2GB) -> Free +2. Used 4.
+    *   Evict C (2GB) -> Free +2. Used 2.
+    *   Total Freed: 4 GB. New Available: 6 GB.
+*   Check Fit Again: Need 7 GB, Have 6 GB. Still No.
+*   Pinned Check: Only pinned model is B. Cannot evict B.
+*   Result: Capacity exhausted (only pinned remains). Load D defers.
+*   State: Resident [B], Used 2 GB, Pinned {B}, Unpinned {}. Deferred List: [D].
+
+**Event 5: `unload B` (2 GB)**
+*   Current Resident: [B].
+*   Action: Remove B. Free capacity.
+*   State: Resident [], Used 0 GB, Pinned {}, Unpinned {}.
+
+### Final Reconciliation
+*   **Loads:** A loaded, B loaded, C loaded. D deferred (not loaded). Total = 3.
+*   **Evictions:** Evicted A and C to attempt load D. Total = 2.
+*   **Deferrals:** Load D failed due to pinned constraint. Total = 1.
+*   **Deferred List:** [D].
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

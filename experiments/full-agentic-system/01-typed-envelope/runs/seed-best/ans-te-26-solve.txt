@@ -1,0 +1,92 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the "whole law for tonight", here are the rules that change state during the event stream:
+
+1.  **Load Rule**: A request to load a model triggers an attempt to place it in resident memory. If space exists, the model is loaded (state changes: `loads` increments).
+2.  **Eviction Rule**: If a load cannot fit, the system evicts the least-recently-touched (LRT) *unpinned* models one at a time until enough space exists for the requested model. Each eviction increments the `evictions` counter and removes the model from resident memory.
+3.  **Deferral Rule**: If a load cannot fit even after evicting all available unpinned models (because only pinned models remain), the request is deferred. The model ID is added to the `deferred` list, and no eviction occurs for this specific event (`evictions` does not increment).
+4.  **Recency Rule**: Every time a model is loaded or touched (implicitly by being resident), it moves to the most-recent position in the recency list. The LRT model is determined by scanning from oldest to newest.
+5.  **Pinned Constraint**: Pinned models (C, N) are never evicted regardless of their age or space pressure. They remain resident until explicitly unloaded or if the system defers a load due to lack of unpinned space.
+6.  **Unload Rule**: A request to unload a model frees its size from memory immediately. If the model is not resident, this is a no-op (state change: `free` increases).
+
+**Trigger Mapping:**
+*   Event "load A": Triggers Load Rule.
+*   Event "load B": Triggers Load Rule -> Eviction Rule (if needed) -> Recency Rule.
+*   Event "load C": Triggers Load Rule.
+*   Event "load D": Triggers Load Rule -> Eviction Rule (if needed).
+*   Event "unload B": Triggers Unload Rule.
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State:**
+*   Pool: 8 GB
+*   Resident: {}
+*   Free: 8 GB
+*   Recency: []
+*   Loads: 0, Evictions: 0, Deferrals: 0, Deferred: []
+
+**Event 1: load A (3 GB)**
+*   Action: Attempt to load A.
+*   Check Fit: 3 <= 8 (Free). Fits.
+*   State Change: Load A succeeds. Free becomes 5. Recency adds A.
+*   Ledger Line: `load A -> resident {A} free 5 recency [A]`
+
+**Event 2: load B (3 GB)**
+*   Action: Attempt to load B.
+*   Check Fit: 3 <= 5 (Free). Fits.
+*   State Change: Load B succeeds. Free becomes 2. Recency updates A->B, adds B. Order: [A, B].
+*   Ledger Line: `load B -> resident {A, B} free 2 recency [A, B]`
+
+**Event 3: load C (1 GB)**
+*   Action: Attempt to load C. Note: Model C is pinned.
+*   Check Fit: 1 <= 2 (Free). Fits.
+*   State Change: Load C succeeds. Free becomes 1. Recency updates A->B->C, adds C. Order: [A, B, C].
+*   Ledger Line: `load C -> resident {A, B, C} free 1 recency [A, B, C]`
+
+**Event 4: load D (7 GB)**
+*   Action: Attempt to load D.
+*   Check Fit: 7 > 1 (Free). Does not fit.
+*   Eviction Logic: Need 6 more GB (7 - 1 = 6).
+    *   Identify LRT Unpinned models in resident {A, B, C}.
+    *   Recency Order: A (oldest), B, C (newest).
+    *   Pinned Status: A (Unpinned), B (Unpinned), C (Pinned).
+    *   Target for eviction: LRT Unpinned = **A**.
+*   Eviction Step 1: Evict A.
+    *   Free becomes 1 + 3 = 4.
+    *   Resident: {B, C}. Recency: [B, C].
+    *   Evictions count: 1.
+*   Check Fit Again: Need 6 GB. Current Free 4. Still not enough (Need 2 more).
+*   Eviction Step 2: Identify next LRT Unpinned in {B, C}.
+    *   Recency Order: B (oldest), C (newest).
+    *   Pinned Status: B (Unpinned), C (Pinned).
+    *   Target for eviction: LRT Unpinned = **B**.
+*   Eviction Step 2: Evict B.
+    *   Free becomes 4 + 3 = 7.
+    *   Resident: {C}. Recency: [C].
+    *   Evictions count: 1 + 1 = 2.
+*   Check Fit Again: Need 6 GB. Current Free 7. Fits (7 >= 6).
+*   State Change: Load D succeeds. Free becomes 7 - 7 = 0. Recency updates C->D, adds D. Order: [C, D].
+*   Ledger Line: `load D -> resident {C, D} free 0 recency [C, D]` (Evictions occurred internally)
+
+**Event 5: unload B (3 GB)**
+*   Action: Attempt to unload B.
+*   Check Resident Status: Is B in resident? No (evicted in Event 4).
+*   Rule Application: "An unload for a model no longer resident is a no-op."
+*   State Change: None. Free remains 0.
+*   Ledger Line: `unload B -> resident {C, D} free 0 recency [C, D]` (No-op)
+
+**Final Totals Calculation:**
+*   Loads (successful): A, B, C, D = 4.
+*   Evictions (models removed): A, B = 2.
+*   Deferrals: 0.
+*   Deferred List: [].
+
+---
+
+### Final Answer
+
+```json
+{"loads": 4, "evictions": 2, "deferrals": 0, "deferred": []}
+```

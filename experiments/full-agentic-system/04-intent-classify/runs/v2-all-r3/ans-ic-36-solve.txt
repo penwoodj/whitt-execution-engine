@@ -1,0 +1,41 @@
+### Phase 1: Rule List
+The following rules govern the state changes during the event sequence (LOW1 arrival/grant, LOW2 arrival/grant, HIGH arrival/preempt/finish, LOW1 resume, LOW2 run):
+
+1.  **Arrival/Grant Rule**: A job arriving at minute `s` with duration `n` is granted execution starting immediately if the core is free; otherwise it enters a wait queue ordered by start minute (`s`).
+2.  **Checkpoint Bank Rule**: For any active job, checkpoints bank at absolute minutes `s+2`, `s+4`, etc., where `s` is the current start or resume minute. A bank landing exactly on HIGH's arrival counts as valid (no waste).
+3.  **Preemption Rule**: When HIGH arrives and preempted a running LOW, any execution time past the last checkpoint bank is wasted. The resumed LOW owes `total_duration - banked_time` minutes upon restart.
+4.  **Resumption Priority Rule**: Upon preemption completion, if multiple jobs are waiting, the core resumes the one with the earliest start minute (`s`). If start times tie, a resumed job outranks a fresh job (not applicable here as LOW1 and LOW2 have distinct `s`).
+5.  **Non-Idle Core Rule**: The core never idles while a LOW is waiting. As soon as a running job finishes or is preempted, the next waiting LOW starts in that same minute.
+6.  **Completion Order Rule**: LOW jobs are listed by their finish minute (lowest first). HIGH is excluded from this list.
+
+**Trigger Mapping:**
+*   Event `LOW1_arrive`: Triggers Rule 1 (Grant).
+*   Event `LOW2_arrive`: Triggers Rule 1 (Wait, as core busy).
+*   Event `HIGH_arrive`: Triggers Rule 3 (Preempt LOW1), Rule 5 (Switch to waiting jobs logic later).
+*   Event `HIGH_finish`: Triggers Rule 4 (Resume lowest-priority waiter), Rule 2 (Bank checks for resumed job).
+
+---
+
+### Phase 2: Ledger Walk
+
+**Fact Bullets:**
+*   **LOW1**: Duration 4 min, Start Minute 0.
+*   **LOW2**: Duration 3 min, Start Minute 3.
+*   **HIGH**: Arrival Minute 5, Duration 4 min.
+
+**Minute-by-Minute Table:**
+
+| minute | core | event | bank@absolute-minute | notes |
+| :--- | :--- | :--- | :--- | :--- |
+| 0 | LOW1 | Start (Grant) | Bank @ 2 | LOW1 runs (min 0-3). |
+| 1 | LOW1 | Run | - | |
+| 2 | LOW1 | Run | Bank @ 4? No, s=0, banks at 2, 4. Wait, rule says "start + 2 and every 2 running mins". If starts at 0: runs min 0, 1 (end of min 1 is absolute 2). Runs min 2, 3 (end of min 2 is absolute 3? No.) |
+| | | | | **Correction on Bank Logic**: "checkpoints bank every 2 completed minutes". If a job starts at `s`, it has run for 0 mins at end of minute `s`. It has run for 1 min at end of minute `s+1`. It has run for 2 mins at end of minute `s+2`. Thus, bank occurs at absolute time `s + 2` (end of execution). <br> LOW1 starts at 0. Runs minutes 0, 1, 2, 3. <br> At end of min 2 (absolute time 2), it has completed 2 mins? No. Minute 0 is interval [0,1]. Minute 1 is [1,2]. So at absolute time 2, LOW1 has finished minute 1 (total 2 mins). **Bank @ 2**. <br> At end of min 4 (absolute time 4), LOW1 has finished minutes 3 and 4? Wait. Minutes are sequential integers. <br> Let's trace strictly: <br> Interval [0,1]: Minute 0 done. Total=1. <br> Interval [1,2]: Minute 1 done. Total=2. **Bank @ 2** (Absolute time 2). <br> Interval [2,3]: Minute 2 done. Total=3. <br> Interval [3,4]: Minute 3 done. Total=4. **Bank @ 4**. |
+| 3 | LOW1 | Run | - | LOW1 runs minute 3 (absolute interval 3-4). Wait, table column "minute" usually means the index of the minute being processed. <br> Let's align with "HIGH arrives at minute 5". This implies time points are integers 0, 1, 2... <br> LOW1 starts at 0. Runs for 4 minutes. Occupies intervals [0,1], [1,2], [2,3], [3,4]. Finishes at absolute time 4. |
+| 4 | LOW1 | Run | Bank @ 4? (Total run = 4 mins). | At end of interval [3,4] (absolute time 4), LOW1 has completed 4 minutes. Next bank would be +2 running minutes -> total 6 -> absolute time 6. |
+| 5 | HIGH | Preempt LOW1 | - | HIGH arrives at minute 5. LOW1 is currently in its 4th minute (interval [4,5] hasn't started? No, LOW1 finishes at 4). <br> **Wait**: "LOW1 runs 4 minutes starting at minute 0". Does this mean it occupies minutes 0, 1, 2, 3 and finishes at the start of 4? Or occupies intervals [0,1], [1,2], [2,3], [3,4] and finishes at 4? <br> Standard convention: "Starts at minute s" means it begins execution in interval `s`. <br> If LOW1 starts at 0, runs 4 mins: Intervals [0,1], [1,2], [2,3], [3,4]. Finish absolute time = 4. <br> HIGH arrives at minute 5 (absolute time 5). <br> So between absolute time 4 and 5, the core is idle? <br> **Rule**: "the core never idles while a LOW job is waiting". Is there a waiting job? <br> LOW2 starts at minute 3. It enters queue at absolute time 3 (when LOW1 started). Queue: [LOW2]. <br> Does the core switch to LOW2 immediately after LOW1 finishes at 4? Yes. <br> So at absolute time 5, HIGH arrives. The core is currently running LOW2 or waiting for it? |
+| | | | | **Re-evaluating Timeline**: <br> 0: Start LOW1. Runs [0,1]. Bank @ 2 (end of min 1). <br> 1: Run LOW1. <br> 2: Run LOW1. End of this minute (absolute 3? No, absolute time is start of interval + duration). Let's use integer timestamps for "Absolute Minutes". <br> Start=0. Duration=4. Finish = Start + Duration = 4. <br> LOW1 occupies [0, 4]. <br> Checkpoints: Run 2 mins -> Absolute Time 2. Run 4 mins -> Absolute Time 4. Banks at T=2, T=4. <br> HIGH arrives at T=5. <br> So LOW1 is free from T=4 to T=5. <br> **Queue**: LOW2 entered queue at T=3 (its start time). <br> At T=4, LOW1 finishes. Core becomes free. Core picks next in queue: LOW2 (Start T=3). <br> Does Core pick LOW2 instantly? Yes ("core never idles"). <br> So LOW2 starts running at T=4. <br> HIGH arrives at T=5. <br> LOW2 has been running for 1 minute (interval [4,5]). Total run = 1. <br> Banks: Start/Resume +2 -> T=6? No, rule says "bank every 2 completed minutes". LOW2 starts fresh at T=4. Bank when total run reaches 2 mins -> Absolute Time 6. <br> So at T=5, no bank yet. |
+| 5 | HIGH | Preempt? | - | **Wait**: "HIGH arrives at minute 5 and runs 4 minutes... instantly preempting whatever LOW job is running". <br> Is a LOW running at T=5? Yes, LOW2 started at T=4 and is in its first minute (interval [4,5]). <br> So HIGH preempts LOW2. <br> **Waste**: LOW2 has run 1 minute. Last bank? None yet (needs 2 mins). So waste = 1 min. <br> Wait, check rule: "LOW jobs checkpoint every 2 completed minutes". LOW2 started at T=4. At T=5, it has completed 1 minute. No checkpoint. Waste = 1. |
+| 6-9 | HIGH | Run | - | HIGH runs [5, 9]. Duration 4 mins. <br> Banks for resumed jobs? Not relevant yet as no one is running. |
+| 9 | HIGH | Finish | - | HIGH finishes at T=9+1 = 10? No, Start 5 + Dur 4 = 9. High occupies [5, 6], [6,7], [7,8], [8,9]. Finishes absolute time 9. <br> Wait, "runs 4 minutes to completion". Intervals: 5->6, 6->7, 7->8, 8->9. Finish at 9. |
+| 10? | Core |

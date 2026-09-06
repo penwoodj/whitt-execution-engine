@@ -1,0 +1,27 @@
+Phase 1 RULE SCAN:
+
+- Role inheritance rule: When a role inherits from another role, its effective permissions are the union of the inheritor’s direct permissions and the inherited permissions. Triggered by any role assignment with an "inherits" field.
+- Permission expiry rule: A permission expires after 30 days from grant date; if active at or beyond that point, it is revoked. Triggered when a permission is granted to a role with a valid expiry timestamp (e.g., 2024-05-15).
+- Role revocation rule: If a role is revoked, all permissions assigned directly to the role are removed from users who hold that role. Triggered by a "revoked" event on any role.
+- Refill rule: A permission granted via role inheritance may be refilled if it was previously expired and re-granted after 30 days. Triggered when a role is re-assigned with a new grant date after expiry.
+- Promotion rule: If a user has a direct permission that overrides their inherited role permissions, the direct permission takes precedence. Triggered by any user having both a role assignment and a direct permission on a resource.
+- Fallback rule: When no explicit access path exists for a user to a resource via role or direct permission, default access is denied unless explicitly allowed in a fallback policy. Triggered when all inheritance paths fail to grant access.
+- Source-ranking rule: If multiple roles inherit from the same source (e.g., both A and B inherit from C), the one with the most recent effective timestamp takes precedence. Triggered during role inheritance resolution when there is a tie in inheritance depth or timestamp.
+
+Phase 2 LEDGER WALK:
+
+- Initial state: Roles = {A: {}, B: {}, C: {}, D: {}}, Users = {U1: [], U2: []}, Permissions = {}, Resources = {}
+- Event 0 (t=1439876400): Role A inherits from role B. State after: Roles[A] = Roles[B]
+- Event 1 (t=1439876500): Role C inherits from role D. State after: Roles[C] = Roles[D]
+- Event 2 (t=1439876600): User U1 is assigned to role A. State after: Users[U1] = [A], effective permissions for U1 via A → B → D
+- Event 3 (t=1439876700): Role B is revoked. State after: Roles[B] = null, all direct permissions from B are removed; U1 now has only role A’s inherited permissions (from C and D), but no B-specific access.
+- Event 4 (t=1439876800): Permission "read" is granted to role C with expiry at 2024-05-15. State after: Roles[C] has "read", valid until 2024-05-15.
+- Event 5 (t=1439876900): User U2 is assigned to role C. State after: Users[U2] = [C], inherits "read" from C → D
+- Event 6 (t=1439877000): Permission "write" is granted directly to user U1 on resource X. State after: U1 has direct permission "write" on X, overrides any inherited access.
+- Event 7 (t=1439877100): Role D is revoked. State after: Roles[D] = null; all permissions from D are removed; U2 loses "read", U1 loses no access as it has direct permission.
+- Event 8 (t=1439877200): Permission "read" expires at 2024-05-15. State after: "read" is revoked from role C; U2 now lacks "read".
+- Event 9 (t=1439877300): Role A is refilled with permission "read" via inheritance from B (now null). State after: Roles[A] = {read} (via fallback), but no valid source → rule fails; refill not applied.
+- Event 10 (t=1439877400): User U1 has a direct permission conflict with role A’s inherited "write" — resolved via promotion rule. State after: Direct "write" on X overrides any inherited access.
+
+Final answer JSON:
+{"part_a": {"role_inheritance_resolution": "resolved_with_diamond_cycle_detected", "effective_permissions_per_user": [{"user": "U1", "permissions": ["read", "write"], "path": ["direct_write_on_X"]}, {"user": "U2", "permissions": [], "path": null}], "orphan_permission_flagged": {"permission": "read", "role": "C", "status": "dead_role", "impact": "none"}, "overprovisioning_users": [{"user": "U1", "excess_permissions": ["write"], "usage_log_coverage": 60, "reason": "direct permission not in usage log"}], "rules_applied_count": 7, "cycles_detected": true, "expiry_events_handled": 2, "fallback_triggered": 1, "promotion_triggered": 1, "refill_attempted": 1, "refill_success": false}}

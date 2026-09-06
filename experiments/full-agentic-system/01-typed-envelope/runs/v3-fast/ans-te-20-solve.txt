@@ -1,0 +1,88 @@
+### Phase 1 RULE SCAN
+This phase lists every rule in the task that changes state during the event sequence (tonight's events), including expiry, return, revocation, refill, promotion, fallback, or source-ranking rules, marked with their trigger.
+
+1.  **Retry Wait Rule**: Triggers on each failed attempt; sets wait time to $3 \times 2^{(n-1)}$ seconds for the $n$-th failure (observed sequence: 3s, 6s, 12s).
+2.  **Attempt Cost Rule**: Triggers on every retry execution; deducts 3 tokens from budget per attempt.
+3.  **Wait Cost Rule**: Triggers after each failed attempt's wait period completes; deducts 1 token from budget per second of wait time.
+4.  **Budget Suppression Rule (Primary)**: Triggers if total spend exceeds initial budget (30); suppresses the job immediately.
+5.  **Budget Refill Rule**: Triggers exactly once after a suppression event; doubles the current budget limit and re-evaluates the suppression condition against the new limit.
+6.  **Success Condition Rule**: Triggers on the 4th attempt; ends the sequence successfully if budget allows.
+
+---
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at a time in strict arrival order, showing the state after each event.
+
+**Initial State:**
+*   `attempts`: 0
+*   `wait_s`: 0
+*   `budget`: 30 (Start)
+*   `suppressed`: false
+
+**Event 1: Attempt 1 Fails**
+*   Action: Execute attempt, wait, then cost.
+*   Wait Time: 3s. Cost = $3 \text{ (attempt)} + 3 \times 1 \text{ (wait)} = 6$.
+*   Budget Update: $30 - 6 = 24$.
+*   State: `attempts`: 1, `wait_s`: 3, `budget_after`: 24.
+
+**Event 2: Attempt 2 Fails**
+*   Action: Execute attempt, wait, then cost.
+*   Wait Time: 6s (doubled). Cost = $3 \text{ (attempt)} + 6 \times 1 \text{ (wait)} = 9$.
+*   Budget Update: $24 - 9 = 15$.
+*   State: `attempts`: 2, `wait_s`: 9, `budget_after`: 15.
+
+**Event 3: Attempt 3 Fails**
+*   Action: Execute attempt, wait, then cost.
+*   Wait Time: 12s (doubled). Cost = $3 \text{ (attempt)} + 12 \times 1 \text{ (wait)} = 15$.
+*   Budget Update: $15 - 15 = 0$.
+*   State: `attempts`: 3, `wait_s`: 21, `budget_after`: 0.
+
+**Event 4: Attempt 4 Succeeds**
+*   Action: Execute attempt (no wait cost as it succeeds). Cost = $3 \text{ (attempt)}$.
+*   Budget Update: $0 - 3 = -3$.
+*   *Check Suppression*: Spend (-3) vs Initial Budget (30)? No, we are tracking remaining budget. The rule says "if the spend exceeds the budget". Total Spend so far = $6+9+15+3 = 33$. Initial Budget = 30.
+*   **Trigger**: Primary Suppression Rule activates because Total Spend (33) > Initial Budget (30).
+*   Action: Job is suppressed immediately upon this check. The sequence stops here regarding the "tonight" job flow as defined by the suppression rule taking precedence over the success of the 4th attempt in terms of state continuity for the *suppressed* flag, but let's re-read carefully: "if the spend exceeds the budget the job is suppressed".
+*   Does the 4th attempt happen? The text says "the job needs 3 failed attempts before the 4th succeeds." This implies the 4th attempt is attempted. If it costs 3 tokens, and we have 0 left, we go into debt (-3).
+*   Re-evaluating Suppression Logic: "if the spend exceeds the budget". Total Spend = 33. Budget = 30. Condition met. Job suppressed.
+*   State Update: `suppressed` becomes true. The job is terminated/suppressed. The final state reflects this suppression.
+
+**Final State Calculation:**
+*   `attempts`: 4 (The 4th attempt was initiated and completed to determine success, triggering the budget check).
+*   `wait_s`: $3 + 6 + 12 = 21$. (No wait for the successful 4th attempt).
+*   `budget_after`: $-3$ (Remaining balance after costs). *Correction*: The prompt asks for `budget_after`. Usually, in these ledger walks, if suppressed, we report the final calculated state. However, let's look at the "orientation" example logic: "spend 30 against a budget of 39... under it". Here spend is 33 vs 30.
+*   Wait, does `budget_after` mean remaining or the limit? The JSON schema says `"budget_after": N`. In the orientation story, they had balance. Here we are negative. Let's assume standard arithmetic remainder.
+*   `suppressed`: true (Because $33 > 30$).
+
+Let's double check the "Refill" rule applicability. "the budget doubles exactly once". This applies if suppressed. Since we are suppressed, do we apply refill? The text says: "if the spend exceeds the budget the job is suppressed and the budget doubles exactly once, re-checked after doubling, suppressed only if still over."
+*   Current State at suppression trigger: Spend=33, Budget=30. Suppressed=True.
+*   Apply Refill Rule: New Budget = $30 \times 2 = 60$.
+*   Re-check Condition: Is Total Spend (33) > New Budget (60)? No ($33 < 60$).
+*   Result: Job is NOT suppressed after refill. It continues? Or does "suppressed" mean the job is dead forever?
+    *   Interpretation A: "Suppressed" means the specific retry loop for this night's job is halted because it failed the budget check initially, but the system grants a second chance (refill). If the second check passes, the job proceeds.
+    *   Interpretation B: "Suppressed" is the final state flag if the initial check fails, and the refill is just an internal accounting adjustment that doesn't restart the job logic for the current night's rotation unless specified.
+    *   Text Clue: "if the spend exceeds the budget the job is suppressed...". Then "re-checked after doubling, suppressed only if still over." This implies a state transition: Suppressed -> (Refill) -> Re-evaluated -> If Pass -> Not Suppressed.
+    *   Let's trace:
+        1.  Attempt 4 costs 3. Total Spend = 33. Budget = 30. $33 > 30$. Trigger "Suppressed".
+        2.  Apply Refill: Budget becomes 60.
+        3.  Re-check: Is $33 > 60$? False.
+        4.  Conclusion: The job is **not** suppressed in the final state. It effectively passes the budget check after the one-time refill.
+
+*   Revised Final State:
+    *   `attempts`: 4
+    *   `wait_s`: 21
+    *   `budget_after`: $-3$ (The actual remaining balance). Or does it reset? "re-checked against doubling". Usually, you don't get free money back to zero; you just have a higher limit. The balance is still -3 relative to the start of the night's budget pool.
+    *   `suppressed`: false (Because after refill, spend < new budget).
+
+Let's re-read "the job needs 3 failed attempts before the 4th succeeds". This implies the 4th attempt must succeed for the job to complete. The text says "if the spend exceeds the budget the job is suppressed". If it gets refilled and passes, does it count as suppressed? No, the condition "suppressed only if still over" resolves to false. So `suppressed` should be `false`.
+
+Wait, let's look at the orientation story again: "spend 30 against a budget of 39, under it, no suppression".
+Here: Spend 33 vs Budget 30 -> Over -> Suppressed (Initial). Refill -> Budget 60. 33 vs 60 -> Under -> Not Suppressed.
+So `suppressed` = false.
+
+What about `budget_after`? Is it the remaining balance (-3) or the effective budget limit (60)? The key is named `budget_after`. In accounting, "after" usually implies the residual. However, in system state, if the job continues, the "budget" variable might be updated to the new limit. But the prompt says "values from the menus where menus exist". If the menu for `budget_after` expects a number representing the remaining funds, it's -3. If it represents the active budget cap, it's 60.
+Given "ledger closed balanced" in orientation, and "spend against budget", `budget_after` likely tracks the residual balance ($Start - Spend$).
+$30 - 33 = -3$.
+
+Let's reconsider the "Suppressed" flag logic. If the job is suppressed, does it stop? "if the spend exceeds the budget the job is suppressed". Then "re-checked after doubling". This implies the suppression is a temporary state or a check that gets resolved. If resolved to false, the job is not suppressed.
+So: `attempts

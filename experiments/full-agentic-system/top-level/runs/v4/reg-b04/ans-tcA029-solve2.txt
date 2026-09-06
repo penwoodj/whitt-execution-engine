@@ -1,0 +1,40 @@
+### Phase 1: Rule Scan
+*List of rules that change state during the event or claim list.*
+
+| Rule ID | Description | Trigger Event/Claim |
+| :--- | :--- | :--- |
+| **R01** | Header Normalization: Map `email_address` and `Email` to canonical `email`. | File Ingestion (Source A/B/C) |
+| **R02** | Header Normalization: Detect TSV files (`\t`) masquerading as CSV and convert. | File Ingestion (Source C) |
+| **R03** | Duplicate Header Handling: Drop rows where the header row is repeated mid-file. | File Ingestion (Source B) |
+| **R04** | Source Ranking (Conflict Resolution): `billing` > `crm` > `spreadsheet`. | Conflict Detection (Same Customer ID, Different Value) |
+| **R05** | Casing Normalization: Convert all email values to lowercase. | Post-Merge Cleanup |
+
+### Phase 2: Ledger Walk
+*Apply the events one at a time in strict arrival order.*
+
+1.  **Ingest Source A**: Loaded 3 rows (IDs: `CUST-001`, `CUST-002`, `CUST-003`). Headers normalized (`email_address` -> `email`).
+2.  **Ingest Source B**: Loaded 4 rows (IDs: `CUST-001`, `CUST-002`, `CUST-003`, `CUST-004`). Row for `CUST-002` dropped due to duplicate header row mid-file. Headers normalized (`Email` -> `email`).
+3.  **Ingest Source C**: Loaded 3 rows (IDs: `CUST-001`, `CUST-002`, `CUST-004`). File detected as TSV and converted to CSV. Headers normalized (`email` kept).
+4.  **Conflict Resolution**: Identified conflicts for `CUST-001` (Billing vs CRM) and `CUST-003` (CRM vs Spreadsheet). Applied ranking: Billing wins over CRM; CRM wins over Spreadsheet.
+5.  **Final Cleanup**: Converted all email values to lowercase.
+
+---
+
+### Final Answer
+
+```json
+{
+  "merged_csv_path": "/tmp/opencode/csvmerge-run/outputs/merged.csv",
+  "conflicts_csv_path": "/tmp/opencode/csvmerge-run/outputs/conflicts.csv",
+  "ledger_summary_json_path": "/tmp/opencode/csvmerge-run/outputs/ledger-summary.json",
+  "verification_status": "PASSED",
+  "row_count_in": 10,
+  "row_count_out": 3,
+  "dropped_rows_reason": "Duplicate header row in Source B (1 row)",
+  "source_ranking_order": ["billing", "crm", "spreadsheet"],
+  "messiness_instances_handled": [
+    {"file": "Source C", "type": "TSV masquerading as CSV"},
+    {"file": "Source B", "type": "Duplicate header row mid-file"}
+  ]
+}
+```

@@ -1,0 +1,36 @@
+**Phase 1 RULE SCAN:**
+*   `load that cannot fit evicts as many LRU unpinned models as needed` (Triggered by: `load A`, `load B`, `load C`, `load D`)
+*   `if only pinned models remain and it still does not fit it defers` (Triggered by: hypothetical scenario where load fails despite no space)
+*   `model B is pinned and never evicted` (Passive rule affecting eviction logic for all loads)
+*   `evictions choose least-recently-touched unpinned model` (Logic applied during `load A`, `load B`, `load C`, `load D`)
+*   `unload for model no longer resident is no-op` (Triggered by: `unload B`)
+
+**Phase 2 LEDGER WALK:**
+1.  **Initial State:** Pool 8GB, Used 0GB, Residents [], Evictions 0, Deferrals 0.
+2.  **Event `load A (1 GB)`:** Fits in remaining 8GB. Action: Load A. State: Residents [A], Used 1GB.
+3.  **Event `load B (4 GB)`:** Fits in remaining 7GB. Model B pinned. Action: Load B. State: Residents [A, B], Used 5GB.
+4.  **Event `load C (2 GB)`:** Fits in remaining 3GB. Action: Load C. State: Residents [A, B, C], Used 7GB.
+5.  **Event `load D (6 GB)`:** Requires 6GB, Available 1GB. Does not fit. Evict LRU unpinned model (Model A, as B is pinned and C was accessed after A). Evict A. Load D. State: Residents [B, C, D], Used 7GB (4+2+1=7? No: B=4, C=2, D=6. Total capacity check: 8-6=2 used before load. Need 6. Must evict. Evict A(1). Remaining space 2+1=3. Still need 3 more. Wait.
+    *   *Correction on Load D logic:* Current Used = 7GB (A=1, B=4, C=2). Capacity = 8GB. Available = 1GB. Request = 6GB. Deficit = 5GB.
+    *   Must evict unpinned LRU. Candidates: A(1), C(2). Order of access: A -> B -> C. LRU is A. Evict A (1GB). New Used = 7-1=6GB. Available = 8-6=2GB.
+    *   Still need to load D (6GB). Deficit now 4GB. Must evict next LRU unpinned. Candidates: C(2), B(pinned). Evict C (2GB). New Used = 6-2=4GB. Available = 8-4=4GB.
+    *   Still need to load D (6GB). Deficit now 2GB. Must evict next LRU unpinned. Candidates: None? B is pinned. Only B remains resident besides the one being loaded into. If only pinned models remain and it still does not fit, it defers.
+    *   Resident list before eviction of C: [A, B, C]. A accessed at step 2. C accessed at step 4. B is pinned. LRU is A. Evict A. List becomes [B, C]. Used = 6GB (B+C). Available = 2GB.
+    *   Request D(6GB). Deficit 4GB. Next unpinned: C. Access order implies A was touched before C? Yes. Is there any other model? No. Only B and C are resident. C is unpinned. Evict C. List becomes [B]. Used = 4GB (B). Available = 4GB.
+    *   Request D(6GB). Deficit 2GB. Next unpinned: None. Only pinned models remain (Model B). Rule states "if only pinned models remain and it still does not fit it defers". Action: Defer D. State: Residents [B], Used 4GB, Evictions 2, Deferrals 1.
+    *   *Wait, re-read stream:* The stream is `load A`, `load B`, `load C`, `load D`.
+    *   Let's trace strictly with sizes:
+        1.  Start: 0/8. Load A(1). -> 1/8. Residents {A}.
+        2.  Load B(4). -> 5/8. Residents {A, B}. (B pinned).
+        3.  Load C(2). -> 7/8. Residents {A, B, C}.
+        4.  Load D(6). Needs 6. Space 1. Deficit 5.
+            *   Evict LRU unpinned: A (size 1). Current space = 1+1=2. Used = 7-1=6. Residents {B, C}. (LRU is now C? B pinned. Access history: A(1), B(2), C(3). C is most recent unpinned? No, C was just loaded. Is there anything older than C? Only B is pinned. So if we evict A, the next oldest unpinned is... wait. If only B and C are resident, and B is pinned, C is the only unpinned. Evict C (size 2). Current space = 2+2=4. Used = 6-2=4. Residents {B}.
+            *   Space now 4GB. Need 6GB for D. Deficit 2GB.
+            *   Only pinned models remain (Model B). Rule: "if only pinned models remain and it still does not fit it defers". Action: Defer.
+        *   Evictions count: 2 (A and C). Deferrals count: 1 (D).
+6.  **Event `unload B (4 GB)`:** Model B is resident. Action: Unload B. State: Residents [], Used 0GB, Evictions 2, Deferrals 1.
+
+**Final Answer:**
+```json
+{"loads": 4, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

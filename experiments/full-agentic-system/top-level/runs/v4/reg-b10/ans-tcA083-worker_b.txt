@@ -1,0 +1,67 @@
+Phase 1 RULE SCAN:
+
+- On request arrival at timestamp t, if bucket tokens < request weight, reject the request. Triggered by every request event in the trace.
+- If bucket tokens ≥ request weight, serve the full request and deduct tokens; update bucket state. Triggered by every request event in the trace.
+- After each refill cycle (every 1 second), add 10 tokens to bucket if not already at capacity (max 100). Triggered by every second boundary in the timeline.
+- If a request has weight zero, serve it immediately with no token cost and do not update bucket state. Triggered by any request with weight == 0.
+- If a timestamp is out of order (later than previous event), treat as invalid and reject the request; log the inconsistency. Triggered by any request with timestamp > prior request timestamp.
+- On fractional millisecond weights, round to nearest integer (round half up). Triggered by every request with non-integer weight.
+- If bucket tokens become negative during serving, cap at zero and mark as partial serve with remaining token deficit. Triggered when serving a request exceeds available tokens.
+- After each request, if the bucket is below 10 tokens and no refill has occurred in the last second, trigger a fallback to 5 tokens (source-ranking rule). Triggered by every request after bucket < 10 and no refill in past second.
+- If a refill occurs during a burst and bucket reaches capacity, cap refill at capacity. Triggered when refill would exceed capacity.
+- On any request that causes bucket to go below zero, record as edge case and log the state before and after. Triggered by every request with token deficit.
+
+Phase 2 LEDGER WALK:
+
+Initial bucket: 100 tokens  
+Timestamps and events from trace (5000 requests with weights):
+
+Event 0: t=0.000, weight=3 → serve full (tokens = 97)  
+Event 1: t=0.500, weight=2 → serve full (tokens = 95)  
+Event 2: t=1.000, weight=4 → serve full (tokens = 91), refill at t=1.000 adds 10 → tokens = 101 → cap to 100  
+Event 3: t=1.500, weight=6 → serve full (tokens = 94)  
+Event 4: t=2.000, weight=8 → serve full (tokens = 86), refill at t=2.000 adds 10 → tokens = 96  
+Event 5: t=2.500, weight=3 → serve full (tokens = 93)  
+Event 6: t=3.000, weight=7 → serve full (tokens = 86), refill at t=3.000 adds 10 → tokens = 96  
+Event 7: t=3.500, weight=2 → serve full (tokens = 94)  
+Event 8: t=4.000, weight=1 → serve full (tokens = 93), refill at t=4.000 adds 10 → tokens = 103 → cap to 100  
+Event 9: t=4.500, weight=5 → serve full (tokens = 95)  
+Event 10: t=5.000, weight=9 → serve full (tokens = 86), refill at t=5.000 adds 10 → tokens = 96  
+Event 11: t=5.500, weight=4 → serve full (tokens = 92)  
+Event 12: t=6.000, weight=3 → serve full (tokens = 89), refill at t=6.000 adds 10 → tokens = 99  
+Event 13: t=6.500, weight=1 → serve full (tokens = 98)  
+Event 14: t=7.000, weight=2 → serve full (tokens = 96), refill at t=7.000 adds 10 → tokens = 106 → cap to 100  
+Event 15: t=7.500, weight=8 → serve full (tokens = 92)  
+Event 16: t=8.000, weight=10 → serve full (tokens = 82), refill at t=8.000 adds 10 → tokens = 92  
+Event 17: t=8.500, weight=3 → serve full (tokens = 89)  
+Event 18: t=9.000, weight=6 → serve full (tokens = 83), refill at t=9.000 adds 10 → tokens = 93  
+Event 19: t=9.500, weight=4 → serve full (tokens = 89)  
+Event 20: t=10.000, weight=7 → serve full (tokens = 82), refill at t=10.000 adds 10 → tokens = 92  
+Event 21: t=10.500, weight=5 → serve full (tokens = 87)  
+Event 22: t=11.000, weight=3 → serve full (tokens = 84), refill at t=11.000 adds 10 → tokens = 94  
+Event 23: t=11.500, weight=2 → serve full (tokens = 92)  
+Event 24: t=12.000, weight=8 → serve full (tokens = 84), refill at t=12.000 adds 10 → tokens = 94  
+Event 25: t=12.500, weight=6 → serve full (tokens = 88)  
+Event 26: t=13.000, weight=4 → serve full (tokens = 84), refill at t=13.000 adds 10 → tokens = 94  
+Event 27: t=13.500, weight=1 → serve full (tokens = 93)  
+Event 28: t=14.000, weight=9 → serve full (tokens = 84), refill at t=14.000 adds 10 → tokens = 94  
+Event 29: t=14.500, weight=3 → serve full (tokens = 91)  
+Event 30: t=15.000, weight=7 → serve full (tokens = 84), refill at t=15.000 adds 10 → tokens = 94  
+Event 31: t=15.500, weight=2 → serve full (tokens = 92)  
+Event 32: t=16.000, weight=8 → serve full (tokens = 84), refill at t=16.000 adds 10 → tokens = 94  
+Event 33: t=16.500, weight=5 → serve full (tokens = 89)  
+Event 34: t=17.000, weight=1 → serve full (tokens = 88), refill at t=17.000 adds 10 → tokens = 98  
+Event 35: t=17.500, weight=6 → serve full (tokens = 92)  
+Event 36: t=18.000, weight=4 → serve full (tokens = 88), refill at t=18.000 adds 10 → tokens = 98  
+Event 37: t=18.500, weight=2 → serve full (tokens = 96)  
+Event 38: t=19.000, weight=3 → serve full (tokens = 93), refill at t=19.000 adds 10 → tokens = 103 → cap to 100  
+Event 39: t=19.500, weight=8 → serve full (tokens = 92)  
+Event 40: t=20.000, weight=7 → serve full (tokens = 85), refill at t=20.000 adds 10 → tokens = 95  
+Event 41: t=20.500, weight=3 → serve full (tokens = 92)  
+Event 42: t=21.000, weight=6 → serve full (tokens = 86), refill at t=21.000 adds 10 → tokens = 96  
+Event 43: t=21.500, weight=4 → serve full (tokens = 92)  
+Event 44: t=22.000, weight=5 → serve full (tokens = 87), refill at t=22.000 adds 10 → tokens = 97  
+Event 45: t=22.500, weight=3 → serve full (tokens = 94)  
+Event 46: t=23.000, weight=8 → serve full (tokens = 86), refill at t=23.000 adds 10 → tokens = 96  
+Event 47: t=23.500, weight=2 → serve full (tokens = 94)  
+Event 48: t=24.000, weight=9 → serve full (tokens

@@ -1,0 +1,72 @@
+{
+  "causal_chain": [
+    {
+      "event": "Cert rotation at 08:00:00 UTC initiated in all regions",
+      "description": "Primary evidence: cert_rotation_log_2024_03_15. The new certificate bundle v3.7.1 was not yet propagated to the object store or cache at time of first deploy job failures.",
+      "evidence_source": "cert_rotation_log_2024_03_15",
+      "falsification_condition": "If the cert rotation had occurred prior to 08:00:00 UTC, and all failed jobs were observed after 08:00:00, then this event would not be causally linked. However, log timestamps confirm rotation began at exactly 08:00:00, and failures begin immediately afterward."
+    },
+    {
+      "event": "Artifact signature verification failure in six regions starting at 08:05:00 UTC",
+      "description": "Primary evidence: deploy_job_log_*_2024_03_15. All failed jobs show identical error message 'invalid certificate chain' and occur within a 5-minute window of cert rotation.",
+      "evidence_source": "deploy_job_logs_affected_regions_2024_03_15",
+      "falsification_condition": "If the verification failure had been caused by an unrelated object-store lifecycle purge (which occurred at 08:36:00 in us-east-1), then failures would have appeared after that time and only in one region. The pattern of six regions failing within minutes of rotation, not after 08:36:00, falsifies this as a root cause."
+    },
+    {
+      "event": "Cache invalidation at 09:10:00 UTC resolved verification failures",
+      "description": "Primary evidence: cache_invalidation_log_2024_03_15. The 600-second bundle cache was invalidated, and subsequent retries succeeded after refresh.",
+      "evidence_source": "cache_invalidation_log_2024_03_15",
+      "falsification_condition": "If the cache invalidation had occurred before 09:10:00 UTC or if it did not affect all regions, then verification failures would persist. The fact that all six affected regions succeeded after refresh and no new failures occurred confirms this as a recovery mechanism, not a root cause."
+    },
+    {
+      "event": "Missing alert for certificate chain validation failure in primary control plane",
+      "description": "Primary evidence: alerting_system_log_2024_03_15. No alert was triggered during the 6-minute window when verification failures occurred; this is a missing control.",
+      "evidence_source": "alerting_system_log_2024_03_15",
+      "falsification_condition": "If an alert had been triggered at any point between 08:05:00 and 09:00:00 UTC, then the failure would have been detected earlier. The absence of such alerts\u2014despite 41 failed jobs\u2014confirms a missing control."
+    }
+  ],
+  "remediation": [
+    {
+      "action": "Immediate fix: Reintroduce certificate bundle v3.7.1 into the object store and cache with a 60-second propagation delay in all regions.",
+      "owner": "Platform Security Lead",
+      "priority": "P0",
+      "verification_steps": [
+        "Verify that all regions show successful signature verification within 2 minutes of deployment start (check deploy_job_logs_affected_regions_2024_03_15).",
+        "Confirm no new failures occur in any region during the next 10-minute window.",
+        "Validate that the cache refresh is triggered and that artifact fetches succeed with correct certificate chain."
+      ],
+      "residual_risk": "If the object store propagation delay exceeds 60 seconds, verification may fail again. This risk is mitigated by a 60-second delay in propagation.",
+      "follow_up_diagnostics": [
+        "Run cache consistency check across all regions at 15-minute intervals for next 3 hours (check: cache_consistency_check_2024_03_15).",
+        "Monitor alerting system for certificate chain validation failures between 09:00:00 and 09:30:00 UTC."
+      ],
+      "audit_hook": "If a deploy job fails with 'invalid certificate chain' after the fix, the deployment pipeline must trigger an immediate alert to Platform Security Lead. This check lives in alerting_system_log_2024_03_15."
+    },
+    {
+      "action": "Systemic prevention: Implement real-time certificate validation alerts and cache propagation monitoring.",
+      "owner": "Platform Reliability Engineering",
+      "priority": "P1",
+      "verification_steps": [
+        "Deploy alert rule that triggers on 'invalid certificate chain' in any region; validate it fires during the next test window (09:30\u201310:00 UTC).",
+        "Implement cache propagation monitoring with a 5-second heartbeat; verify it detects delays exceeding 60 seconds.",
+        "Validate that all regions show consistent artifact fetch times within 2 seconds of each other."
+      ],
+      "residual_risk": "Alerts may be suppressed by noise (e.g., transient network issues). This risk is mitigated by a threshold-based rule with 3 consecutive failures required to trigger.",
+      "follow_up_diagnostics": [
+        "Run stress test simulating cert rotation under load; validate alert triggers and cache propagation within 60 seconds of rotation start.",
+        "Simulate object-store purge event in one region; verify that no deploy jobs fail due to missing artifacts."
+      ],
+      "audit_hook": "If the new alert rule fails to trigger during a simulated cert rotation, it must be revalidated against the same evidence pack. This check lives in alerting_system_log_2024_03_15 and test_case_cert_rotation_stress_2024_03_15."
+    }
+  ],
+  "_meta": {
+    "confidence": 0.78,
+    "self_consistency": 0.85,
+    "tool_errors": 0,
+    "contradiction_pairs": [],
+    "truncated": true,
+    "upstream_errors": [
+      "artifact truncated at section 1 of 5"
+    ]
+  }
+}

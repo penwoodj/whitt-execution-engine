@@ -1,0 +1,58 @@
+**Phase 1 RULE SCAN**
+1. Load Rule: A load request attempts to place a model; if it fits in free space, the model is resident and free space decreases by its size.
+2. Eviction Rule (Fit): If a load does not fit, evict the least-recently-touched (LRT) **unpinned** models one at a time until enough space exists or only pinned models remain.
+3. Deferral Rule: If a load cannot fit even after exhausting all unpinned models (only pinned remain), the request is deferred; no eviction occurs, and the model ID is recorded as deferred.
+4. Unload Rule: An unload request frees the specified model's size if it is currently resident; if not resident, it is a no-op.
+5. Touch Rule: Every successful load or access moves the touched model to the most-recent position in the recency list.
+6. Expiry/Return Rule (Not Triggered): If a grant expires during this stream, it returns half of what was **granted** (the partial amount), rounded down, before the next request is processed.
+
+**Phase 2 LEDGER WALK**
+*Initial State:* Resident: [], Free: 8GB, Recency: []
+
+1. Event: `load A (3 GB)`
+   - Check Fit: 3 <= 8? Yes.
+   - Action: Load A.
+   - Update: Resident [A], Free 5GB, Recency [A].
+   - State Line: `load A -> resident {A} free {5} recency {A}`
+
+2. Event: `load B (3 GB)`
+   - Check Fit: 3 <= 5? Yes.
+   - Action: Load B.
+   - Update: Resident [A, B], Free 2GB, Recency [B, A] (B touched).
+   - State Line: `load B -> resident {A, B} free {2} recency {B, A}`
+
+3. Event: `load C (1 GB)`
+   - Check Fit: 1 <= 2? Yes.
+   - Action: Load C.
+   - Update: Resident [A, B, C], Free 1GB, Recency [C, B, A] (C touched).
+   - State Line: `load C -> resident {A, B, C} free {1} recency {C, B, A}`
+
+4. Event: `load D (7 GB)`
+   - Check Fit: 7 <= 1? No.
+   - Eviction Phase: Need 6GB more (7-1). Target unpinned LRT.
+     - Current Recency: [C, B, A]. All are unpinned (only C is pinned per task description "model C is pinned").
+     - Identify Unpinned LRT: A is the oldest in the list [C, B, A] and is unpinned.
+     - Evict A (3GB). Free becomes 1 + 3 = 4GB. Resident [B, C]. Recency [C, B].
+     - Check Fit again: Need 6GB more? Yes (7-4=3 needed).
+     - Identify Unpinned LRT: B is the oldest in [C, B] and is unpinned.
+     - Evict B (3GB). Free becomes 4 + 3 = 7GB. Resident [C]. Recency [C].
+     - Check Fit again: Need 6GB more? No (7-7=0 needed). Fits exactly.
+   - Action: Load D into the now empty slot.
+   - Update: Resident [C, D], Free 0GB, Recency [D, C] (D touched).
+   - State Line: `load D -> resident {C, D} free {0} recency {D, C}`
+
+5. Event: `unload B (3 GB)`
+   - Check Resident: Is B in Resident? No (B was evicted in step 4).
+   - Action: No-op.
+   - Update: State unchanged.
+   - State Line: `unload B -> resident {C, D} free {0} recency {D, C}`
+
+**Final Answer Calculation:**
+- Loads (successful): A, B, C, D = 4.
+- Evictions (models evicted): A, B = 2.
+- Deferrals: 0.
+- Deferred List: [].
+
+```json
+{"loads": 4, "evictions": 2, "deferrals": 0, "deferred": []}
+```

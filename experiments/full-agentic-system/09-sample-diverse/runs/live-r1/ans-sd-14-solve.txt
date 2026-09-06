@@ -1,0 +1,76 @@
+### Phase 1: Rule List
+Based on the text, here are the rules that govern state changes during the event list (arrivals in order):
+
+1. **Arrival Event**: Triggers an attempt execution. Consumes budget equal to `per_attempt_cost` + `current_wait_seconds`. Increments failure count if unsuccessful; resets on success.
+2. **Budget Check Rule**: If total spend > current budget, the job is suppressed. The budget doubles exactly once immediately upon this condition. A re-check occurs against the doubled budget. If still over, suppression persists (`suppressed=true`). If under or equal, execution proceeds with `suppressed=false`.
+3. **Spend Accumulation Rule**: Total spend = sum of all wait seconds + sum of per-attempt costs for every attempt (failed and successful).
+4. **Budget After Calculation Rule**: `budget_after` = initial budget - total spend (computed after any doubling adjustments if triggered during the flow). Note: The text implies `budget_after` reflects the balance relative to the *effective* budget used at the time of resolution, but strictly defined as "budget minus all spend" in the final summary check. Given the specific example logic where $39 - 42$ became negative then doubled to $78$ and $78-42=36$, the `budget_after` is derived from the *final effective budget* minus spend? No, re-reading: "budget_after is always computed against the doubled budget when doubling fired... as doubled budget minus the same spend". So if doubling fires, use doubled budget. If no doubling, use original.
+5. **Suppression Persistence Rule**: Once suppressed due to exceeding even the doubled budget, `suppressed` remains true.
+
+### Phase 2: Ledger Walk
+We apply events in strict arrival order for tonight's scenario.
+
+**Initial State:**
+- Budget = 30
+- Per-attempt cost = 3
+- Wait sequence (observed): 3s, then doubles to 6s, then doubles to 12s.
+- Failures required before success: 3 failed attempts.
+- Total Spend calculation: `wait_seconds` + `attempts * per_attempt_cost`.
+
+**Event 1: Arrival & Attempt 1 (Fail)**
+- Current Wait = 3s.
+- Cost = Wait (3) + Attempt (3) = 6.
+- Budget remaining = 30 - 6 = 24.
+- Status: Failed. Failures = 1.
+
+**Event 2: Arrival & Attempt 2 (Fail)**
+- Current Wait doubles to 6s.
+- Cost = Wait (6) + Attempt (3) = 9.
+- Budget remaining = 24 - 9 = 15.
+- Status: Failed. Failures = 2.
+
+**Event 3: Arrival & Attempt 3 (Fail)**
+- Current Wait doubles to 12s.
+- Cost = Wait (12) + Attempt (3) = 15.
+- Budget remaining = 15 - 15 = 0.
+- Status: Failed. Failures = 3.
+- *Check*: The job needs the 4th attempt to succeed. We have completed 3 failures.
+
+**Event 4: Arrival & Attempt 4 (Success)**
+- Current Wait would normally double to 24s, but let's check budget first.
+- Cost calculation: If we proceed without doubling: Wait (24) + Attempt (3) = 27.
+- Budget is 0. Spend (27) > Budget (0). **Suppression Triggered.**
+- Apply Rule: Double budget exactly once.
+- New Effective Budget = 0 * 2 = 0? Or does doubling apply to the original budget value before depletion? The text says "budget doubles exactly once... re-checked after doubling". Usually, this means `Budget = Original_Budget * 2`. Let's assume `Original_Budget` was 30. Doubled Budget = 60.
+- Re-check against Doubled Budget (60):
+  - Spend required = Wait (24) + Attempt (3) = 27.
+  - Is 27 > 60? No.
+  - Result: Job runs, `suppressed` = false.
+- Update State:
+  - Total Spend = Previous Spend (21 from first 3 attempts? Wait, let's re-sum spend carefully).
+    - Attempt 1: 6
+    - Attempt 2: 9
+    - Attempt 3: 15
+    - Sum so far: 30.
+    - Attempt 4: 27 (Wait 24 + Cost 3).
+    - Total Spend = 30 + 27 = 57.
+  - Wait Seconds Sum = 3 + 6 + 12 + 24 = 45.
+  - Attempts Count = 4.
+  - Per-attempt cost sum = 4 * 3 = 12.
+  - Total Spend check: 45 (waits) + 12 (costs) = 57. Matches.
+- Final Budget Calculation (`budget_after`):
+  - The rule states: "budget_after is always computed against the doubled budget when doubling fired, as doubled budget minus the same spend".
+  - Doubled Budget = 60.
+  - Spend = 57.
+  - `budget_after` = 60 - 57 = 3.
+
+**Final State Verification:**
+- Attempts: 4
+- Wait Seconds: 45 (Sum of 3, 6, 12, 24)
+- Budget After: 3
+- Suppressed: false
+
+### Final Answer JSON
+```json
+{"attempts": 4, "wait_s": 45, "budget_after": 3, "suppressed": false}
+```

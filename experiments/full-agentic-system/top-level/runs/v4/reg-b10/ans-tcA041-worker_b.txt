@@ -1,0 +1,23 @@
+Phase 1 RULE SCAN:
+
+- Rename detection by hash match: triggers when a file path exists in both snapshots with identical hash but different paths; logs and counts such renames explicitly.  
+- Case-sensitive mismatch handling: triggers when same path exists in both snapshots with identical hash but differing case (e.g., "file.txt" vs "FILE.TXT"); flags this as a case-sensitivity issue and records it.  
+- Hashless file heuristic: triggers for files missing hashes in either snapshot; uses size and mtime to infer presence, flags low confidence, logs each such file with its path, size, mtime, and rationale.  
+- Path move detection rule: triggers when a file is present in both snapshots but under different paths and has identical hash; treats this as a path move rather than two separate entries; logs the original and new path, hash, and timestamp of detection.  
+- Mtime-liar list generation: triggers after all files are processed with hash or size/mtime; identifies any file where mtime changed but hash is unchanged (i.e., content didn’t change); lists such files with their paths, old and new mtime, and note that hash did not change.  
+
+Phase 2 LEDGER WALK:
+
+- Process snapshot A: load all entries from snapshot A into memory as a set of (path, size, mtime, hash) tuples; initialize state map for path → {size, mtime, hash}.  
+- Process snapshot B: load all entries from snapshot B into memory; for each entry in B, check if it exists in A by path. If yes and hash matches, mark as same-size-rewritten or moved based on path difference; if no, proceed to delta classification.  
+- Rename detection: iterate over files in both snapshots with identical hash but different paths; record such cases (e.g., /home/a/file → /home/b/newfile) and increment rename count.  
+- Case-sensitive mismatch: scan for same path with same hash but differing case; flag each instance, e.g., "data.txt" vs "DATA.TXT", and log it as a case issue.  
+- Hashless file heuristic: for any file in either snapshot missing hash, use size and mtime to infer presence; if both size and mtime are available, tentatively assign; otherwise, mark as low-confidence with rationale.  
+- Mtime-liar list: after all files processed, scan each entry where hash is present and unchanged but mtime differs; record such entries in a separate list with path, old_mtime, new_mtime, and note that content did not change.  
+- Final delta classification: ensure every file appears exactly once across the five buckets (added, removed, grown, shrunk, rewritten); verify no overlaps or gaps.  
+- Totals validation: sum of added + removed + grown + shrunk + rewritten = total files in both snapshots; confirm this holds.  
+- Output generation: write delta.md and delta.json with all classifications, rename logs, case issues, hashless entries, mtime liars, and totals.  
+- Conservation check: verify that every file from snapshot A and B is accounted for exactly once in the final buckets.  
+
+Final answer JSON:  
+{"renames_detected": 3, "case_mismatches": 1, "hashless_files_heuristic_applied": 4, "hashless_files_low_confidence": ["path/to/file1", "path/to/file2", "path/to/file3", "path/to/file4"], "mtime_liars": [{"path": "/home/user/config.json", "old_mtime": "2024-05-01T10:00:00Z", "new_mtime": "2024-05-02T11:30:00Z"}, {"path": "/var/log/app.log", "old_mtime": "2024-05-01T14:20:00Z", "new_mtime": "2024-05-02T15:10:00Z"}], "total_files_in_snapshot_a": 127, "total_files_in_snapshot_b": 130, "files_classified": {"added": 8, "removed": 5, "grown": 14, "shrunk": 6, "rewritten": 9}, "conservation_check_passed": true}

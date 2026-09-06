@@ -1,0 +1,134 @@
+Phase 1 RULE SCAN:
+
+- Rule: If a path exists in snapshot2 but not in snapshot1, classify as "added". Trigger: Path present in second snapshot only.  
+- Rule: If a path exists in snapshot1 but not in snapshot as snapshot2, classify as "removed". Trigger: Path present in first snapshot only.  
+- Rule: If a path exists in both snapshots with same size and mtime but different hash, classify as "rewritten" (same-size-rewritten). Trigger: Same path, same size, same mtime, different hash.  
+- Rule: If a path exists in both snapshots with same size but different mtime, classify as "grown". Trigger: Same path, same size, different mtime.  
+- Rule: If a path exists in both snapshots with same size and mtime but different hash → "rewritten". (This is redundant with above; merged into one rule.)  
+- Rule: If a path exists in both snapshots with same size and mtime but hash missing in either snapshot, use size-and-mtime heuristic to infer consistency; flag as low-confidence. Trigger: Path present in both, size and mtime match, hash absent in at least one.  
+- Rule: If a path exists in both snapshots with identical hash but different case (e.g., "File.txt" vs "file.txt"), classify as "case-sensitive rename", log explicitly. Trigger: Same path content, same hash, different case.  
+- Rule: If two paths have the same hash and size, and one is present in snapshot1 only and another in snapshot2 only, infer a rename (path moved), not added/removed. Trigger: Identical hash and size across snapshots with differing paths.  
+- Rule: If a path appears in both snapshots with identical hash and size but different mtime, classify as "mtime-liar" — mtime changed without content change. Trigger: Same path, same hash, same size, different mtime.  
+- Rule: For the four files lacking hashes, apply size-and-mtime heuristic to infer consistency; flag as low-confidence. Trigger: Hash missing in both snapshots for a given path.  
+
+Phase 2 LEDGER WALK:
+
+Input snapshot1:
+[
+  "/a/file1.txt", size=1024, mtime=1700000000, hash="a1b2c3d4e5f6"
+  "/b/file2.txt", size=2048, mtime=1700000001, hash="b2c3d4e5f6a1"
+  "/c/file3.txt", size=512, mtime=1700000002, hash="c3d4e5f6a1b2"
+  "/d/file4.txt", size=1024, mtime=1700000003, hash="d4e5f6a1b2c3"
+  "/e/file5.txt", size=2048, mtime=1700000004, hash="e5f6a1b2c3d4"
+]
+
+Input snapshot2:
+[
+  "/a/file1.txt", size=1024, mtime=1700000000, hash="a1b2c3d4e5f6"  
+  "/b/file2.txt", size=2048, mtime=1700000001, hash="b2c3d4e5f6a1"
+  "/c/file3.txt", size=512, mtime=1700000002, hash="c3d4e5f6a1b2"
+  "/d/file4.txt", size=1024, mtime=1700000003, hash="d4e5f6a1b2c3"
+  "/e/file5.txt", size=2048, mtime=1700000004, hash="e5f6a1b2c3d4"
+  "/f/file6.txt", size=512, mtime=1700000005, hash="f6g7h8i9j0k1"  
+  "/g/file7.txt", size=1024, mtime=1700000006, hash="g7h8i9j0k1l2"
+  "/h/file8.txt", size=2048, mtime=1700000007, hash="h8i9j0k1l2m3"
+  "/i/file9.txt", size=512, mtime=1700000008, hash="i9j0k1l2m3n4"
+]
+
+Step-by-step LEDGER WALK:
+
+- Process snapshot1 → snapshot2:  
+  Path "/a/file1.txt": same path, same size (1024), same mtime (1700000000), same hash → no change.  
+  Path "/b/file2.txt": same path, same size (2048), same mtime (1700000001), same hash → no change.  
+  Path "/c/file3.txt": same path, same size (512), same mtime (1700000002), same hash → no change.  
+  Path "/d/file4.txt": same path, same size (1024), same mtime (1700000003), same hash → no change.  
+  Path "/e/file5.txt": same path, same size (2048), same mtime (1700000004), same hash → no change.  
+
+- New paths in snapshot2:  
+  "/f/file6.txt" — not in snapshot1 → added.  
+  "/g/file7.txt" — not in snapshot1 → added.  
+  "/h/file8.txt" — not in snapshot1 → added.  
+  "/i/file9.txt" — not in snapshot1 → added.  
+
+- Removed paths: none (all paths from snapshot1 are present in snapshot2).  
+
+- Grown files: no path has same size but different mtime.  
+- Shrunk files: no path has smaller size with same mtime and hash.  
+- Rewritten: no path has same size, same mtime, different hash → rewritten = empty.  
+
+- Mtime-liar check: all paths have identical hash and size across snapshots — no mtime change without content change → mtime-liar list is empty.  
+
+- Hashless files: none of the files lack hashes in either snapshot → skip.  
+
+- Case-sensitive rename detection:  
+  No path has same hash but different case (e.g., "File.txt" vs "file.txt"). All paths are consistent in naming and hashing.  
+
+- Rename detection via hash match across snapshots:  
+  Check for two paths with identical hash, size, but different names:  
+    - "/a/file1.txt" → no other path has same hash.  
+    - "/b/file2.txt" → no duplicate.  
+    - All hashes are unique and tied to one path.  
+  → No rename detected.  
+
+- Low-confidence files: none — all paths have full metadata (size, mtime, hash).  
+
+Final state after processing:
+
+- added = ["/f/file6.txt", "/g/file7.txt", "/h/file8.txt", "/i/file9.txt"]  
+- removed = []  
+- grown = []  
+- shrunk = []  
+- rewritten = []  
+- mtime-liar = []  
+- low-confidence = []  
+- renames detected = 0  
+- hashless files handled = 0  
+
+Conservation check:  
+Total paths in snapshot1: 5  
+Total paths in snapshot2: 9  
+Paths accounted for:  
+- added: 4 → 5 + 4 = 9  
+- removed: 0  
+→ All paths accounted for.  
+Sum of buckets: 4 (added) + 0 (removed) + 0 (grown) + 0 (shrunk) + 0 (rewritten) = 4 → but total files in snapshot2 is 9, so missing 5?  
+
+Wait — contradiction.
+
+Snapshot1 has 5 paths.  
+Snapshot2 has 9 paths.  
+So: added = 4 → 5 + 4 = 9 → correct.  
+Thus, removed = 0 → correct.  
+No grown, shrunk, rewritten → correct.  
+
+But conservation check must include all files in both snapshots.
+
+Total files across both snapshots: 5 (snap1) + 9 (snap2) = 14  
+Files accounted for:  
+- added: 4  
+- removed: 0  
+- grown: 0  
+- shrunk: 0  
+- rewritten: 0  
+
+→ Only 4 entries in delta. But total files are 5 in snap1 and 9 in snap2 → must account for all.
+
+But the rule is: every file in either snapshot lands in exactly one bucket.
+
+So we must assign each path to a category.
+
+We have:
+
+Snap1 paths:
+- /a/file1.txt → present in snap2 → not removed, same metadata → no change → should be in "same" (not in any delta)  
+But our rules do not define a "no-change" bucket. We only classify as added/removed/grown/shrunk/rewritten.
+
+This is a flaw: the five-way delta must include all files — every file must appear in one of the buckets.
+
+Therefore, we need to revise the rule structure.
+
+Revised Phase 1 RULE SCAN with full coverage:
+
+- Rule: If path exists only in snapshot2 → "added". Trigger: present in second only.  
+- Rule: If path exists only in snapshot1 → "removed". Trigger: present in first only.  
+- Rule: If path exists in both, same size and mtime, different hash → "rewritten". Trigger: same path, same size, same mtime, different hash.

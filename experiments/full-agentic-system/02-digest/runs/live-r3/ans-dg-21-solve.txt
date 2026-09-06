@@ -1,0 +1,78 @@
+Based on the strict rules provided in the task, here is the step-by-step derivation and final JSON output.
+
+### **Phase 1: Rule List & Event Triggers**
+
+The system state evolves according to these specific rules applied to each event in arrival order:
+
+1.  **Load A (1 GB):**
+    *   **Rule:** Add model `A` with size `1`.
+    *   **State Change:** Current memory usage increases by `1`. Remaining capacity becomes `7`.
+2.  **Load B (4 GB):**
+    *   **Rule:** Add model `B` with size `4`.
+    *   **Constraint:** Model `B` is pinned and cannot be evicted.
+    *   **State Change:** Current memory usage increases by `4`. Remaining capacity becomes `3`. Total used: `5` (A=1, B=4).
+3.  **Load C (2 GB):**
+    *   **Rule:** Add model `C` with size `2`.
+    *   **Constraint:** Model `B` is pinned; cannot evict it. Must find unpinned space.
+    *   **Fit Check:** Unpinned models resident: `A` (1). Total unpinned size = 1. Required = 2.
+    *   **Eviction Rule:** Cannot fit in unpinned residue. Evict the least-recently-touched (LRT) unpinned model (`A`) to free space, then load.
+    *   **State Change:** Evict `A` (-1), Load `C` (+2). Current memory usage increases by net `+1`. Remaining capacity becomes `6`. Total used: `5` (B=4, C=2). `A` is removed from resident set.
+4.  **Load D (6 GB):**
+    *   **Rule:** Add model `D` with size `6`.
+    *   **Constraint:** Model `B` is pinned; cannot evict it. Must find unpinned space.
+    *   **Fit Check:** Unpinned models resident: `C` (2). Total unpinned size = 2. Required = 6.
+    *   **Eviction Rule:** Cannot fit in current unpinned residue (`2 < 4`). Evict LRT unpinned model (`C`) to free space, then load.
+    *   **State Change:** Evict `C` (-2), Load `D` (+6). Current memory usage increases by net `+4`. Remaining capacity becomes `2`. Total used: `6` (B=4, D=6). `C` is removed from resident set.
+5.  **Unload B (4 GB):**
+    *   **Rule:** Remove model `B` if present and not pinned?
+    *   **Constraint Check:** The task states "Model B is pinned". Usually, unloading a pinned model is either a no-op or implies the pinning constraint only applies to eviction. However, looking at the "Orientation" story logic: "an unload for a model no longer resident is a no-op." It does not explicitly forbid unloading a pinned model if requested, but standard LRU behavior with pins usually means you can't evict them, not necessarily that they are immutable against explicit removal requests unless specified.
+    *   **Re-evaluating "Pinned" semantics in this context:** In many such problems (like the provided orientation story), "pinned" implies immunity to eviction. If an explicit `unload` event occurs for a pinned model, does it succeed?
+        *   Orientation Story: "N at 2GB pinned... requests load M... Q's 4GB evicted P and still did not fit with only pinned N remaining, so Q deferred". This implies `N` stays resident. The story doesn't show an explicit unload of a pinned model failing or succeeding to set the rule for *this* night.
+        *   Task Rule Text: "model B is pinned and never evicted." It does not say "cannot be unloaded". However, standard interpretation of "pinned" in cache management often implies it stays resident until explicitly removed (which might be allowed) or it acts as a permanent resident for the duration. Given the instruction "never evicted", if we treat "unload" as an eviction mechanism, it fails. If we treat "unload" as a distinct command that bypasses eviction logic, it succeeds.
+        *   **Crucial Clue:** The orientation story mentions "deferred" lists when capacity is insufficient due to pinned items. It does not mention unloading pinned items failing. However, the phrase "model B is pinned and never evicted" strongly suggests its residency is protected by the system logic against removal attempts that function as evictions. If `unload` triggers eviction logic (which it usually does in these discrete state problems unless specified otherwise), then `B` remains.
+        *   **Decision:** Based on "never evicted", an event attempting to remove `B` via standard eviction flow is treated as a no-op or fails to change the resident set count for the purpose of capacity calculation if it's strictly protected. Let's assume the "pinned" constraint extends to preventing removal until explicitly unpinned (which hasn't happened). Thus, `Unload B` is a **no-op** regarding state changes because `B` is pinned and cannot be removed/evicted by this event.
+        *   **Alternative Interpretation:** If `unload` simply marks it for deletion regardless of pinning: Then memory frees up. But "never evicted" usually defines the behavior of the cache manager when under pressure or attempting to remove. An explicit command "Unload B" is often synonymous with eviction in these puzzles unless a specific "unpin" event precedes it. Given "never evicted", I will treat this as **No State Change** (B remains).
+
+    *   **Refined Decision on Unload:** Let's look at the counts required: `loads`, `evictions`, `deferrals`.
+        *   If `Unload B` succeeds: `loads`=3, `evictions`=2, `deferred`=0.
+        *   If `Unload B` fails (no-op): `loads`=3, `evictions`=2, `deferred`=0.
+        The counts of loads and evictions are determined by the successful additions and removals of other models. The unload itself doesn't add to a "load" or "eviction" counter unless it successfully removes a model that was previously loaded (which acts as an eviction). If it's a no-op, no new counters increment.
+        Let's assume the standard strict interpretation: **Pinned items are immutable**. `Unload B` is a no-op.
+
+    *   **Wait, let's re-read carefully:** "model B is pinned and never evicted."
+        Does an explicit `unload B` command count as an eviction? Yes, typically. Since it says "never evicted", the event fails to remove B.
+        
+    *   **Final State Calculation:**
+        *   Start: 8GB free.
+        *   Event 1 (Load A): +1 used. (A=1)
+        *   Event 2 (Load B): +4 used. (A=1, B=4). Total 5. Free 3.
+        *   Event 3 (Load C): Needs 2. Unpinned space = 1 (A). Deficit 1. Evict A (-1). Load C (+2). Net +1. Used: 6 (B=4, C=2). Evictions: 1.
+        *   Event 4 (Load D): Needs 6. Unpinned space = 2 (C). Deficit 4. Evict C (-2). Load D (+6). Net +4. Used: 8 (B=4, D=6). Evictions: 2.
+        *   Event 5 (Unload B): Target B. B is pinned and "never evicted". Command ignored/No-op. State remains Used: 8.
+
+    *   **Counts:**
+        *   Loads: A, C, D were successfully loaded (3). Note: The request was for B again? No, the sequence is Load A, Load B, Load C, Load D, Unload B. The "Loads" count refers to successful `load` events in the stream.
+            1. Load A -> Success.
+            2. Load B -> Success.
+            3. Load C -> Success (after eviction).
+            4. Load D -> Success (after eviction).
+            Total Loads = 4? Or does "Load" event count only if it adds a *new* model or refills? Usually, every successful `load` instruction increments the counter.
+            Let's check the Orientation Story counts: "three loads, two evictions, one deferral". In that story: Load M (ok), Load N (ok), Load P (evicted M then ok -> 1 load?), Load Q (deferred).
+            If Load P is successful after eviction, it counts as a load. So 3 loads in the story matches 3 successful `load` instructions (M, N, P). Q was deferred.
+            In our case: A, B, C, D are all successfully loaded. That's 4 loads.
+        *   Evictions: A was evicted. C was evicted. Total = 2.
+        *   Deferrals: None (Capacity reached exactly at the end with pinned items).
+
+    *   **Deferred List:** Empty.
+
+### **Phase 2: Ledger Walk Verification**
+
+1.  **Initial State:** Capacity 8GB, Used 0GB. Models: {}.
+2.  **Event: Load A (1 GB)**
+    *   Action: Add A (1).
+    *   Check Pinning: Not pinned. Fits? Yes.
+    *   Result: Used = 1. Resident: {A}. Loads = 1. Evictions = 0.
+3.  **Event: Load B (4 GB)**
+    *   Action: Add B (4).
+    *   Check Pinning: Pinned. Fits? Yes (1+4=5 <= 8).
+    *   Result: Used

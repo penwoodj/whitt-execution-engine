@@ -1,0 +1,296 @@
+# ══════════════════════════════════════════════════════════════════
+# CORRECTION ATOM — Multi-Perspective Sequential Correction v1
+# Pattern: 5 angles mutate text in sequence (compounding fixes)
+# Model: Ministral-3B CPU (single model, different prompts per angle)
+# Per angle: persona + lens + recognize + think + fix rules (caveman)
+# ══════════════════════════════════════════════════════════════════
+workflow_id: correction_atom_v1
+name: "Correction Atom — Multi-Perspective v1"
+description: "5 sequential angle passes on broken LLM output. Mutate-in-sequence."
+version: "1.0.0"
+author: "Whitt Execution Engine"
+tags: [correction, multi-perspective, sequential]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config: { host: localhost, port: 8080 }
+
+models:
+  "worker":
+    name: "Ministral-3-3B-Instruct-2512-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.2, max_tokens: 400 }
+
+workflow_execution_strategy:
+  memory: { model_lifecycle: { unload_unused: false } }
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "__OUTPUT_DIR__/last-run.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+
+    # ── STEP 0: BOOTSTRAP — load case file, emit initial state ──
+    step_00_bootstrap:
+      generative_entity: "${models.worker}"
+      prompt: "READY."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/emit-context.py __CASE_FILE__"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: true
+
+    # ── STEP 1: ANGLE 1 — FORMAT AUDITOR ───────────────────────
+    step_01_format_auditor:
+      depends_on: [step_00_bootstrap]
+      generative_entity: "${models.worker}"
+      prompt: |
+        PERSONA: FORMAT AUDITOR
+        GOAL: Fix structural defects only. Ignore content correctness.
+
+        LENS:
+        Surface structure. Whitespace, indentation, list shape, bullet markers, code fences, leaked prompt artifacts. NOT facts, NOT logic, NOT requirements.
+
+        RECOGNIZE ISSUE:
+        - Bullet count output != spec (spec asks 3, output has 2 or 4)
+        - Mixed indentation (2-space + 4-space + tab)
+        - Leaked prompt artifacts: "ORIGINAL DRAFT:", "TASK_KIND:", "PROBLEM:", "DRAFT:", "You did NOT write this", meta phrases in final
+        - Markdown broken: code fence unclosed, table malformed, header level wrong
+        - Trailing whitespace on lines
+        - Output format != spec format (spec asks JSON, output is prose)
+
+        THINK:
+        1. Compare output structure to spec format request.
+        2. Count items. Match?
+        3. Scan for prompt artifacts (any phrase reading as instruction not content).
+        4. Check indentation char-by-char.
+
+        FIX RULES:
+        - Preserve content meaning. Only restructure.
+        - Use exactly format task spec requested.
+        - Strip prompt artifacts completely.
+        - No new info added.
+
+        INPUTS:
+        {{bookmarks.shell_output.stdout}}
+
+        Emit corrected text only. No commentary.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_after_angle_1
+              - "__OUTPUT_DIR__/after-angle-1.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 1 __CASE_FILE__ '{{bookmarks.text_after_angle_1}}' > __OUTPUT_DIR__/check-angle-1.json 2>&1 || true"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    # ── STEP 2: ANGLE 2 — FACT CHECKER ─────────────────────────
+    step_02_fact_checker:
+      depends_on: [step_01_format_auditor]
+      generative_entity: "${models.worker}"
+      prompt: |
+        PERSONA: FACT CHECKER
+        GOAL: Fix factual mismatches vs source. Ignore format, ignore missing requirements.
+
+        LENS:
+        Numerical/named/quoted claims must trace to task spec or auxiliary. Invented numbers, altered quotes, fabricated names = your issue.
+
+        RECOGNIZE ISSUE:
+        - Number in output != source (scores, counts, thresholds, dates, percentages)
+        - Quoted text altered inside quote marks
+        - Named entity not in source (invented person, project, library)
+        - Date/time conflicts with source
+        - Math wrong (spec says 50-point scale, output invents 40)
+        - Statistics cited without source
+
+        THINK:
+        1. Extract every number, name, quote from output.
+        2. For each: appears in task spec or auxiliary?
+        3. If not: derivable via correct arithmetic from spec?
+        4. If still not: fabricated. Remove or replace with sourced value.
+
+        FIX RULES:
+        - Replace wrong number with sourced number.
+        - No correct value available: remove claim entirely.
+        - No new facts introduced.
+        - Preserve format.
+
+        TEXT UNDER REVIEW (already passed format audit):
+        {{bookmarks.text_after_angle_1}}
+
+        TASK SPEC + AUXILIARY (source of truth):
+        {{bookmarks.shell_output.stdout}}
+
+        Emit corrected text only. No commentary.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_after_angle_2
+              - "__OUTPUT_DIR__/after-angle-2.txt"
+
+    # ── STEP 3: ANGLE 3 — REQUIREMENTS TRACER ──────────────────
+    step_03_requirements_tracer:
+      depends_on: [step_02_fact_checker]
+      generative_entity: "${models.worker}"
+      prompt: |
+        PERSONA: REQUIREMENTS TRACER
+        GOAL: Fix incomplete output. Every spec requirement addressed. Ignore format style, ignore fact errors.
+
+        LENS:
+        Task spec = checklist. Each requirement addressed in output. Missing requirement = your issue. Extra content beyond spec scope = also your issue.
+
+        RECOGNIZE ISSUE:
+        - Spec asks N items, output has different count
+        - Spec asks specific field (e.g. "description:"), output omits
+        - Spec asks specific format (e.g. "T1: <CATEGORY>"), output uses different
+        - Output addresses spec partially (3 of 5 requirements covered)
+        - Output adds unrequested content (4th "tips" bullet when spec asked 3)
+        - Output answers different question than spec asked
+
+        THINK:
+        1. List every requirement from spec (count, fields, format, content type).
+        2. Walk output against this list. Tick each.
+        3. Unticked = missing requirement.
+        4. Output items not in spec list = scope creep.
+
+        FIX RULES:
+        - Add missing requirements with minimal content.
+        - Remove scope creep.
+        - Do not improve existing content (other angles do that).
+        - Match requested format exactly.
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_after_angle_2}}
+
+        TASK SPEC + AUXILIARY:
+        {{bookmarks.shell_output.stdout}}
+
+        Emit corrected text only. No commentary.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_after_angle_3
+              - "__OUTPUT_DIR__/after-angle-3.txt"
+
+    # ── STEP 4: ANGLE 4 — HALLUCINATION HUNTER ─────────────────
+    step_04_hallucination_hunter:
+      depends_on: [step_03_requirements_tracer]
+      generative_entity: "${models.worker}"
+      prompt: |
+        PERSONA: HALLUCINATION HUNTER
+        GOAL: Fix fabricated content. Output invents things not in source. Ignore style, ignore missing items.
+
+        LENS:
+        Distinguish "sourced from spec" vs "plausible-sounding invention". Common: invented taxonomies, fabricated citation patterns, fake technical terms, invented library/API names, fake rubric criteria.
+
+        RECOGNIZE ISSUE:
+        - Output introduces taxonomy not in source ("PLAN/IMPLEMENT/VALIDATE/DEPLOY" when source used different words)
+        - Output cites rubric/criteria not in source ("correctness, completeness, safety, scalability" — invented list)
+        - Output invents library/API name ("express-rate-limit" if not in source)
+        - Output creates quote by combining source fragments out of context
+        - Output uses technical term that doesn't exist
+        - Output attributes claim to source that source didn't make
+
+        THINK:
+        1. For each claim in output: "Where in source is this from?"
+        2. No source: is it common knowledge or invention?
+        3. Invention and not common knowledge: remove.
+        4. Common knowledge: keep but mark as general.
+
+        FIX RULES:
+        - Remove fabricated content entirely.
+        - Replace with sourced content if available.
+        - Nothing to replace with: leave gap (other angles fill).
+        - Do not invent replacement.
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_after_angle_3}}
+
+        TASK SPEC + AUXILIARY:
+        {{bookmarks.shell_output.stdout}}
+
+        Emit corrected text only. No commentary.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $text_after_angle_4
+              - "__OUTPUT_DIR__/after-angle-4.txt"
+
+    # ── STEP 5: ANGLE 5 — CONSISTENCY AUDITOR ──────────────────
+    step_05_consistency_auditor:
+      depends_on: [step_04_hallucination_hunter]
+      generative_entity: "${models.worker}"
+      prompt: |
+        PERSONA: CONSISTENCY AUDITOR
+        GOAL: Fix internal inconsistencies. Output contradicts itself or claims fix without fixing. Ignore format, ignore missing items.
+
+        LENS:
+        Internal coherence. Output's claims must agree with each other. If output acknowledges problem, fix must appear. Common: "I will fix X" language in final, stated solution doesn't match content, copy-verbatim of source including bug.
+
+        RECOGNIZE ISSUE:
+        - Meta language in output ("I will fix...", "the output does not clearly state...", "here is corrected version")
+        - Output acknowledges issue ("PROBLEM: X") but X still present
+        - Output claims "fixed Y" but Y still broken
+        - Output copy-verbatim of broken input (no actual change)
+        - Output contradicts itself (early section says A, later says not-A)
+        - Output title/header promises content body doesn't deliver
+
+        THINK:
+        1. Read for meta phrases (first-person verbs, commentary about output itself).
+        2. Each meta phrase: should be in final deliverable? No → remove.
+        3. Each acknowledged issue: scan rest of output for fix. Not present? Remove acknowledgment, surface actual fix.
+        4. Compare output to broken_input — identical means no fix applied. Surface unfixed issue.
+
+        FIX RULES:
+        - Remove all meta language about output itself.
+        - Either fix acknowledged issues OR remove acknowledgment.
+        - Output == input verbatim: at minimum rephrase broken section.
+        - Preserve sourced content.
+
+        TEXT UNDER REVIEW:
+        {{bookmarks.text_after_angle_4}}
+
+        TASK SPEC + AUXILIARY:
+        {{bookmarks.shell_output.stdout}}
+
+        Emit corrected text only. No commentary.
+      model_overrides: { temperature: 0.2, max_tokens: 400 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - $final_output
+              - "__OUTPUT_DIR__/final-corrected.txt"
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/check-angle.py 5 __CASE_FILE__ '{{bookmarks.final_output}}' > __OUTPUT_DIR__/check-angle-5.json 2>&1 || true"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+
+    # ── STEP 6: EMIT — write JSON change log ───────────────────
+    step_06_emit:
+      depends_on: [step_05_consistency_auditor]
+      generative_entity: "${models.worker}"
+      prompt: "DONE."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        after_step_succeeds:
+          - shell:
+              command: "python3 __REPO_ROOT__/experiments/correction-atom/scripts/build-changelog.py __CASE_FILE__ __OUTPUT_DIR__ > __OUTPUT_DIR__/change-log.json 2>&1 || true"
+              working_dir: "__REPO_ROOT__"
+              fail_on_error: false
+          - log:
+              to_file_path: "__OUTPUT_DIR__/summary.log"
+              event_fields: [workflow_id, total_steps]
+              level: info

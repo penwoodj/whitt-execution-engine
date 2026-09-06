@@ -1,0 +1,288 @@
+```json
+{
+  "mapping": {
+    "glossary": {
+      "jurisdiction": "target data protection framework (e.g., GDPR, CCPA, PIPEDA)",
+      "transfer_mechanism": "data transfer protocol between jurisdictions (e.g., Standard Contractual Clauses, Binding Corporate Rules)",
+      "representative_appointment": "legal entity designated to oversee cross-border data flows",
+      "workstream": "functional team responsible for implementing a specific compliance component (e.g., consent management, audit logging)"
+    },
+    "field_mapping": {
+      "input_variant_1": {
+        "source_fields": [
+          {"name": "personal_id", "type": "string", "unit": null},
+          {"name": "consent_version", "type": "string", "unit": null},
+          {"name": "transfer_timestamp", "type": "timestamp", "unit": "ISO 8601"}
+        ],
+        "target_fields": [
+          {
+            "name": "jurisdiction_id",
+            "type": "integer",
+            "mapping_rule": {
+              "condition": { "consent_version": ["GDPR", "CCPA"] },
+              "action": "map_to_0",
+              "default": null,
+              "trigger": "empty or invalid consent_version"
+            }
+          },
+          {
+            "name": "transfer_mechanism_type",
+            "type": "string",
+            "mapping_rule": {
+              "condition": { "personal_id": {"regex": "^[A-Z]{2}$"} },
+              "action": "map_to_SCC",
+              "default": "map_to_BCR"
+            }
+          },
+          {
+            "name": "representative_role",
+            "type": "string",
+            "mapping_rule": {
+              "condition": { "transfer_timestamp": {"gte": "2023-10-01"} },
+              "action": "map_to_legal_entity",
+              "default": "map_to_data_processor"
+            }
+          }
+        ],
+        "edge_cases": [
+          {
+            "input": "empty personal_id field",
+            "behavior": "halt with diagnostic: 'MissingRequiredField'",
+            "output_flags": ["error"]
+          },
+          {
+            "input": "consent_version matches multiple jurisdictions",
+            "behavior": "flag as ambiguous, retain original value in output"
+          }
+        ]
+      },
+      "input_variant_2": {
+        "source_fields": [
+          {"name": "user_metadata", "type": "object"},
+          {"name": "audit_logs", "type": "array"}
+        ],
+        "target_fields": [
+          {
+            "name": "jurisdiction_id",
+            "type": "integer",
+            "mapping_rule": {
+              "condition": { "user_metadata.preferred_language": ["fr", "en"] },
+              "action": "map_to_0",
+              "default": null,
+              "trigger": "neither language present"
+            }
+          },
+          {
+            "name": "transfer_mechanism_type",
+            "type": "string",
+            "mapping_rule": {
+              "condition": { "audit_logs.length": {"gte": 3} },
+              "action": "map_to_SCC",
+              "default": "map_to_BCR"
+            }
+          }
+        ]
+      },
+      "input_variant_3": {
+        "source_fields": [
+          {"name": "legacy_data", "type": "object"},
+          {"name": "timestamp_stamp", "type": "string"}
+        ],
+        "target_fields": [
+          {
+            "name": "jurisdiction_id",
+            "type": "integer",
+            "mapping_rule": {
+              "condition": { "timestamp_stamp": {"regex": "^\\d{4}-\\d{2}-\\d{2}$"} },
+              "action": "map_to_1",
+              "default": null,
+              "trigger": "invalid timestamp format"
+            }
+          },
+          "out_of_scope": [
+            "All fields not explicitly mapped in this variant are silently dropped (hard failure)."
+          ]
+        ]
+      }
+    }
+  },
+
+  "rules": {
+    "filter_clamp_normalization": [
+      {
+        "name": "consent_version_validation",
+        "trigger": { "input_variant": ["1", "2"] },
+        "action": {
+          "clamp": {
+            "field": "jurisdiction_id",
+            "min": 0,
+            "max": 3,
+            "error_on_violation": true
+          }
+        },
+        "rationale": "Ensures jurisdiction_id adheres to three-point risk scale (Low/Medium/High)"
+      },
+      {
+        "name": "transfer_mechanism_deduplication",
+        "trigger": { "input_variant": ["1", "2"] },
+        "action": {
+          "normalize": {
+            "field": "transfer_timestamp",
+            "format": "ISO 8601"
+          }
+        },
+        "rationale": "Standardizes timestamp format for reconciliation purposes"
+      },
+      {
+        "name": "representative_role_escalation",
+        "trigger": { "input_variant": ["2"] },
+        "action": {
+          "interpolate": {
+            "field": "representative_role",
+            "default_value": "unspecified",
+            "decision_path": [
+              {"condition": { "audit_logs.length": 0 }, "value": "data_processor"},
+              {"condition": { "audit_logs.length": {"gte": 1} }, "value": "legal_entity"}
+            ]
+          }
+        },
+        "rationale": "Delegates role determination to compliance team (Role: DataProtectionOfficer, Timeframe: <24h)"
+      }
+    ],
+    "branching_logic": [
+      {
+        "name": "multi_variant_branch",
+        "trigger_condition": { "input_variant": ["1", "3"] },
+        "action": {
+          "output_flags": ["variant_1_processed"],
+          "transformations": [
+            {"field": "jurisdiction_id", "operation": "map"},
+            {"field": "transfer_mechanism_type", "operation": "map"}
+          ]
+        }
+      },
+      {
+        "name": "edge_case_branch",
+        "trigger_condition": { "input_variant": ["1"], "edge_case": "missing_required_field" },
+        "action": {
+          "output_flags": ["halted"],
+          "diagnostic": "MissingRequiredField: personal_id field not present"
+        }
+      }
+    ]
+  },
+
+  "gap_handling": {
+    "discovery_tasks": [
+      {
+        "workstream": "DataMapping",
+        "responsible_role": "ComplianceAnalyst",
+        "information_needed": [
+          { "field": "jurisdiction_id", "value": "missing in variant_3" },
+          { "field": "transfer_mechanism_type", "value": "legacy_data format"}
+        ],
+        "timeframe": "<72h",
+        "compensating_control": {
+          "name": "DataMappingAudit",
+          "description": "Review of all unmapped fields by ComplianceBoard"
+        }
+      },
+      {
+        "workstream": "ConsentManagement",
+        "responsible_role": "LegalTeam",
+        "information_needed": [
+          { "field": "consent_version", "value": "ambiguous mappings"}
+        ],
+        "timeframe": "<48h",
+        "compensating_control": {
+          "name": "ConsentValidationLog",
+          "description": "Audit trail of all consent version decisions"
+        }
+      }
+    ],
+    "unmapped_fields": [
+      {
+        "variant": "input_variant_3",
+        "fields": ["legacy_data"],
+        "status": "explicitly out_of_scope: 'Legacy data fields are not part of current jurisdiction requirements'",
+        "risk_rating": "Medium"
+      }
+    ]
+  },
+
+  "invariants": {
+    "validation_rules": [
+      {
+        "name": "jurisdiction_id_integrity",
+        "check": {
+          "type": "integer",
+          "range": { "min": 0, "max": 3 },
+          "error_on_violation": true
+        },
+        "description": "Ensures jurisdiction_id maps to one of three risk categories (Low/Medium/High)"
+      },
+      {
+        "name": "transfer_mechanism_consistency",
+        "check": {
+          "type": "string",
+          "valid_values": ["SCC", "BCR"],
+          "error_on_violation": true
+        },
+        "description": "Verifies transfer mechanism type is one of two approved protocols"
+      },
+      {
+        "name": "representative_role_validation",
+        "check": {
+          "type": "string",
+          "valid_values": ["data_processor", "legal_entity"],
+          "error_on_violation": true
+        },
+        "description": "Ensures representative role is one of two permitted options"
+      }
+    ],
+    "reconciliation": [
+      {
+        "name": "total_records_consistency",
+        "source": { "field": "input_variant_1.length", "value": 50 },
+        "target": { "field": "output_records.length", "value": 48 },
+        "mismatch_handling": {
+          "diagnostic": "RecordsMismatch: 2 records flagged as 'ambiguous_consent_version'",
+          "action": "halt"
+        }
+      }
+    ]
+  },
+
+  "reproducibility": {
+    "ordering_rules": [
+      {
+        "name": "input_variant_order",
+        "description": "Processes variants in order of appearance: variant_1 → variant_2 → variant_3"
+      },
+      {
+        "name": "timestamp_normalization",
+        "description": "All timestamps converted to ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ)"
+      }
+    ],
+    "rounding_rules": [
+      {
+        "name": "numeric_field_precision",
+        "description": "Integer fields rounded to nearest whole number; all other numeric fields truncated"
+      },
+      "out_of_scope": [
+        "No floating-point rounding is applied to non-numeric fields (e.g., consent_version strings)"
+      ]
+    ],
+    "serialization_rules": [
+      {
+        "name": "output_format",
+        "description": "JSON output with double-quoted strings and ISO 8601 timestamps"
+      }
+    ]
+  },
+
+  "status": "draft",
+  "version": "1.0",
+  "notes": []
+}
+```

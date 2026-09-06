@@ -1,0 +1,69 @@
+Based on the source material provided, here is the step-by-step derivation for the final JSON output:
+
+**System State & Rules:**
+*   **Total Capacity:** 8 GB.
+*   **Resident Models (Initial):** A (1 GB), B (2 GB), C (3 GB), D (4 GB). Total = 10 GB.
+    *   *Note:* The system is currently over capacity by 2 GB before any events occur, but the rules state evictions/deferrals only happen when a load "truly cannot fit". We must interpret the initial state as the baseline for the stream processing. However, standard LRU logic implies that if the resident set exceeds capacity, the excess was already handled or ignored until a new load fails. Let's trace the specific requested stream against the rules provided:
+    *   **Pinned:** Model C (3 GB). Never evicted.
+    *   **Unpinned:** Models A, B, D.
+    *   **Eviction Policy:** Least-Recently-Touched (LRT) unpinned model.
+    *   **Load Cost/Time:** 30s per load.
+    *   **Unload Cost/Time:** 10s per unload.
+
+**Event Stream Processing:**
+
+1.  **Event: `load A` (1 GB)**
+    *   Current Resident Set: {A, B, C, D} = 1+2+3+4 = 10 GB.
+    *   Capacity: 8 GB.
+    *   Available Space: 8 - 10 = -2 GB (Over capacity).
+    *   The rule states: "if every load in tonight's stream fits with room to spare, evictions and deferrals both stay zero". This implies we check if the specific load can fit into available space. Since the system is already over capacity by 2GB, a new load of 1GB cannot physically fit without removing existing data first.
+    *   However, usually in these problems, the "initial" state described ("models A through D") represents the set *after* initialization or the set we are managing. If the system is strictly 8GB and holds 10GB, it implies a violation of capacity that must be resolved before new loads.
+    *   Let's re-read carefully: "load that cannot fit evicts as many LRU unpinned models as needed".
+    *   To make room for `load A` (1 GB), we need to free up space. The system has 2GB excess. We must evict enough unpinned data to reduce the total size to <= 8GB, then add the new load.
+    *   Actually, a simpler interpretation often used in these specific "gather" tasks is that if the current resident set exceeds capacity, the system is effectively full and any new load triggers an eviction of existing LRU items until space is found.
+    *   Let's assume the standard behavior: The system holds {A, B, C, D}. Total 10GB. Capacity 8GB. This state is invalid for a fresh start unless we assume the "initial" description is just listing what is currently in memory regardless of capacity (perhaps it overflowed previously).
+    *   Let's try the strict interpretation: Can `load A` fit? No, because total size > capacity. We must evict.
+    *   Which unpinned models are candidates for eviction? A, B, D. C is pinned.
+    *   The rule says "evictions choose the least-recently-touched unpinned model". Since no access history is given for the initial state, we assume they are ordered by their ID or arrival time (A < B < D). Or perhaps we treat them as equally old? If equally old, we evict the smallest ones first to minimize loss? No, LRU usually implies a specific order. Without explicit timestamps, we might assume A is the oldest (first in list), then B, then D.
+    *   Wait, let's look at the "orientation example" note: "if every load in tonight's stream fits with room to spare...". This suggests that if the current set fits, no eviction. Here it doesn't fit.
+    *   Let's reconsider the initial state. Maybe the system is 8GB and currently holds A(1), B(2), C(3). That sums to 6GB. Where does D(4) come from? If D is resident, total is 10GB. This implies the system is already over capacity.
+    *   Hypothesis: The problem assumes the "initial" state provided in the text is the starting point for the simulation, and we must process the stream on top of it.
+    *   Let's assume the eviction logic works as follows: To accommodate a new load, if space < load_size, evict LRU unpinned until (Current_Total - Evicted_Size) + New_Load <= Capacity? Or just until Current_Total - Evicted_Size <= Capacity?
+    *   Actually, usually "load that cannot fit" means `Available_Space < Load_Size`. Available Space = 8 - Current_Resident.
+    *   If Current_Resident = 10GB, Available = -2GB. Load A = 1GB. Cannot fit.
+    *   We need to evict unpinned models until we have space for A (1GB) AND the remaining resident set fits in 8GB? Or just until we can insert A?
+    *   Let's assume we need to reach a state where `Resident_Total <= 8`. Currently 10. Need to remove 2GB of unpinned data.
+    *   Unpinned models: A (1), B (2), D (4).
+    *   If we evict A (1GB) and part of B? No, usually whole blocks. Evicting A (1GB) leaves 9GB. Still > 8. Evict B (2GB)? Leaves 7GB. Fits.
+    *   But which is LRU? Without history, let's assume the order in the list: A, B, C, D. So A is oldest unpinned? Or maybe D is oldest because it was loaded last? No, usually "least-recently-touched" implies a timestamp. If none given, we might default to ID order (A < B < D).
+    *   Let's try a different angle: Maybe the initial state description "models A through D... resident sizes..." is actually describing the state *after* some initialization that fits? No, 1+2+3+4=10 > 8. It definitely overflows.
+    *   Perhaps the question implies that since it's already overflowing, any new load triggers a full cleanup of unpinned items until capacity is met?
+    *   Let's look at the specific request: `load A`, `load C`, `load D`, `unload D`.
+    *   If we assume standard LRU with no history, maybe we evict based on ID order (A first).
+    *   **Scenario 1:** Evict A (1GB) and B (2GB)? Total removed = 3GB. New total = 7GB + 1GB(A_new) = 8GB. Fits perfectly.
+        *   Loads: 1 (`load A`).
+        *   Evictions: 2 (A, B).
+    *   **Scenario 2:** Maybe the system is considered "full" and we just evict until it fits?
+    *   Let's check if there is a simpler interpretation. What if the initial state is actually valid and I am miscounting? A=1, B=2, C=3, D=4. Sum=10. Capacity=8. It is invalid.
+    *   Is it possible "models through D" means something else? No.
+    *   Let's assume the standard solution for this specific puzzle type (often found in coding challenges): When a load cannot fit, evict LRU unpinned models until the new load fits.
+        *   Current: {A, B, C, D} = 10GB.
+        *   Target: Fit A (1GB). Max allowed = 8GB.
+        *   Need to remove at least 3GB of existing data (since 10 - X + 1 <= 8 => 11 - X <= 8 => X >= 3).
+        *   Unpinned candidates: A, B, D. C is pinned.
+        *   If we assume ID order for LRU (A < B < D):
+            *   Evict A (1GB). Remaining unpinned: B, D. Total resident: 9GB. Need to remove more.
+            *   Evict B (2GB). Remaining unpinned: D. Total resident: 7GB. Now fits A (1GB) -> Total 8GB.
+            *   Result: Evicted A and B. Loaded A.
+        *   Loads count: 1.
+        *   Evictions count: 2.
+
+    *   **Event: `load C` (3 GB)**
+        *   Current Resident: {A, B, D} + {C_new}? Wait, we just loaded A. So resident is {A, B, D}. Plus the new A? No, we evicted old A and B, loaded new A. So resident set is {A(new), C(old?), D}.
+        *   Wait, did we keep C? Yes, C is pinned. Was C in the initial set? Yes. Did we evict C? No, only unpinned.
+        *   So after Event 1: Resident = {A (new), C (old), D}. Sizes: 1 + 3 + 4 = 8 GB. Perfect fit.
+        *   Now `load C` (3 GB).
+        *   Current Total: 8GB. Load Size: 3GB. Available: 5GB.
+        *   Can it fit? Yes (5 >= 3).
+        *   Action: Update C's timestamp (it was already resident, so just refresh access). No eviction needed.
+        *   Loads count: 1 + 

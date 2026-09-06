@@ -1,0 +1,39 @@
+**Phase 1 RULE SCAN**
+1. **Step Limit Rule**: For steps 1-5, max error rate is 2.0%; for steps 6-10, max error rate is 1.0%. Trigger: Arrival of step observation.
+2. **Breach Pause & Rollback Rule**: If observed error > current limit, the climb pauses and rolls back to the previous step (N-1). The breaching observation becomes spent. Trigger: Breach condition met at step N.
+3. **Tightened Limit Rule**: After any rollback, the limit for all remaining steps tightens to 0.8%. Trigger: Completion of a rollback event.
+4. **Stop Condition Rule**: A second breach (total count = 2) stops everything permanently; status becomes STOPPED. Trigger: Second breach condition met.
+5. **Success Condition Rule**: If no breaches occur, the climb finishes with status DONE. Trigger: Completion of final step without breach.
+
+**Phase 2 LEDGER WALK**
+1. **Step 1 (0.5%)**: Limit is 2.0%. Observed 0.5% <= 2.0%. No breach. State: Step 1 passed, Climb continues to Step 2.
+2. **Step 2 (0.8%)**: Limit is 2.0%. Observed 0.8% <= 2.0%. No breach. State: Step 2 passed, Climb continues to Step 3.
+3. **Step 3 (2.1%)**: Limit is 2.0%. Observed 2.1% > 2.0%. BREACH #1. Action: Pause climb. Rollback to previous step (Step 2). Observation spent. New limit for remaining steps becomes 0.8%. State: Climb paused at Step 2 (effectively), awaiting resumption rule logic, but since the next observation arrives after the breach, we check if it triggers a second breach immediately or resumes. The prompt says "climbs in 10 percent steps... observed error rates by step". This implies sequential arrival.
+   - *Correction on Rollback Logic*: The climb rolls back to Step N-1. The next observation (Step 4) arrives. Does it trigger against the new limit? Yes, "after any rollback the limit tightens".
+   - Current State: We are at Step 2 (the safe step). We have triggered a breach on Step 3. We must now process Step 4 with the new rules.
+4. **Step 4 (0.6%)**: Limit is now 0.8% (due to prior rollback). Observed 0.6% <= 0.8%. No breach. State: Step 2 confirmed safe, Climb continues to Step 3? Or does it resume counting from the last successful step? The prompt says "climbs in 10 percent steps". Usually, this means N=1, N=2... If a rollback happens at N=3, we go back to N=2. Then we try N=3 again? Or do we move to N=4?
+   - *Re-reading carefully*: "it climbs in 10 percent steps". "observed error rates by step, in order: 0.5, 0.8, 2.1...". This implies the sequence of events is fixed: Event 1 (Step 1), Event 2 (Step 2), Event 3 (Step 3)...
+   - If Event 3 breaches, we rollback. The "climb" pauses at Step 2? Or does it mean we discard Step 3 and try again? "rolls back to the previous step". This usually means the system reverts state to N-1. The next event in the list is Step 4.
+   - However, standard rollout logic implies you retry the failed step or move forward if the step index increments. But the text says "climbs... steps 1 through 5". If I breach at 3, do I go back to trying 3? Or does the sequence continue to 4? The phrase "rolls back to the previous step" suggests reverting the counter. So after Event 3 (Breach), the counter is effectively reset or held at Step 2.
+   - Let's look at the "Orientation Story": "rolled 0.2, 0.75, 2.5... third step breached... climb paused at 20 percent holding a pair of clean stages". This implies the counter stopped incrementing. The next event would be an attempt to resume?
+   - But the input is a fixed list: "observed error rates by step, in order". If I am at Step 3 and it breaches, and then Step 4 arrives... does Step 4 arrive *after* the rollback? Yes. Does Step 4 represent a new attempt at Step 3 or Step 4?
+   - Interpretation A: The steps are fixed indices (1..10). If index 3 fails, we hold index 2. Then what is index 4? Is it a retry of 3? Or is the list simply sequential observations where "step" refers to the ordinal position in the list?
+   - Interpretation B: The steps are stages of a version (V10%, V20%...). If Stage 3 fails, we revert to Stage 2. The next observation in the log is for Stage 4? No, that would skip Stage 3 retry.
+   - Let's look at the "Orientation" again: "rolled 0.2, 0.75, 2.5... third step breached". Then "window closed before any resume observation arrived". This implies there was a specific "resume" event type not in the main list? Or that the main list *is* the attempts.
+   - Crucial sentence: "the climb resumes from the next observation." In the orientation, it didn't. In tonight's case: "rolls back to the previous step... and the observation that breached is spent, the climb resumes from the next observation."
+   - This phrasing "resumes from the next observation" strongly implies that after a rollback at Step N, we proceed to observe Step N+1 (or whatever the next item in the list is), treating it as the continuation of the climb. The counter effectively increments past the failure? Or does it retry the same step?
+   - If I have steps 1..5 allowed. Event 3 breaches. Rollback to 2. "Resume from the next observation". If the observations are fixed in order (0.5, 0.8, 2.1, 0.6...), then after Event 3, the *next* observation is Event 4 (0.6). Does Event 4 correspond to Step 4? Or a retry of Step 3?
+   - Given "climbs in 10 percent steps", usually this means V10, V20... If I fail V30, I am back at V20. The next logical step is to try V30 again. But the list gives me Event 4 with value 0.6. If Event 4 is a retry of Step 3, then I need to check it against the *current* limit (0.8). 0.6 <= 0.8. Pass. Then I move to Step 4?
+   - OR, does "next observation" mean the list simply continues as if the breach didn't stop the sequence of *indices*, but stops the *progression*?
+   - Let's assume the simplest state machine: `current_step` starts at 1.
+     - Event 1 (0.5) -> Step 1 OK. `current_step` becomes 2.
+     - Event 2 (0.8) -> Step 2 OK. `current_step` becomes 3.
+     - Event 3 (2.1) -> Step 3 Breach. `current_step` rolls back to 2? Or does it stay at 3 for retry? The text says "rolls back to the previous step". So we are now effectively defending Step 2 again? But there is no new event for Step 2 in the list (it's already passed).
+     - Maybe "next observation" means the *list* provides the next attempt. If I rolled back, do I get a retry of the failed step from the list? The list has 10 items. Steps are 1-10. It matches perfectly.
+     - Hypothesis: The list represents the sequence of *attempts*. Step N corresponds to the N-th item in the list IF we haven't rolled back. If we roll back, do we consume a new item for the retry?
+     - Let's re-read: "observed error rates by step, in order". This implies the data is tied to the Step index. 0.5 is Step 1's rate. 2.1 is Step 3's rate.
+     - If Step 3 breaches, we rollback to Step 2. The observation (2.1) is spent. The climb resumes from the *next observation*. What is the next observation? Is it a retry of Step 3 using the same data? No, that would be circular.
+     - Perhaps the "next observation" refers to the next item in the provided list, which we must treat as an attempt at the *current* step (which is now Step 2 due to rollback)? That seems wrong because Step 2 already passed.
+     - Alternative interpretation: The steps are version percentages (10%, 20%...). The "list" gives us the observed rates for Steps 1, 2, 3... in order of arrival. If Step 3 fails, we go back to Step 2. But there is no new data for Step 2.
+     - Wait, "the climb resumes from the next observation". Maybe this means we increment the step counter anyway? i.e., We failed Step 3, but we move on to evaluate Step 4? That contradicts "rolls back to previous".
+     - Let's look at the Orientation Story again for clues: "rolled 0.2, 0.75, 2.5... third step breached... climb

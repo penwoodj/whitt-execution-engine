@@ -1,0 +1,51 @@
+```plaintext
+1. Create directory structure in /tmp/opencode/budget-run with subdirectories:
+   - data/          # raw uptime check files per service per day (CSV or JSON)
+   - scripts/       # all pipeline scripts as standalone, dependency-free Python or shell
+   - outputs/       # final deliverables: budget.md, budget.json, logs/*.log, messagelog.txt
+   - rules.md       # one line per rule with justification and data source
+   - decisions.md   # one line per decision with reasoning (e.g., "missing check = 0% uptime")
+   - verifier.py    # standalone script that recomputes key metrics from raw inputs
+
+2. Generate synthetic daily uptime data for three services over 30 days:
+   - Service A: 99.9% SLO → 1 error per 1,000 checks (1 check every 60 seconds)
+   - Service B: 99.5% SLO → 2 errors per 1,000 checks
+   - Service C: 99.0% SLO → 5 errors per 1,000 checks
+   - Each day has one minute check every minute (30 days × 24 hours = 720 minutes/day)
+   - For each service, generate a CSV file in data/{service}/day_{d}.csv with columns: timestamp, status (up/down), error_count
+
+3. Simulate missing checks by introducing 15% of daily check records as "missing" (not failed, not up) — these are not counted toward uptime or errors.
+   - Rule: Missing check = no record → do not infer downtime; treat as data gap
+   - Document in rules.md: "Missing checks are treated as absent data points. No inference is made. They do not contribute to availability or error counts."
+
+4. For each day, compute daily availability per service:
+   - Total checks per day = 1440 (24 hours × 60 minutes)
+   - Available checks = total checks – missing checks – failed checks
+   - Availability = available_checks / total_checks → expressed as percentage with denominator
+
+5. Compute monthly error budget per service using SLO targets:
+   - Monthly error budget = (total minutes in month) × (1 - SLO)
+     - Service A: 30 days × 24 hours × 60 min/day × (1 - 0.999) = 30×1440×0.001 = 43.2 minutes
+     - Service B: 30×1440×(1-0.995) = 30×1440×0.005 = 216 minutes
+     - Service C: 30×1440×(1-0.990) = 30×1440×0.010 = 432 minutes
+   - Store in budget.json under "budget_minutes" and "remaining_budget_timeline"
+
+6. Compute daily burn rate (minutes of error budget consumed per day):
+   - Daily burn = total errors × (error cost per minute) → each error consumes one minute of budget
+   - Error count per day = sum of failed checks per service per day
+   - Burn rate = (total errors in day) / 1440 minutes/day → expressed as minutes per day
+
+7. Flag any day where burn rate exceeds 3× sustainable burn:
+   - Sustainable burn = monthly budget / 30 days
+     - A: 43.2 / 30 = 1.44 min/day → flag if > 4.32 min/day (3×)
+     - B: 216 / 30 = 7.2 min/day → flag if > 21.6 min/day
+     - C: 432 / 30 = 14.4 min/day → flag if > 43.2 min/day
+   - Rule: "If daily burn rate exceeds 3× sustainable burn, mark day as 'high-risk' in logs and budget.md"
+
+8. Analyze Day-9 budget exhaustion:
+   - Compute cumulative error minutes from day 1 to day 9
+   - If total errors ≥ monthly budget for that service → budget exhausted
+   - Determine whether it was due to one bad hour (e.g., 60-minute spike) or slow grind:
+     - Check daily burn rate on day 9: if > sustainable burn ×3, then "one bad hour"
+     - Else, if cumulative error minutes reached budget slowly, then "slow grind"
+   - Rule: "Day-9 exhaustion

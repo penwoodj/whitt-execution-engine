@@ -1,0 +1,77 @@
+Phase 1 RULE SCAN:
+
+- Rule: If an item has a price change mid-stream (detected by timestamp batch artifact), trigger a price revision rule for that item. Triggered by: price change event in sales data.
+- Rule: If three slots share one item, trigger a slot-overlap detection rule and flag the item as "multi-slot" with a note of shared capacity. Triggered by: item-slot mapping row with count > 1.
+- Rule: If an item's demand trend drops below 5% of average weekly sales over 4 weeks, trigger a dead-item proposal rule for that item. Triggered by: weekly sales trend analysis showing <5% of average.
+- Rule: If restock forecast exceeds capacity (i.e., forecast > 8 units per slot), trigger a capacity-overrun fallback rule and cap forecast at 8. Triggered by: next-week forecast calculation exceeding slot capacity.
+- Rule: If an item has no sales in two consecutive weeks, trigger a dead-item revocation rule and remove it from restock list. Triggered by: absence of sales for two consecutive weeks.
+- Rule: If a restock trip is scheduled weekly but demand trend shows <10% growth over 3 weeks, trigger a biweekly fallback rule to reduce frequency. Triggered by: low-demand trend in weekly sales.
+- Rule: If an item's price changes mid-stream and the change occurs after 09:00 timestamp batch, trigger a price-change expiry rule and mark that version as expired. Triggered by: price change event with timestamp > 09:00.
+- Rule: If forecast demand is below 1% of average capacity utilization (i.e., <0.01 units per slot), trigger a fallback to zero restock for that item. Triggered by: next-week forecast calculation showing <0.01 units.
+
+Phase 2 LEDGER WALK:
+
+- Initial state: 30 slots, 8 items per slot; sales data loaded with batch timestamps at 09:00 daily.
+- Event: Item "Coke" has price change from $1.50 to $1.75 at timestamp 2024-03-15T09:00:00Z → Price revision rule triggered; new price recorded, old version expired (rule: price-change expiry).
+- Event: Item "Coke" appears in three slots (slot 5, 12, 27) → Slot-overlap detection rule triggered; flagged as multi-slot with shared capacity note.
+- Event: Weekly sales trend for "Coke" shows average of 4.2 units/week over last 4 weeks → 4.2 / 8 = 52.5% of capacity → no dead-item trigger (threshold is <5%, not met).
+- Event: Forecast for "Coke" next week is 6.1 units → below capacity limit of 8 → no overflow; restock list includes 6.1 units.
+- Event: Item "Gum" has zero sales in weeks 3 and 4 (2024-03-15 to 2024-03-29) → dead-item revocation rule triggered; removed from restock list.
+- Event: Forecast for "Gum" is 0.8 units → below 1% of average capacity utilization (average = 7.2 units/week, 0.8 / 8 = 10%) → fallback to zero restock rule triggered; restock set to 0.
+- Event: Weekly demand trend for "Chips" shows only 3.4 units over last 3 weeks → below 10% growth threshold (average = 5.2, 3.4/5.2 ≈ 65%) → biweekly fallback rule triggered; restock frequency reduced to biweekly.
+- Event: Forecast for "Chips" next week is 7.8 units → within capacity limit of 8 → restock list includes 7.8 units.
+- Final state: Restock list generated with per-item forecast, dead-item removals, and fallbacks applied; all rules triggered as per event sequence.
+
+{
+  "restock_list": [
+    {
+      "item": "Coke",
+      "forecast_units": 6.1,
+      "slot_count": 3,
+      "status": "active",
+      "notes": "Price changed mid-stream, shared across three slots; forecast within capacity"
+    },
+    {
+      "item": "Chips",
+      "forecast_units": 7.8,
+      "slot_count": 1,
+      "status": "active",
+      "notes": "Low demand trend (65% of average); restock frequency reduced to biweekly"
+    },
+    {
+      "item": "Gum",
+      "forecast_units": 0,
+      "slot_count": 0,
+      "status": "dead",
+      "notes": "Zero sales in two consecutive weeks; removed from restock list"
+    }
+  ],
+  "dead_item_proposals": [
+    {
+      "item": "Gum",
+      "reason": "No sales for two consecutive weeks (weeks 3 and 4)",
+      "action": "Revoked from restock list"
+    }
+  ],
+  "capacity_overrun": [],
+  "fallback_rules_applied": [
+    "biweekly fallback for Chips due to low demand trend",
+    "zero restock for Gum due to below 1% capacity utilization"
+  ],
+  "price_change_events": [
+    {
+      "item": "Coke",
+      "old_price": 1.5,
+      "new_price": 1.75,
+      "timestamp": "2024-03-15T09:00:00Z",
+      "action": "Price revision; old version expired"
+    }
+  ],
+  "slot_overlap_detected": [
+    {
+      "item": "Coke",
+      "slots": ["5", "12", "27"],
+      "note": "Three slots share one item; capacity shared across slots"
+    }
+  ]
+}

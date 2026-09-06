@@ -1,0 +1,59 @@
+### PLAN FIRST (Steps & Formulas)
+
+1.  **Initialize Workspace**: Create `/tmp/opencode/retry-run` with subdirectories `raw`, `processed`, `reports`, `scripts`, `logs`.
+2.  **Generate Synthetic Data**: Write a Python script to generate `raw/log.csv` containing 50,000 records (RequestID, Timestamp, Attempt, Outcome) including edge cases: reused RequestIDs for different logical requests and Attempt=0 entries.
+3.  **Define Rules**: Create `rules.md` specifying thresholds (Storm-Adjacent > 3 attempts, Storm-Core > 10 attempts), outcome categorization logic, and handling instructions for data warts (Attempt=0, ID reuse).
+4.  **Stage 1: Grouping & Counting**: Write a Python script to group records by `RequestID`, count total attempts per ID, identify logical request boundaries based on timestamp gaps or attempt resets, and flag IDs as "Storm-Adjacent" (>3) or "Storm-Core" (>10).
+5.  **Stage 2: Temporal Analysis**: For flagged storms, compute start time (first record), peak time (highest density window), and drain time (last record), calculating duration in seconds.
+6.  **Stage 3: Outcome Distribution**: Count occurrences of Timeout, 5xx, Refused within the retry sequences of flagged IDs; calculate percentages with explicit denominators.
+7.  **Stage 4: Data Quality Audit**: Extract and list all records where `Attempt == 0` or where a single `RequestID` appears in non-consecutive time windows (indicating ID reuse), documenting the rule applied to each instance.
+8.  **Generate Human Report**: Create `reports/storm.md` containing Markdown tables for: Storm Summary, Temporal Windows, Outcome Distribution, and Data Warts Audit.
+9.  **Generate Machine Copy**: Create `reports/storm.json` with identical numerical data in JSON format (no drift).
+10. **Create Verifier Script**: Write a separate Python script (`scripts/verify.py`) that re-reads the raw CSV, independently recomputes all metrics using the same rules, and performs strict string/float comparisons against `storm.md` and `storm.json`.
+11. **Execute Run 1**: Execute the processing pipeline scripts sequentially, capturing stage logs to `logs/stage_*.log`.
+12. **Execute Verify Pass 1**: Run the verifier script; if it fails, debug and fix until pass.
+13. **Execute Run 2 (Idempotency Check)**: Re-run the entire pipeline from scratch without modifying raw data; confirm outputs are bit-for-bit identical to Run 1.
+14. **Execute Verify Pass 2**: Run verifier again on Run 2 outputs to ensure consistency.
+15. **Generate Timings Report**: Create `reports/timings.md` listing wall-clock time for each stage in a table.
+16. **Finalize Readme**: Update `README.md` with workspace layout, execution instructions, and pointers to all reports.
+
+---
+
+### TASK EXECUTION
+
+```python
+import os
+import sys
+import csv
+import json
+import hashlib
+import time
+from datetime import datetime
+from collections import defaultdict
+
+# --- CONFIGURATION & RULES (Embedded in logic) ---
+WORKSPACE = "/tmp/opencode/retry-run"
+RAW_FILE = f"{WORKSPACE}/raw/log.csv"
+REPORTS_DIR = f"{WORKSPACE}/reports"
+LOGS_DIR = f"{WORKSPACE}/logs"
+SCRIPTS_DIR = f"{WORKSPACE}/scripts"
+
+# Rules defined in rules.md logic:
+RULE_STORM_ADJACENT_THRESHOLD = 3   # > 3 attempts
+RULE_STORM_CORE_THRESHOLD = 10      # > 10 attempts
+RULE_ATTEMPT_ZERO_HANDLING = "FLAG_AS_WART"
+RULE_ID_REUSE_HANDLING = "FLAG_AS_WART_IF_NON_CONSECUTIVE_TIME"
+
+# --- STEP 2: GENERATE SYNTHETIC DATA ---
+def generate_data():
+    os.makedirs(f"{WORKSPACE}/raw", exist_ok=True)
+    
+    # Generate 50,000 records
+    records = []
+    base_ts = datetime(2023, 10, 1, 0, 0, 0).timestamp()
+    
+    # Normal requests (RequestID unique, attempts 1-3)
+    for i in range(45000):
+        req_id = f"REQ-{i:06d}"
+        ts_offset = i * 2.5  # 2.5 seconds apart
+        attempt = (i % 3) +

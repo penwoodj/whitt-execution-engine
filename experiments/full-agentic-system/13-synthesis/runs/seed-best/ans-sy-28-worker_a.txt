@@ -1,0 +1,59 @@
+### Phase 1 Rule Scan (First Half Only)
+*Rules governing the core scheduling, preemption, checkpointing, and waste calculation for LOW jobs.*
+
+1. **Arrival Order & Queuing**: LOW jobs take the core in strict order of their start minutes; a resumed LOW outranks a fresh one at any tie; if the core is busy when a LOW's start minute arrives, it waits until the current job finishes or is preempted.
+2. **Preemption Priority**: HIGH arrival instantly preempts whatever LOW job is running and stops all other activity while HIGH runs.
+3. **Checkpoint Banking**: LOW jobs checkpoint every 2 completed minutes of running time; banks occur at absolute minute $s+2$ and every subsequent even interval relative to the start/resume point ($s, s+2, s+4...$).
+4. **Waste on Preemption**: On preemption, work past the last banked checkpoint is wasted and must be redone upon resume.
+5. **Resume Calculation**: A job resumes with remaining time = Total Time - Banked Minutes; it redoes every minute past its last bank.
+
+### Phase 2 Ledger Walk (First Half Only)
+*Applying events in strict arrival order to track state, banks, and waste.*
+
+**Minute 0**: `LOW1` starts (Total: 4). Running time: 0/4. Banked: 0. State: Running LOW1.
+**Minute 1**: `LOW1` continues. Running time: 1/4. Banked: 0. State: Running LOW1.
+**Minute 2**: `LOW1` completes minute 2. **Bank Event**: Checkpoint banked at absolute min 2 (Start+2). Running time: 2/4. Banked: 1. State: Running LOW1.
+**Minute 3**: `LOW1` continues. Running time: 3/4. Banked: 1. State: Running LOW1. (`LOW2` start minute arrives, but core busy).
+**Minute 4**: `HIGH` arrives at min 5? No, HIGH arrives at **Minute 5**. Wait, re-reading prompt: "HIGH arrives at minute 5".
+*Correction*: At Minute 3 and 4, LOW1 is still running.
+**Minute 4**: `LOW1` completes minute 4 (Total). Finished. Banked: 2 (Start+4). State: Core Idle? No, `LOW2` start minute was 3.
+*Re-evaluating Queue Logic*: "the core never idles while a LOW job is waiting".
+At Minute 0: `LOW1` starts.
+At Minute 3: `LOW2` start minute arrives. `LOW1` is running (time 3/4). Core busy. `LOW2` waits in queue.
+At Minute 4: `LOW1` finishes (Total 4 mins done). Banked at min 4. Queue pops `LOW2`. `LOW2` starts immediately at Minute 4.
+**Minute 5**: `HIGH` arrives. Preempts `LOW2` (which has run for 0 minutes? No, started at 4, so ran minute 4).
+*Wait, let's trace strictly by absolute minutes*:
+- **Min 0**: `LOW1` starts. Runs min 0. (Time: 1/4). Banked: 0.
+- **Min 1**: `LOW1` runs min 1. (Time: 2/4). **Bank Event**: Checkpoint at Start+2 (Min 2)? No, bank happens *after* completing the minute? "checkpoint every 2 completed minutes". Usually implies after finishing the interval. Let's assume banks are recorded at the end of the minute if the count hits a multiple of 2.
+    - End Min 0: Time=1. Banked=0.
+    - End Min 1: Time=2. **Bank Event**: Checkpoint banked (Min 2). Banked=1.
+- **Min 2**: `LOW1` runs min 2. (Time: 3/4). Banked=1. (`LOW2` start minute arrives, waits).
+- **Min 3**: `LOW1` runs min 3. (Time: 4/4). Finished. Banked=2 (Start+4). Queue pops `LOW2`. `LOW2` starts immediately at Min 3? Or does it wait for the slot? "the minute one LOW job finishes... the next waiting LOW starts in that same minute". So `LOW2` starts at Min 3.
+- **Min 4**: `HIGH` arrives at Min 5? Prompt: "HIGH arrives at minute 5".
+    - Let's re-read carefully: "HIGH arrives at minute 5 and runs 4 minutes to completion, instantly preempting whatever LOW job is running".
+    - Timeline so far:
+        - Min 0-1: `LOW1` runs. (Ends Min 2 with bank).
+        - Min 2-3: `LOW1` runs. Finishes at end of Min 3? Total 4 mins. Starts Min 0. Runs 0,1,2,3. Finishes end of Min 3.
+        - Queue: `LOW2` (Start min 3).
+        - At end of Min 3, `LOW1` finishes. `LOW2` starts immediately at Min 4? Or does it start at the same minute slot? "starts in that same minute". If `LOW1` finished during Min 3, the slot for Min 3 is free. `LOW2` takes Min 3?
+        - Let's assume standard discrete time steps:
+            - Step 0 (`LOW1`): Runs.
+            - Step 1 (`LOW1`): Runs. (Bank at end of step 1? "every 2 completed minutes". If starts at 0, completes min 0 and 1 -> 2 mins done. Bank at end of Min 1).
+            - Step 2 (`LOW1`): Runs.
+            - Step 3 (`LOW1`): Runs. Finishes. (Total 4).
+            - Queue: `LOW2`. Start minute was 3. It waited during Min 0,1,2,3? No, "starts in that same minute" when previous finishes. Previous finished end of Min 3. So `LOW2` starts at Min 4? Or does it fill the gap?
+            - Let's look at the "Orientation" example for logic: "LOW1 held core minutes 0, 1 and 2... swap came [at min 3]". In that example, LOW1 ran 0,1,2 (3 mins). Then HIGH arrived.
+            - Here: `LOW1` runs 4 mins (0,1,2,3). Finishes end of Min 3.
+            - `LOW2` start minute is 3. It was waiting. When `LOW1` finishes (end of Min 3), `LOW2` starts immediately. Does it take the slot for Min 3? Or Min 4? "starts in that same minute". If `LOW1` occupied Min 3, and finished at the very end, `LOW2` takes the *next* available time unit, which is Min 4? Or does it retroactively fill? Usually "same minute" means if A finishes at T, B starts at T. But here T=End of Min 3. So B runs during Min 4?
+            - Let's assume `LOW2` runs during **Minute 4**.
+    - **Event**: `HIGH` arrives at **Minute 5**.
+    - At Minute 5: `LOW2` is running (started Min 4). `HIGH` preempts.
+    - `LOW2` ran for 1 minute (Min 4). Total duration of `LOW2`? Prompt doesn't specify total duration for `LOW2` in the main task, only "three jobs". Wait, "one core tonight, three jobs." Usually implies LOW1, LOW2, and maybe a third? Or just two?
+    - Re-reading: "two crews worked... one report to file... one core tonight, three jobs." This is ambiguous. However, the orientation example lists `LOW1` and `LOW2`. The main task says "three jobs". Let's assume there are only two LOWs mentioned by name (LOW1, LOW2) but maybe a third unnamed? Or perhaps "three jobs" refers to the fact that HIGH counts as one? No, "preempting whatever LOW job".
+    - Let's look at the specific text: "LOW1 runs 4 minutes... LOW2 runs 3 minutes starting at minute 3." It explicitly names two. Where is the third? Maybe the prompt implies `HIGH` is a job? No. Maybe there is a `LOW3`?
+    - Hypothesis: The prompt says "three jobs" but only defines two. This might be a trick or I missed a definition. Let's re-read *very* carefully. "one core tonight, three jobs." Then definitions for LOW1 and LOW2. No third defined.
+    - Is it possible `HIGH` is considered the third job? Unlikely given the preemption context.
+    - Is it possible the prompt implies a queue of 3? "two ledgers to close". Maybe LOW1, LOW2, and LOW3? But only two are described.
+    - Let's assume there are only **two** LOW jobs (LOW1, LOW2) and the text "three jobs" is an error or refers to something else (like HIGH + 2 LOWs?). Or perhaps `LOW2` runs for 3 minutes total? Yes, "LOW2 runs 3 minutes".
+    - If there are only two LOWs:
+        - `LOW1`: Runs Min 0-3. Finishes end of Min 3. Banked at Min 2 (Start+2) and Min 4 (Start+4)? No, Start=0. Banks at 2, 4... It finished at 4 mins total. So it

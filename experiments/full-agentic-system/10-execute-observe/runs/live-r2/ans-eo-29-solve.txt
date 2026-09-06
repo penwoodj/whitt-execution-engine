@@ -1,0 +1,78 @@
+Based on the task requirements and the specific constraints regarding LOW job execution, preemption by HIGH, and checkpointing logic, here is the step-by-step derivation:
+
+**1. Event Timeline & State Analysis:**
+
+*   **Minute 0-1:** `LOW1` starts at minute 0. It runs for 2 minutes total (until minute 2). At minute 1, it has accumulated 1 minute of running time.
+    *   *Checkpoint Logic:* Checkpoints occur every 2 completed minutes. The first checkpoint is at absolute minute $0+2=2$. Since the current time is 1, no checkpoint exists yet. Wasted work = 0.
+*   **Minute 1-2:** `LOW1` continues running. At the end of minute 1 (start of minute 2), it reaches exactly 2 minutes of accumulated running time. This triggers a checkpoint at absolute minute 2. The job has successfully banked 2 minutes of work.
+    *   State: `LOW1` is in a safe state with 0 wasted work pending, ready to run the remaining $4-2=2$ minutes.
+*   **Minute 2:** `HIGH` arrives at minute 2.
+    *   *Preemption:* `HIGH` instantly preempts whatever job was running (`LOW1`).
+    *   *Checkpoint Validation:* The prompt states: "bank landing on exact minute HIGH arrives still counts and nothing is wasted". Since the checkpoint landed exactly at minute 2, `LOW1` has successfully saved its progress up to that point. No work needs to be redone for this specific moment of arrival.
+    *   *State after preemption:* `HIGH` runs for 6 minutes (until minute 8). `LOW1` is paused. Work accumulated so far: 2 minutes. Remaining for `LOW1`: 2 minutes. Wasted work: 0.
+
+*   **Minute 3-8:** `HIGH` executes exclusively.
+    *   At the end of minute 8, `HIGH` finishes instantly (or effectively completes its slot). The core becomes free again at minute 9? Or does it become free immediately after completion? Usually, if a job runs from $T$ to $T+Duration$, the core is busy during $[T, T+Duration)$. If `HIGH` arrives at 2 and takes 6 mins, it occupies $[2, 8)$. It finishes exactly at minute 8. The core becomes free at minute 8.
+    *   Let's re-read: "runs 6 minutes to completion". Start=2. End=8. Core busy during min 3,4,5,6,7,8? Or does it finish at the instant 8 is reached? Standard scheduling implies if a task takes duration $D$ starting at $T$, it occupies slots corresponding to time intervals $[T, T+1), [T+1, T+2)... [T+(D-1), T+D)$. It releases the core at time $T+D$.
+    *   So `HIGH` runs during minutes 3, 4, 5, 6, 7. Wait, if it starts at minute 2 (instantly), does it run during minute interval [2,3)? Yes. Then [3,4) ... up to [7,8). It finishes exactly at minute 8.
+    *   So the core is busy: Minute 2 (partial, but preempted immediately? No, HIGH preempts LOW1. Does LOW1 get any time in minute 2? "instantly preempting". If it's instant at t=2, `LOW1` gets 0 time in that interval. It effectively resumes from its last checkpoint).
+    *   Let's assume standard discrete time steps for the walk:
+        *   Min 0-1: LOW1 runs (accumulates 1 min).
+        *   Min 1-2: LOW1 runs (accumulates 2 mins total). Checkpoint hits at t=2.
+        *   Min 2 (arrival): HIGH preempts instantly. `LOW1` is saved (0 wasted). `HIGH` starts.
+        *   Min 2-3: HIGH runs (accumulates 1 min of its 6 mins).
+        *   Min 3-4: HIGH runs (accumulates 2 mins).
+        *   Min 4-5: HIGH runs (accumulates 3 mins).
+        *   Min 5-6: HIGH runs (accumulates 4 mins).
+        *   Min 6-7: HIGH runs (accumulates 5 mins).
+        *   Min 7-8: HIGH runs (accumulates 6 mins). `HIGH` completes exactly at minute 8.
+
+*   **Minute 8 onwards:** `LOW1` resumes.
+    *   It has completed 2 minutes. It needs 2 more to finish its 4-minute duration.
+    *   Min 8-9: `LOW1` runs (accumulates 3 mins).
+    *   Min 9-10: `LOW1` runs (accumulates 4 mins). `LOW1` finishes exactly at minute 10.
+
+*   **Wait, is there a LOW2?**
+    *   The prompt says "LOW jobs take core in order of their start minutes". Both started at minute 0.
+    *   "resumed LOW outranks fresh one at any tie". `LOW1` was running (and paused). `LOW2` is waiting/fresh. So `LOW1` must finish before `LOW2` starts? Or does `LOW2` start immediately after `LOW1` finishes?
+    *   The prompt says: "LOW jobs take core in order of their start minutes, resumed LOW outranks fresh one at any tie". This implies priority to the active/resumed job. So `LOW1` continues until finished. Only then does `LOW2` start.
+    *   Let's re-evaluate the completion time logic with this constraint.
+
+**Revised Timeline with `LOW2`:**
+
+*   **0-8:** As above, `HIGH` runs from 2 to 8. `LOW1` is suspended but checkpointed at 2.
+    *   At minute 8, `HIGH` finishes. Core free.
+    *   `LOW1` resumes immediately (it has priority over fresh `LOW2`).
+*   **8-9:** `LOW1` runs. Total done: $2+1=3$ mins.
+*   **9-10:** `LOW1` runs. Total done: $3+1=4$ mins. **`LOW1` finishes at minute 10.**
+    *   Wasted work for `LOW1`: Since it checkpointed at 2 and resumed, did it waste anything? The prompt says "past last checkpoint is wasted". Between checkpoint (at 2) and resume (at 8), the job was paused. When it resumes, does it lose the progress made between 2 and 8? No, because the core was busy with HIGH. However, checkpoints are every 2 minutes *of running time*.
+    *   Checkpoint logic: "LOW jobs checkpoint every 2 completed minutes of running time".
+        *   Run 1 (0-2): 2 mins done. Checkpoint at t=2.
+        *   Pause (2-8).
+        *   Resume (8-10).
+        *   New run starts accumulating "completed minutes". At t=9, it has 1 min. At t=10, it has 2 mins. Does it checkpoint again? Yes.
+    *   Did any work get wasted? The prompt says: "on preemption work past last checkpoint is wasted and redone after resume." This usually applies if a job is paused mid-run (e.g., at minute 3) without a checkpoint. Here, the pause occurred exactly at a checkpoint boundary (minute 2). So no waste there.
+    *   Is there any other source of waste? "job that starts or resumes... banks checkpoint".
+    *   What about `LOW2`? It hasn't started yet because `LOW1` (resumed) outranks it.
+    *   Wait, let's check the duration again. `LOW1` is 4 mins. `HIGH` is 6 mins.
+    *   If `LOW1` resumes at 8 and runs 2 minutes, it finishes at 10.
+    *   Then `LOW2` starts at 10. It runs 3 minutes (instant duration). Finishes at 13.
+
+**Let's check the "makespan" definition:** "counts from last finish". Last finish is `LOW2` at minute 13? Or is there a different interpretation of "instantly preempting"?
+Maybe `HIGH` preemption logic implies something about wasted minutes differently?
+"work past last checkpoint is wasted and redone after resume."
+If the job was running from 0 to 4. Checkpoints at 2, 4 (finish).
+Preempted at 2: Saved. No waste.
+Resume at 8: Run remaining 2 mins. Finish at 10.
+Is `LOW2` even run? "three jobs". Yes.
+
+**Alternative interpretation of "order"**: Maybe the order is based on arrival time in the final list? The prompt says "completion order lists LOW jobs by minute each finishes".
+So if `LOW1` finishes at 10 and `LOW2` finishes at 13, Order = ["LOW1", "LOW2"].
+
+**Is there any scenario where waste occurs?**
+Maybe the checkpoint logic is stricter? "bank landing on exact minute HIGH arrives still counts". This confirms no waste at t=2.
+What if `HIGH` didn't align with a checkpoint? But it did (t=2).
+So Wasted = 0?
+
+**Wait, let's look at the previous failed attempt check:** "json_exact: observed [JSON fields/values differ] — recheck this rule against the task contract". The user provided a specific `ATTEMPT` object. Maybe I need to match that structure or values?
+The prompt asks

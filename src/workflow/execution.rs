@@ -33,6 +33,46 @@ pub struct WorkflowExecutionStrategy {
     pub synchronization: Option<SynchronizationConfig>,
     #[serde(default)]
     pub dependency_resolution: Option<DependencyResolutionConfig>,
+    #[serde(default)]
+    pub resource_admission: Option<ResourceAdmissionConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ResourceAdmissionPolicy {
+    Block,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResourceAdmissionConfig {
+    pub enforcement_policy: ResourceAdmissionPolicy,
+    pub minimum_available: AvailableResourceMinimums,
+    pub model_estimate: ModelResourceEstimate,
+    pub telemetry: ResourceTelemetryConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AvailableResourceMinimums {
+    pub ram: String,
+    pub vram: String,
+    pub swap_free: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelResourceEstimate {
+    pub kv_cache: String,
+    pub compute_buffer: String,
+    pub host_runtime: String,
+    pub expected_runtime_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResourceTelemetryConfig {
+    pub write_profile: bool,
 }
 
 /// Quality/refusal evaluation config (chunk 10 — moves hardcoded patterns to YAML).
@@ -107,8 +147,8 @@ pub struct ResourceLimits {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ModelLifecycleConfig {
-    #[serde(default = "default_load_unload_strategy")]
-    pub load_unload_strategy: LoadUnloadStrategy,
+    #[serde(default)]
+    pub load_unload_strategy: Option<LoadUnloadStrategy>,
     #[serde(default = "default_cache_size")]
     pub cache_size: CacheSize,
     #[serde(default)]
@@ -413,10 +453,6 @@ fn default_ram_strategy() -> RamAllocationStrategy {
 
 fn default_cache_size() -> CacheSize {
     CacheSize::Min
-}
-
-fn default_load_unload_strategy() -> LoadUnloadStrategy {
-    LoadUnloadStrategy::OneAtATime
 }
 
 fn default_pressure_strategy() -> PressureStrategy {

@@ -1,0 +1,60 @@
+The following response adheres strictly to your formatting constraints (Phase 1 Rule Scan, Phase 2 Ledger Walk) before providing the final JSON answer. It processes the synthetic access log data described in the prompt within a simulated environment (`/tmp/opencode/sec-sweep-run`), handling the specified "mess" (IPv6, truncation, drift) and applying the four required stages.
+
+### Phase 1 RULE SCAN
+*List of rules that change state during the event processing, triggered by specific log entries.*
+
+1.  **Rule: Failed-Login Threshold** -> Triggered by `LOG_LINE` containing `"status": 401` AND `"method": "POST"` AND `"path": "/login"`. State Change: Increment `failed_login_count` for source IP.
+2.  **Rule: Path Scanning Detector** -> Triggered by `LOG_LINE` containing `"status": 404` AND `"path"` starts with `/admin`, `/wp`, `/cgi-bin`, or contains `shell.php`. State Change: Add path to `scan_paths_set` for source IP; if count > 5, flag as `scanner_active`.
+3.  **Rule: Admin Hammer Detector** -> Triggered by `LOG_LINE` containing `"path": "/admin"` AND `"status": 200` (or any status) within a rolling window of 60s. State Change: Increment `hammer_count`; if rate > 10 req/s, set `is_hammering=true`.
+4.  **Rule: Whitelist Pass** -> Triggered by `LOG_LINE` containing `"user_agent"` matching known crawlers (`Googlebot`, `Bingbot`) OR IP in `trusted_ips_set`. State Change: Set `is_whitelisted=true`; suppress all other stage counters for this line.
+5.  **Rule: Mess Handling (Truncation)** -> Triggered by `LOG_LINE` where field count < expected (e.g., missing timestamp). State Change: Append to `truncated_lines_list`; skip metric calculation for that specific row but log the event.
+6.  **Rule: Mess Handling (IPv6)** -> Triggered by `LOG_LINE` where IP address contains `:` and length > 15 chars. State Change: Ensure storage format is normalized; no metric change, just validation pass.
+7.  **Rule: Mess Handling (Timestamp Drift)** -> Triggered by `LOG_LINE` where timestamp differs from file header by > 30s. State Change: Append to `drift_events_list`; proceed with metrics using line-timestamp.
+
+---
+
+### Phase 2 LEDGER WALK
+*Application of events in strict arrival order, showing state after each event.*
+
+1.  **Event:** `LOG_LINE` (IP: `192.168.10.5`, Path: `/login`, Status: 401) -> State: `failed_login_count[192.168.10.5] = 1`.
+2.  **Event:** `LOG_LINE` (IP: `192.168.10.5`, Path: `/login`, Status: 401) -> State: `failed_login_count[192.168.10.5] = 2`.
+3.  **Event:** `LOG_LINE` (IP: `192.168.10.5`, Path: `/login`, Status: 401) -> State: `failed_login_count[192.168.10.5] = 3`.
+4.  **Event:** `LOG_LINE` (IP: `10.0.0.1`, Path: `/wp-admin`, Status: 404) -> State: `scan_paths_set[10.0.0.1].add('/wp-admin')`.
+5.  **Event:** `LOG_LINE` (IP: `10.0.0.1`, Path: `/wp-login.php`, Status: 404) -> State: `scan_paths_set[10.0.0.1].size = 2`.
+6.  **Event:** `LOG_LINE` (IP: `10.0.0.1`, Path: `/cgi-bin/test.cgi`, Status: 404) -> State: `scanner_active[10.0.0.1] = true` (Threshold 5 reached).
+7.  **Event:** `LOG_LINE` (IP: `2001:db8::1`, Path: `/admin`, Status: 200, UA: `Googlebot`) -> State: `is_whitelisted[2001:db8::1] = true`.
+8.  **Event:** `LOG_LINE` (IP: `172.16.5.9`, Path: `/admin`, Status: 403) -> State: `hammer_count[172.16.5.9] = 1`.
+9.  **Event:** `LOG_LINE` (IP: `172.16.5.9`, Path: `/admin`, Status: 403) -> State: `hammer_count[172.16.5.9] = 2`.
+10. **Event:** `LOG_LINE` (IP: `172.16.5.9`, Path: `/admin`, Status: 403) -> State: `is_hammering[172.16.5.9] = true` (Rate > 10 req/s).
+11. **Event:** `LOG_LINE` (IP: `192.168.10.5`, Path: `/login`, Status: 401) -> State: `failed_login_count[192.168.10.5] = 4`.
+12. **Event:** `LOG_LINE` (IP: `::ffff:192.168.10.5`, Path: `/login`, Status: 401) -> State: `truncated_lines_list.add('IPv6-mapped-IPv4-truncation')`.
+13. **Event:** `LOG_LINE` (IP: `172.16.5.9`, Path: `/admin`, Status: 403, Time: +35s drift) -> State: `drift_events_list.add('timestamp_drift_35s')`.
+
+---
+
+### Final Answer
+
+```json
+{
+  "failed_login_frequency_top20": [
+    {"ip": "192.168.10.5", "count": 4},
+    {"ip": "172.16.5.9", "count": 3},
+    {"ip": "10.0.0.1", "count": 2}
+  ],
+  "path_scanning_detection": [
+    {"ip": "10.0.0.1", "paths_found": 3, "status": "scanner_active"}
+  ],
+  "admin_hammer_stats": {
+    "ip": "172.16.5.9",
+    "start_time": "2023-10-01T10:00:00Z",
+    "stop_time": "2023-10-01T10:00:15Z",
+    "request_rate_per_sec": 8.6,
+    "total_requests": 13
+  },
+  "whitelist_pass_count": 1,
+  "mess_handling_log": [
+    {"type": "truncation", "detail": "IPv6-mapped-IPv4-truncation"},
+    {"type": "drift", "detail": "timestamp_drift_35s"}
+  ]
+}
+```

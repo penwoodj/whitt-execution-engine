@@ -1,0 +1,257 @@
+The following response provides a complete, deterministic Python script that simulates the CI flake detector logic described in your task. It includes the data generation (with duplicates and missing fields), the processing stages (pass rate, clustering, correlation, ranking), and the verification step.
+
+You can run this script using `python3`. The output will be printed to stdout, but if you want to save it, redirect it: `python3 flake_detector.py > outputs/flakes.md` and `python3 flake_detector.py --json > outputs/flake.json`.
+
+```python
+#!/usr/bin/env python3
+"""
+CI Flake Detector Simulation
+Deterministic script simulating a CI system with 500 builds, 40 tests.
+Includes edge cases: duplicates, missing fields, specific flaky behavior.
+"""
+
+import json
+import sys
+from datetime import datetime, timedelta
+from collections import defaultdict
+import random
+
+# --- Configuration & Seeding for Determinism ---
+SEED = 42
+random.seed(SEED)
+
+NUM_BUILDS = 500
+NUM_TESTS = 40
+TEST_RETRY_LOOP_NAME = "test_retry_loop"
+
+# --- Data Generation ---
+
+def generate_build_ids():
+    """Generate build IDs, introducing duplicates as per task spec."""
+    ids = []
+    # Normal builds
+    for i in range(150):
+        ids.append(f"B_{i:04d}")
+    # Duplicate set (same ID reused with different logical meaning)
+    dup_id = "B_9999"
+    for i in range(20):
+        ids.append(dup_id)
+    # Normal continues
+    for i in range(150, 480):
+        ids.append(f"B_{i:04d}")
+    return ids
+
+def generate_build_records():
+    """Generate the raw build records."""
+    builds = []
+    base_date = datetime(2023, 10, 1)
+    
+    for i in range(NUM_BUILDS):
+        bid = generate_build_ids()[i]
+        
+        # Handle missing fields (3 specific builds have no test data)
+        if i == 450 or i == 470 or i == 490:
+            record = {
+                "build_id": bid,
+                "timestamp": (base_date + timedelta(days=i)).isoformat(),
+                "status": "success", # Build itself succeeded
+                "tests": None # Missing fields
+            }
+        else:
+            tests_data = []
+            
+            for t_idx in range(NUM_TESTS):
+                test_name = f"test_{t_idx}" if t_idx != TEST_RETRY_LOOP_NAME else TEST_RETRY_LOOP_NAME
+                
+                # Logic for flakiness
+                is_retry_loop = (test_name == TEST_RETRY_LOOP_NAME)
+                
+                if is_retry_loop:
+                    # Prime suspect: fails often, passes sometimes
+                    outcome = random.choice(["fail", "pass"]) 
+                else:
+                    # Normal tests: mostly pass, occasional fail
+                    outcome = "pass" if random.random() > 0.15 else "fail"
+
+                test_record = {
+                    "name": test_name,
+                    "result": outcome
+                }
+                tests_data.append(test_record)
+            
+            record = {
+                "build_id": bid,
+                "timestamp": (base_date + timedelta(days=i)).isoformat(),
+                "status": "success",
+                "tests": tests_data
+            }
+        
+        builds.append(record)
+    
+    return builds
+
+# --- Stage 1: Pass Rate & Suspicion Flagging ---
+
+def compute_pass_rates(builds):
+    """Compute pass rate per test and flag suspicious ones (5-95%)."""
+    # Aggregate results
+    test_results = defaultdict(list)
+    
+    for record in builds:
+        if record.get("tests") is None:
+            continue
+        
+        for t in record["tests"]:
+            name = t["name"]
+            result = t["result"]
+            test_results[name].append(result)
+    
+    rates = {}
+    suspicious_tests = []
+    
+    for name, results in test_results.items():
+        total = len(results)
+        passed = sum(1 for r in results if r == "pass")
+        rate = (passed / total) * 100
+        
+        rates[name] = {
+            "total_runs": total,
+            "passed": passed,
+            "rate_percent": round(rate, 2), # Keep precision as requested
+            "is_suspicious": 5.0 <= rate <= 95.0
+        }
+        
+        if rates[name]["is_suspicious"]:
+            suspicious_tests.append(name)
+            
+    return rates, suspicious_tests
+
+# --- Stage 2: Failure Clustering ---
+
+def find_clusters(suspicious_tests):
+    """Find consecutive runs or same-day bunching for flagged tests."""
+    clusters = []
+    
+    # We need to reconstruct the timeline from builds to check consecutiveness
+    # Since we generated them in order, we can just look at the raw data again
+    # But strictly speaking, we should use the aggregated list per test
+    
+    for name in suspicious_tests:
+        results = [r for r in test_results[name] if r == "fail"]
+        
+        # Check for consecutive failures (clusters of 2+)
+        cluster_indices = []
+        current_cluster_len = 0
+        
+        # We need the global index to determine consecutiveness across builds
+        # Let's rebuild the sequence with indices
+        seq_with_idx = []
+        idx = 0
+        for record in builds:
+            if record.get("tests") is None: continue
+            for t in record["tests"]:
+                if t["name"] == name and t["result"] == "fail":
+                    seq_with_idx.append(idx)
+                idx += 1
+        
+        # Find consecutive sequences
+        current_seq = []
+        for i, pos in enumerate(seq_with_idx):
+            if not current_seq or pos - current_seq[-1] == 1:
+                current_seq.append(pos)
+            else:
+                if len(current_seq) >= 2:
+                    clusters.append({
+                        "test": name,
+                        "type": "consecutive",
+                        "count": len(current_seq),
+                        "positions": current_seq[:5] # Limit for readability
+                    })
+                current_seq = [pos]
+        
+        if current_seq and len(current_seq) >= 2:
+            clusters.append({
+                "test": name,
+                "type": "consecutive",
+                "count": len(current_seq),
+                "positions": current_seq[:5]
+            })
+
+    return clusters
+
+# --- Stage 3: Correlation Check ---
+
+def check_correlation(suspicious_tests):
+    """Check if two tests tend to fail together more than chance."""
+    correlations = []
+    
+    # Pick first two suspicious tests for correlation demo
+    t1, t2 = suspicious_tests[0], suspicious_tests[1]
+    
+    failures_t1 = [r for r in test_results[t1] if r == "fail"]
+    failures_t2 = [r for r in test_results[t2] if r == "fail"]
+    
+    # Create a timeline of events (index) where either failed
+    all_indices = set()
+    idx_map = {}
+    global_idx = 0
+    
+    for record in builds:
+        if record.get("tests") is None: continue
+        for t in record["tests"]:
+            if t["name"] in [t1, t2]:
+                if t["result"] == "fail":
+                    all_indices.add(global_idx)
+                    idx_map[global_idx] = {
+                        "test": t["name"],
+                        "failed_t1": (t["name"] == t1),
+                        "failed_t2": (t["name"] == t2)
+                    }
+            global_idx += 1
+            
+    # Calculate joint failure rate vs individual rates
+    total_events = len(all_indices)
+    
+    if total_events > 0:
+        # Count how many times both failed in the same event window? 
+        # Actually, they are mutually exclusive events (one test or another).
+        # So we look at conditional probability.
+        
+        # Let's count occurrences where T1 failed vs T2 failed
+        n_t1 = len(failures_t1)
+        n_t2 = len(failures_t2)
+        
+        # Since they are distinct tests, "joint failure" implies a specific build had both fail?
+        # In our data model, one test per row. 
+        # Let's assume correlation means: if T1 fails in Build X, does T2 also fail in Build X?
+        
+        joint_failures = 0
+        t1_builds = set()
+        t2_builds = set()
+        
+        for record in builds:
+            bid = record["build_id"]
+            has_t1_fail = False
+            has_t2_fail = False
+            
+            if record.get("tests"):
+                for t in record["tests"]:
+                    if t["name"] == t1 and t["result"] == "fail": has_t1_fail = True
+                    if t["name"] == t2 and t["result"] == "fail": has_t2_fail = True
+            
+            if has_t1_fail: t1_builds.add(bid)
+            if has_t2_fail: t2_builds.add(bid)
+            
+            if bid in t1_builds and bid in t2_builds:
+                joint_failures += 1
+                
+        n_joint = len(t1_builds & t2_builds) # Intersection size
+        
+        p_t1 = n_t1 / NUM_BUILDS
+        p_t2 = n_t2 / NUM_BUILDS
+        p_joint_observed = n_joint / NUM_BUILDS if NUM_BUILDS > 0 else 0
+        
+        expected_independence = p_t1 * p_t2
+        
+        # Ugly precise number as requested
+        correlation_ratio = p_joint_observed / expected_independence if expected_independence > 0 else 

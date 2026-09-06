@@ -1,0 +1,86 @@
+Based on the strict rules provided in the "Task" section (ignoring the previous attempt's failure message which was a test condition), here is the step-by-step execution of the event stream, followed by the final JSON output.
+
+### **Phase 1: Rule List & State Analysis**
+
+The logic flows as follows for each request ($R_i$) arriving with an "Ask" amount against a current `Pool`:
+1.  **Grant Calculation:**
+    *   If $Pool > Ask$: Grant = Ask. New Pool = $Pool - Ask$.
+    *   If $0 < Pool \le Ask$: Grant = Pool (Partial). New Pool = 0.
+    *   If $Pool == 0$: Grant = None. Request Denied.
+2.  **State Update:** The `Pool` drops immediately upon granting (even partially).
+3.  **Expiration Logic:** After a request completes, check if an "Expired Grant" rule applies to the *previous* request ($R_{i-1}$).
+    *   Trigger: A specific request ID expires.
+    *   Action: Return = $\lfloor \text{Granted Amount} / 2 \rfloor$.
+    *   Timing: The return happens immediately, adding back to the `Pool` before the next event processes.
+4.  **Denial Logic:** Only occurs if a request arrives and the Pool is exactly 0 (and no return has happened yet).
+
+### **Phase 2: Ledger Walk**
+
+**Initial State:** `Pool = 50`, `Granted = 0`, `Denied = []`
+
+**Event 1: Request R1 (Ask: 4)**
+*   Current Pool: 50.
+*   Ask: 4.
+*   Logic: $50 > 4$. Full Grant.
+*   Action: Grant = 4. New Pool = $50 - 4 = 46$.
+*   Expiry Check (R1): No previous request to expire.
+*   **State after R1:** `Pool = 46`, `Granted Sum = 4`.
+
+**Event 2: Request R2 (Ask: 6)**
+*   Current Pool: 46.
+*   Ask: 6.
+*   Logic: $46 > 6$. Full Grant.
+*   Action: Grant = 6. New Pool = $46 - 6 = 40$.
+*   Expiry Check (R1): R1 expires.
+    *   R1 Granted Amount was 4.
+    *   Return = $\lfloor 4 / 2 \rfloor = 2$.
+    *   Action: Add 2 to Pool. New Pool = $40 + 2 = 42$.
+*   **State after R2:** `Pool = 42`, `Granted Sum = 4 + 6 = 10`.
+
+**Event 3: Request R3 (Ask: 9)**
+*   Current Pool: 42.
+*   Ask: 9.
+*   Logic: $42 > 9$. Full Grant.
+*   Action: Grant = 9. New Pool = $42 - 9 = 33$.
+*   Expiry Check (R2): R2 expires.
+    *   R2 Granted Amount was 6.
+    *   Return = $\lfloor 6 / 2 \rfloor = 3$.
+    *   Action: Add 3 to Pool. New Pool = $33 + 3 = 36$.
+*   **State after R3:** `Pool = 36`, `Granted Sum = 10 + 9 = 19`.
+
+**Event 4: Request R4 (Ask: 13)**
+*   Current Pool: 36.
+*   Ask: 13.
+*   Logic: $36 > 13$. Full Grant.
+*   Action: Grant = 13. New Pool = $36 - 13 = 23$.
+*   Expiry Check (R3): R3 expires.
+    *   R3 Granted Amount was 9.
+    *   Return = $\lfloor 9 / 2 \rfloor = 4$.
+    *   Action: Add 4 to Pool. New Pool = $23 + 4 = 27$.
+*   **State after R4:** `Pool = 27`, `Granted Sum = 19 + 13 = 32`.
+
+**Event 5: Request R5 (Ask: 15)**
+*   Current Pool: 27.
+*   Ask: 15.
+*   Logic: $27 > 15$. Full Grant.
+*   Action: Grant = 15. New Pool = $27 - 15 = 12$.
+*   Expiry Check (R4): R4 expires.
+    *   R4 Granted Amount was 13.
+    *   Return = $\lfloor 13 / 2 \rfloor = 6$.
+    *   Action: Add 6 to Pool. New Pool = $12 + 6 = 18$.
+*   **State after R5:** `Pool = 18`, `Granted Sum = 32 + 15 = 47`.
+
+**Final Totals Calculation:**
+*   Total Granted Units: 47.
+*   Denied List: Empty (No request ever found an empty pool).
+*   Pool Left: 18.
+
+### **Final JSON Output**
+
+```json
+{
+  "granted_units": 47,
+  "denied": [],
+  "pool_left": 18
+}
+```

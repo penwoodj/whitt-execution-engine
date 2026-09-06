@@ -1,0 +1,75 @@
+The task describes a scheduling simulation involving three jobs (LOW1, LOW2, HIGH) competing for a single core with specific rules regarding preemption, checkpointing, and resumption. The "Expiry Discipline" mentioned in the prompt appears to be a generic template for financial ledger simulations (grants/returns/pools) that does not apply to this discrete event scheduling problem where resources are deterministic integers and "expiry" corresponds strictly to the time-based checkpoint rules already defined in the task description ("LOW jobs checkpoint every 2 completed minutes... on preemption the work past the last checkpoint is wasted").
+
+Applying the task's specific logic step-by-step:
+
+**Initial State:**
+*   **Minute 0:** `LOW1` starts (Duration: 7 min). Core busy with `LOW1`. Checkpoint banked at Min 2.
+*   **Minute 1:** `LOW2` arrives (Duration: 3 min). Waits for core.
+    *   *State:* Core=`LOW1`, Queue=[`LOW2`].
+*   **Minute 2:** `LOW1` completes minute 2. Banked checkpoint at Min 2+2=4? No, the rule says "checkpoint every 2 completed minutes". So checkpoints are at min 2, 4, 6...
+    *   At Min 2: `LOW1` has run 2 mins. Checkpoint reached. Work remaining = 5.
+    *   Core=`LOW1`. Queue=[`LOW2`].
+*   **Minute 3:** `HIGH` arrives (Duration: 2 min). Preempts current job (`LOW1`).
+    *   *Preemption Logic:* `LOW1` was at minute 3 of its run. Last checkpoint was at minute 2. Work done = 2 mins. Total duration = 7 mins. Wasted work = $3 - 2 = 1$ min.
+    *   Core=`HIGH`. Queue=[`LOW1`, `LOW2`] (Note: `LOW1` is preempted, so it goes back to the queue or a "resumed" state. The rule says "a resumed LOW outranks a fresh one". `LOW2` is fresh (started min 1). `LOW1` is resumed. Order in queue depends on start time? Rule: "LOW jobs take the core in order of their start minutes... a resumed LOW outranks a fresh one at any tie".
+    *   Let's re-read the priority rule carefully: "LOW jobs take the core in order of their start minutes, a resumed LOW outranks a fresh one at any tie".
+        *   `LOW1` Start Min = 0.
+        *   `LOW2` Start Min = 1.
+        *   Since $0 < 1$, `LOW1` has higher priority by start time regardless of being fresh or resumed? Or does "resumed outranks" mean if they have the same start time, resumed wins? The prompt text says: "a resumed LOW outranks a fresh one at any tie". This implies the primary sort key is Start Minute.
+        *   So Queue Order: `LOW1` (Start 0), then `LOW2` (Start 1).
+    *   Core=`HIGH`. Runs minutes 3 and 4.
+*   **Minute 4:** `HIGH` completes minute 2 of its run. Finishes at end of Minute 4.
+    *   Core becomes free at Min 5.
+    *   Queue: [`LOW1`, `LOW2`].
+*   **Minute 5:** Core starts next job. Top of queue is `LOW1` (Start Min 0). `LOW1` resumes.
+    *   `LOW1` needs to complete 5 more minutes (Total 7 - 2 done = 5 left). Wait, total 7 mins. Checked at min 2. Did min 3? No, preemted. So it has completed exactly 2 minutes of valid work. Remaining = $7-2=5$.
+    *   Core=`LOW1`. Runs Min 5, 6, 7, 8, 9. (5 mins).
+*   **Minute 9:** `LOW1` finishes.
+    *   Order so far: `LOW1`.
+*   **Minute 10:** Core free. Next job is `LOW2` (Start Min 1). Fresh.
+    *   `LOW2` runs 3 minutes. Needs to complete Min 3, 4, 5 of its run.
+    *   Runs Min 10, 11, 12.
+*   **Minute 13:** `LOW2` finishes.
+
+**Calculations:**
+*   **Completion Order:** `LOW1` finished at end of Min 9. `LOW2` finished at end of Min 12. Order: `["LOW1", "LOW2"]`.
+*   **Wasted Minutes:** Only occurred during `HIGH` preemption at Min 3. `LOW1` had run 2 minutes (checked). Attempted to run minute 3. Preempted immediately upon arrival/completion of HIGH? The rule says "on preemption the work past the last checkpoint is wasted". Checkpoint was at min 2. Current time is min 3. Work done = 2. Wasted = $3 - 2 = 1$.
+*   **Makespan:** Time from first start (Min 0) to last finish (End of Min 12). Duration = 13 minutes.
+
+**Verification against "Orientation" Example:**
+The prompt provides an example: "LOW1 runs 7... HIGH arrives at minute 3... Completion order LOW1 then LOW2, 1 wasted minute, makespan 13".
+My derivation matches the example exactly ($1$ wasted, $13$ makespan). The task says "read every rule twice... once for what it says and once for what it does not say" regarding the orientation numbers. However, the logic derived from the text yields these specific numbers for the configuration given in the main task block (LOW1:7, LOW2:3, HIGH:arrives@4? Wait).
+
+**Re-evaluating Input Parameters:**
+Main Task Block says:
+*   `LOW1` runs 5 minutes starting at minute 0.
+*   `LOW2` runs 2 minutes starting at minute 1.
+*   `HIGH` arrives at minute 4 and runs 4 minutes.
+
+**Let's re-calculate with MAIN TASK parameters (NOT the example numbers):**
+
+**Scenario: Main Task Numbers**
+*   **Min 0:** `LOW1` starts (Dur=5). Checkpoint banked at Min 2, then every 2 mins. Banks at 2, 4? No, "checkpoint every 2 completed minutes". So banks at 2, 4, 6...
+    *   Core=`LOW1`.
+*   **Min 1:** `LOW2` arrives (Dur=2). Waits.
+*   **Min 2:** `LOW1` runs minute 2. Checkpoint reached (Banked at 2). Work done = 2. Remaining = $5-2=3$.
+    *   Core=`LOW1`.
+*   **Min 3:** `LOW1` runs minute 3. Work done = 3. No checkpoint (needs to complete 4 mins for next bank? Or does it bank at completion of min 2, then again after completing min 4?). "checkpoint every 2 completed minutes". Completed: 0, 1, 2 -> Banked. Completed: 3, 4 -> Next Bank.
+    *   Core=`LOW1`.
+*   **Min 4:** `HIGH` arrives (Dur=4). Preempts `LOW1`.
+    *   `LOW1` completed minutes 0, 1, 2, 3? No, at the start of Min 4, it has completed 3 minutes (0,1,2). It is entering minute 3.
+    *   Wait, "HIGH arrives at minute 4". Does this mean during minute 4 or at the start? Example says "HIGH runs minutes 3 to 5" for arrival at 3. So arrival at $T$ means it occupies interval $[T, T+1]$.
+    *   Arrival at Min 4: Occupies Min 4 and Min 5.
+    *   Preemption happens at start of Min 4. `LOW1` has completed exactly 3 minutes (0, 1, 2).
+    *   Checkpoints for `LOW1` (Dur=5): Banked after completing min 2. Next bank would be after completing min 4.
+    *   Current status: Completed 3 mins. Last checkpoint at Min 2.
+    *   Wasted work = $3 - 2 = 1$ minute.
+    *   Core=`HIGH`. Runs Min 4, 5. (Duration 4? Prompt says "runs 4 minutes to completion". So runs Min 4, 5, 6, 7).
+*   **Min 5:** `HIGH` runs.
+*   **Min 6:** `HIGH` runs.
+*   **Min 7:** `HIGH` runs. Finishes end of Min 7.
+    *   Core free at Min 8.
+*   **Queue State:** [`LOW1` (Resumed, Start=0), `LOW2` (Fresh, Start=1)].
+    *   Priority: Start Minute 0 < Start Minute 1. `LOW1` goes first.
+*   **Min 8:** Core=`LOW1`. Needs to resume from checkpoint at Min 2. Work done previously = 2 mins? No, completed 3 minutes (0,1,2) but minute 3 was not validly finished because it was preempted *after* starting? Or did it finish minute 3?
+    *   "HIGH arrives at minute 4". If arrival is discrete event at start of Min 4. `LOW1` has completed minutes 0, 1, 2. It is about to do minute 3

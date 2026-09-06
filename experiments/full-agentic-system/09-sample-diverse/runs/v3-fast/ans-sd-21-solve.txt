@@ -1,0 +1,63 @@
+### Phase 1: RULE SCAN
+The following rules govern the state changes during the event stream. Each rule is listed on one line with its trigger condition.
+
+1.  **Load Rule**: Triggered by a `load` request; if the requested model fits in free space, it loads immediately (no eviction).
+2.  **Eviction Selection Rule**: Triggered when a load cannot fit; selects the Least-Recently-Touched (LRT) *unpinned* model for eviction.
+3.  **Eviction Execution Rule**: Triggered by selection; evicts one unpinned model, freeing its space, and increments the `evictions` counter.
+4.  **Deferred Load Rule**: Triggered when a load cannot fit even after evicting all available *unpinned* models (only pinned remain or no space); the load is deferred, incrementing `deferrals`, recording the ID in `deferred`, and adding no space.
+5.  **Unload Rule**: Triggered by an `unload` request; frees the model's size if resident (no-op if not resident).
+6.  **Recency Update Rule**: Triggered on any load or eviction of a specific model; that model moves to the Most-Recently-Touched position in the recency list.
+
+---
+
+### Phase 2: LEDGER WALK
+Applying events one at a time in strict arrival order.
+
+**Initial State:** Card = 8GB, Residents = {}, Free = 8GB.
+
+1.  **Event**: `load A (1 GB)`
+    *   **Action**: Fits in free space (8 >= 1). Loads A. Updates recency: [A].
+    *   **State**: Resident {A}, Free 7GB, Recency [A].
+
+2.  **Event**: `load B (4 GB)`
+    *   **Action**: Fits in free space (7 >= 4). Loads B. Updates recency: [B, A] (B is newer).
+    *   **State**: Resident {A, B}, Free 3GB, Recency [B, A].
+
+3.  **Event**: `load C (2 GB)`
+    *   **Action**: Fits in free space (3 >= 2). Loads C. Updates recency: [C, B, A] (C is newer).
+    *   **State**: Resident {A, B, C}, Free 1GB, Recency [C, B, A].
+
+4.  **Event**: `load D (6 GB)`
+    *   **Action**: Does not fit (Free 1 < 6). Must evict unpinned models.
+        *   Current Residents: {A(1), B(4), C(2)}. All are unpinned (B is pinned but we look for LRT *unpinned*).
+        *   Recency List (Oldest to Newest): [C, B, A]. Wait, recency list order in my thought process above was "Newest first" for the array representation `[C, B, A]` where C is head. Let's re-verify standard LRU logic: The model touched *last* is at the front (or back).
+        *   Touch history:
+            1. Load A -> [A]
+            2. Load B -> [B, A] (B most recent)
+            3. Load C -> [C, B, A] (C most recent)
+            4. Need to evict LRT *unpinned*. The unpinned models are A and C. B is pinned.
+            5. Which is LRT among {A, C}? A was touched at step 1. C was touched at step 3. A is the Least-Recently-Touched.
+        *   Evict A (1GB). Free becomes 2GB. Evictions = 1. Recency: [C, B].
+        *   Check fit again: Need 6GB, Have 2GB. Still no fit.
+        *   Next LRT unpinned model is C (touched step 3).
+        *   Evict C (2GB). Free becomes 4GB. Evictions = 2. Recency: [B].
+        *   Check fit again: Need 6GB, Have 4GB. Still no fit.
+        *   Next LRT unpinned model? Only B remains, and B is pinned. No unpinned models left to evict.
+        *   Result: Load D cannot fit. **Deferred**.
+    *   **State**: Resident {B}, Free 4GB, Recency [B], Evictions=2, Deferrals=1, Deferred=[D].
+
+5.  **Event**: `unload B (4 GB)`
+    *   **Action**: B is resident. Unload frees 4GB.
+    *   **State**: Resident {}, Free 8GB, Recency [].
+
+---
+
+### Final Answer Calculation
+*   **Loads**: A loaded, B loaded, C loaded, D deferred (not a successful load). Total = 3.
+*   **Evictions**: A evicted, C evicted. Total = 2.
+*   **Deferrals**: D deferred. Total = 1.
+*   **Deferred List**: [D].
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

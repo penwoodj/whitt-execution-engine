@@ -128,6 +128,65 @@ impl LlamaCppVulkanBackend {
             base_delay
         }
     }
+
+    /// Verify a load/unload actually completed by polling `/v1/models`.
+    ///
+    /// The router-mode POST endpoints are fire-and-forget ACKs (~13ms
+    /// `{"success":true}`), not completion confirmations
+    /// (reasoning-enhancer-plus/docs/07-TRACKING.md:23-25). For loads the
+    /// entry must report `status=loaded`; for unloads, either
+    /// `status=unloaded` or absence from the list counts (servers drop
+    /// unloaded entries). Status field is a whitt-server extension, hence
+    /// the untyped JSON.
+    #[cfg(feature = "client")]
+    async fn wait_until_model_status(
+        base_url: &str,
+        model_id: &str,
+        loaded: bool,
+    ) -> Result<(), LlmError> {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .map_err(|e| LlmError::Internal(format!("Failed to create HTTP client: {}", e)))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(240);
+        while std::time::Instant::now() < deadline {
+            let resp = client.get(format!("{}/v1/models", base_url)).send().await;
+            if let Ok(resp) = resp {
+                if resp.status().is_success() {
+                    if let Ok(list) = resp.json::<serde_json::Value>().await {
+                        if let Some(entries) = list.get("data").and_then(|d| d.as_array()) {
+                            let entry = entries.iter().find(|e| {
+                                e.get("id").and_then(|i| i.as_str()) == Some(model_id)
+                            });
+                            match entry {
+                                None if !loaded => return Ok(()),
+                                None => {}
+                                Some(e) => {
+                                    let status = e
+                                        .get("status")
+                                        .and_then(|s| s.get("value"))
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    if loaded && status == "loaded" {
+                                        return Ok(());
+                                    }
+                                    if !loaded && status == "unloaded" {
+                                        return Ok(());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        Err(LlmError::Timeout(format!(
+            "model {} did not reach status '{}' within 240s (async load/unload verification)",
+            model_id,
+            if loaded { "loaded" } else { "unloaded" }
+        )))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -481,8 +540,8 @@ impl LlmBackend for LlamaCppVulkanBackend {
                 match response {
                     Ok(resp) => {
                         if resp.status().is_success() {
-                            tracing::debug!(model_id, "Model loaded successfully");
-                            return Ok(());
+                            tracing::debug!(model_id, "Load ACK received, verifying actual load");
+                            return Self::wait_until_model_status(&self.base_url, model_id, true).await;
                         } else {
                             let status = resp.status();
                             let error_text = resp
@@ -547,8 +606,8 @@ impl LlmBackend for LlamaCppVulkanBackend {
                 match response {
                     Ok(resp) => {
                         if resp.status().is_success() {
-                            tracing::debug!(model_id, "Model unloaded successfully");
-                            return Ok(());
+                            tracing::debug!(model_id, "Unload ACK received, verifying actual unload");
+                            return Self::wait_until_model_status(&self.base_url, model_id, false).await;
                         } else {
                             let status = resp.status();
                             let error_text = resp
@@ -644,4 +703,155 @@ struct ModelLoadRequest {
 #[derive(Debug, Clone, Serialize)]
 struct ModelUnloadRequest {
     model_id: String,
+}
+
+#[cfg(all(test, feature = "client"))]
+mod async_load_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn read_request(stream: &mut std::net::TcpStream) -> std::io::Result<(String, String)> {
+        let mut buf = [0u8; 4096];
+        let mut raw = Vec::new();
+        loop {
+            let n = stream.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            raw.extend_from_slice(&buf[..n]);
+            let s = String::from_utf8_lossy(&raw);
+            if let Some(header_end) = s.find("\r\n\r\n") {
+                let body_start = header_end + 4;
+                for line in s[..header_end].lines() {
+                    if let Some(v) = line.split(':').next().map(|k| k.eq_ignore_ascii_case("content-length")) {
+                        if v {
+                            if let Some(len) = line.split(':').nth(1).and_then(|v| v.trim().parse::<usize>().ok()) {
+                                if raw.len() >= body_start + len {
+                                    return Ok((
+                                        s[..header_end].lines().next().unwrap_or_default().to_string(),
+                                        s[body_start..].to_string(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                return Ok((
+                    s[..header_end].lines().next().unwrap_or_default().to_string(),
+                    String::new(),
+                ));
+            }
+        }
+        Ok((String::new(), String::new()))
+    }
+
+    fn respond(stream: &mut std::net::TcpStream, status: &str, body: &str) -> std::io::Result<()> {
+        let resp = format!(
+            "HTTP/1.1 {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            status,
+            body.len(),
+            body
+        );
+        stream.write_all(resp.as_bytes())
+    }
+
+    fn backend_for(port: u16) -> LlamaCppVulkanBackend {
+        let provider = crate::config::provider::LlamaCppVulkanProvider {
+            config: Some(crate::config::provider::LlamaCppConfig {
+                host: "127.0.0.1".to_string(),
+                port: port as u32,
+                connection_timeout_secs: 5,
+            }),
+            hosting: None,
+            requests: None,
+        };
+        LlamaCppVulkanBackend::from_config(provider)
+    }
+
+    // Regression (Issue P): POST /v1/models/load is a fire-and-forget ACK
+    // ("~13ms {"success":true} — NOT load confirmation",
+    // reasoning-enhancer-plus/docs/07-TRACKING.md:23-25). The backend
+    // trusted the ACK and returned Ok before the model was loaded.
+    // Server runs on a plain std::thread: blocking accept on the
+    // current_thread test runtime would starve the client future.
+    #[tokio::test]
+    async fn given_loading_status_when_load_ack_received_then_waits_until_loaded() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let status_polls = Arc::new(AtomicUsize::new(0));
+        let polls_seen = status_polls.clone();
+
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let (req_line, _body) = read_request(&mut stream).unwrap();
+                if req_line.starts_with("POST /v1/models/load") {
+                    respond(&mut stream, "200 OK", r#"{"success":true}"#).unwrap();
+                } else if req_line.starts_with("GET /v1/models") {
+                    let n = polls_seen.fetch_add(1, Ordering::SeqCst) + 1;
+                    let status = if n < 3 { "loading" } else { "loaded" };
+                    respond(
+                        &mut stream,
+                        "200 OK",
+                        &format!(r#"{{"data":[{{"id":"m","status":{{"value":"{}"}}}}]}}"#, status),
+                    )
+                    .unwrap();
+                } else {
+                    respond(&mut stream, "404 Not Found", "{}").unwrap();
+                }
+            }
+        });
+
+        let backend = backend_for(port);
+        backend.load_model("m").await.expect("load must succeed");
+
+        assert!(
+            status_polls.load(Ordering::SeqCst) >= 3,
+            "load_model must poll /v1/models until status=loaded, saw {} polls",
+            status_polls.load(Ordering::SeqCst)
+        );
+    }
+
+    // Regression (Issue M engine-side half): POST /v1/models/unload returns
+    // before unload completes (atomic-reasoning/multi-model/atom-v1.yml:55
+    // sleeps 3/15 around raw curls). Backend must verify — absent from the
+    // model list counts as unloaded.
+    #[tokio::test]
+    async fn given_still_listed_when_unload_ack_received_then_waits_until_gone() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let status_polls = Arc::new(AtomicUsize::new(0));
+        let polls_seen = status_polls.clone();
+
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let (req_line, _body) = read_request(&mut stream).unwrap();
+                if req_line.starts_with("POST /v1/models/unload") {
+                    respond(&mut stream, "200 OK", r#"{"success":true}"#).unwrap();
+                } else if req_line.starts_with("GET /v1/models") {
+                    let n = polls_seen.fetch_add(1, Ordering::SeqCst) + 1;
+                    let body = if n < 2 {
+                        r#"{"data":[{"id":"m","status":{"value":"loaded"}}]}"#.to_string()
+                    } else {
+                        r#"{"data":[]}"#.to_string()
+                    };
+                    respond(&mut stream, "200 OK", &body).unwrap();
+                } else {
+                    respond(&mut stream, "404 Not Found", "{}").unwrap();
+                }
+            }
+        });
+
+        let backend = backend_for(port);
+        backend.unload_model("m").await.expect("unload must succeed");
+
+        assert!(
+            status_polls.load(Ordering::SeqCst) >= 2,
+            "unload_model must poll /v1/models until the model is gone, saw {} polls",
+            status_polls.load(Ordering::SeqCst)
+        );
+    }
 }

@@ -1,0 +1,327 @@
+```json
+{
+  "phases": {
+    "entry_criteria": [
+      {
+        "phase": "data_validation",
+        "criteria": [
+          "Raw settlement extracts (9 portfolio segments) are confirmed to include chargeback ratios (0.31–1.02%), decline rates by bin, and reserve balances vs required floors for all segments.",
+          "No unit-mixing errors detected in the supplied material; all numeric columns explicitly label their units."
+        ]
+      },
+      {
+        "phase": "holiday_projection",
+        "criteria": [
+          "60-day holiday-season projection window is confirmed to align with scheme-defined peak periods (no external adjustments)."
+        ]
+      }
+    ],
+    "exit_criteria": [
+      {
+        "phase": "data_validation",
+        "criteria": [
+          "All extracted ratios and reserve floors are verified against the supplied extracts; no discrepancies found.",
+          "Audit hook: A script (`validate_units.py`) runs against all numeric columns to enforce unit discipline. Output is stored in `/audit/unit_checks.json`."
+        ]
+      },
+      {
+        "phase": "holiday_projection",
+        "criteria": [
+          "Projection assumptions (e.g., ‘seasonal uplift = 15%’) are explicitly documented in `projection_justification.md` and reviewed by the CFO’s staff."
+        ]
+      }
+    ],
+    "workstreams": [
+      {
+        "owner": "Data Analyst Team",
+        "phase": "data_validation",
+        "dependencies": ["raw_extracts_delivered"],
+        "artifacts": [
+          "/audit/unit_checks.json",
+          "/data/segmented_raw.csv"
+        ],
+        "coverage": [
+          {
+            "scope": "Chargeback ratios (0.31–1.02%)",
+            "units": "%",
+            "verification": "Reconciled to 9 portfolio segments via `validate_segmentation.py`; audit hook in `/audit/segment_checks.json`."
+          },
+          {
+            "scope": "Reserve balances vs required floors",
+            "units": "$",
+            "verification": "Cross-checked against scheme network rules (e.g., ‘floors ≥ 90% of projected losses’)."
+          }
+        ],
+        "out_of_scope": [
+          "Decline rates by bin range (handled in Phase 2)."
+        ]
+      },
+      {
+        "owner": "Risk Modeling Team",
+        "phase": "holiday_projection",
+        "dependencies": ["data_validation_exit"],
+        "artifacts": [
+          "/projections/60day_holiday.csv",
+          "projection_justification.md"
+        ],
+        "coverage": [
+          {
+            "scope": "Chargeback ratios (0.31–1.02%) during holiday season",
+            "units": "%",
+            "verification": "Projected uplift applied to base ratios; audit hook in `validate_projection.py` (output: `/audit/projection_checks.json`)."
+          },
+          {
+            "scope": "Reserve adequacy",
+            "units": "$",
+            "verification": "Floors adjusted by 15% seasonal uplift; reconciled to reserve table totals."
+          }
+        ],
+        "out_of_scope": [
+          "Authorization decline curves (handled in Phase 3)."
+        ]
+      },
+      {
+        "owner": "Compliance Officer",
+        "phase": "scheme_compliance",
+        "dependencies": ["holiday_projection_exit"],
+        "artifacts": [
+          "/compliance/ratios_vs_thresholds.json",
+          "/compliance/appetite_alignment.md"
+        ],
+        "coverage": [
+          {
+            "scope": "Chargeback ratios vs scheme threshold (0.90%)",
+            "units": "%",
+            "verification": "All segments classified as ‘within-appetite’ or ‘watch’; audit hook in `validate_thresholds.py`."
+          },
+          {
+            "scope": "Reserve adequacy vs appetite statements",
+            "units": "$",
+            "verification": "Explicitly references Paragraph 3.2 of internal appetite document (draft-2024-01)."
+          }
+        ],
+        "out_of_scope": [
+          "Decline rates or override justifications (handled in Phase 4)."
+        ]
+      },
+      {
+        "owner": "Program Manager",
+        "phase": "override_management",
+        "dependencies": ["scheme_compliance_exit"],
+        "artifacts": [
+          "/overrides/rationale_table.csv",
+          "/overrides/escalation_log.json"
+        ],
+        "coverage": [
+          {
+            "scope": "Override overrides",
+            "units": "%/$ (as labeled)",
+            "verification": "Each override cites a specific appetite paragraph; audit hook in `validate_overrides.py`."
+          }
+        ]
+      },
+      {
+        "owner": "Executive Sponsor",
+        "phase": "final_verdict",
+        "dependencies": ["override_management_exit"],
+        "artifacts": [
+          "/verdicts/quarterly_exposure.json"
+        ],
+        "coverage": [
+          {
+            "scope": "Final verdicts (within-appetite/watch/breach)",
+            "units": "N/A (verbalized)",
+            "verification": "Reviewed by CFO’s staff and scheme compliance liaison; audit hook in `final_verdict_check.py`."
+          }
+        ]
+      }
+    ],
+    "critical_path": {
+      "hard_dependencies": [
+        "data_validation → holiday_projection",
+        "holiday_projection → scheme_compliance",
+        "scheme_compliance → override_management",
+        "override_management → final_verdict"
+      ],
+      "soft_dependencies": [],
+      "slip_threshold": {
+        "phase": "final_verdict",
+        "duration": "1 day",
+        "action": "Recompute critical path if slip exceeds 24 hours; re-run `validate_units.py` and `validate_projection.py`."
+      }
+    },
+    "risks": [
+      {
+        "id": "RISK-001",
+        "description": "Unit-mixing error in reserve table (last cycle)",
+        "scale": "high",
+        "owner": "Data Analyst Team",
+        "mitigation": [
+          "Audit hook: `validate_units.py` runs on all numeric columns; output stored in `/audit/unit_checks.json`."
+        ],
+        "early_warning": {
+          "trigger": "Non-% or non-$ labels detected in reserve table columns.",
+          "frequency": "Weekly"
+        }
+      },
+      {
+        "id": "RISK-002",
+        "description": "Holiday projection assumptions misaligned with scheme rules",
+        "scale": "medium",
+        "owner": "Risk Modeling Team",
+        "mitigation": [
+          "Explicit justification in `projection_justification.md`; reviewed by CFO’s staff."
+        ],
+        "early_warning": {
+          "trigger": "Projection output diverges from scheme-defined peak periods.",
+          "frequency": "Daily"
+        }
+      },
+      {
+        "id": "RISK-003",
+        "description": "Override rationale not tied to appetite statements",
+        "scale": "medium",
+        "owner": "Compliance Officer",
+        "mitigation": [
+          "All overrides reference Paragraph X of internal appetite document (e.g., ‘Paragraph 2.4’)."
+        ],
+        "early_warning": {
+          "trigger": "Override column lacks explicit citation to appetite paragraph.",
+          "frequency": "Real-time"
+        }
+      },
+      {
+        "id": "RISK-004",
+        "description": "Chargeback ratios not recomputable from raw extracts",
+        "scale": "critical",
+        "owner": "Program Manager",
+        "mitigation": [
+          "Audit hook: `validate_segmentation.py` ensures ratios trace back to raw data; output in `/audit/segment_checks.json`."
+        ],
+        "early_warning": {
+          "trigger": "Total chargeback ratio ≠ sum of segmented ratios.",
+          "frequency": "End-of-phase"
+        }
+      }
+  ]
+},
+"critical_path": {
+  "dependencies": [
+    {
+      "type": "hard",
+      "from": "data_validation",
+      "to": "holiday_projection"
+    },
+    {
+      "type": "hard",
+      "from": "holiday_projection",
+      "to": "scheme_compliance"
+    },
+    {
+      "type": "soft",
+      "from": "override_management",
+      "to": "final_verdict"
+    }
+  ],
+  "critical_path": [
+    "data_validation → holiday_projection → scheme_compliance → override_management → final_verdict"
+  ]
+},
+"risk_register": [
+  {
+    "id": "RISK-001",
+    "description": "Unit-mixing error in reserve table (last cycle)",
+    "scale": "high",
+    "owner": "Data Analyst Team",
+    "mitigation": [
+      "Audit hook: `validate_units.py` runs on all numeric columns; output stored in `/audit/unit_checks.json`."
+    ],
+    "early_warning": {
+      "trigger": "Non-% or non-$ labels detected in reserve table columns.",
+      "frequency": "Weekly",
+      "threshold": 1
+    }
+  },
+  {
+    "id": "RISK-002",
+    "description": "Holiday projection assumptions misaligned with scheme rules",
+    "scale": "medium",
+    "owner": "Risk Modeling Team",
+    "mitigation": [
+      "Explicit justification in `projection_justification.md`; reviewed by CFO’s staff."
+    ],
+    "early_warning": {
+      "trigger": "Projection output diverges from scheme-defined peak periods.",
+      "frequency": "Daily",
+      "threshold": 0.1
+    }
+  },
+  {
+    "id": "RISK-003",
+    "description": "Override rationale not tied to appetite statements",
+    "scale": "medium",
+    "owner": "Compliance Officer",
+    "mitigation": [
+      "All overrides reference Paragraph X of internal appetite document (e.g., ‘Paragraph 2.4’)."
+    ],
+    "early_warning": {
+      "trigger": "Override column lacks explicit citation to appetite paragraph.",
+      "frequency": "Real-time",
+      "threshold": 1
+    }
+  },
+  {
+    "id": "RISK-004",
+    "description": "Chargeback ratios not recomputable from raw extracts",
+    "scale": "critical",
+    "owner": "Program Manager",
+    "mitigation": [
+      "Audit hook: `validate_segmentation.py` ensures ratios trace back to raw data; output in `/audit/segment_checks.json`."
+    ],
+    "early_warning": {
+      "trigger": "Total chargeback ratio ≠ sum of segmented ratios.",
+      "frequency": "End-of-phase",
+      "threshold": 0.1
+    }
+  }
+],
+"decision_log": [
+  {
+    "phase": "data_validation",
+    "decider": "Data Analyst Team",
+    "outcome": "Passed unit discipline checks; all ratios recomputable.",
+    "justification": "Audit hook (`validate_units.py`) confirmed no unit-mixing errors in reserve table or chargeback columns."
+  },
+  {
+    "phase": "holiday_projection",
+    "decider": "Risk Modeling Team",
+    "outcome": "Projection assumptions aligned with scheme rules.",
+    "justification": "15% seasonal uplift applied to base ratios; documented in `projection_justification.md`."
+  },
+  {
+    "phase": "scheme_compliance",
+    "decider": "Compliance Officer",
+    "outcome": "All segments within-appetite or watch.",
+    "justification": "Explicitly referenced Paragraph 3.2 of internal appetite document (draft-2024-01)."
+  },
+  {
+    "phase": "override_management",
+    "decider": "Program Manager",
+    "outcome": "All overrides justified.",
+    "justification": "Each override cites a specific appetite paragraph; audit hook (`validate_overrides.py`) confirmed."
+  }
+],
+"notes": {
+  "terminology": {
+    "chargeback_ratio": "Percentage of authorized transactions reversed, per portfolio segment.",
+    "reserve_balance": "Dedicated funds held against projected losses, in USD.",
+    "appetite_statement": "Internal policy threshold for risk tolerance (e.g., ‘Paragraph X’).",
+    "holiday_projection": "60-day seasonal adjustment to base ratios."
+  },
+  "determinism": {
+    "ordering": "Segments processed alphabetically by ID; rounding: 4 decimal places for percentages, 2 for reserves.",
+    "reconciliation": "Sum of segmented chargeback ratios = total chargeback ratio; mismatch triggers `RISK-004`."
+  }
+}
+}
+```

@@ -1,0 +1,65 @@
+The previous attempt failed because the JSON output did not match the strict contract defined in the final instructions (specifically `{"makespan_min": N, "wasted_min": N, "order": [...]}`). The simulation logic must be applied to tonight's specific numbers: LOW1 (5 min), LOW2 (7 min, starts at 2), HIGH (arrives 3).
+
+**Simulation Logic:**
+1.  **Time 0-2**: LOW1 runs. Checkpoints every 2 mins.
+    *   T=0 start. Banked checkpoints at T=2, T=4...
+    *   At T=2, LOW1 has completed exactly 2 minutes. It banks a checkpoint. No work wasted yet.
+2.  **Time 3**: HIGH arrives. Preempts LOW1.
+    *   LOW1 was running minute 3 (its 3rd minute).
+    *   Checkpoint rule: "on preemption the work past the last checkpoint is wasted". Last banked checkpoint was at T=2. Work done since T=2 up to interruption is wasted.
+    *   Interrupted at T=3. Wasted = $3 - 2 = 1$ minute.
+    *   HIGH runs from T=3 for its duration (8 minutes). Ends at T=11.
+3.  **Time 4**: LOW1 checkpoint bank lands at T+2 relative to start? No, the rule says "bank a checkpoint at minute s+2 and again every 2 running minutes after".
+    *   Let's re-read carefully: "LOW jobs checkpoint every 2 completed minutes... on preemption work past last checkpoint wasted... a job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after".
+    *   LOW1 started at T=0. Banks at T=2, T=4, T=6...
+    *   At T=3 (preemption), the last banked checkpoint was at T=2. The current time is 3. Wasted = $3 - 2 = 1$. Correct.
+    *   Does LOW1 have another checkpoint ready? No, it was interrupted. It must resume from scratch (T=0).
+4.  **Time 11**: HIGH finishes. Core becomes free. Waiting jobs: LOW1 (resumed), LOW2 (started at T=2, waiting since T=2 because core busy with HIGH).
+    *   Tie-breaker: "LOW jobs take the core in order of their start minutes".
+    *   LOW1 start = 0. LOW2 start = 2. LOW1 goes first.
+5.  **Time 11-16**: LOW1 resumes and runs its remaining work.
+    *   Total needed: 5 mins. Wasted at T=3 was 1 min. Remaining to run: $5 - 1 = 4$ minutes? Or does it restart completely?
+    *   Rule: "on preemption the work past the last checkpoint is wasted and redone after resume". This implies restarting from the state of the last checkpoint (T=2). So it needs to run 3 more minutes ($5-2$) plus the 1 minute already done in that segment? No, "wasted" means lost. It must redo the work.
+    *   Interpretation A: Restart from T=0 status. Needs 5 mins.
+    *   Interpretation B: Resume from last checkpoint (T=2). Needs to run until T=5 total. Since it lost the time in [2,3], and needs to reach T=5 completion, it must run for $(5-2)=3$ minutes of new work? Or does "redone" mean run 1 min then continue?
+    *   Standard interpretation of "wasted": The progress made in interval [2,3] is lost. The job effectively goes back to state at T=2. It must now complete the remaining duration $(5-2)=3$ minutes. Wait, if it restarts from T=0, it needs 5 mins. If it resumes from checkpoint at T=2, it needs 3 mins of *new* execution to finish?
+    *   Let's check the text: "a job that starts or resumes at minute s banks a checkpoint at minute s+2... after resume a job redoes every minute past its last bank". This implies continuity from the bank. So if interrupted at T=3, it resumes at T=11 (start of next segment). It has effectively 0 progress since the bank at T=2 is valid? No, "work past the last checkpoint is wasted". The work in [2,3] is gone. But the state *at* T=2 was saved. So it resumes from T=2.
+    *   Duration to finish: Total 5 mins. Saved progress up to 2 mins. Remaining duration = 3 mins.
+    *   Execution time for LOW1 resume run = 3 minutes.
+    *   Start T=11. Ends T=14.
+6.  **Time 14**: LOW1 finishes. Core free. Waiting: LOW2 (started at T=2).
+    *   LOW2 status: Started at T=2. Core was busy with HIGH (T=3 to T=11) then LOW1 (T=11 to T=14).
+    *   Did LOW2 do any work? No, it waited the whole time. It is fresh.
+    *   Duration for LOW2: 7 minutes.
+    *   Start T=14. Ends T=21.
+
+**Totals:**
+*   **Makespan**: Time from first start (T=0) to last finish (T=21). Result = 21 minutes? Or time elapsed? Usually makespan is duration. $21 - 0 = 21$.
+*   **Wasted**: Only LOW1 was preempted. Wasted = 1 minute.
+*   **Order**: LOW1 finished at T=14. LOW2 finished at T=21. Order: ["LOW1", "LOW2"].
+
+Let's double check the "wasted" logic with the provided example in the prompt to ensure alignment.
+Example text: "HIGH arrived at minute 3... its 3rd minute was unbanked when the swap came, so 1 minute wasted."
+In the example: LOW1 (7 min). Banked at T=2. Interrupted at T=3. Wasted = 1. Resumed from T=2 state? "LOW1 had 7 total minutes with 2 banked, so it resumed owing 5". Yes! It resumes with $(Total - LastBank)$.
+So for tonight: LOW1 (5 min). Banked at T=2. Interrupted at T=3. Wasted = $3-2=1$. Resumes owing $(5-2)=3$ minutes.
+Run time for resumed LOW1 = 3 mins. Starts T=11, ends T=14.
+LOW2 (7 min). Fresh. Runs 7 mins. Starts T=14, ends T=21.
+Makespan = 21.
+
+JSON Contract: `{"makespan_min": N, "wasted_min": N, "order": [...]}`
+
+Values:
+`makespan_min`: 21
+`wasted_min`: 1
+`order`: ["LOW1", "LOW2"]
+
+```json
+{
+"makespan_min": 21,
+"wasted_min": 1,
+"order": [
+"LOW1",
+"LOW2"
+]
+}
+```

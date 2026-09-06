@@ -1,0 +1,29 @@
+**PLAN FIRST: Step-by-step execution plan (each step is one line with formula or rule)**
+
+1. Initialize workspace at `/tmp/opencode/queue-run` with directory structure: `scripts/`, `outputs/`, `rules.md`, `decisions.txt`, `logs/`.  
+2. Create timestamped log file in `logs/` for each stage, named `stage-<step>-<timestamp>.log`.  
+3. Download or generate synthetic lag snapshots (consumer × partition × time) as CSV with columns: `timestamp`, `consumer`, `partition`, `offset`, `log_end_offset`.  
+4. Validate input data: check for missing timestamps, offsets going backwards, and gaps in 2-day window; record all violations in `decisions.txt` under "missing_snapshot", "backwards_offset".  
+5. Parse raw CSV into structured array of records using Python/pandas or awk; ensure each row has timestamp, consumer, partition, offset, log_end_offset.  
+6. For each time point and consumer-partition pair: compute lag = log_end_offset - offset.  
+7. Compute per-consumer-per-partition lag max, mean over 1-minute windows across the two-day period.  
+8. Identify burst windows: define a burst as any 5-minute window where lag exceeds prior 30-minute average by ≥2σ (standard deviation), with σ computed from 1-min lag values.  
+9. Extract three rebalance timestamps from metadata or logs; validate they exist in the time range and are not duplicates.  
+10. For each rebalance timestamp, compute lag at that moment per consumer-partition pair; flag spikes where lag increases by ≥50% compared to 3-minute pre-rebalance window.  
+11. Compute throughput per consumer: for each partition, sum (log_end_offset - offset) over time, divide by total seconds in interval, multiply by 60/1 → messages per minute.  
+12. For each consumer, compute mean and max throughput across all partitions; assign to worker-2 separately.  
+13. Compare worker-2’s lag max and throughput to other consumers: if lag max exceeds others by ≥50% on any partition, flag as "slow"; if only one partition shows high lag and rebalances occur, flag as "stuck with hot partition".  
+14. Compute percentage of time worker-2 is behind: (time when lag > 3σ above mean) / total time × 100%, where σ is per-consumer-partition lag standard deviation.  
+15. Identify any row where offset < prior offset in same consumer-partition; flag it with rule "offset_backwards" and record in `decisions.txt`.  
+16. For each rebalance event, check if lag spikes occur within 2 minutes before or after — if yes, mark as correlated.  
+17. Output per-consumer-per-partition lag max/mean/burst windows to `outputs/lag_per_consumer_partition.json` and `outputs/lag_per_consumer_partition.md`.  
+18. Output rebalance correlation table: timestamp, consumer, partition, pre-rebalance lag, post-rebalance lag, spike magnitude (Δ), whether correlated with spike. Save as `outputs/rebalance_correlation.md` and `outputs/rebalance_correlation.json`.  
+19. Output throughput per consumer in messages/minute to `outputs/throughput_per_consumer.json` and `outputs/throughput_per_consumer.md`.  
+20. Generate final report: `lag-report.md`, containing methodology, tables, decisions, and one-paragraph honest note on assumptions and data contradictions.  
+21. Write rules for all thresholds (e.g., 50% lag increase = burst; 2σ = threshold) directly into `rules.md` with justification.  
+22. Run verification script: `scripts/verify.py`, which reprocesses raw input, outputs same fields as main pipeline, and compares field-by-field using pandas or awk; exits nonzero if any drift > 1e-6.  
+23. Ensure all counts add up: total messages in lag data must equal sum of throughput × time (in minutes).  
+24. Run entire workflow twice: first run to establish baseline, second run with same input to detect state bugs or idempotency issues; log both runs and compare outputs.  
+25. Log each stage’s runtime in `logs/stage-<step>-<timestamp>.log` as "Stage X completed at 12:00:00 UTC, duration=34.2s".  
+26. If any rule feels arbitrary (e.g., threshold of 50% spike), write it with reason next to it in `rules.md`.  
+27. Cache only if explicitly noted; all caching must be documented with

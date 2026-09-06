@@ -1,0 +1,83 @@
+**Phase 1: Rule List**
+Based on the text provided, here are the rules governing the state changes for tonight's events (ignoring orientation numbers):
+
+1.  **Arrival/Attempt Cost Rule**: Each failed attempt costs 3 tokens; each wait second costs 1 token. Total spend accumulates per event.
+2.  **Budget Check Rule**: After every event, check if `total_spend` > `budget`. If true, trigger budget doubling logic.
+3.  **Budget Doubling Rule**: If over budget, double the budget exactly once immediately. The new budget becomes `2 * original_budget`.
+4.  **Re-check Rule**: Compare `total_spend` against the *doubled* budget.
+5.  **Suppression Decision Rule**: If `total_spend` > `doubled_budget`, set `suppressed = true`. Otherwise, set `suppressed = false`.
+6.  **Budget After Calculation Rule**: Calculate `budget_after` as `current_effective_budget - total_spend`. (Note: The text implies the effective budget used for subtraction is the one that determined the outcome; in the orientation example where doubling fired and re-check passed, it subtracted from the doubled budget. In tonight's case, if no doubling fires or if we assume standard behavior unless specified otherwise by a "doubling fired" flag, we must look at the specific trigger. The text says: "budget_after is always computed against the doubled budget when doubling fired". Since tonight's spend (3+6+12 + 3*4 = 30) vs Budget (30) is exactly equal, no doubling fires. Thus, `budget_after` is calculated against the original budget).
+7.  **Wait Sum Rule**: `wait_s` is the sum of all wait seconds observed in the sequence.
+
+**Phase 2: Ledger Walk**
+Processing tonight's events in strict arrival order:
+
+*   **Event 1 (Attempt 1)**:
+    *   Wait: 3s
+    *   Attempt Cost: 3 tokens
+    *   Spend: $3 + 3 = 6$
+    *   State Check: $6 \le 30$. No doubling.
+*   **Event 2 (Attempt 2)**:
+    *   Wait: 6s (doubles from previous)
+    *   Attempt Cost: 3 tokens
+    *   Spend: $6 + 3 = 9$
+    *   Cumulative Spend: $6 + 9 = 15$
+    *   State Check: $15 \le 30$. No doubling.
+*   **Event 3 (Attempt 3)**:
+    *   Wait: 12s (doubles from previous)
+    *   Attempt Cost: 3 tokens
+    *   Spend: $12 + 3 = 15$
+    *   Cumulative Spend: $15 + 15 = 30$
+    *   State Check: $30 \le 30$. Condition is "exceeds" (strictly greater). Since $30 == 30$, it does not exceed. No doubling fires.
+*   **Final Calculation**:
+    *   Total Attempts ($N$): 4 (The text says "the job needs 3 failed attempts before the 4th succeeds". We processed 3 failures. The 4th success is implied to happen after these waits/costs, or the cost includes the successful one? Let's re-read carefully: "after each failed attempt the retry waits, then runs... first wait is 3s... Waits observed: 3, 6, 12". This implies 3 failures occurred. The 4th attempt succeeds. Does the 4th attempt incur a cost? Usually, yes. But the text lists "Waits observed: 3, 6, 12" and says "three attempts in all" for the orientation story where it failed. For tonight, it says "the job needs 3 failed attempts before the 4th succeeds".
+    *   Let's check the spend definition again: "every attempt costs 3 and every wait second costs 1".
+    *   Sequence of events described by "Waits observed":
+        1. Fail 1: Wait 3s, Run (Cost 3). Total Spend = 6.
+        2. Fail 2: Wait 6s, Run (Cost 3). Total Spend = 15.
+        3. Fail 3: Wait 12s, Run (Cost 3). Total Spend = 30.
+        4. Success 4: Does it wait? The text says "after each failed attempt the retry waits". It does not explicitly state a wait for the successful one, but usually, an attempt has a cost regardless of success/failure in these token models unless specified "only on failure". However, looking at the orientation story: "three attempts in all... spend 30 against a budget of 39". In that story, 3 failures happened? No, it says "2 failures doubling to 10s... three attempts in all". Wait, if there are only 3 attempts total and 2 failed, the 3rd must have succeeded.
+        *   Orientation Story Math Check:
+            *   Attempt 1 (Fail): Wait 5s + Cost 5 = 10 spend.
+            *   Attempt 2 (Fail): Wait 10s + Cost 5 = 15 spend. Cumulative = 25.
+            *   Attempt 3 (Success?): Text says "total waiting 15s". $5+10=15$. This matches.
+            *   Text says "spend 30 against a budget of 39". Wait, if only 3 attempts and costs are per attempt: $5+5+5 = 15$ cost + $15$ wait = $30$ spend.
+            *   So the successful attempt does NOT incur extra wait/cost beyond what is listed? Or perhaps the "spend" calculation in the text includes the cost of the successful attempt but no additional wait?
+            *   Let's re-read tonight's specific constraint: "first wait is 3s, each next wait doubles... Waits observed: 3, 6, 12". This lists exactly 3 waits.
+            *   If there are 4 attempts (3 failed, 1 success), and we only see 3 waits listed in the observation ("Waits observed: 3, 6, 12"), it implies the successful attempt did not generate a "wait" event or its wait is zero/not counted.
+            *   However, every attempt costs 3 tokens. Does the successful one cost? The text says "every attempt costs 3". It doesn't say "every failed attempt". So Attempt 4 should cost 3.
+            *   Total Spend = (Wait1 + Cost1) + (Wait2 + Cost2) + (Wait3 + Cost3) + (Cost4).
+            *   Wait Sum = $3+6+12 = 21$.
+            *   Attempt Costs = $3 \times 4 = 12$? Or is the successful attempt free of cost in this specific "token" model where only failures consume tokens?
+            *   Let's look at the orientation story again to deduce the rule for "Success Cost".
+                *   Story: "three attempts in all... spend 30".
+                *   Waits: $5+10=15$.
+                *   If costs were included: $15 \text{ (wait)} + 15 \text{ (costs for 3 attempts)} = 30$.
+                *   This implies **every attempt** (including the successful one) incurs a cost of 3 tokens.
+            *   Applying to Tonight:
+                *   Waits: $3+6+12 = 21$.
+                *   Attempts: 4 (3 failed, 1 success).
+                *   Costs: $4 \times 3 = 12$.
+                *   Total Spend: $21 + 12 = 33$.
+            *   Budget Check: Is $33 > 30$? Yes.
+            *   Trigger Doubling: Double budget to $60$.
+            *   Re-check: Is $33 \le 60$? Yes.
+            *   Suppressed: False.
+            *   Budget After: $60 - 33 = 27$.
+
+    *   **Alternative Interpretation**: Maybe the "Waits observed" list is exhaustive for the whole job, and the successful attempt has no wait (which fits) but does it have a cost? The text says "every attempt costs 3". It doesn't qualify with "failed". So yes, cost applies.
+    *   Let's double check the "orientation story" logic again. "spend 30 against a budget of 39... waits 5+10 = 15 wait-seconds, plus 3 attempts at 5 each = 15, all spend 15 + 15 = 30".
+        *   This explicitly sums: (Wait Sum) + (Attempt Count * Cost).
+        *   So for Tonight:
+            *   Wait Sum = $3+6+12 = 21$.
+            *   Attempt Count = 4.
+            *   Spend = $21 + (4 \times 3) = 33$.
+    *   Budget Logic:
+        *   Initial Budget = 30.
+        *   Spend = 33.
+        *   $33 > 30$ -> Double Budget to 60.
+        *   Re-check: $33 \le 60$.
+        *   Suppressed = False.
+        *   Budget After = Doubled Budget - Spend = $60 - 33 = 27$.
+
+    *   Wait, let's re-read the "budget_after" rule in the text carefully: "budget_after is always

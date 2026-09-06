@@ -1,0 +1,61 @@
+# Tier-A Case 091 — Release Notes Distill (SYNTH)
+
+the task is release notes distill, and the details are below, all of them. construct a self-contained reporting exercise, that's the job, workspace is /tmp/opencode/relnotes-run, and read the whole thing before starting because the constraints at the end apply to every step, not just the last one.
+
+here's the situation: the last four changelogs plus the raw diff stats between releases, after that the deliverable: user-facing release notes, one page, no internals language, plus translation table: internal jargon to user benefit, feature-x-shard becomes faster search, then three changes have no user impact and belong in a footer at most. the whole point of this exercise is that the working files and the checkable outputs exist on disk where i can poke at them, so every stage leaves real artifacts, and the artifacts are the deliverable, not the chat narration around them. if a step produces nothing i can open, it didn't happen.
+
+percentages need denominators next to them always, twelve percent of what, because a percentage alone is half a number.
+
+think of this as a miniature version of the real jobs i hand off: messy inputs, stated rules, honest outputs. the rules you invent matter as much as the numbers you compute, because i'm going to reuse this when the data is real and i need to trust the machinery.
+
+what i need done, in this order:
+
+1. change inventory across the four changelogs with diff-stat weight each. edge cases belong in the output, not in your head, list what you hit and what you did with each.
+after that user-impact filter, impactful, minor, invisible, with criteria. and don't round anything into meaninglessness, i'd rather see the ugly precise number than a tidy lie.
+3. the notes: headline, three bullets max of user benefit, footer for minor, nothing else. and that one gets checked by the verifier too, it's not just a produce-and-hope step.
+4. jargon translation table shown alongside as evidence of the work. and don't round anything into meaninglessness, i'd rather see the ugly precise number than a tidy lie.
+after that relnotes.md plus inventory.json plus translation.csv. and that one gets checked by the verifier too, it's not just a produce-and-hope step.
+
+now the mess, because a pipeline that only works on clean data is worthless to me: one change is a regression fix of a change two releases back, the story must be told honestly, diff stats are missing for one release window, and two changes are duplicates across changelog wording. those aren't obstacles, they're the actual test, a clean run on clean data is worthless and i've said this before. the decisions file gets one line per mess type saying how you dealt with it.
+
+keep the rules you invent in a rules.md next to the scripts, so when i come back in a week i know why the machine did what it did.
+
+everything gets a run twice test before you call it done, because the first run always works and the second one is where the state bugs live.
+
+when a rule and a row disagree, both go in the output, the flagged row and the rule that flagged it, side by side.
+
+if any rule you write down feels arbitrary, good, that means you noticed, write the threshold and the reason next to it so future-me can argue with it.
+
+i'd rather have an ugly table that's right than a beautiful chart that's approximate, so default to tables unless the data genuinely needs a picture.
+
+the workspace layout is yours to design but say it in the readme, so the structure is a decision not an accident.
+
+anything you cache or skip for speed gets a note, because invisible shortcuts are how results stop being reproducible.
+
+on outputs: every stage writes to its own subfolder under the workspace, naming is yours but be consistent, and the final report goes both human, markdown with actual tables, and machine, json with the same numbers. i'll be checking that the two agree, and i'll be unhappy if they don't.
+
+error messages should say what failed and where, not just that something did, because 'an error occurred' has never helped anybody.
+
+if two stages could run in either order and it doesn't matter, pick one and move on, i don't need a committee meeting about it.
+
+verification is a first-class deliverable here. independent recomputation from the raw files, its own code path, and a conservation check that everything entering the pipeline is accounted for at the end, kept, rejected, merged, flagged, the books have to balance. nonzero exit on failure, actual output shown in your report.
+
+one more thing, every number you quote me at the end better come from an actual run you can point at, because should-be-roughly-nine is not a result, it's a vibe.
+
+if a stage can honestly be a one-liner, let it be a one-liner, padding steps to look thorough is its own kind of lie.
+
+and a note on tone in the outputs: plain sentences, tables where tables belong, no buzzword garbage, i want to skim this in two minutes and know exactly what happened.
+
+logs per stage, one line each is plenty, i want to see where time went and where things broke without spelunking.
+
+and when i say documented i mean in a file on disk, not in the chat log where it scrolls away forever.
+
+no network, no installs, no llm calls, deterministic or seeded everywhere, and if any stage is slow relative to its work say so honestly instead of pretending it's fine. don't stop until the whole sequence is verified end to end. don't stop halfway to ask me questions you can answer yourself. names, orderings, column formats, those are yours. only come back at a real fork that changes what i asked for, and there isn't one hiding in here.
+
+timings, real ones, timestamps around each stage, a table at the end. not vibes.
+
+and if you find something in the data that contradicts what i said above, the data wins, report the contradiction, don't quietly bend either one.
+
+and no leaving a to-do in a comment for later-me, later-me is you in ten minutes, finish the job.
+
+end state: verified outputs, a short readme pointing at everything, timings, and your one honest surprise.

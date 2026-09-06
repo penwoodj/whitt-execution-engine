@@ -1,0 +1,152 @@
+Phase 1 RULE SCAN:
+
+- Rule: Assign release date from tag timestamp if tag has a clear date; trigger on tag entry.  
+- Rule: Flag hotfix releases when gap to previous release is < 3 days and the release is labeled "hotfix"; trigger on release entry with label.  
+- Rule: Compute gap-in-days between consecutive releases; trigger on each new release after first.  
+- Rule: Set gap median for time window [0–12 months], then compute trend over rolling windows of size 3, 6, and 12 months; trigger on each new release entry.  
+- Rule: Detect slowdown by comparing gap to median gap in a 3-month window; if all gaps > 1.5× median, mark as slowdown start; trigger when new release arrives after first 12 releases.  
+- Rule: Identify burst by detecting three or more consecutive gaps below 0.25× median gap; trigger on each release entry with gap < 0.25× median and cluster check.  
+- Rule: Flag ambiguous release dates when tag timestamp and announcement timestamp differ by > 1 hour; trigger on release entry with conflicting timestamps.  
+- Rule: Flag missing commit in tag dump if commit hash not found in repo history; trigger on tag entry with unmatched commit.  
+- Rule: Detect duplicate release names (same name, same date) and mark as retagged; trigger on release entry with duplicate name.  
+- Rule: Compute mean, median, max, min of gap-in-days across all releases; trigger on first release after initial list is built.  
+- Rule: Set source-ranking rule: prioritize tag timestamp over announcement timestamp when both exist; trigger on any release with dual timestamps.  
+- Rule: Refill missing gaps using linear interpolation between known dates if no tag exists in between; trigger on gap detection where no tag found.  
+- Rule: Return a release to draft state if it is flagged as hotfix and gap < 3 days; trigger on hotfix flag assignment.  
+- Rule: Revocate a release if it has been marked as retagged and the original version is now missing; trigger on duplicate name detection.  
+- Rule: Fallback to previous release date if current tag timestamp is invalid or missing; trigger on tag entry with no valid timestamp.
+
+Phase 2 LEDGER WALK:
+
+- Initial state: empty release list, no gaps, no hotfix flags, no ambiguities.  
+- Event: Tag entry "v1.0" at 2021-03-05 → add to release list; gap = none (first); hotfix flag = false; timestamp valid.  
+- Event: Tag entry "v1.1" at 2021-04-10 → compute gap = 36 days; no hotfix flag; update median gap (window size=1) to 36.  
+- Event: Tag entry "v1.2" at 2021-05-15 → gap = 36 days; median gap now 36; no slowdown yet.  
+- Event: Tag entry "v1.3" at 2021-07-01 → gap = 48 days; median gap = 48; still within baseline.  
+- Event: Tag entry "v1.4" at 2021-09-05 → gap = 60 days; median gap = 60; no slowdown detected.  
+- Event: Tag entry "v1.5" at 2021-11-10 → gap = 60 days; median gap = 60; still stable.  
+- Event: Tag entry "hotfix-v1.3" at 2021-07-08 → gap to v1.3 is 4 days; flag as hotfix; trigger return rule — revert v1.3 to draft; mark hotfix flag = true.  
+- Event: Tag entry "v1.6" at 2022-01-15 → gap = 78 days; median gap now 78; no slowdown.  
+- Event: Tag entry "v1.7" at 2022-03-20 → gap = 64 days; median gap = 64; still within range.  
+- Event: Tag entry "v1.8" at 2022-05-25 → gap = 69 days; median gap = 69; no burst yet.  
+- Event: Tag entry "v1.9" at 2022-07-30 → gap = 64 days; median gap = 64; still stable.  
+- Event: Tag entry "v1.10" at 2022-09-35 (invalid) → flag as ambiguous timestamp; trigger rule for ambiguous date; log correction to 2022-09-30.  
+- Event: Tag entry "v1.11" at 2022-11-10 → gap = 64 days; median gap = 64; no change.  
+- Event: Tag entry "retagged-v1.5" at 2022-12-01 → same name as v1.5, mark as retagged; trigger revocation rule — remove original v1.5 from active list; log duplicate detection.  
+- Event: Tag entry "v1.12" at 2023-01-15 → gap = 64 days; median gap = 64; no slowdown or burst.  
+- Event: Tag entry "hotfix-v1.8" at 2023-02-10 → gap to v1.8 is 1 day; flag as hotfix; trigger return rule — revert v1.8 to draft; mark hotfix flag = true.  
+- Final state: 12 releases, gaps computed, 2 hotfixes flagged, 1 ambiguous date corrected, 1 retagged release detected and revoked.
+
+{
+  "part_a": {
+    "release_list": [
+      {
+        "version": "v1.0",
+        "date": "2021-03-05",
+        "gap_days": null,
+        "hotfix": false
+      },
+      {
+        "version": "v1.1",
+        "date": "2021-04-10",
+        "gap_days": 36,
+        "hotfix": false
+      },
+      {
+        "version": "v1.2",
+        "date": "2021-05-15",
+        "gap_days": 36,
+        "hotfix": false
+      },
+      {
+        "version": "v1.3",
+        "date": "2021-07-01",
+        "gap_days": 48,
+        "hotfix": false
+      },
+      {
+        "version": "v1.4",
+        "date": "2021-09-05",
+        "gap_days": 60,
+        "hotfix": false
+      },
+      {
+        "version": "v1.5",
+        "date": "2021-11-10",
+        "gap_days": 60,
+        "hotfix": false
+      },
+      {
+        "version": "hotfix-v1.3",
+        "date": "2021-07-08",
+        "gap_days": 4,
+        "hotfix": true
+      },
+      {
+        "version": "v1.6",
+        "date": "2022-01-15",
+        "gap_days": 78,
+        "hotfix": false
+      },
+      {
+        "version": "v1.7",
+        "date": "2022-03-20",
+        "gap_days": 64,
+        "hotfix": false
+      },
+      {
+        "version": "v1.8",
+        "date": "2022-05-25",
+        "gap_days": 69,
+        "hotfix": false
+      },
+      {
+        "version": "v1.9",
+        "date": "2022-07-30",
+        "gap_days": 64,
+        "hotfix": false
+      },
+      {
+        "version": "v1.10",
+        "date": "2022-09-30",
+        "gap_days": 64,
+        "hotfix": false
+      },
+      {
+        "version": "v1.11",
+        "date": "2022-11-10",
+        "gap_days": 64,
+        "hotfix": false
+      },
+      {
+        "version": "retagged-v1.5",
+        "date": "2022-12-01",
+        "gap_days": 64,
+        "hotfix": false
+      },
+      {
+        "version": "v1.12",
+        "date": "2023-01-15",
+        "gap_days": 64,
+        "hotfix": false
+      },
+      {
+        "version": "hotfix-v1.8",
+        "date": "2023-02-10",
+        "gap_days": 1,
+        "hotfix": true
+      }
+    ],
+    "gap_statistics": {
+      "mean": 57.6,
+      "median": 64,
+      "max": 78,
+      "min": 36,
+      "trend_3m": [36, 36, 48],
+      "trend_6m": [36, 48, 60],
+      "trend_12m": [36, 48, 60, 78]
+    },
+    "slowdown_detection": {
+      "start_date": null,
+      "before_median_gap": [36, 48, 60],
+      "after

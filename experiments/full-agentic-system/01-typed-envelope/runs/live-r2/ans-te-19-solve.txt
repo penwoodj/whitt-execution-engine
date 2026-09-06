@@ -1,0 +1,102 @@
+### Phase 1: RULE SCAN
+
+Based on the strict interpretation of the text provided for "tonight", here are the rules that change state or trigger actions, listed in order of precedence (as implied by "pick the one higher in the list"):
+
+1.  **Retry Logic Rule**: Triggers after a failed attempt; sets wait time to initial `2s` then doubles (`2 -> 4 -> 8`) for subsequent retries.
+2.  **Cost Calculation Rule**: Every retry attempt costs `2` tokens; every second of waiting costs `1` token.
+3.  **Budget Deduction Rule**: Subtracts total cost (attempts + waits) from the initial budget immediately upon completion of an event cycle.
+4.  **Failure Threshold Rule**: The job requires exactly `3` failed attempts before the `4th` succeeds.
+5.  **Suppression Check Rule**: If spend exceeds budget, suppress the job and double the budget; re-check suppression status after doubling.
+6.  **Success Termination Rule**: Upon the successful attempt (the 4th), stop processing further retries for this job instance.
+7.  **State Persistence Rule**: Counts (`attempts`, `wait_s`) and remaining balance (`budget_after`) accumulate strictly across events; no carry-over from "orientation" stories.
+8.  **Output Formatting Rule**: Final state must be output as JSON with keys `{"attempts": N, "wait_s": N, "budget_after": N, "suppressed": true|false}` only.
+
+---
+
+### Phase 2: LEDGER WALK
+
+**Initial State:**
+*   Initial Budget: 24 tokens
+*   Current Wait: 0s (pre-first attempt)
+*   Failed Attempts Count: 0
+*   Suppressed: false
+*   Attempt Number: 1
+
+**Event 1: First Retry Attempt Cycle**
+*   *Action*: Execute Attempt #1.
+*   *Outcome*: Fail.
+*   *Rule Applied*: Failure Threshold Rule (Count = 1). Retry Logic Rule triggers wait.
+*   *Cost Calculation*:
+    *   Wait cost: 2 seconds × 1 token/sec = 2 tokens.
+    *   Attempt cost: 2 tokens.
+    *   Total Event Cost: 4 tokens.
+*   *Budget Update*: 24 - 4 = 20 tokens.
+*   *State Check*: Spend (4) <= Budget (20). No suppression.
+*   **State After Event 1**: `attempts`=1, `wait_s`=2, `budget_after`=20, `suppressed`=false.
+
+**Event 2: Second Retry Attempt Cycle**
+*   *Action*: Execute Attempt #2.
+*   *Outcome*: Fail (Required for threshold).
+*   *Rule Applied*: Failure Threshold Rule (Count = 2). Retry Logic Rule triggers next wait (doubles previous: 2 -> 4s).
+*   *Cost Calculation*:
+    *   Wait cost: 4 seconds × 1 token/sec = 4 tokens.
+    *   Attempt cost: 2 tokens.
+    *   Total Event Cost: 6 tokens.
+*   *Budget Update*: 20 - 6 = 14 tokens.
+*   *State Check*: Spend (6) <= Budget (14). No suppression.
+*   **State After Event 2**: `attempts`=2, `wait_s`=4, `budget_after`=14, `suppressed`=false.
+
+**Event 3: Third Retry Attempt Cycle**
+*   *Action*: Execute Attempt #3.
+*   *Outcome*: Fail (Required for threshold).
+*   *Rule Applied*: Failure Threshold Rule (Count = 3, which triggers the logic that the *next* attempt succeeds per "job needs 3 failed attempts before the 4th succeeds"). Retry Logic Rule triggers next wait (doubles previous: 4 -> 8s).
+*   *Cost Calculation*:
+    *   Wait cost: 8 seconds × 1 token/sec = 8 tokens.
+    *   Attempt cost: 2 tokens.
+    *   Total Event Cost: 10 tokens.
+*   *Budget Update*: 14 - 10 = 4 tokens.
+*   *State Check*: Spend (10) <= Budget (4)? **NO**. Spend (10) > Budget (4).
+*   *Rule Applied*: Suppression Check Rule triggers.
+    *   Suppress job? Yes, spend exceeds budget.
+    *   Double the budget: New Budget = 4 × 2 = 8 tokens.
+    *   Re-check suppression: Is Spend (10) > New Budget (8)? **YES**.
+    *   Final Status: Suppressed remains `true`.
+*   **State After Event 3**: `attempts`=3, `wait_s`=8, `budget_after`=8, `suppressed`=true.
+
+**Event 4: Fourth Attempt Cycle (Success Trigger)**
+*   *Action*: Execute Attempt #4.
+    *   *Note on Rule Interpretation*: The rule states "the job needs 3 failed attempts before the 4th succeeds". This implies the system proceeds to the 4th attempt automatically after the 3rd failure, regardless of the previous budget deficit that caused suppression logic. However, the prompt says "if the spend exceeds the budget the job is suppressed".
+    *   Does "suppressed" mean we stop counting attempts? Or do we count this successful attempt towards the total `attempts` key in the final report?
+    *   Re-reading strict constraints: "the job is suppressed... re-checked after doubling, suppressed only if still over." Once marked suppressed, does the 4th attempt happen? Usually, in such systems, suppression halts execution. However, the rule says "before the 4th succeeds", implying the sequence completes. Let's look at the cost. If we execute Attempt #4:
+        *   Wait for #4: The pattern was `2 -> 4 -> 8`. Does it double again to 16? Or does success happen immediately with a standard wait? The rule says "each next wait doubles". So wait = 16s.
+        *   Cost: 16 (wait) + 2 (attempt) = 18 tokens.
+    *   *Conflict Check*: If the job is suppressed, can it spend more money?
+    *   *Refined Interpretation*: The phrase "the job is suppressed" usually implies termination of the process. The budget doubling and re-check are mechanisms to decide if we *continue* or *stop*. Since it remained over budget even after doubling, the state `suppressed: true` is set. If the job is suppressed, the 4th attempt (which would be a success) likely does not occur, or if it occurs conceptually for logging, it doesn't happen in reality because the job was killed.
+    *   *Standard Ledger Logic*: "Suppressed" means the operation stops. The budget is frozen at the state where suppression occurred. We do not execute Event 4 because the job was suppressed by Event 3's outcome. The "success" described in the rule ("before the 4th succeeds") describes the *condition* for success if funds existed, but since funds did not exist (and were capped), the event sequence stops at the suppression decision.
+    *   Therefore, we stop after Event 3. The `attempts` count reflects the attempts made before the job was killed/suppressed.
+
+**Final State Calculation Verification:**
+*   Total Attempts Executed: 3 (Failed).
+*   Total Wait Seconds Incurred: 2 + 4 + 8 = 14 seconds.
+*   Total Cost Incurred: 4 (Event 1) + 6 (Event 2) + 10 (Event 3) = 20 tokens.
+*   Initial Budget: 24.
+*   Remaining Budget: 24 - 20 = 4.
+*   Suppression Logic: Cost (20) > Budget (24)? No initially.
+    *   Wait, let's re-trace the budget logic carefully.
+    *   Start: 24.
+    *   After Event 1: Spend 4. Remainder 20. OK.
+    *   After Event 2: Spend 6 more (Total 10). Remainder 14. OK.
+    *   After Event 3: Spend 10 more (Total 20). Remainder 4.
+        *   Check: Is Total Spend (20) > Initial Budget (24)? No. 20 < 24.
+        *   Wait, my previous mental math was slightly off in the "Event 3" step regarding the threshold check.
+        *   Let's re-evaluate Event 3 trigger:
+            *   Pre-Event 3 Budget: 14.
+            *   Cost of Event 3: 8 (wait) + 2 (attempt) = 10.
+            *   Post-Event 3 Budget: 4.
+            *   Is Spend (10) > Pre-Budget (14)? No. Wait, the rule says "if the spend exceeds the budget". Does it mean current available budget or initial? Usually "the budget" implies the running balance.
+            *   Current Balance before Event 3: 14. Cost to run: 10. Resulting Balance: 4. Is 10 > 14? No. So no suppression yet?
+            *   BUT, look at the rule text: "if the spend exceeds the budget".
+            *   Scenario A: Compare Cost (10) vs Current Balance (14). 10 <= 14. Proceed. New Balance 4.
+            *   Scenario B: Compare Cumulative Spend (20) vs Initial Budget (24). 20 <= 24. Proceed.
+            *   Is there a point where it exceeds?
+            *   Let's check the very last step. If we proceed to Event 3, balance is 4. The job has had 3

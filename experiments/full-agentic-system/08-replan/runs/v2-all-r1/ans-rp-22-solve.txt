@@ -1,0 +1,72 @@
+**Phase 1 RULE SCAN**
+1. **Load Rule**: A load request attempts to place a model of specific size into the pool; if it fits (pool_size >= requested_size), it succeeds immediately.
+2. **Eviction Rule**: If a load does not fit, evict the Least-Recently-Touched (LRT) *unpinned* models one at a time until enough space exists or only pinned models remain. Each eviction counts toward the total.
+3. **Deferral Rule**: If after exhausting all unpinned models there is still insufficient space for the requested load, and only pinned models remain, defer the load (no evictions performed).
+4. **Touch Rule**: Every successful load or partial fit updates the recency of the involved model(s) to Most-Recently-Touched.
+5. **Unload Rule**: An unload request frees the specified size from the pool immediately; if the model is not resident, it is a no-op.
+
+**Phase 2 LEDGER WALK**
+*Initial State*: Pool = 8 GB. Residents: None. Recency: Empty. Pinned: {C}. Unpinned: {}.
+*Note on Model C*: The prompt states "model C is pinned and never evicted". This implies it is pre-loaded or treated as always present. However, the request stream starts with `load A`. If C were already in the pool (8GB total), then available space would be 0. Let's re-read carefully: "one 8GB card tonight... resident sizes: A1 B2 C3 D4 GB respectively." Usually, this implies these are the *sizes* of the models to be loaded, not that they start loaded. The phrase "model C is pinned and never evicted" suggests a constraint on eviction logic if it ever gets loaded, or it might imply it starts loaded.
+Let's look at the orientation example: "M and N loaded clean." This implies some start loaded? No, usually "loaded clean" means they were successfully loaded without eviction.
+Re-evaluating standard residency problem semantics vs this specific text: "model C is pinned". If C starts in the pool (3GB), then initial free = 5GB. If C does not start in the pool, initial free = 8GB.
+Let's check the request `load A (1 GB)`. If C is already there, we load A into remaining space? Or does "pinned" mean it can only be loaded if space allows and stays?
+Actually, looking at the orientation example logic: "P's 3GB did not fit in the 1GB left... evicted M". This implies a pool with some content.
+Hypothesis A: C starts loaded (3GB). Free = 5GB.
+Hypothesis B: No models start loaded. Free = 8GB.
+Text: "model C is pinned and never evicted." If it wasn't loaded, it can't be evicted. This phrasing usually implies it *is* in the pool (perhaps pre-loaded or reserved). However, if we assume standard "empty pool" unless specified "pre-loaded", then C is just a model with a property. But wait, "resident sizes... A1 B2 C3 D4".
+Let's look at the request: `load A`, `load C`, `load D`. If C starts loaded, why ask to load it? Maybe to verify it stays? Or maybe it doesn't start loaded.
+Let's assume **Empty Pool** (8GB free) first, as is standard unless "pre-loaded" is explicit. The "pinned" property just means if we ever try to evict C, we skip it. Since we only evict LRT *unpinned*, and C is pinned, we naturally never evict C anyway. So the distinction might be moot for eviction logic, but relevant if there's a specific rule about pinned models occupying space initially.
+Wait, "model C is pinned" in residency contexts often means it occupies space and cannot be removed. If it doesn't occupy space, it's not a resident. Let's assume **C starts loaded (3GB)** because otherwise the "pinned" constraint on eviction is trivially satisfied by the general rule ("evict unpinned"). The specific mention suggests C has special status in the pool state.
+*Correction*: If I assume C starts loaded, then `load A` fits in 5GB. Then `load C`? It's already there. Does "load C" mean "ensure C is resident"? Or does it fail because it's full? Usually requests are for new loads. If C is already resident, a load request might be ignored or treated as a no-op?
+Let's reconsider the standard interpretation of such puzzles: The list of models and sizes defines the *types* available. The "pinned" attribute applies to type C. Unless stated "C starts loaded", we assume empty pool. Why mention pinned then? To ensure that if C gets loaded, it stays. But wait, if C is 3GB, and we load A (1), B (2), D (4).
+Let's trace with **Empty Pool (8GB)**:
+1. `load A` (1 GB): Fits in 8GB. Load A. Free = 7GB. Residents: {A}. Recency: [A].
+2. `load C` (3 GB): Fits in 7GB. Load C. Free = 4GB. Residents: {A, C}. Recency: [C, A] (C touched last). Note: C is pinned.
+3. `load D` (4 GB): Needs 4GB. Available 4GB. Fits exactly? Yes. Load D. Free = 0GB. Residents: {A, C, D}. Recency: [D, C, A].
+4. `unload D` (4 GB): Frees 4GB. Free = 4GB. Residents: {A, C}.
+
+This sequence requires **0 evictions** and **0 deferrals**.
+Is there any scenario where this fails? "model C is pinned". If the rule implies C *must* be in the pool initially (e.g., reserved), then start free = 5GB.
+1. `load A` (1 GB): Fits in 5GB. Load A. Free = 4GB. Residents: {A, C}. Recency: [C, A].
+2. `load C`: Already resident? If the request is for a new load of C, and C is already there, maybe it's ignored? Or maybe "load C" implies loading *another* instance? No, models are unique types.
+If C starts loaded, then step 2 is redundant or invalid as a "new load".
+However, often in these problems, "pinned" means "cannot be evicted", not "starts loaded". The orientation example says "M and N loaded clean" (implying they were successfully loaded). It doesn't say "P was pre-loaded". So likely **Empty Pool**.
+
+Let's double check the "orientation" text for clues on initial state: "a 5GB card... requests load M, load N... M and N loaded clean." This implies M and N were not there initially.
+So for tonight: Empty pool is the correct assumption. The "pinned" attribute just restricts eviction logic (which we don't hit anyway because we have enough space).
+
+Wait, let's re-read the request stream carefully: `load A`, `load C`, `load D`.
+If I load A (1), then C (3), then D (4). Total size = 8GB. Card size = 8GB.
+It fits perfectly with no evictions.
+
+Let's check if "model C is pinned" implies it takes up space *before* any loads? No, that would be "pre-loaded".
+Is there a trick? "loads cost 30s...". Irrelevant for state counts.
+"evictions choose the least-recently-touched unpinned model".
+If I have {A, C} and need to load D (4GB) but only have 2GB free? Then I evict LRT unpinned. A is unpinned. Evict A. Free becomes 1+3=4GB. Load D.
+But in my trace, space was exactly enough at each step.
+Step 1: 8 -> 7 (Load A).
+Step 2: 7 -> 4 (Load C).
+Step 3: 4 -> 0 (Load D).
+All fit.
+
+Is it possible `load C` fails because C is pinned and we can't load a pinned model? No, "pinned" usually means "protected from eviction".
+Is it possible the order of recency matters for something else? No.
+
+Let's consider the alternative: What if "model C is pinned" implies that C *cannot* be loaded unless there is space, and maybe it starts in a special state? No, standard interpretation holds.
+
+Wait, look at the orientation example again: "Q's 4GB evicted P and still did not fit with only pinned N remaining, so Q deferred".
+This confirms: If you have to evict, you skip pinned models. If after skipping all unpinned (and thus hitting only pinned), space is still insufficient -> Deferral.
+In tonight's case:
+Start: 8GB free.
+1. Load A (1GB). Free=7. Residents={A}. Recency=[A].
+2. Load C (3GB). Fits in 7? Yes. Free=4. Residents={A, C}. Recency=[C, A] (C is most recent). Note: C is pinned.
+3. Load D (4GB). Fits in 4? Yes. Free=0. Residents={A, C, D}. Recency=[D, C, A].
+4. Unload D (4GB). Free=4. Residents={A, C}.
+
+Result: Loads=3, Evictions=0, Deferrals=0, Deferred=[].
+
+Is there any interpretation where this fails?
+What if "model C is pinned" means it occupies 3GB *initially*?
+If Start Free = 5GB (8-3).
+1. Load A (1GB). Fits in

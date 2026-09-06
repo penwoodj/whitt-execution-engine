@@ -1,0 +1,92 @@
+The task describes two independent systems (Canary Rollout and Cache Residency) driven by specific event streams. The narrative includes a detailed "orientation example" which serves as a shape reference but explicitly states its numbers do not apply to tonight's events. The final output must be a JSON object with keys `part_a` and `part_b`.
+
+### Part A: Canary Rollout Analysis
+**Rules & Logic:**
+1.  **Steps 1-5 Limit:** 2.0%
+2.  **Steps 6-10 Limit:** 1.0% (Note: The stream only has 7 events, so Step 6 and 7 apply the stricter limit of 1.0%).
+3.  **Stage Completion Rule:** A clean observation completes the stage equal to its position in the list ($S = P$).
+4.  **Rollout Growth Rule:** Rollout increases by $10 \times S$.
+5.  **Breach Handling:** If an event breaches:
+    *   It is "spent" (no state change for that step).
+    *   The system reverts to the values of the last completed stage (Rollout and Stages hold).
+    *   The limit tightens to 0.8% for remaining steps.
+    *   If a second breach occurs, status becomes `STOPPED`.
+    *   If exactly one breach occurs at the end of the list, status is `PAUSED`.
+
+**Event Stream (Step: Rate):**
+1.  Step 1: 0.6% (Clean) -> Limit 2.0%. $0.6 \le 2.0$. Stage becomes 1. Rollout increases to $10 \times 1 = 10$. State: **R=10, S=1**.
+2.  Step 2: 0.9% (Clean) -> Limit 2.0%. $0.9 \le 2.0$. Stage becomes 2. Rollout increases to $10 \times 2 = 20$. State: **R=20, S=2**.
+3.  Step 3: 1.4% (Clean) -> Limit 2.0%. $1.4 \le 2.0$. Stage becomes 3. Rollout increases to $10 \times 3 = 30$. State: **R=30, S=3**.
+4.  Step 4: 2.0% (Clean) -> Limit 2.0%. $2.0 \le 2.0$. Stage becomes 4. Rollout increases to $10 \times 4 = 40$. State: **R=40, S=4**.
+5.  Step 5: 0.5% (Clean) -> Limit 2.0%. $0.5 \le 2.0$. Stage becomes 5. Rollout increases to $10 \times 5 = 50$. State: **R=50, S=5**.
+6.  Step 6: 1.1% (Breach) -> Limit 1.0%. $1.1 > 1.0$. Breach occurs.
+    *   System reverts to last completed stage values ($S=4$, $R=40$).
+    *   Limit tightens to 0.8%. Status remains active (one breach so far).
+7.  Step 7: 1.5% (Breach) -> Limit 0.8%. $1.5 > 0.8$. Breach occurs again.
+    *   Since this is the second breach, the status becomes `STOPPED`.
+
+**Final Part A State:**
+*   Rollout Pct: 40
+*   Stages Done: 4
+*   Status: STOPPED
+
+---
+
+### Part B: Cache Residency Analysis
+**Rules & Logic:**
+1.  **Models/Resident Sizes:** A=1GB, B=4GB, C=2GB, D=6GB.
+2.  **Pinned Model:** B (4GB) is pinned and never evicted.
+3.  **Eviction Policy:** LRU (Least Recently Used). Evicts unpinned models only. If a load cannot fit even after evicting all unpinned models, it defers.
+4.  **Timing:** Load costs 30s, Unload 10s (Counts towards total but not requested in final JSON keys, usually implied by 'loads' count).
+5.  **Count Definitions:**
+    *   `loads`: Count of load commands executed.
+    *   `evictions`: Count of successful eviction operations performed to make room.
+    *   `deferrals`: IDs of loads that could not fit even after max evictions.
+6.  **Event Stream:** Load A, Load B, Load C, Load D, Unload B.
+
+**Step-by-Step Walk:**
+1.  **Load A (1 GB):** Fits in empty cache (Total 0 -> 1). No eviction needed.
+    *   State: {A:1}. Total Used: 1GB.
+2.  **Load B (4 GB):** Fits (Total 1 -> 5). No eviction needed.
+    *   State: {A:1, B:4}. Total Used: 5GB.
+3.  **Load C (2 GB):** Fits (Total 5 -> 7). No eviction needed.
+    *   State: {A:1, B:4, C:2}. Total Used: 7GB.
+4.  **Load D (6 GB):** Needs 6GB. Current capacity? The problem doesn't state a maximum cache size limit in the text provided ("resident sizes" implies these are the items currently on disk/memory, but without an explicit `MAX_SIZE` variable defined like "8GB card tonight", we must infer from the context of "loads cost... unloads..." and standard LRU problems).
+    *   *Re-reading carefully:* "one 8GB card tonight". The cache size is **8 GB**.
+    *   Current Used: 7GB. Available Space: $8 - 7 = 1$GB.
+    *   Request: Load D (6GB). Needed: $7 + 6 = 13$GB > 8GB.
+    *   Eviction Phase: Must evict unpinned models to fit 6GB.
+        *   Pinned: B (4GB). Cannot touch.
+        *   Unpinned Available: A (1GB), C (2GB). Total removable = 3GB.
+        *   Max possible space after eviction of all unpinned = $8 - (\text{Pinned } 4) = 4$GB.
+    *   Can we fit Load D (6GB) in 4GB? No. Even if we evict A and C, we only have 4GB free for new items. We need 6GB.
+    *   Result: The load cannot fit. It is deferred.
+    *   Evictions performed: None were actually removed to make room because there was no valid target (we can't remove B). Wait, the rule says "evicts choose the least-recently-touched unpinned model". Does it evict them and fail? Or just defer immediately if max space < needed?
+    *   Rule text: "if only pinned models remain and it still does not fit it defers." This implies we try to evict unpinned first. If after evacuating all unpinned, it doesn't fit, then defer.
+    *   Did any eviction happen? We tried to evict A or C to make room for D? No, because $4 < 6$. The load is too big for the remaining space regardless of which unpinned models are left. Thus, no valid eviction operation occurs that changes state; it goes straight to defer condition based on max capacity constraint.
+    *   However, let's check if "loads" count includes this one. Yes ("load commands in tonight's stream"). So `loads` increases.
+    *   Did any evictions occur? No successful eviction of resident data happened to make room for D because it was impossible even after clearing unpinned slots (limited by B). So `evictions` = 0.
+5.  **Unload B (4 GB):** Model B is pinned and currently resident. Unloading a pinned model might be disallowed or simply an operation that happens. The rule says "unloads choose the least-recently-touched unpinned". This implies we can't unload pinned models via LRU policy? But the command is explicit: `unload B`.
+    *   If B is pinned, does it stay resident? Usually "pinned" means "never evicted", but manual unloading might be allowed. However, standard LRU cache problems with "pinned" items usually imply they are protected from eviction/unload logic unless specified. But the command `unload B` is explicit.
+    *   Let's look at the counts requested: `loads`, `evictions`, `deferrals`. `Unload` operations do not increment these specific counters in the definition provided ("loads counts every load command..."). They don't define a counter for unloads. So this event updates state but doesn't change the tallies.
+    *   Does it affect `evictions`? No.
+    *   Does it affect `deferrals`? No.
+
+**Tally Check:**
+*   **Loads:** Executed: A, B, C, D (deferred), Unload B. Total Load commands = 4.
+*   **Evictions:** None occurred. Max space after clearing unpinned was 4GB, needed 6GB. No valid eviction happened to make room for the new item size. Count = 0.
+*   **Deferrals:** ID of load D (since it didn't fit). List = ["D"].
+
+**Final Part B State:**
+*   Loads: 4
+*   Evictions: 0
+*   Deferrals: ["D"]
+
+---
+
+### Final JSON Construction
+
+```json
+{
+"part_a": {
+"rollout_pct": 40,

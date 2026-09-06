@@ -1,0 +1,802 @@
+workflow_id: harness_v7_hb-02
+name: "Harness v7 - hb-02"
+description: "TABLE->GATE->AGGREGATE->JUDGE-V2->LEAK-AUDIT. Case: hb-02 hops=4 route=light"
+version: "7.0.0"
+author: "Experiment"
+tags: [harness, agentic, v7, routing, snapshot, meter, audit]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config:
+      host: localhost
+      port: 8080
+
+models:
+  m_light:
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  m_heavy:
+    name: "Qwen3-5-9B-Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+  m_judge:
+    name: "Hermes-2-Pro-Mistral-7B.Q4_K_M"
+    host:
+      type: llama_cpp_with_vulkan
+
+workflow_execution_strategy:
+  timing:
+    cooldown_after_unload_secs: 0
+    min_tmp_space_mb: 50
+  memory:
+    model_lifecycle:
+      unload_unused: false
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+  steps:
+    s00_screen:
+      generative_entity: "${models.m_light}"
+      prompt: "pre-flight"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/screen-validate.py /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-02.yml"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - skip_step: true
+
+    s01_solve:
+      generative_entity: "${models.m_light}"
+      prompt: |
+        ROLE: on-call operator. Precise. Zero fluff.
+
+                The quarterly budget committee for the platform engineering group met on
+        Thursday afternoon, and you are the operations lead responsible for turning
+        the committee's decisions into the spending ledger. The meeting ran long,
+        the espresso machine in the corner broke halfway through, and by the end
+        everyone was arguing about chair cushions for the new office, so this
+        written summary is now the only authoritative record of what was actually
+        decided about the four capital requests on the agenda. You have re-read
+        your notes twice, and this is the faithful account.
+        
+        First, the standing rules the committee operates under, which were read
+        aloud at the start of the meeting because two members were new. Every
+        capital request must carry a dollar amount, an owner, and a category. Any
+        single request sized at fifty thousand dollars or less, with no
+        complicating factors, is approved outright by the committee and the money
+        is committed immediately. Any request sized above fifty thousand dollars
+        cannot be approved outright regardless of merit: it must be routed to the
+        CFO for signoff, and while it sits in the CFO's queue its money is NOT
+        committed — the ledger records it as needs_signoff, and it only becomes
+        committed later if and when the CFO signs, which is outside this meeting's
+        scope. Requests tagged as emergency are moved to the front of the agenda
+        and discussed first, but the emergency tag changes only the order of
+        discussion; it has no effect whatsoever on the approval thresholds or on
+        the money. Finally, any request whose owning team has an unpaid invoice
+        older than ninety days sitting with finance is placed on hold before it is
+        even discussed; a held request commits nothing and approves nothing.
+        
+        Now the four requests, in the order they were actually discussed, which —
+        remember — is not the order they appeared on the printed agenda, because
+        the emergency tag reorders discussion.
+        
+        Request R1 came from the storage team: thirty thousand dollars for a
+        second-tier backup array to replace the failing one in rack 12. It is a
+        routine request with no emergency tag. The owning team's invoices are all
+        current. Thirty thousand sits comfortably at or under the fifty-thousand
+        line. The committee voted and approved it without drama. Its full thirty
+        thousand is committed as of Thursday.
+        
+        Request R2 came from the data platform group: sixty thousand dollars to
+        double the capacity of the analytics cluster, complete with a slide deck
+        arguing that query queues are destroying analyst productivity. There is no
+        emergency tag, and the group's invoices are current. But sixty thousand is
+        strictly above the fifty-thousand ceiling that the committee is empowered
+        to approve, and the ceiling makes no exception for persuasive slide decks.
+        Under the rules, R2 must go to the CFO for signoff. As of the close of the
+        meeting the CFO has not signed it. So R2's status is needs_signoff, and
+        none of its sixty thousand is committed.
+        
+        Request R3 carried the emergency tag: twenty thousand dollars to replace a
+        failed fiber module that took the inter-rack link down that very morning.
+        The emergency tag moved R3 to the front of the agenda — it was actually
+        the first request discussed, before R1 — and there was some confusion in
+        the room about whether emergency requests follow a different approval
+        path. They do not. The tag reorders discussion and nothing else; the same
+        fifty-thousand threshold applies. Twenty thousand is under the line, the
+        owning team's invoices are current, and the committee approved R3 outright.
+        Its twenty thousand is committed.
+        
+        Request R4 was the last one discussed: fifteen thousand dollars for a
+        licensing renewal for the diagramming tool nobody admits to using. The
+        amount is trivially under the threshold, but when the finance liaison
+        pulled the owner's file, the platform tooling team — R4's owner — has an
+        unpaid invoice from a vendor dating back one hundred and twelve days. The
+        ninety-day rule triggers: the request is placed on hold before discussion,
+        and the committee never voted on it. Held requests commit nothing.
+        
+        Two side matters, for the record, and neither touches the ledger. The
+        office manager's request for new lobby furniture was tabled to next
+        quarter and was never a capital request on this agenda. And the coffee
+        budget, a sore subject after the espresso machine died mid-meeting, runs
+        through the facilities petty-cash account, which you do not manage and
+        which the committee has no authority over.
+        
+        As you build the ledger entry, you need four numbers and the total spend
+        actually committed by this meeting. Count approved as requests approved
+        outright by committee vote; count needs_signoff as requests routed to the
+        CFO and still unsigned; count held as requests blocked before discussion.
+        Committed money is only money from outright-approved requests, in
+        thousands of dollars. Also report the status of each individual request —
+        R1, R2, R3, R4 — as one of approved, needs_signoff, or held.
+        
+        The committee's dual-track structure was not designed in a vacuum. Before
+        the split, every request regardless of size went through the same full
+        ceremony — five members, a full read of the proposal, a discussion round,
+        a vote — and by last spring the queue had grown to a two-meeting backlog.
+        An audit found that eighty percent of the queue consisted of requests
+        under the ceiling that nobody seriously disputed, each burning forty
+        minutes of five people's time. The ceiling rule was the fix — draw a line
+        at the amount where scrutiny actually starts paying for itself, and let a
+        single empowered member carry those through. The exact ceiling figure was
+        argued over three sessions before landing where it now sits, and the
+        bylaws note wryly that the number is a judgment call dressed as a rule,
+        but a judgment call everyone finally agreed to live by.
+        
+        Your own week as duty member began Monday morning when the chair handed
+        over the fast-track stamp, a physical rubber stamp that lives in a drawer
+        for reasons of tradition no one can defend. Since then each request has
+        crossed your desk with its one-page form filled out by the requesting
+        team — amount, purpose, the account it draws from, and a signed
+        acknowledgment that the funds must be spent this quarter. You read each
+        form in full, checked each amount against the ceiling line, and where a
+        signature was missing you set the form aside rather than chase it, because
+        the bylaws are explicit that an incomplete form waits for completeness
+        rather than being waved through by a sympathetic duty member.
+        
+        Around the committee's work sits a small cloud of process that touches
+        nothing you will report. A procurement bot posts daily summaries of
+        account balances to a channel nobody reads, its numbers always a day
+        stale and used for nothing. The finance systems team you do not manage
+        has been piloting a pre-approval assistant that drafts suggested
+        dispositions for each request, and while its suggestions are sometimes
+        uncannily good, the bylaws do not recognize it and every actual decision
+        this quarter was made by a human with a stamp or a gavel. The archive of
+        requests from prior quarters sits in a shared drive, browsable and
+        occasionally consulted, but nothing from those quarters belongs in this
+        quarter's counts.
+        
+        In the final hour before the quarter's books close, the discipline that
+        matters most is re-verification of the disposition trail. You re-read
+        each one-page form against the decision you recorded, not the one you
+        remember recording, because memory under deadline pressure turns
+        ambiguity into confidence. You double-check that every held request
+        carries a reason — missing signature is a reason, ceiling breach is a
+        reason, and a hold without one gets flagged by the chair as an
+        unexplained gap. You confirm the committed total you are about to report
+        reconciles against the sum of the approved amounts, since a committed
+        figure that drifted from its parts would be the first thing the auditor
+        hunts. Only when the trail reads cleanly from first form to last do you
+        draft the summary the committee will rubber-stamp tomorrow — the same
+        summary whose counts you are about to report, and the last thing
+        standing between your week and the record.
+        
+        The archive room itself tells the history of how this committee learned
+        to count. Shelves of bound minutes go back nine years, and flipping
+        through them you can watch the vocabulary evolve — early quarters record
+        every request as passed or failed with no middle ground, the signoff
+        state only appearing after a year in which three approved requests
+        stalled for lack of a second signature and nobody could say whether
+        they were alive. The held state arrived later still, born of a quarter
+        when the ceiling was raised mid-meeting and requests that would have
+        sailed through an hour earlier were left in limbo with no label at all.
+        Each bucket in tonight's counts carries that lineage, which is why the
+        bylaws refuse to collapse them — a request waiting on paperwork is not
+        denied, and a request over the line is not waiting, and a request the
+        committee has not yet gavelled is none of the above.
+
+        METHOD: for EACH entity below, derive its answer from the rules.
+        Track state step by step in plain text. Entities you do not manage
+        NEVER count. Check deadline/budget rules BEFORE finalizing.
+
+        Entities (one line each, id then question):
+        - r1: R1 is a routine request at 30k, under the 50k fast-track ceiling, with invoices current — under-ceiling routine requests are approved by the duty member alone; status? (approved, needs_signoff, or held) [answer format: a single word in quotes]
+        - r2: R2 is a routine request at 60k, over the 50k ceiling, routed to the CFO whose signoff has not arrived — over-ceiling requests without CFO signoff are not committed; status? [answer format: a single word in quotes]
+        - r3: R3 is an emergency-tagged request at 20k, under the ceiling, invoices current — emergency bypasses queue order but the ceiling test still governs; status? [answer format: a single word in quotes]
+        - r4: R4 is routine at 15k but the requesting owner carries a 112-day unpaid invoice under the 90-day hold rule — the hold blocks approval until cleared; status? [answer format: a single word in quotes]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 4 lines,
+        one per entity above, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines. No JSON. No explanations.
+      model_overrides: { temperature: 0.1, max_tokens: 1280 }
+      when:
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-02.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s02_fix_1
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json check ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-02"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.solve.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage solve --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-02"
+              working_dir: "."
+              fail_on_error: false
+
+    s02_fix_1:
+      generative_entity: "${models.m_light}"
+      prompt: |
+        ROLE: correction specialist. Entity table failed checks. Fix rows.
+
+        Original task:
+                The quarterly budget committee for the platform engineering group met on
+        Thursday afternoon, and you are the operations lead responsible for turning
+        the committee's decisions into the spending ledger. The meeting ran long,
+        the espresso machine in the corner broke halfway through, and by the end
+        everyone was arguing about chair cushions for the new office, so this
+        written summary is now the only authoritative record of what was actually
+        decided about the four capital requests on the agenda. You have re-read
+        your notes twice, and this is the faithful account.
+        
+        First, the standing rules the committee operates under, which were read
+        aloud at the start of the meeting because two members were new. Every
+        capital request must carry a dollar amount, an owner, and a category. Any
+        single request sized at fifty thousand dollars or less, with no
+        complicating factors, is approved outright by the committee and the money
+        is committed immediately. Any request sized above fifty thousand dollars
+        cannot be approved outright regardless of merit: it must be routed to the
+        CFO for signoff, and while it sits in the CFO's queue its money is NOT
+        committed — the ledger records it as needs_signoff, and it only becomes
+        committed later if and when the CFO signs, which is outside this meeting's
+        scope. Requests tagged as emergency are moved to the front of the agenda
+        and discussed first, but the emergency tag changes only the order of
+        discussion; it has no effect whatsoever on the approval thresholds or on
+        the money. Finally, any request whose owning team has an unpaid invoice
+        older than ninety days sitting with finance is placed on hold before it is
+        even discussed; a held request commits nothing and approves nothing.
+        
+        Now the four requests, in the order they were actually discussed, which —
+        remember — is not the order they appeared on the printed agenda, because
+        the emergency tag reorders discussion.
+        
+        Request R1 came from the storage team: thirty thousand dollars for a
+        second-tier backup array to replace the failing one in rack 12. It is a
+        routine request with no emergency tag. The owning team's invoices are all
+        current. Thirty thousand sits comfortably at or under the fifty-thousand
+        line. The committee voted and approved it without drama. Its full thirty
+        thousand is committed as of Thursday.
+        
+        Request R2 came from the data platform group: sixty thousand dollars to
+        double the capacity of the analytics cluster, complete with a slide deck
+        arguing that query queues are destroying analyst productivity. There is no
+        emergency tag, and the group's invoices are current. But sixty thousand is
+        strictly above the fifty-thousand ceiling that the committee is empowered
+        to approve, and the ceiling makes no exception for persuasive slide decks.
+        Under the rules, R2 must go to the CFO for signoff. As of the close of the
+        meeting the CFO has not signed it. So R2's status is needs_signoff, and
+        none of its sixty thousand is committed.
+        
+        Request R3 carried the emergency tag: twenty thousand dollars to replace a
+        failed fiber module that took the inter-rack link down that very morning.
+        The emergency tag moved R3 to the front of the agenda — it was actually
+        the first request discussed, before R1 — and there was some confusion in
+        the room about whether emergency requests follow a different approval
+        path. They do not. The tag reorders discussion and nothing else; the same
+        fifty-thousand threshold applies. Twenty thousand is under the line, the
+        owning team's invoices are current, and the committee approved R3 outright.
+        Its twenty thousand is committed.
+        
+        Request R4 was the last one discussed: fifteen thousand dollars for a
+        licensing renewal for the diagramming tool nobody admits to using. The
+        amount is trivially under the threshold, but when the finance liaison
+        pulled the owner's file, the platform tooling team — R4's owner — has an
+        unpaid invoice from a vendor dating back one hundred and twelve days. The
+        ninety-day rule triggers: the request is placed on hold before discussion,
+        and the committee never voted on it. Held requests commit nothing.
+        
+        Two side matters, for the record, and neither touches the ledger. The
+        office manager's request for new lobby furniture was tabled to next
+        quarter and was never a capital request on this agenda. And the coffee
+        budget, a sore subject after the espresso machine died mid-meeting, runs
+        through the facilities petty-cash account, which you do not manage and
+        which the committee has no authority over.
+        
+        As you build the ledger entry, you need four numbers and the total spend
+        actually committed by this meeting. Count approved as requests approved
+        outright by committee vote; count needs_signoff as requests routed to the
+        CFO and still unsigned; count held as requests blocked before discussion.
+        Committed money is only money from outright-approved requests, in
+        thousands of dollars. Also report the status of each individual request —
+        R1, R2, R3, R4 — as one of approved, needs_signoff, or held.
+        
+        The committee's dual-track structure was not designed in a vacuum. Before
+        the split, every request regardless of size went through the same full
+        ceremony — five members, a full read of the proposal, a discussion round,
+        a vote — and by last spring the queue had grown to a two-meeting backlog.
+        An audit found that eighty percent of the queue consisted of requests
+        under the ceiling that nobody seriously disputed, each burning forty
+        minutes of five people's time. The ceiling rule was the fix — draw a line
+        at the amount where scrutiny actually starts paying for itself, and let a
+        single empowered member carry those through. The exact ceiling figure was
+        argued over three sessions before landing where it now sits, and the
+        bylaws note wryly that the number is a judgment call dressed as a rule,
+        but a judgment call everyone finally agreed to live by.
+        
+        Your own week as duty member began Monday morning when the chair handed
+        over the fast-track stamp, a physical rubber stamp that lives in a drawer
+        for reasons of tradition no one can defend. Since then each request has
+        crossed your desk with its one-page form filled out by the requesting
+        team — amount, purpose, the account it draws from, and a signed
+        acknowledgment that the funds must be spent this quarter. You read each
+        form in full, checked each amount against the ceiling line, and where a
+        signature was missing you set the form aside rather than chase it, because
+        the bylaws are explicit that an incomplete form waits for completeness
+        rather than being waved through by a sympathetic duty member.
+        
+        Around the committee's work sits a small cloud of process that touches
+        nothing you will report. A procurement bot posts daily summaries of
+        account balances to a channel nobody reads, its numbers always a day
+        stale and used for nothing. The finance systems team you do not manage
+        has been piloting a pre-approval assistant that drafts suggested
+        dispositions for each request, and while its suggestions are sometimes
+        uncannily good, the bylaws do not recognize it and every actual decision
+        this quarter was made by a human with a stamp or a gavel. The archive of
+        requests from prior quarters sits in a shared drive, browsable and
+        occasionally consulted, but nothing from those quarters belongs in this
+        quarter's counts.
+        
+        In the final hour before the quarter's books close, the discipline that
+        matters most is re-verification of the disposition trail. You re-read
+        each one-page form against the decision you recorded, not the one you
+        remember recording, because memory under deadline pressure turns
+        ambiguity into confidence. You double-check that every held request
+        carries a reason — missing signature is a reason, ceiling breach is a
+        reason, and a hold without one gets flagged by the chair as an
+        unexplained gap. You confirm the committed total you are about to report
+        reconciles against the sum of the approved amounts, since a committed
+        figure that drifted from its parts would be the first thing the auditor
+        hunts. Only when the trail reads cleanly from first form to last do you
+        draft the summary the committee will rubber-stamp tomorrow — the same
+        summary whose counts you are about to report, and the last thing
+        standing between your week and the record.
+        
+        The archive room itself tells the history of how this committee learned
+        to count. Shelves of bound minutes go back nine years, and flipping
+        through them you can watch the vocabulary evolve — early quarters record
+        every request as passed or failed with no middle ground, the signoff
+        state only appearing after a year in which three approved requests
+        stalled for lack of a second signature and nobody could say whether
+        they were alive. The held state arrived later still, born of a quarter
+        when the ceiling was raised mid-meeting and requests that would have
+        sailed through an hour earlier were left in limbo with no label at all.
+        Each bucket in tonight's counts carries that lineage, which is why the
+        bylaws refuse to collapse them — a request waiting on paperwork is not
+        denied, and a request over the line is not waiting, and a request the
+        committee has not yet gavelled is none of the above.
+
+        Failed cells (id + your observed value, correct values withheld):
+        {{bookmarks.cell_feedback}}
+
+        Prior table:
+        {{bookmarks.table}}
+
+        METHOD: re-read the task rules above, then re-derive each failed
+        entity. Use these exact entity ids:
+
+        - r1: R1 is a routine request at 30k, under the 50k fast-track ceiling, with invoices current — under-ceiling routine requests are approved by the duty member alone; status? (approved, needs_signoff, or held) [answer format: a single word in quotes]
+        - r2: R2 is a routine request at 60k, over the 50k ceiling, routed to the CFO whose signoff has not arrived — over-ceiling requests without CFO signoff are not committed; status? [answer format: a single word in quotes]
+        - r3: R3 is an emergency-tagged request at 20k, under the ceiling, invoices current — emergency bypasses queue order but the ceiling test still governs; status? [answer format: a single word in quotes]
+        - r4: R4 is routine at 15k but the requesting owner carries a 112-day unpaid invoice under the 90-day hold rule — the hold blocks approval until cleared; status? [answer format: a single word in quotes]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 4 lines,
+        one per entity, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines.
+      model_overrides: { temperature: 0.0, max_tokens: 1600 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/table-feedback.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-02.yml"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$cell_feedback"
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-02.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s03_fix_2
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json fix_1 ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-02"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.fix_1.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage fix_1 --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-02"
+              working_dir: "."
+              fail_on_error: false
+
+    s03_fix_2:
+      generative_entity: "${models.m_heavy}"
+      prompt: |
+        ROLE: escalation solver. Two attempts wrong. Rebuild table from scratch.
+
+        Original task:
+                The quarterly budget committee for the platform engineering group met on
+        Thursday afternoon, and you are the operations lead responsible for turning
+        the committee's decisions into the spending ledger. The meeting ran long,
+        the espresso machine in the corner broke halfway through, and by the end
+        everyone was arguing about chair cushions for the new office, so this
+        written summary is now the only authoritative record of what was actually
+        decided about the four capital requests on the agenda. You have re-read
+        your notes twice, and this is the faithful account.
+        
+        First, the standing rules the committee operates under, which were read
+        aloud at the start of the meeting because two members were new. Every
+        capital request must carry a dollar amount, an owner, and a category. Any
+        single request sized at fifty thousand dollars or less, with no
+        complicating factors, is approved outright by the committee and the money
+        is committed immediately. Any request sized above fifty thousand dollars
+        cannot be approved outright regardless of merit: it must be routed to the
+        CFO for signoff, and while it sits in the CFO's queue its money is NOT
+        committed — the ledger records it as needs_signoff, and it only becomes
+        committed later if and when the CFO signs, which is outside this meeting's
+        scope. Requests tagged as emergency are moved to the front of the agenda
+        and discussed first, but the emergency tag changes only the order of
+        discussion; it has no effect whatsoever on the approval thresholds or on
+        the money. Finally, any request whose owning team has an unpaid invoice
+        older than ninety days sitting with finance is placed on hold before it is
+        even discussed; a held request commits nothing and approves nothing.
+        
+        Now the four requests, in the order they were actually discussed, which —
+        remember — is not the order they appeared on the printed agenda, because
+        the emergency tag reorders discussion.
+        
+        Request R1 came from the storage team: thirty thousand dollars for a
+        second-tier backup array to replace the failing one in rack 12. It is a
+        routine request with no emergency tag. The owning team's invoices are all
+        current. Thirty thousand sits comfortably at or under the fifty-thousand
+        line. The committee voted and approved it without drama. Its full thirty
+        thousand is committed as of Thursday.
+        
+        Request R2 came from the data platform group: sixty thousand dollars to
+        double the capacity of the analytics cluster, complete with a slide deck
+        arguing that query queues are destroying analyst productivity. There is no
+        emergency tag, and the group's invoices are current. But sixty thousand is
+        strictly above the fifty-thousand ceiling that the committee is empowered
+        to approve, and the ceiling makes no exception for persuasive slide decks.
+        Under the rules, R2 must go to the CFO for signoff. As of the close of the
+        meeting the CFO has not signed it. So R2's status is needs_signoff, and
+        none of its sixty thousand is committed.
+        
+        Request R3 carried the emergency tag: twenty thousand dollars to replace a
+        failed fiber module that took the inter-rack link down that very morning.
+        The emergency tag moved R3 to the front of the agenda — it was actually
+        the first request discussed, before R1 — and there was some confusion in
+        the room about whether emergency requests follow a different approval
+        path. They do not. The tag reorders discussion and nothing else; the same
+        fifty-thousand threshold applies. Twenty thousand is under the line, the
+        owning team's invoices are current, and the committee approved R3 outright.
+        Its twenty thousand is committed.
+        
+        Request R4 was the last one discussed: fifteen thousand dollars for a
+        licensing renewal for the diagramming tool nobody admits to using. The
+        amount is trivially under the threshold, but when the finance liaison
+        pulled the owner's file, the platform tooling team — R4's owner — has an
+        unpaid invoice from a vendor dating back one hundred and twelve days. The
+        ninety-day rule triggers: the request is placed on hold before discussion,
+        and the committee never voted on it. Held requests commit nothing.
+        
+        Two side matters, for the record, and neither touches the ledger. The
+        office manager's request for new lobby furniture was tabled to next
+        quarter and was never a capital request on this agenda. And the coffee
+        budget, a sore subject after the espresso machine died mid-meeting, runs
+        through the facilities petty-cash account, which you do not manage and
+        which the committee has no authority over.
+        
+        As you build the ledger entry, you need four numbers and the total spend
+        actually committed by this meeting. Count approved as requests approved
+        outright by committee vote; count needs_signoff as requests routed to the
+        CFO and still unsigned; count held as requests blocked before discussion.
+        Committed money is only money from outright-approved requests, in
+        thousands of dollars. Also report the status of each individual request —
+        R1, R2, R3, R4 — as one of approved, needs_signoff, or held.
+        
+        The committee's dual-track structure was not designed in a vacuum. Before
+        the split, every request regardless of size went through the same full
+        ceremony — five members, a full read of the proposal, a discussion round,
+        a vote — and by last spring the queue had grown to a two-meeting backlog.
+        An audit found that eighty percent of the queue consisted of requests
+        under the ceiling that nobody seriously disputed, each burning forty
+        minutes of five people's time. The ceiling rule was the fix — draw a line
+        at the amount where scrutiny actually starts paying for itself, and let a
+        single empowered member carry those through. The exact ceiling figure was
+        argued over three sessions before landing where it now sits, and the
+        bylaws note wryly that the number is a judgment call dressed as a rule,
+        but a judgment call everyone finally agreed to live by.
+        
+        Your own week as duty member began Monday morning when the chair handed
+        over the fast-track stamp, a physical rubber stamp that lives in a drawer
+        for reasons of tradition no one can defend. Since then each request has
+        crossed your desk with its one-page form filled out by the requesting
+        team — amount, purpose, the account it draws from, and a signed
+        acknowledgment that the funds must be spent this quarter. You read each
+        form in full, checked each amount against the ceiling line, and where a
+        signature was missing you set the form aside rather than chase it, because
+        the bylaws are explicit that an incomplete form waits for completeness
+        rather than being waved through by a sympathetic duty member.
+        
+        Around the committee's work sits a small cloud of process that touches
+        nothing you will report. A procurement bot posts daily summaries of
+        account balances to a channel nobody reads, its numbers always a day
+        stale and used for nothing. The finance systems team you do not manage
+        has been piloting a pre-approval assistant that drafts suggested
+        dispositions for each request, and while its suggestions are sometimes
+        uncannily good, the bylaws do not recognize it and every actual decision
+        this quarter was made by a human with a stamp or a gavel. The archive of
+        requests from prior quarters sits in a shared drive, browsable and
+        occasionally consulted, but nothing from those quarters belongs in this
+        quarter's counts.
+        
+        In the final hour before the quarter's books close, the discipline that
+        matters most is re-verification of the disposition trail. You re-read
+        each one-page form against the decision you recorded, not the one you
+        remember recording, because memory under deadline pressure turns
+        ambiguity into confidence. You double-check that every held request
+        carries a reason — missing signature is a reason, ceiling breach is a
+        reason, and a hold without one gets flagged by the chair as an
+        unexplained gap. You confirm the committed total you are about to report
+        reconciles against the sum of the approved amounts, since a committed
+        figure that drifted from its parts would be the first thing the auditor
+        hunts. Only when the trail reads cleanly from first form to last do you
+        draft the summary the committee will rubber-stamp tomorrow — the same
+        summary whose counts you are about to report, and the last thing
+        standing between your week and the record.
+        
+        The archive room itself tells the history of how this committee learned
+        to count. Shelves of bound minutes go back nine years, and flipping
+        through them you can watch the vocabulary evolve — early quarters record
+        every request as passed or failed with no middle ground, the signoff
+        state only appearing after a year in which three approved requests
+        stalled for lack of a second signature and nobody could say whether
+        they were alive. The held state arrived later still, born of a quarter
+        when the ceiling was raised mid-meeting and requests that would have
+        sailed through an hour earlier were left in limbo with no label at all.
+        Each bucket in tonight's counts carries that lineage, which is why the
+        bylaws refuse to collapse them — a request waiting on paperwork is not
+        denied, and a request over the line is not waiting, and a request the
+        committee has not yet gavelled is none of the above.
+
+        Failed cells (id + observed, withheld correct):
+        {{bookmarks.cell_feedback}}
+
+        METHOD: discard prior attempts. Re-derive EVERY entity answer from
+        the rules. Use these exact entity ids:
+
+        - r1: R1 is a routine request at 30k, under the 50k fast-track ceiling, with invoices current — under-ceiling routine requests are approved by the duty member alone; status? (approved, needs_signoff, or held) [answer format: a single word in quotes]
+        - r2: R2 is a routine request at 60k, over the 50k ceiling, routed to the CFO whose signoff has not arrived — over-ceiling requests without CFO signoff are not committed; status? [answer format: a single word in quotes]
+        - r3: R3 is an emergency-tagged request at 20k, under the ceiling, invoices current — emergency bypasses queue order but the ceiling test still governs; status? [answer format: a single word in quotes]
+        - r4: R4 is routine at 15k but the requesting owner carries a 112-day unpaid invoice under the 90-day hold rule — the hold blocks approval until cleared; status? [answer format: a single word in quotes]
+
+        OUTPUT CONTRACT — your reply MUST end with exactly 4 lines,
+        one per entity, in this exact format:
+        ENTITY <id> | <answer>
+        Example line (format only): ENTITY case_X | 12
+        No other text after these lines. No prose summaries.
+      model_overrides: { temperature: 0.0, max_tokens: 1600 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/table-feedback.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-02.yml"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$cell_feedback"
+        after_step_succeeds:
+          - save_to:
+              - "$table"
+              - "./docs/benchmarks/outputs/output/ha-table.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-table.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-02.yml --out ./docs/benchmarks/outputs/output/ha-table-result.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s04_aggregate
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-table-result.json fix_2 ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-02"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "cp ./docs/benchmarks/outputs/output/ha-table.txt ./docs/benchmarks/outputs/output/artifact.fix_2.txt"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/meter.py --artifact ./docs/benchmarks/outputs/output/ha-table.txt --stage fix_2 --trace ./docs/benchmarks/outputs/output/ha-trace.jsonl --case hb-02"
+              working_dir: "."
+              fail_on_error: false
+
+    s04_aggregate:
+      generative_entity: "${models.m_light}"
+      prompt: "deterministic-aggregate-noop"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/aggregate.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-02.yml --table-result ./docs/benchmarks/outputs/output/ha-table-result.json --out ./docs/benchmarks/outputs/output/ha-final.json"
+              working_dir: "."
+              fail_on_error: false
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/check-deterministic.py --artifact ./docs/benchmarks/outputs/output/ha-final.json --criteria /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-02.yml --out ./docs/benchmarks/outputs/output/ha-final-check.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s05_judge
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s06_end_fail
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-check.py ./docs/benchmarks/outputs/output/ha-final-check.json final ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-02"
+              working_dir: "."
+              fail_on_error: false
+          - skip_step: true
+
+    s05_judge:
+      generative_entity: "${models.m_judge}"
+      prompt: |
+        ROLE: blind auditor. See only task + result. No author knowledge.
+
+        Task objective: Apply committee approval rules including cap, signoff routing, and invoice hold.
+        Result: {{bookmarks.final_json}}
+
+        Answer EXACTLY 6 lines, nothing else:
+        KEYS: yes or no
+        VALUES: yes or no
+        FORMAT: yes or no
+        VERDICT: PASS or FAIL
+        REASON: one sentence
+        SCORE: 1-10
+
+        VERDICT must be PASS only if all three of KEYS, VALUES, FORMAT are yes.
+      model_overrides: { temperature: 0.0, max_tokens: 160 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "cat ./docs/benchmarks/outputs/output/ha-final.json"
+              working_dir: "."
+              fail_on_error: false
+          - append_to:
+              - "$final_json"
+        after_step_succeeds:
+          - save_to:
+              - "$verdict"
+              - "./docs/benchmarks/outputs/output/ha-verdict.txt"
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-judge.py ./docs/benchmarks/outputs/output/ha-verdict.txt ./docs/benchmarks/outputs/output/ha-trace.jsonl hb-02"
+              working_dir: "."
+              fail_on_error: false
+
+    s06_end_fail:
+      generative_entity: "${models.m_light}"
+      prompt: "FAIL"
+      model_overrides: { temperature: 0.0, max_tokens: 8 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/failflag.py --result ./docs/benchmarks/outputs/output/ha-table-result.json --final-check ./docs/benchmarks/outputs/output/ha-final-check.json"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s07_fail_trace
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s08_audit
+          - skip_step: true
+
+    s07_fail_trace:
+      generative_entity: "${models.m_light}"
+      prompt: "trace-only"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl end_fail fail case=hb-02"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s08_audit
+
+    s08_audit:
+      generative_entity: "${models.m_light}"
+      prompt: "leak-audit-noop"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/leak-audit.py --run-dir ./docs/benchmarks/outputs/output --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/harness-inspired/cases/hb-02.yml"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '{{bookmarks.shell_output.exit_code}} == 0'
+                then: s09_audit_pass
+              - given: '{{bookmarks.shell_output.exit_code}} != 0'
+                then: s10_audit_leak
+          - skip_step: true
+
+    s09_audit_pass:
+      generative_entity: "${models.m_light}"
+      prompt: "audit-pass-trace"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl audit pass case=hb-02"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s_end
+
+    s10_audit_leak:
+      generative_entity: "${models.m_light}"
+      prompt: "audit-leak-trace"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 experiments/harness-inspired/scripts/trace-append.py ./docs/benchmarks/outputs/output/ha-trace.jsonl audit fail leak=true case=hb-02"
+              working_dir: "."
+              fail_on_error: false
+          - gwt:
+              - given: '1 == 1'
+                then: s_end
+
+    s_end:
+      generative_entity: "${models.m_light}"
+      prompt: "term"
+      model_overrides: { temperature: 0.0, max_tokens: 1 }
+      when:
+        before_step_starts:
+          - skip_step: true

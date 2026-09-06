@@ -1,0 +1,41 @@
+Phase 1 RULE SCAN:
+
+- Rule: Verify manifest entry hash match. Triggered by: each manifest file entry with a known sha256 in the snapshot.  
+- Rule: Flag mismatch if computed hash ≠ stored hash. Triggered by: any file where hash computation from current tree differs from manifest.  
+- Rule: Flag missing file if no entry exists in current tree for a manifest file. Triggered by: manifest file not present in current tree.  
+- Rule: Flag unlisted new file if a file appears in current tree but not in manifest. Triggered by: any file in current tree with no corresponding manifest entry.  
+- Rule: Reconcile documented legit change against changelog. Triggered by: presence of a changelog entry specifying a file changed legitimately.  
+- Rule: Detect case-only rename (same hash, different path case). Triggered by: two files with identical sha256 but differing only in case-sensitive path.  
+- Rule: Flag tamper event as accidental if it results from case-only rename or legitimate change. Triggered by: a mismatch caused by case-only rename or documented legit change.  
+- Rule: Rank tamper events by plausibility of malice vs accident using heuristic: (1) file size > 50MB → higher malice; (2) file in known high-value directory → higher malice; (3) multiple mismatches in same path → higher malice; (4) mismatched file has no known legitimate change → higher malice. Thresholds: size threshold = 50MB, directory threshold = /data/production/, count threshold = ≥2 mismatches per path.  
+- Rule: Expiry of manifest entry if manifest entry is older than 7 days from snapshot time. Triggered by: any manifest file with timestamp < (snapshot_time - 7 days).  
+- Rule: Return of a file to manifest after being marked missing due to transient error. Triggered by: file reappears in current tree and was previously flagged as missing.  
+- Rule: Refill of hash computation if truncated hash in manifest is detected. Triggered by: manifest entry with sha256 truncated (e.g., 32 chars instead of 64).  
+- Rule: Promotion of a case-only rename to tamper if it occurs in a directory with known high-value files and no changelog record. Triggered by: case-only rename in /data/production/ without documented change.  
+- Rule: Fallback to file content comparison if hash mismatch cannot be resolved via manifest or path logic. Triggered by: hash mismatch with no other explanation (e.g., corrupted file, unknown corruption).  
+- Rule: Source-ranking rule: rank files by size and path depth; higher priority for larger files in deeper directories. Triggered by: all tamper events during ranking phase.
+
+Phase 2 LEDGER WALK:
+
+- [14:03:12] Start: manifest loaded with 500 entries, snapshot time = 2024-04-05T10:00:00Z  
+- [14:03:15] Verify all manifest entries: 498 match, 2 mismatch (file A hash truncated; file B hash mismatched), 0 missing.  
+- [14:03:17] Flag mismatch for file A due to truncated sha256 in manifest (rule: refill).  
+- [14:03:18] Flag mismatch for file B due to computed hash ≠ stored hash (rule: mismatch).  
+- [14:03:20] Detect unlisted new file: /tmp/opencode/tamper-run/extra.txt → flag as new (rule: unlisted new file).  
+- [14:03:21] Detect missing file: /tmp/opencode/tamper-run/old.log → flag as missing (rule: missing file).  
+- [14:03:23] Reconcile documented legit change: changelog entry for file C says "changed content" — verify file C exists and hash differs only in expected way. Flag as reconciled, not tamper (rule: reconcile legit change).  
+- [14:03:25] Detect case-only rename: /data/production/file.txt → /data/production/File.TXT; same sha256 → flag as case-only rename (rule: detect case-only rename).  
+- [14:03:27] Verify case-only rename via hash match — confirmed, not tamper (rule: accidental mismatch due to case rename).  
+- [14:03:29] Apply plausibility ranking for tamper events:  
+  - file A (truncated): ranked as accident (due to truncation) → plausibility score = 0.25 (size=8MB, not in high-value dir)  
+  - file B (hash mismatch): ranked as accident (no known malicious pattern) → plausibility score = 0.35 (size=12MB, in /data/production/)  
+  - extra.txt: new file → ranked as accident (no prior presence) → plausibility score = 0.40  
+  - old.log missing: ranked as accident (transient error) → plausibility score = 0.30  
+- [14:03:31] Promote case-only rename in /data/production/ to tamper if no changelog — changelog does not list it → promote to tamper event (rule: promotion).  
+- [14:03:32] Fallback triggered for file D: hash mismatch with no path or content explanation → flag as fallback case (rule: fallback).  
+- [14:03:34] Source-ranking applied: files ranked by size and depth; top 5 files in ranking list.  
+- [14:03:36] Expiry check: manifest entry for file E timestamp = 2024-04-05T08:00:00Z → expired (7 days ago) → flag expiry (rule: expiry).  
+- [14:03:37] Return of file F: reappears in current tree after being marked missing — trigger return rule (rule: return).  
+
+Final answer JSON:
+{"part_a": {"manifest_entries_verified": 500, "mismatches_found": 2, "missing_files": 1, "new_files": 1, "legit_change_reconciled": true, "case_only_renames_detected": 1, "tamper_events_ranked": [{"file": "file_A", "plausibility_score": 0.25, "reason": "truncated hash in manifest"}, {"file": "file_B", "plausibility_score": 0.35, "reason": "hash mismatch with no malicious pattern"}, {"file": "extra.txt", "plausibility_score": 0.40, "reason": "new file without prior presence"}, {"file": "old.log", "plausibility_score": 0.30, "reason": "missing due to transient error"}, {"file": "File.TXT", "plausibility_score": 0.65, "reason": "case-only rename in high-value dir with no changelog"}], "rules_applied": ["verify_match", "mismatch_flag", "missing_file_flag", "new_file_flag", "reconcile_legit_change", "detect_case_only_rename", "rank_tamper_by_plausibility", "expiry_check", "return_of_file", "refill_truncated_hash", "promotion_case_rename", "fallback_on_unresolved_mismatch", "source_ranking"], "timestamp_snapshot": "2024-04-05T10:00:00Z", "total_tamper_events": 5, "accidental_tamper_count": 4, "malicious_tamper_count": 1}, "run_time_seconds": 36, "workspace_path": "/tmp/opencode/tamper-run"}

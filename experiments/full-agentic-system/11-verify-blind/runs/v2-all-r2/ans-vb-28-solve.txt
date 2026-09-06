@@ -1,0 +1,80 @@
+### Fact Bullets (Tonight's Numbers Only)
+*   **LOW1**: Duration 4 minutes, Starts at minute 0.
+*   **LOW2**: Duration 3 minutes, Starts at minute 3.
+*   **HIGH**: Arrives at minute 3, Duration 6 minutes.
+
+### Minute-by-Minute Walk
+| minute | core | event | bank@absolute-minute | finish |
+| :--- | :--- | :--- | :--- | :--- |
+| 0 | LOW1 | Start (owed=4) | Bank @ 2 | - |
+| 1 | LOW1 | Run | - | - |
+| 2 | LOW1 | Run | Bank @ 4 | - |
+| 3 | HIGH | Preempt LOW1 (LOW1 owed=2, wasted=0). Start LOW2. | Bank LOW2 @ 5 | - |
+| 4 | HIGH | Run | - | - |
+| 5 | HIGH | Run | - | - |
+| 6 | HIGH | Run | - | - |
+| 7 | HIGH | Run | - | - |
+| 8 | HIGH | Run | - | - |
+| 9 | HIGH | Run | Bank LOW2 @ 7 (absolute) | - |
+| 10 | HIGH | Run | - | Finish LOW2? No, finishes at start+duration. |
+
+**Correction on Finish Logic**:
+*   **LOW1**: Started min 0, ran mins 0-3. Finished at min $0+4 = 4$. Wait, preemption happens *at* minute 3 arrival. The rule says "HIGH arrives... instantly preempting whatever LOW job is running".
+    *   Minute 0: Start LOW1.
+    *   Minute 1: Run LOW1.
+    *   Minute 2: Run LOW1. Bank at min $0+2=2$ (absolute).
+    *   Minute 3: HIGH arrives. Preemption occurs. The bank landed exactly at minute 3? No, the bank is at absolute minute 4 ($0+2$ runs completed = minutes 0,1,2 done, ready for 3rd? Or does "completed minutes" mean time elapsed).
+    *   Let's re-read checkpoint rule: "LOW jobs checkpoint every 2 completed minutes of running time".
+        *   Time 0-1 (1 min complete): No bank.
+        *   Time 1-2 (2 mins complete): Bank at absolute minute 3? Or absolute minute $start+2$?
+        *   Rule: "a job that starts or resumes at minute s banks a checkpoint at minute s+2".
+        *   Start=0. Bank at $0+2 = 2$. But this is usually when the 2nd minute completes (end of minute 1/start of minute 2)? Or absolute time point?
+        *   "track banks in absolute minutes; a bank landing on the exact minute HIGH arrives still counts". HIGH arrives at min 3. If LOW1 had a bank at min 2, it doesn't help at min 3. Does LOW1 have another bank? "and again every 2 running minutes after".
+        *   Running mins: Minute 0 (run), Minute 1 (run) -> 2 mins run. Bank triggers?
+        *   Let's assume standard discrete time steps where minute $t$ is the interval $(t-1, t]$.
+        *   LOW1 runs min 0, 1, 2. Total 3 minutes run before preemption at arrival of HIGH (min 3).
+        *   Checkpoint condition: "every 2 completed minutes".
+            *   After running min 0 and 1 (total 2 mins), a checkpoint is triggered. When? At the end of minute 1 (start of minute 2)? Or absolute time $t=2$?
+            *   Rule text: "banks a checkpoint at minute s+2". Start $s=0$. Bank at min 2. This implies absolute time point $T=2$.
+            *   So LOW1 runs min 0, 1 (total duration 2). At end of min 1 (start of min 2), it banks. The bank is valid if the job resumes from there.
+            *   Preemption happens at arrival of HIGH (minute 3). The job was running minute 2. It has completed minutes 0 and 1. It has NOT completed minute 2 yet.
+            *   Wait, "HIGH arrives... instantly preempting". Arrival is at the start of minute 3.
+            *   At start of minute 3, LOW1 has completed exactly 2 minutes (min 0 and min 1).
+            *   Does it have a bank? Yes, at $s+2 = 2$. The bank lands on minute 2.
+            *   Therefore, the work done in minute 2 is NOT wasted because the job hasn't "completed" minute 2 yet when preemption hits? Or does the bank happen *after* completing 2 minutes?
+            *   Usually: Run min 0 (done), Run min 1 (done). Total 2 mins. Bank triggers immediately upon completion of 2nd minute. So at $T=2$, bank is established.
+            *   Then HIGH arrives at $T=3$. LOW1 resumes from the bank? But there are no minutes between 2 and 3 for LOW1 to run.
+            *   Wait, if LOW1 runs min 0, 1, 2... that means it occupies intervals [0,1], [1,2], [2,3].
+            *   Preemption at $T=3$ cuts off the interval [2,3].
+            *   Did it complete minute 2? No, minute 2 ends at $T=3$.
+            *   So it completed minutes 0 and 1. Total 2 mins. Bank is at $s+2 = 2$.
+            *   Since the bank exists at $T=2$, and preemption happens at $T=3$, the job resumes from the state after minute 1? Or does it resume from the bank established at min 2?
+            *   If the bank is established at min 2 (which requires completing min 0 and 1), then the job effectively has "saved" up to that point. The work in progress during [2,3] is lost.
+            *   Amount wasted: Length of interval [2,3] = 1 minute.
+            *   Resume state: Completed 2 minutes (banked). Total duration 4. Remaining owed = $4 - 2 = 2$.
+    *   LOW2 starts at min 3.
+    *   HIGH runs for 6 minutes: occupies [3,4], [4,5], [5,6], [6,7], [7,8], [8,9]. Finishes at $T=9$ (start $3+6=9$).
+    *   At min 9 ($T=9$), HIGH finishes. Core becomes free.
+    *   Waiting jobs: LOW1 (owed 2 mins) and LOW2 (started min 3, running min 3..8? No, LOW2 starts min 3 but core is busy with HIGH. So LOW2 waits).
+    *   Comparison at $T=9$:
+        *   LOW1 start minute = 0.
+        *   LOW2 start minute = 3.
+        *   Rule: "LOW jobs take the core in order of their start minutes".
+        *   Order: LOW1 (0) > LOW2 (3).
+    *   Core goes to LOW1.
+    *   LOW1 resumes with owed = 2 minutes. Runs [9, 10], [10, 11]. Finishes at $T=11$. ($9+2=11$).
+        *   Checkpointing for resume: "on preemption the work past the last checkpoint is wasted and redone". It resumes with owed=2. Does it bank?
+        *   Resume start effective = 9 (or does it count from original?). Rule: "a job that starts or resumes at minute s banks a checkpoint at minute s+2". Here $s$ is the resume minute? Or original? Usually resume acts as new start for banking logic relative to current time.
+        *   If resume at min 9, bank at min 11. But it finishes at min 11 anyway (duration 2). No waste here.
+    *   After LOW1 finishes at $T=11$, core is free.
+    *   Next job: LOW2. Started min 3, waited entire duration of HIGH.
+        *   Duration = 3 minutes.
+        *   Starts at min 11 (same minute LOW1 finished).
+        *   Runs [11, 12], [12, 13]. Finishes at $T=14$. ($11+3=14$).
+
+**Recalculating Wasted Minutes**:
+*   LOW1: Preempted at min 3. Completed mins 0, 1 (total 2). Bank established at min 2? Yes. Remaining duration to run = 2. Work done in current minute (min 2) was cut short? No, preemption is instantaneous arrival. The job was running minute 2 (interval 2-3). It completes 0 and 1 before arrival. So it has a valid bank at min 2.
+*   Wait, "banking every 2 completed minutes".
+    *   End of min 1 -> 2 mins complete. Bank triggers. Location: Absolute minute 2? Or absolute time $t=2$ (start of min 3)?
+    *   If bank is at start of min 3 ($T=3$), then it covers the preemption perfectly. Wasted = 0?
+    *   Let's check the example text logic: "LOW1 held the core minutes 0, 1 and 2... 3rd minute was un

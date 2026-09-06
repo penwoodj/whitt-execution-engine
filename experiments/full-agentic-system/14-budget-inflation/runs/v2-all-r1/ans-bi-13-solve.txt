@@ -1,0 +1,50 @@
+Based on the strict rules and event log provided in the task, here is the step-by-step derivation of the final state.
+
+### Phase 1: Rule Definition (The Law for Tonight)
+
+We define the active constraints and triggers based *only* on "tonight's numbers" (Steps 1-5 limit 2.0%, Steps 6-10 limit 1.0%). The orientation story is ignored for values but used only to confirm the logic flow:
+1.  **Trigger:** An event arrives with an `error_rate`.
+2.  **Check Limit:** Compare `error_rate` against the current step's `limit`.
+    *   Steps 1-5: `limit = 2.0%`.
+    *   Steps 6-10: `limit = 1.0%`.
+3.  **Action on Breach (First or Subsequent):**
+    *   If `error_rate > limit`: The climb pauses.
+    *   State Update: `status` becomes "PAUSED".
+    *   Current Step (`rollout_pct`) is reset to the previous step's value (Rollback). Since this is the first event, there is no previous step; effectively, we stop at 0%.
+    *   Observation Status: The breached observation is "spent" (ignored for future checks on tighter limits per orientation logic, though tonight we never reach a tighter limit scenario anyway because we fail early).
+4.  **Action on Second Breach:**
+    *   If this were the second breach, `status` would become "STOPPED".
+5.  **Completion:**
+    *   If no breaches occur after reaching Step 10 (or however many steps are in the list), `status` is "DONE" and `rollout_pct` reflects the final step.
+
+### Phase 2: Ledger Walk (Applying Tonight's Events)
+
+**Event List:** Steps 1 through 6 with error rates: `0.5, 0.8, 2.1, 0.6, 0.7, 0.9`.
+**Limits:** Step 1-5 (`<3` in list implies limit 2.0), Step 6 (`>=4`? No, let's map indices).
+*   Step 1: Rate 0.5 vs Limit 2.0 -> OK. (Cumulative 1)
+*   Step 2: Rate 0.8 vs Limit 2.0 -> OK. (Cumulative 2)
+*   Step 3: Rate 2.1 vs Limit 2.0 -> **BREACH**.
+
+**Walk Execution:**
+
+1.  **Event 1 (Step 1):** Error rate `0.5`. Current Limit for Step 1 is `2.0`. $0.5 \le 2.0$.
+    *   State: Proceed to next step. Cumulative steps done: 1.
+2.  **Event 2 (Step 2):** Error rate `0.8`. Current Limit for Step 2 is `2.0`. $0.8 \le 2.0$.
+    *   State: Proceed to next step. Cumulative steps done: 2.
+3.  **Event 3 (Step 3):** Error rate `2.1`. Current Limit for Step 3 is `2.0`. $2.1 > 2.0$.
+    *   **Rule Applied:** Breach occurs.
+    *   **Action:** Rollback to previous step. Previous steps done = 2.
+    *   **Status Update:** Climb pauses. Status becomes "PAUSED".
+    *   **Result State:** The rollout percentage corresponds to the number of successful stages before the rollback. Since each step adds 10%, and we rolled back after Step 3, we are effectively at Step 2 (20%).
+
+*Note: Events 4-6 are never processed because the system is paused after Event 3.*
+
+### Final Answer Construction
+
+*   `rollout_pct`: The successful stages were 1 and 2. Each step represents 10%. Total = 20%.
+*   `stages_done`: We completed Step 1 and Step 2 successfully before pausing. Count = 2.
+*   `status`: The system hit a breach limit, triggering a pause. Value = "PAUSED".
+
+```json
+{"rollout_pct": 20, "stages_done": 2, "status": "PAUSED"}
+```

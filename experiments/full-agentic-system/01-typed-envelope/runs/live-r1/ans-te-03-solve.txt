@@ -1,0 +1,84 @@
+### Phase 1 RULE SCAN
+*Listing every rule that changes state during the event or claim list, including triggers.*
+
+1. **Arrival Rule**: Request `r` arrives with ask amount `A`.
+   - *Trigger*: Every request in arrival order (`r1` through `r7`).
+2. **Grant Rule (Full)**: If Pool $\ge$ Ask, grant full Ask; Pool decreases by Ask.
+   - *Trigger*: Requests where current pool covers the full ask.
+3. **Grant Rule (Partial)**: If Pool < Ask, grant current Pool amount; Pool drops to zero.
+   - *Trigger*: Requests arriving when the pool cannot cover the full ask.
+4. **Denial Rule**: If Pool is empty upon arrival, deny request; do not modify pool or state further for this event.
+   - *Trigger*: Requests arriving after a previous partial grant has drained the pool to zero and no refill has occurred.
+5. **Expiry Rule**: The grant from `r1` expires immediately after `r2` completes.
+   - *Trigger*: Completion of request `r2`.
+6. **Return Rule (Expiry)**: Upon expiry, return $\lfloor \text{granted\_amount} / 2 \rfloor$ to the pool.
+   - *Trigger*: The event specified in the Expiry Rule (`r2` completion).
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order, showing state after each.*
+
+**Initial State**: Pool = 60. Grants: None. Denied: [].
+
+1. **Event `r1` arrives (Ask: 6)**
+   - Rule Applied: Grant Rule (Full). $60 \ge 6$.
+   - Action: Grant 6. Pool becomes $60 - 6 = 54$.
+   - State After: Pool=54, Granted=[6], PendingExpiry=None.
+
+2. **Event `r2` arrives (Ask: 10)**
+   - Rule Applied: Grant Rule (Full). $54 \ge 10$.
+   - Action: Grant 10. Pool becomes $54 - 10 = 44$.
+   - State After: Pool=44, Granted=[6, 10], PendingExpiry=`r2` completes next.
+
+3. **Event `r2` Completes (Triggers Expiry of `r1`) & Event `r3` arrives (Ask: 12)**
+   *Note: The prompt states "the grant for r1 expires after request r2 completes". We must process the expiry logic associated with the completion of r2 before or as part of the transition to r3, but strictly speaking, the arrival of r3 is the next event in the list. However, the rule says expiry happens *after* r2 completes. Let's trace the sequence precisely: r1 arrives -> r2 arrives -> r2 completes (triggering expiry) -> r3 arrives.*
+   
+   **Sub-step 3a: `r2` Completion**
+   - Rule Applied: Expiry Rule. Target: Grant from `r1` (6).
+   - Action: Return $\lfloor 6 / 2 \rfloor = 3$. Pool becomes $44 + 3 = 47$.
+   
+   **Sub-step 3b: Event `r3` arrives (Ask: 12)**
+   - Rule Applied: Grant Rule (Full). $47 \ge 12$.
+   - Action: Grant 12. Pool becomes $47 - 12 = 35$.
+   - State After: Pool=35, Granted=[6, 10, 12], PendingExpiry=None.
+
+4. **Event `r4` arrives (Ask: 15)**
+   - Rule Applied: Grant Rule (Full). $35 \ge 15$.
+   - Action: Grant 15. Pool becomes $35 - 15 = 20$.
+   - State After: Pool=20, Granted=[6, 10, 12, 15], PendingExpiry=None.
+
+5. **Event `r5` arrives (Ask: 19)**
+   - Rule Applied: Grant Rule (Full). $20 \ge 19$.
+   - Action: Grant 19. Pool becomes $20 - 19 = 1$.
+   - State After: Pool=1, Granted=[6, 10, 12, 15, 19], PendingExpiry=None.
+
+6. **Event `r6` arrives (Ask: 21)**
+   - Rule Applied: Grant Rule (Partial). $1 < 21$.
+   - Action: Grant current Pool (1). Pool becomes $1 - 1 = 0$.
+   - State After: Pool=0, Granted=[6, 10, 12, 15, 19, 1], PendingExpiry=None.
+
+7. **Event `r7` arrives (Ask: 24)**
+   - Rule Applied: Denial Rule. Pool is 0.
+   - Action: Deny request. No change to pool or grants.
+   - State After: Pool=0, Granted=[6, 10, 12, 15, 19, 1], Denied=["r7"].
+
+---
+
+### Final Calculation & Verification
+
+*   **Total Granted**: Sum of all successful grant amounts.
+    $6 + 10 + 12 + 15 + 19 + 1 = 63$.
+*   **Denied List**: IDs of requests that arrived at an empty pool and were rejected.
+    `["r7"]`.
+*   **Pool Left**: Final state of the pool.
+    $0$.
+
+**Contract Check**:
+- Keys: `granted_units`, `denied`, `pool_left`. (All present).
+- Types: Numbers for counts/sums, List of strings for IDs. (Correct).
+- Order: Denied list in arrival order (`r7` is the only one). (Correct).
+
+```json
+{"granted_units": 63, "denied": ["r7"], "pool_left": 0}
+```

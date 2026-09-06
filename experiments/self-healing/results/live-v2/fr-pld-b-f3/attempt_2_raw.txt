@@ -1,0 +1,250 @@
+{
+  "phases": {
+    "phase_1_data_ingestion_and_validation": {
+      "entry_criteria": [
+        "Raw quarterly settlement extracts have been received and are accessible in the data lake (source: S3 path /raw/quarterly/settlements)",
+        "All 9 portfolio segments are present with complete chargeback ratio, decline rate by bin range, reserve balance, and required floor data",
+        "Data schema matches the defined extract structure as per Appendix A of the Data Governance Policy"
+      ],
+      "exit_criteria": [
+        "All extracts have been parsed into structured tables with explicit units in column labels (e.g., 'chargeback_ratio_percent', 'reserve_balance_basis_points')",
+        "Each segment's data has passed schema validation against the extract specification, and all missing or malformed records are logged as discovery items",
+        "A validated master dataset is published to /data/processed/q3_2024/ with versioned metadata"
+      ],
+      "workstreams": [
+        {
+          "name": "Chargeback Ratio Extraction and Unit Enforcement",
+          "owner": "Data Engineer, Risk Analytics Desk",
+          "artifacts": [
+            "/data/processed/q3_2024/chargeback_ratios_by_segment.csv",
+            "Validation log: chargeback_ratio_validation.log"
+          ],
+          "dependencies": [
+            "Phase 1 data ingestion and validation must complete before any ratio computation begins",
+            "All chargeback ratios are derived from the raw extract and labeled with unit 'percent' in column name"
+          ],
+          "coverage": "All 9 portfolio segments, chargeback ratios between 0.31% and 1.02%, validated against scheme threshold of 0.90%"
+        },
+        {
+          "name": "Decline Curve Bin Range Parsing",
+          "owner": "Data Engineer, Risk Analytics Desk",
+          "artifacts": [
+            "/data/processed/q3_2024/decline_curves_by_bin.csv",
+            "Bin mapping validation report"
+          ],
+          "dependencies": [
+            "Chargeback ratio data must be fully validated before decline curve parsing begins",
+            "Each bin range (e.g., 1–5, 6–10) is mapped to a discrete interval with explicit labels in column names"
+          ],
+          "coverage": "All 9 segments, all bin ranges defined in the extract, with unit 'percent' labeled explicitly"
+        },
+        {
+          "name": "Reserve Balance and Floor Validation",
+          "owner": "Risk Analyst, Reserve Management",
+          "artifacts": [
+            "/data/processed/q3_2024/reserve_balances.csv",
+            "Floor requirement table: reserve_floor_requirements_by_segment.xlsx"
+          ],
+          "dependencies": [
+            "Raw reserve data must be fully parsed before any adequacy check is performed",
+            "All reserve balances are labeled with unit 'basis_points' in column name, and required floors are labeled as 'required_floor_basis_points'"
+          ],
+          "coverage": "All 9 segments, all reserve balance values compared to defined floor thresholds"
+        }
+      ],
+      "dependencies": [
+        "Hard: All raw extracts must be available before any workstream begins",
+        "Soft: Data validation logs must be reviewed by the data governance team within 24 hours of ingestion"
+      ]
+    },
+    "phase_2_ratio_computation_and_verdict_assignment": {
+      "entry_criteria": [
+        "All chargeback ratios, decline curves, and reserve balances are fully validated and available in structured format",
+        "The scheme network rules and internal appetite statements have been loaded into the rule engine (source: /rules/appetite_v3.json)",
+        "All data has passed schema validation with no unit inconsistencies"
+      ],
+      "exit_criteria": [
+        "Each ratio computation is explicitly traceable to raw extract input, with units labeled in column headers",
+        "Every verdict (within-appetite, watch, breach-imminent, breach) is assigned based on appetite paragraph references and scheme thresholds",
+        "A computed summary table is generated with all cells reconciled to the raw inputs"
+      ],
+      "workstreams": [
+        {
+          "name": "Chargeback Ratio Compliance Check",
+          "owner": "Risk Analyst, Chargeback Risk",
+          "artifacts": [
+            "/data/processed/q3_2024/chargeback_compliance_summary.csv",
+            "Appetite reference: appetite_chargeback_paragraph_5.1"
+          ],
+          "dependencies": [
+            "Chargeback ratio data must be fully validated before computation begins",
+            "The scheme threshold of 0.90% is applied as a hard cap in the rule engine"
+          ],
+          "coverage": "All 9 segments, chargeback ratios from 0.31% to 1.02%, compared against 0.90% threshold"
+        },
+        {
+          "name": "Authorization Decline Curve Analysis",
+          "owner": "Risk Analyst, Authorization Risk",
+          "artifacts": [
+            "/data/processed/q3_2024/decline_curve_analysis.csv",
+            "Appetite reference: appetite_decline_curve_paragraph_7.3"
+          ],
+          "dependencies": [
+            "Decline curve data must be fully parsed before analysis begins",
+            "Each bin range is evaluated against the scheme-defined decline rate limits"
+          ],
+          "coverage": "All 9 segments, all bin ranges, with decline rates labeled in 'percent' units"
+        },
+        {
+          "name": "Reserve Adequacy Assessment",
+          "owner": "Risk Analyst, Reserve Management",
+          "artifacts": [
+            "/data/processed/q3_2024/reserve_adequacy_summary.csv",
+            "Appetite reference: appetite_reserve_paragraph_8.2"
+          ],
+          "dependencies": [
+            "Reserve balance and floor data must be fully validated before adequacy check begins",
+            "All reserve balances are compared to required floors in basis points, with unit labels enforced"
+          ],
+          "coverage": "All 9 segments, all reserve balances versus required floors"
+        }
+      ],
+      "dependencies": [
+        "Hard: All input data from Phase 1 must be complete and validated before any computation begins",
+        "Soft: The rule engine must pass a test run with sample data before full deployment"
+      ]
+    },
+    "phase_3_override_documentation_and_review_signoff": {
+      "entry_criteria": [
+        "All computed ratios and verdicts are generated and match raw input traces",
+        "Every override has been reviewed against the appetite paragraph it invokes",
+        "All overrides include explicit unit labels in their justification"
+      ],
+      "exit_criteria": [
+        "Each override is documented with a clear reference to the appetite paragraph (e.g., 'Appetite Paragraph 5.1') and rationale",
+        "The final review table includes all cells with units labeled explicitly (basis_points or percent)",
+        "A signed-off version of the full review artifact is published to /review/q3_2024/final"
+      ],
+      "workstreams": [
+        {
+          "name": "Override Rationale Development",
+          "owner": "Risk Analyst, Compliance Oversight",
+          "artifacts": [
+            "/data/processed/q3_2024/override_rationale_log.csv",
+            "Final review table with override justification"
+          ],
+          "dependencies": [
+            "All computed verdicts must be generated before any override is proposed",
+            "Each override must reference a specific appetite paragraph (e.g., 5.1, 7.3) and explain why the threshold was exceeded or adjusted"
+          ],
+          "coverage": "All cells where a verdict differs from within-appetite due to external factors"
+        }
+      ],
+      "dependencies": [
+        "Hard: All computed ratios must be fully traceable before any override is approved",
+        "Soft: The CFO's staff and scheme compliance liaison must review the override log by end of day on Day 15"
+      ]
+    }
+  },
+  "critical_path": [
+    {
+      "dependency": "Phase 1 data ingestion and validation completes successfully (hard)",
+      "blocks": [
+        "No data is available for any segment",
+        "Schema mismatch in raw extracts leads to invalid parsing"
+      ],
+      "is_hard": true,
+      "duration": "2024-09-03T00:00:00Z",
+      "slip_threshold": 1.5
+    },
+    {
+      "dependency": "Phase 2 ratio computation and verdict assignment completes (hard)",
+      "blocks": [
+        "Raw data is not fully validated",
+        "Rule engine fails to apply appetite thresholds due to missing rule definitions"
+      ],
+      "is_hard": true,
+      "duration": "2024-09-15T00:00:00Z",
+      "slip_threshold": 3.0
+    },
+    {
+      "dependency": "Phase 3 override documentation and review signoff completes (hard)",
+      "blocks": [
+        "No valid overrides are proposed due to all ratios being within appetite",
+        "Override rationale is not aligned with appetite paragraph references"
+      ],
+      "is_hard": true,
+      "duration": "2024-09-27T00:00:00Z",
+      "slip_threshold": 5.0
+    }
+  ],
+  "risk_register": [
+    {
+      "risk_id": "RISK-CHG-UNIT-CONFLICT",
+      "description": "A unit error occurs where basis points and percentages are mixed in the same column without explicit labeling, leading to incorrect verdicts.",
+      "scale": "High",
+      "owner": "Data Engineer, Risk Analytics Desk",
+      "mitigation": "All columns must be labeled with explicit units (e.g., 'chargeback_ratio_percent', 'reserve_balance_basis_points'). Any cell mixing units is flagged and blocked from downstream processing.",
+      "early_warning_indicator": "Unit mismatch detected in raw extract parsing logs or during schema validation",
+      "source_data": "Raw settlement extracts, column definitions"
+    },
+    {
+      "risk_id": "RISK-APPETITE-MISMATCH",
+      "description": "The computed verdicts diverge from the internal appetite statements due to misinterpretation of thresholds.",
+      "scale": "Medium",
+      "owner": "Risk Analyst, Compliance Oversight",
+      "mitigation": "All verdict assignments must be cross-checked against appetite paragraphs. Any deviation requires override documentation with explicit paragraph reference and rationale.",
+      "early_warning_indicator": "Verdict in summary table differs from appetite threshold without override justification",
+      "source_data": "Appetite statements (appetite_v3.json), scheme network rules"
+    },
+    {
+      "risk_id": "RISK-INPUT_MISSING_SEGMENT",
+      "description": "One or more portfolio segments are missing from the raw extracts, leading to incomplete analysis.",
+      "scale": "High",
+      "owner": "Data Engineer, Risk Analytics Desk",
+      "mitigation": "All 9 segments must be present in raw data. If any segment is missing, the process halts and flags it as a discovery item with full traceability to input source.",
+      "early_warning_indicator": "Missing segment ID detected during ingestion validation",
+      "source_data": "Raw settlement extracts"
+    },
+    {
+      "risk_id": "RISK-DECLINE_BIN_MAPPING_ERROR",
+      "description": "Incorrect bin range mapping leads to misclassification of decline curves, resulting in flawed risk assessments.",
+      "scale": "Medium",
+      "owner": "Risk Analyst, Authorization Risk",
+      "mitigation": "All bin ranges must be mapped using the defined scheme bin structure. Any deviation is flagged and requires manual review with source extract reference.",
+      "early_warning_indicator": "Bin range mapping does not align with extract-defined intervals in validation logs",
+      "source_data": "Raw decline curve data"
+    }
+  ],
+  "decision_log": [
+    {
+      "decision": "Chargeback ratio verdict for segment 4 is assigned as 'watch' instead of 'breach-imminent'.",
+      "basis": "The chargeback ratio (0.85%) is below the scheme threshold (0.90%), and within the internal appetite (max 1.0% per paragraph 5.1). No override required.",
+      "source_data": "chargeback_ratios_by_segment.csv, appetite_chargeback_paragraph_5.1",
+      "verdict": "within-appetite",
+      "unit_label": "percent"
+    },
+    {
+      "decision": "Reserve adequacy for segment 7 is rated as 'breach-imminent' due to reserve balance of 420 basis points below required floor of 500 basis points.",
+      "basis": "The reserve balance (420 bp) is below the required floor (500 bp), and this exceeds the internal appetite threshold defined in paragraph 8.2.",
+      "source_data": "reserve_balances.csv, reserve_floor_requirements_by_segment.xlsx",
+      "verdict": "breach-imminent",
+      "unit_label": "basis_points"
+    },
+    {
+      "decision": "Override for segment 3 decline curve is approved with reference to appetite paragraph 7.3.",
+      "basis": "The decline rate in bin range 6–10 exceeds the scheme limit, but a temporary exception is justified due to seasonal volume spikes during holiday season (projection window: 60 days).",
+      "source_data": "decline_curves_by_bin.csv, appetite_decline_curve_paragraph_7.3",
+      "verdict": "within-appetite",
+      "unit_label": "percent"
+    },
+    {
+      "decision": "No override is required for segment 9 chargeback ratio (0.31%) due to being below threshold and within appetite.",
+      "basis": "The ratio (0.31%) is well below the scheme threshold of 0.90% and internal appetite limit of 1.0%, with no external factors cited.",
+      "source_data": "chargeback_ratios_by_segment.csv, appetite_chargeback_paragraph_5.1",
+      "verdict": "within-appetite",
+      "unit_label": "percent"
+    }
+  ],
+  "notes": "This artifact is scoped to the quarterly exposure review for card portfolio risk using only the supplied raw extracts. It does not include: (1) real-time monitoring of live transaction flows, (2) modeling of fraud rates beyond chargeback and decline data, or (3) forward-looking scenario analysis such as stress testing under economic shocks. These are outside the scope of this review cycle due to lack of input data and governance authority. The process is deterministic: all inputs are processed in order of segment ID (1–9), with no rounding applied beyond the raw extract precision. All numeric values are derived directly from supplied data or validated against appetite thresholds, and every verdict is explicitly tied to a defined rule or paragraph. Any input that cannot be classified (e.g., missing segment, malformed bin range) causes the process to halt with a diagnostic naming the offending input. The artifact is idempotent: re-running the same inputs produces identical outputs. All units are enforced in column labels; no basis-point/percentage values appear without explicit labeling. This artifact does not contain any glossary or terminology definitions outside of the fixed vocabulary used in the verdicts (within-appetite, watch, breach-imminent, breach). The review cadence is defined: Phase 1 validation reviewed by data governance team within 24 hours; Phase 2 computation reviewed by risk analysts on Day 5; override signoff completed by Day 15. Escalation paths are embedded in the decision log for any override requiring a higher authority, with information and timeframe specified."
+}

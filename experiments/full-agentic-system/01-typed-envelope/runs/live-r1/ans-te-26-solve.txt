@@ -1,0 +1,104 @@
+### Phase 1 RULE SCAN
+
+1. **Capacity Rule**: Total GPU memory usage cannot exceed card capacity (8GB).
+2. **Pinning Rule**: Model B is pinned; it is never evicted regardless of LRU status.
+3. **Loading Cost Rule**: Loading a model takes 30s and adds its size to current usage.
+4. **Unloading Cost Rule**: Unloading a model takes 10s and removes its size from current usage.
+5. **Eviction Trigger Rule (Overload)**: If a new load cannot fit, evict the Least Recently Used (LRU) unpinned models one by one until space is available or only pinned models remain.
+6. **Deferred Load Rule**: If all remaining resident models are pinned and a new load does not fit, defer the load indefinitely (cannot be loaded).
+7. **State Transition Rule**: State must be updated immediately after each event; no carrying over of partial states from previous events.
+8. **Counting Rule**: Counts (`loads`, `evictions`) increment only when an action successfully completes its transition in the ledger walk.
+
+**Triggers:**
+- Event 1 (Load A): Triggers Capacity Rule, Loading Cost Rule. Result: Load successful. Count: Loads=1.
+- Event 2 (Load B): Triggers Capacity Rule, Loading Cost Rule, Pinning Rule (implicit validation). Result: Load successful. Count: Evictions=0.
+- Event 3 (Load C): Triggers Capacity Rule, Loading Cost Rule. Current usage (A+B) = 5GB < 8GB? No, A(2)+B(1)=3GB. Wait, check sizes again. A=2, B=1, C=4. Sum so far: 2+1=3. Add 4 -> 7. Fits. Result: Load successful. Count: Loads=2.
+- Event 4 (Load D): Triggers Capacity Rule, Loading Cost Rule. Current usage (A+B+C) = 2+1+4 = 7GB. Add D(3) -> 10GB > 8GB. Overload. Triggers Eviction Trigger Rule. Must evict LRU unpinned models.
+    - Residents: A(LRU, unpinned), B(pinned), C(MRU, unpinned). (Order of arrival: A, then B, then C).
+    - Candidate for eviction: A (2GB) and C (4GB). A is older (LRU).
+    - Evict A? New size needed: 8 - (Current 7) = 1GB space. Remove A(2GB)? No, remove smallest unpinned to get enough room? Rule says "evicts as many LRU... as needed". Usually implies removing the oldest first until fit.
+    - Let's re-evaluate "LRU". Order: A arrived first, B second, C third.
+    - Stack: [A, B(pinned), C].
+    - Unpinned stack top (oldest): A.
+    - Need to free space for D(3). Current occupied by unpinned: A(2) + C(4) = 6GB. Plus pinned B(1) = 7GB.
+    - Target state after load: Usage <= 8.
+    - If we evict A (2GB): New usage = 7 - 2 = 5GB. Add D(3) -> 8GB. Fits perfectly.
+    - Action: Evict A. Load D.
+    - Count: Loads=3, Evictions=1.
+- Event 5 (Unload B): Triggers Unloading Cost Rule. Removes B. Result: Usage drops to 6GB (A was evicted, so only C and D remain? Wait, let's re-trace carefully).
+
+**Corrected Trace for Phase 1 Logic:**
+- **Start**: 0/8 GB.
+- **E1: Load A (2GB)**. Fit? Yes. State: {A}. Usage: 2/8. Count: Loads=1.
+- **E2: Load B (1GB)**. Pin B. Fit? Yes (2+1=3). State: {A, B}. Usage: 3/8. Count: Loads=2. Evictions=0.
+- **E3: Load C (4GB)**. Fit? Yes (3+4=7 <= 8). State: {A, B(pinned), C}. Usage: 7/8. Count: Loads=3. Evictions=0.
+- **E4: Load D (3GB)**. Fit? No (7+3=10 > 8).
+    - Rule: Evict LRU unpinned models until fit or all pinned remain.
+    - Current Unpinned: A (oldest), C (newest). Pinned: B.
+    - Try evicting A (2GB). New free space from A = 2GB.
+    - Can we fit D (3GB)? We have 8-7=1GB slack + 2GB freed = 3GB total available for the new load?
+    - Logic: Current Usage 7. Remove A(2) -> Usage 5. Add D(3) -> Usage 8. Fits exactly.
+    - Action: Evict A, Load D.
+    - State: {B(pinned), C, D}. Usage: 8GB (C is 4, D is 3, B is 1). Wait, 4+3+1=8. Correct.
+    - Count: Loads=4, Evictions=1.
+- **E5: Unload B**.
+    - Rule: Unload takes 10s. Removes model.
+    - Does this trigger eviction? No explicit rule says unloading triggers eviction unless capacity is exceeded *by the unload* (impossible) or if we are reloading something else immediately. The event list ends here.
+    - Action: Remove B from state.
+    - State: {C, D}. Usage: 4+3=7GB.
+    - Count: Evictions remains 1. Loads remains 4. Deferrals remains 0.
+
+**Final Counts Check:**
+- Total Successful Loads: A, B, C, D = 4.
+- Total Successful Evictions: A = 1.
+- Total Deferrals: None (we had unpinned models to evict).
+- Deferred List: [].
+
+### Phase 2 LEDGER WALK
+
+**Event 1: Load A**
+- Action: Attempt load A (2GB).
+- Check Fit: Current 0 + 2 <= 8. OK.
+- Update State: Residents = [A]. Usage = 2.
+- Counters: Loads -> 1. Evictions -> 0.
+
+**Event 2: Load B**
+- Action: Attempt load B (1GB). Pin flag set.
+- Check Fit: Current 2 + 1 <= 8. OK.
+- Update State: Residents = [A, B(pinned)]. Usage = 3.
+- Counters: Loads -> 2. Evictions -> 0.
+
+**Event 3: Load C**
+- Action: Attempt load C (4GB).
+- Check Fit: Current 3 + 4 <= 8. OK.
+- Update State: Residents = [A, B(pinned), C]. Usage = 7.
+- Counters: Loads -> 3. Evictions -> 0.
+
+**Event 4: Load D**
+- Action: Attempt load D (3GB).
+- Check Fit: Current 7 + 3 = 10 > 8. Overflow detected.
+- Rule Application: Evict LRU unpinned models until space allows D.
+    - Unpinned Residents in order of arrival: A, C.
+    - Oldest unpinned: A (2GB).
+    - Simulate removal of A: New Usage = 7 - 2 = 5. Add D(3) -> 8. Fits exactly.
+- Action: Evict A, Load D.
+- Update State: Residents = [B(pinned), C, D]. Usage = 8. (Order for LRU next time would be B[pinned], C, then D).
+- Counters: Loads -> 4. Evictions -> 1.
+
+**Event 5: Unload B**
+- Action: Unload pinned model B.
+- Update State: Residents = [C, D]. Usage = 8 - 1 = 7.
+- Note: No eviction occurs here as no load is attempted immediately after in this sequence, and the rule only forces eviction on a *load* that overflows.
+- Counters: Loads -> 4. Evictions -> 1.
+
+**Final State Verification:**
+- Loads count: 4 (A, B, C, D).
+- Evictions count: 1 (A).
+- Deferrals count: 0.
+- Deferred list: Empty.
+
+### Final Answer Construction
+
+```json
+{"loads": 4, "evictions": 1, "deferrals": 0, "deferred": []}
+```

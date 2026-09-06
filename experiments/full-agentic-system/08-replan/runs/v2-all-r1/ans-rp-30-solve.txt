@@ -1,0 +1,51 @@
+### Fact Bullets (Tonight's Numbers Only)
+*   **LOW1**: Duration 4 minutes, Start Minute 0.
+*   **LOW2**: Duration 3 minutes, Start Minute 3.
+*   **HIGH**: Arrival Minute 5, Duration 4 minutes.
+
+### Per-Minute Walk Table
+
+| minute | core | event |
+| :--- | :--- | :--- |
+| 0 | LOW1 (Start) | LOW1 starts at t=0. Bank @2. |
+| 1 | LOW1 (Run) | LOW1 runs. Bank @4. |
+| 2 | LOW1 (Run) | LOW1 finishes (Duration 4 reached? No, 3 mins run so far). **Correction**: Duration is 4 minutes total. Occupies minutes 0,1,2,3. Finishes at t=4. At t=2: 3 mins run? No. Start 0, Run 1 (end 1), Run 2 (end 2). Wait, "occupies minutes s .. s+n-1". n=4. Minutes 0,1,2,3. Finish at 4. |
+| 2 | LOW1 (Run) | LOW1 runs minute 2 (Occupied: 0,1,2). Bank @4 reached? No, bank is start+2 = 2. Yes, banked at t=2. Remaining owed: 2. |
+| 3 | LOW1 (Run) | LOW1 runs minute 3 (Occupied: 0,1,2,3). **Finishes**. Next waiting LOW starts at t=4? No, "next waiting LOW starts in that same finish minute". Wait, logic check: "the next waiting LOW starts in that same finish minute" usually implies immediate handoff. But table shows discrete minutes. If LOW1 finishes at end of minute 3 (time point 4), does the core idle for a moment? Rule: "core never idles while a LOW job is waiting". If LOW2 is waiting, it starts immediately. When is LOW2 waiting? Start minute 3. So from t=0 to t=3, LOW1 holds core. At t=3 (end of minute 3), LOW1 finishes. LOW2 start minute is 3. Does it start at t=4 or t=3? "Start minute" usually means the clock time when eligibility begins. If LOW1 finishes at t=4, and LOW2 became eligible at t=3, is there a gap? Rule: "next waiting LOW starts in that same finish minute". This implies continuity. Let's trace carefully. |
+| 3 | LOW1 (Finish) | LOW1 occupies minutes 0,1,2,3. Finishes at time point 4. |
+| 3 | LOW2 (Wait) | LOW2 is waiting (Eligible since t=3). Core goes to LOW2 immediately? Or wait for next minute tick? Standard scheduling: immediate handoff. Let's assume continuity. Core runs LOW2 starting effectively at t=4? No, if "same finish minute", it means the slot used by LOW1 finishes, and LOW2 takes that slot? No, minutes are discrete steps 0, 1, 2, 3. Step 3 is occupied by LOW1. At end of step 3, time is 4. If handoff is immediate, LOW2 starts at t=4. |
+| 4 | LOW2 (Start) | LOW2 starts. Bank @5 (start+2). Duration 3 minutes total. Occupies minutes 4,5,6. Finishes at t=7. |
+| 4 | LOW2 (Run) | LOW2 runs minute 4. |
+| 5 | HIGH (Arrive) | HIGH arrives at t=5. It wants to run. Preemption check: LOW2 is running minute 5? Occupies 4,5,6. Yes. Preempt LOW2. |
+| 5 | HIGH (Start) | HIGH preempts LOW2. Runs minutes 5,6,7,8. Finishes at t=9. |
+| 6 | HIGH (Run) | HIGH runs minute 6. |
+| 7 | HIGH (Run) | HIGH runs minute 7. |
+| 8 | HIGH (Finish) | HIGH finishes at t=9. Core free for LOW2. |
+| 9 | LOW2 (Resume) | LOW2 resumes. Banked minutes? Started at 4, ran 0-1 (mins). Preempted at start of minute 5 (time point 5)? Or end? "HIGH arrives at minute 5". If HIGH runs for duration 4 starting minute 5, it occupies minutes 5,6,7,8. LOW2 occupied minutes 4,5,6... Preemption happens when HIGH starts. So LOW2 ran minute 4 only. Banked at t=6 (start+2). Did bank land? Start 4 + 2 = 6. HIGH arrived at 5. Bank lands at 6. "bank landing on the exact minute HIGH arrives still counts". But HIGH arrived at 5, not 6. So LOW2 had no bank before preemption. |
+| 9 | LOW2 (Run) | LOW2 resumes. Owed: Total 3 - Run 1 = 2? Wait. "owes every minute past its last bank". Start 4. Bank at 6. Preempted at 5 (before reaching 6). So no bank reached. All work wasted. Redoes full duration? Or redoes from start? "Redo after resume". Usually implies restarting the job's execution, but does it restart the clock or just run remaining? "redoes every minute past its last bank". If no bank reached, all minutes are "past" (unbanked). So runs 3 minutes. Occupies minutes 9,10,11. Finishes at t=12. |
+| 10 | LOW2 (Run) | LOW2 runs minute 10. Bank @5+2? No, bank is start/resume +2. Resume at 9. Bank at 11. Runs minute 10. |
+| 11 | LOW2 (Finish) | LOW2 runs minute 11. Finishes at t=12. |
+
+**Re-evaluating Preemption Logic**:
+*   **LOW2 Start**: Minute 3. Eligible since t=3.
+*   **LOW2 Run**:
+    *   Minute 0-3: Core busy with LOW1. (Wait time).
+    *   Time point 4: LOW1 finishes. LOW2 starts immediately? Or next minute tick? "Next waiting LOW starts in that same finish minute". This phrasing is tricky. If LOW1 occupies minutes 0,1,2,3. The "finish minute" is the slot of minute 3? No, it finishes *at* time point 4. The table rows are discrete steps (minutes). Step 0, 1, 2, 3. At end of step 3, time is 4. If handoff is immediate, LOW2 starts at t=4.
+    *   Does "Start Minute" mean the job begins execution exactly at that clock value? Yes. So if LOW2 starts minute 3, it should ideally start at t=3. But core was busy. It waits until free. When does it become "running"? At t=4.
+*   **HIGH Arrival**: Minute 5. Arrives at t=5.
+*   **Conflict**: LOW2 is running minutes 4, 5, 6. (Duration 3).
+    *   At t=5, HIGH arrives. Preemption occurs.
+    *   LOW2 ran minute 4 only.
+    *   Bank check: Start/Resume + 2 = 4+2 = 6. Bank lands at t=6.
+    *   HIGH arrived at t=5. "bank landing on the exact minute HIGH arrives still counts". The bank is scheduled for t=6. It does not land on t=5. So no protection.
+*   **Wasted**: Minutes past last bank (t=6) before preemption? Preemption happened at t=5. No minutes were run after a bank because the bank was at 6 and preemption was at 5. Wait, is there a bank at start+2? Yes. Did it land? No. So all work unbanked.
+*   **Resume**: HIGH finishes at t=9 (runs minutes 5,6,7,8).
+    *   LOW2 resumes at t=9.
+    *   Does it restart from the beginning of its duration or continue? "Redoes every minute past its last bank". Since no bank was reached, all 3 minutes are "past". It must run 3 minutes again.
+*   **Resume Execution**: Starts at t=9. Runs minutes 9, 10, 11. Finishes at t=12.
+
+**Timeline Summary**:
+*   LOW1: Starts t=0. Runs min 0,1,2,3. Finishes t=4.
+*   LOW2: Waits until t=4. Starts t=4. Runs min 4. Preempted at t=5 (by HIGH). Wasted = 0 minutes *banked*, but effectively all work lost? No, "minutes run past the last bank". If no bank reached, is wasted = 3? Or wasted = 0 because nothing was saved? The metric asks for "wasted_min". Usually this means "work discarded". Work discarded = Total Duration - Banked Minutes.
+    *   LOW2 Phase 1: Ran min 4 (1 min). Banked at 6 (not reached). Discarded work = 3 (since none banked? Or just the unbanked portion?). Rule: "owes every minute past its last bank". If no bank, owes all. So discarded = 3.
+    *   LOW2 Phase 2: Runs min 9,10,11 (3 mins). Banked at

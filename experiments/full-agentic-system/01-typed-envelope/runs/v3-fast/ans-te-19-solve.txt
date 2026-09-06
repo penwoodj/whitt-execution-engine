@@ -1,0 +1,66 @@
+### Phase 1 RULE SCAN
+This phase lists every rule in the task that changes state during the event sequence (tonight's events), including expiry, return, revocation, refill, promotion, fallback, or source-ranking rules. One line per rule, marking the trigger.
+
+1.  **Retry Wait Rule**: Triggers on each failed attempt; sets wait time to double previous ($2s \to 4s \to 8s$).
+2.  **Attempt Cost Rule**: Triggers on every retry execution; deducts 2 tokens from budget per attempt.
+3.  **Wait Cost Rule**: Triggers on every retry wait period; deducts 1 token from budget per second waited.
+4.  **Budget Suppression Rule (Primary)**: Triggers if total spend exceeds initial budget (24); suppresses job and doubles budget for re-check.
+5.  **Expiry Return Rule**: Triggers when the trigger request completes (after success or failure sequence ends); returns half of the *granted* partial amount, rounded down, immediately before processing the next event.
+
+---
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at a time in strict arrival order, showing the state after each event.
+
+**Event 1: Attempt 1 (Fail)**
+-   **Action**: Execute attempt.
+-   **Cost**: 2 tokens (Attempt) + 0 tokens (Wait).
+-   **State**: `budget` = $24 - 2 = 22$. `attempts` = 1. `wait_s` = 0.
+
+**Event 2: Wait after Attempt 1**
+-   **Action**: Enforce wait time ($2s$).
+-   **Cost**: 2 seconds $\times$ 1 token/sec = 2 tokens.
+-   **State**: `budget` = $22 - 2 = 20$. `attempts` = 1. `wait_s` = 2.
+
+**Event 3: Attempt 2 (Fail)**
+-   **Action**: Execute attempt.
+-   **Cost**: 2 tokens (Attempt) + 0 tokens (Wait).
+-   **State**: `budget` = $20 - 2 = 18$. `attempts` = 2. `wait_s` = 2.
+
+**Event 4: Wait after Attempt 2**
+-   **Action**: Enforce wait time ($4s$).
+-   **Cost**: 4 seconds $\times$ 1 token/sec = 4 tokens.
+-   **State**: `budget` = $18 - 4 = 14$. `attempts` = 2. `wait_s` = $2 + 4 = 6$.
+
+**Event 5: Attempt 3 (Fail)**
+-   **Action**: Execute attempt.
+-   **Cost**: 2 tokens (Attempt) + 0 tokens (Wait).
+-   **State**: `budget` = $14 - 2 = 12$. `attempts` = 3. `wait_s` = 6.
+
+**Event 6: Wait after Attempt 3**
+-   **Action**: Enforce wait time ($8s$).
+-   **Cost**: 8 seconds $\times$ 1 token/sec = 8 tokens.
+-   **State**: `budget` = $12 - 8 = 4$. `attempts` = 3. `wait_s` = $6 + 8 = 14$.
+
+**Event 7: Attempt 4 (Success)**
+-   **Action**: Execute attempt (Job succeeds).
+-   **Cost**: 2 tokens (Attempt) + 0 tokens (Wait).
+-   **State**: `budget` = $4 - 2 = 2$. `attempts` = 4. `wait_s` = 14.
+
+**Event 8: Expiry Return Trigger**
+-   **Action**: The trigger request completes. Apply Expiry Rule.
+-   **Logic**: Returns half of the *granted* partial amount. Since no partial grant occurred in this sequence (only retries), the granted amount is 0. Return = $\lfloor 0 / 2 \rfloor = 0$.
+-   **State**: `budget` remains 2. `attempts` = 4. `wait_s` = 14.
+
+**Final State Check:**
+-   Total Spend: $2+2+4+2+8+2 = 22$ tokens.
+-   Initial Budget: 24.
+-   Final Budget: $24 - 22 = 2$.
+-   Suppression Condition: Spend (22) $\le$ Budget (24). No suppression triggered.
+
+---
+
+### Final Answer JSON
+```json
+{"attempts": 4, "wait_s": 14, "budget_after": 2, "suppressed": false}
+```

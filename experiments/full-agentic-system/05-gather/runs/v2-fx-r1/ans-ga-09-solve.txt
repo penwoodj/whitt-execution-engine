@@ -1,0 +1,73 @@
+Based on the provided material and task requirements, here is the analysis of the "Canary Duty" scenario.
+
+**Phase 1: Rule List (Implicit in Task Logic)**
+The task description defines the rules governing the state transitions without requiring a separate ledger walk for this specific event sequence (as no external grants/pools are mentioned to trigger an expiry return). The logic relies on the `limit` thresholds and breach definitions provided in the text.
+
+*   **Step 1:** Rate 0.5% is within the limit of 2.0%. Verdict: Clean. Stage completes. Rollout updates (10 * 1 = 10%).
+*   **Step 2:** Rate 0.8% is within the limit of 2.0%. Verdict: Clean. Stage completes. Rollout updates (10 * 2 = 20%).
+*   **Step 3:** Rate 2.1% exceeds the limit of 2.0%. Verdict: Breach. Stage does not complete. No stage count increment. Limit tightens to 0.8% for remaining steps.
+*   **Step 4:** Rate 0.6% is within the new limit (0.8%). However, since Step 3 was a breach and no stages were advanced in the current "night" logic following a breach (per "breaching observation completes nothing"), this step does not advance the stage counter. It remains a spent/breach state relative to the climb progression required for status determination. *Correction based on strict text:* The text says "breaches do not shift count". The limit tightens. We check if we can continue climbing.
+    *   *Re-evaluation of Step 3/4 logic against standard "climb" definitions:* Usually, a breach stops the climb for that specific night or requires recovery. However, looking at **Step 5** (0.7%) and **Step 6** (0.9%):
+    *   The text states: "after any rollback limit tightens to 0.8". It implies we are in a "rollback" state after Step 3.
+    *   Let's trace the status conditions strictly from the end result:
+        *   **Step 1:** Clean (Stage 1). Rollout = 10.
+        *   **Step 2:** Clean (Stage 2). Rollout = 20.
+        *   **Step 3:** Breach (2.1% > 2.0%). Count does not advance. Limit tightens to 0.8%.
+        *   **Step 4:** Rate 0.6% < 0.8%. Is this a clean step or just a recovery? The text says "breaching observation completes nothing". It doesn't explicitly say subsequent steps under the new limit count as stages unless specified. However, looking at the final status options:
+            *   If Step 3 is a breach and we continue with valid rates (0.6%, 0.7%), does it become DONE?
+            *   Let's look at **Step 5**: Rate 0.7% < 0.8%. Clean under new limit?
+            *   Let's look at **Step 6**: Rate 0.9% > 0.8%. Breach under new limit.
+    *   **Breach Count:**
+        *   Step 3 is a breach (1st breach).
+        *   Step 6 is a breach (2nd breach, since 0.9 > 0.8).
+    *   The text states: "second breach stops everything with status STOPPED".
+
+Therefore, the sequence results in two breaches.
+
+**Phase 2: Walk Lines**
+1.  **Pos 1:** Rate 0.5%, Limit 2.0%, Verdict Clean, Stage Completed (1), Rollout after (10).
+2.  **Pos 2:** Rate 0.8%, Limit 2.0%, Verdict Clean, Stage Completed (2), Rollout after (20).
+3.  **Pos 3:** Rate 2.1%, Limit 2.0%, Verdict Breach, Stage Completed (2), Rollout after (20). *(Breach does not increment stage)*.
+4.  **Pos 4:** Rate 0.6%, Limit 0.8%, Verdict Clean, Stage Completed (3? or still 2?). *Interpretation:* In many "climb" logic tasks, a breach stops the climb until limits are met again, but often only counts as "spent". However, Step 5 is 0.7% and Step 6 is 0.9%. If we assume strict stage counting only happens on clean steps:
+    *   If Step 4 is clean (0.6 < 0.8), Stage becomes 3? Rollout = 30?
+    *   If Step 5 is clean (0.7 < 0.8), Stage becomes 4? Rollout = 40?
+    *   Then Step 6 (0.9 > 0.8) is a breach. That would be the **2nd breach**.
+    *   Regardless of whether Step 4 or 5 incremented the stage, the existence of two breaches triggers `STOPPED`. The values held are those of the last completed stage before the final crash.
+    *   Let's assume the "last completed stage" is the maximum clean count achieved.
+        *   Clean at 1 (Stage 1).
+        *   Clean at 2 (Stage 2).
+        *   Breach at 3.
+        *   If 4 and 5 are cleans, we reach Stage 4? Or does a breach reset the stage counter to the last clean one but we can't count more? Text: "breaching observation completes nothing". It doesn't say it resets the stage number for previous cleans. But usually, if you fail a step in a sequence, that step doesn't add a stage.
+        *   Let's assume Stage 2 was the last fully valid climb before Step 3 failed. Then Steps 4 and 5 might be "recovery" steps but not "climb" steps? OR they are just new clean steps.
+        *   If we assume standard progression: Stage 1, Stage 2, (Breach), Stage 3, Stage 4, (Breach).
+        *   Last completed stage = 4. Rollout = 40. Status = STOPPED.
+
+    *Alternative Interpretation:* The text says "after any rollback limit tightens to 0.8". This implies the system enters a specific state. If we treat Step 3 as the start of this state, and Steps 4/5 are just valid observations in this state (not necessarily advancing the global stage count unless specified). However, usually, `stages_done` tracks successful climbs.
+    *   Let's stick to the strongest signal: **Two Breaches**. Status = STOPPED.
+    *   If Step 3 is breach #1. Step 6 is breach #2 (0.9 > 0.8).
+    *   Values held are from the state before the second breach crashed it.
+    *   Assuming Steps 4 and 5 were valid cleans: Stage count would be 4. Rollout 40.
+
+    *Let's refine the "Clean" definition:* "clean observation completes stage equal to its own position".
+    *   Pos 1 Clean -> Completes Stage 1.
+    *   Pos 2 Clean -> Completes Stage 2.
+    *   Pos 3 Breach -> Completes nothing (Stage remains 2).
+    *   Pos 4 Rate 0.6 < 0.8 Limit. Is it clean? Yes. Does it complete Stage 3? Text: "clean observation completes stage equal to its own position". So if Pos 4 is clean, it completes Stage 4? That seems like a huge jump (Stage 1 -> 2 -> skip 3 -> 4). This implies the "position" refers to the sequence number.
+    *   If Pos 4 completes Stage 4, then Pos 5 completes Stage 5.
+    *   Then Pos 6 breaches.
+    *   So: Stage 4, Rollout 40 (10 * 4). Status STOPPED.
+
+**Final JSON Construction:**
+*   `rollout_pct`: 40 (Based on last clean stage being position 5).
+*   `stages_done`: 4 (Wait, if Pos 5 is clean, it completes Stage 5? Or does the "stage number" reset after a breach?).
+    *   Text: "breaches do not shift count". This suggests the counter stays at the last valid value. If Pos 1=Stage1, Pos 2=Stage2. Breach at 3. Counter is still 2.
+    *   If we treat it as a "climb" where you must pass the check to increment:
+        *   Step 1: Pass -> Stage 1.
+        *   Step 2: Pass -> Stage 2.
+        *   Step 3: Fail -> Stage stays 2.
+        *   Step 4: Pass (under new limit). Does it go to Stage 3 or does the "breach" prevent further climbing? Text doesn't say it resets to 0, just that breach completes nothing. It implies you can try again. If you pass, do you increment from current (2) to 3? Or is the stage number tied strictly to the "climb list"?
+        *   Given the ambiguity, let's look at the result of the **Second Breach**. The system stops. The values are held. Usually, this means the last successfully completed state. If Step 4 and 5 were successful climbs (completing stages 3 and 4), then the last stage is 4.
+        *   Let's assume "Stage Number" = Count of successful clean steps.
+            *   Clean: 1, 2, 4, 5. (Total 4).
+            *   Breach: 3, 6.
+            *   Last completed stage count = 4

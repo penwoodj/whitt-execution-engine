@@ -1,0 +1,100 @@
+Based on the strict rules provided, here is the step-by-step derivation for the state of the core and jobs during tonight's rotation.
+
+### **Phase 1: Rule List & State Checks**
+
+The following rules govern the system state changes triggered by events (arrivals, preemptions):
+1.  **Arrival/Start Rule**: A job `LOW` starts or resumes at minute $s$. It banks a checkpoint at $s+2$ and every subsequent even interval relative to its running time ($s+4, s+6, \dots$).
+    *   *Trigger*: Job arrival (`LOW1`, `LOW2`) or Resume request.
+    *   *Effect*: Sets the job's state to "Running" (or "Waiting"), records start/resume minute $s$, initializes bank list $\{s+2\}$.
+
+2.  **Preemption Rule**: When `HIGH` arrives at minute $H$ and runs, it immediately preempts any currently running `LOW`.
+    *   *Trigger*: `HIGH` arrival.
+    *   *Effect*: Stops current `LOW`. Calculates wasted minutes = (Current Running Time) - (Last Banked Time). If Current < Last Banked, wasted = 0. Marks job as "Preempted". Sets owed time to `Total Duration` - `Banked Count`.
+
+3.  **Resume Priority Rule**: The core never idles while a `LOW` is waiting. When the previous `LOW` finishes or is preempted, the next waiting `LOW` starts in that same minute.
+    *   *Trigger*: Completion of current job OR Preemption of current job.
+    *   *Effect*: Selects the next job based on: 1) Start Minute (lower wins), 2) Resume status (Resume beats Fresh at tie).
+
+4.  **Completion Rule**: A job finishes when its owed time is fully run.
+    *   *Trigger*: End of minute for the last owed second.
+    *   *Effect*: Job state becomes "Finished". Updates order list and makespan.
+
+---
+
+### **Phase 2: Ledger Walk (Minute-by-Minute)**
+
+**Parameters:**
+*   `LOW1`: Total = 5 mins, Start = 0.
+*   `LOW2`: Total = 7 mins, Start = 2.
+*   `HIGH`: Arrives = 2, Duration = 9 (Minutes 2 to 10).
+
+**Walk:**
+
+| Minute | Event / State Change | Core Holder | Notes / Banks |
+| :--- | :--- | :--- | :--- |
+| **0** | `LOW1` arrives. Starts immediately. Runs min 0. | LOW1 (Fresh) | Bank at $0+2=2$. |
+| **1** | `LOW1` continues. Runs min 1. | LOW1 (Fresh) | Next bank at 4 ($2+2$). |
+| **2** | `HIGH` arrives. Preempts `LOW1`.<br>`LOW1` has run 2 mins (minutes 0, 1).<br>Bank list: $\{2\}$.<br>Last bank = 2. Current time = 2.<br>**Wasted**: $2 - 2 = 0$.<br>`HIGH` starts running. | HIGH | `LOW1` is Preempted (Owed: $5-2=3$).<br>`LOW2` arrives at min 2 but must wait for core. |
+| **3** | `HIGH` runs min 3. | HIGH | |
+| **4** | `HIGH` runs min 4. | HIGH | |
+| **5** | `HIGH` runs min 5. | HIGH | |
+| **6** | `HIGH` runs min 6. | HIGH | |
+| **7** | `HIGH` runs min 7. | HIGH | |
+| **8** | `HIGH` runs min 8. | HIGH | |
+| **9** | `HIGH` runs min 9. | HIGH | |
+| **10**| `HIGH` finishes (ran 2-10). Core free.<br>Resume candidates:<br>1. `LOW1` (Start=0, Preempted, Owed=3, Status=Preempt/Freshish)*<br>2. `LOW2` (Start=2, Waiting, Owed=7, Status=Fresh)<br>*Note on Priority:* The rule states "a resumed LOW outranks a fresh one". However, `LOW1` was *preempted*, not finished naturally. Does it count as "resumed"?<br>Interpretation A: Only jobs that started/ran and are waiting to resume count. Both are waiting.<br>Tie-breaker at minute 10? No tie in start minutes (0 vs 2). `LOW1` starts earlier (0 < 2), so `LOW1` wins immediately regardless of "fresh" status, because the primary sort key is Start Minute. | LOW1 (Resuming) | `LOW1` resumes at min 10. Runs min 10 (Time=1).<br>Banks? No bank triggered yet ($10+2=12$). |
+| **11**| `LOW1` runs min 11. | LOW1 (Resuming) | Time=2. |
+| **12**| `LOW1` runs min 12. | LOW1 (Resuming) | Time=3. Bank at $10+4=14$? No, banks are absolute minutes from start of run?<br>Rule: "banks a checkpoint at minute s+2 and again every 2 running minutes after".<br>If resuming at 10, first bank is at $10+2=12$. |
+| **13**| `LOW1` runs min 13. | LOW1 (Resuming) | Time=4. Bank at 14. |
+| **14**| `LOW1` runs min 14. | LOW1 (Resuming) | Time=5. **Finished**. |
+
+*Correction on Bank Logic for Resume:*
+The rule says: "a job that starts or resumes at minute s banks a checkpoint at minute s+2".
+When `LOW1` resumes at minute 10, it effectively treats minute 10 as its new start $s=10$.
+Banks at: $10+2=12$, then $12+2=14$.
+At minute 12 (end of min 12), bank triggers.
+At minute 13, time=4. Bank at 14 is next.
+At minute 14, time=5. Job finishes.
+
+**Final Order Calculation:**
+*   `LOW1` finished first (at end of minute 14).
+*   `LOW2` waited the whole time. Starts when `LOW1` finishes? No, core never idles. But no other job is waiting. So `LOW2` starts at minute 15.
+    *   Wait, let's re-read "The core never idles while a LOW job is waiting". At minute 14, `LOW1` finishes. `LOW2` is the only waiting job. Core goes to `LOW2`.
+*   `LOW2` runs:
+    *   Min 15 (Time=1)
+    *   Min 16 (Time=2). Bank at $2+2=4$ (relative)? No, absolute resume start $s=15$. Bank at $15+2=17$.
+    *   ...
+    *   Total duration = 7 minutes.
+    *   Runs 15 to 21 inclusive (7 mins).
+*   `LOW2` finishes at end of minute 21.
+
+**Summary:**
+*   **Order**: `LOW1`, then `LOW2`.
+*   **Wasted Minutes**: At preemption (min 2), `LOW1` ran minutes 0, 1. Banks: $\{2\}$. Last bank = 2. Current time = 2. Wasted = $2-2=0$.
+    *   Wait, did it run minute 2? No, HIGH arrived at start of minute 2 and preempted instantly. So `LOW1` ran exactly 2 minutes (indices 0 and 1). The bank is triggered at absolute minute 2. Since the job stopped exactly when the bank was due (or just before), no work past the last bank is wasted.
+    *   Wasted = 0.
+*   **Makespan**: Last finish time. `LOW2` finishes at end of minute 21. So makespan = 21.
+
+**Double Check Preemption Logic:**
+"minutes past the last checkpoint are wasted".
+Checkpoint banks: Start (0) -> Bank at 2. Then every 2 running mins. Running mins: 0, 1, ...
+At min 2, the job has completed minutes 0 and 1. The bank is due.
+If HIGH preempts *at* minute 2 (start of processing), the job hasn't processed minute 2 yet.
+Banks are usually checked at the end of the interval or trigger on arrival if aligned?
+"a bank landing on the exact minute HIGH arrives still counts and nothing is wasted".
+Minute 2 is the exact minute HIGH arrives. The bank lands exactly there. Nothing wasted.
+
+**Double Check Resume Priority:**
+"resumed LOW outranks a fresh one at any tie".
+Tie condition: "Start Minute".
+`LOW1` start = 0. `LOW2` start = 2.
+No tie in Start Minutes. The primary sort key (Start Minute) dictates the order. `LOW1` wins.
+The rule about "resumed vs fresh" only applies if Start Minutes are equal. Here they are not.
+
+**Result:**
+Order: ["LOW1", "LOW2"]
+Wasted: 0
+Makespan: 21
+
+```json
+{"makespan_min": 21, "w

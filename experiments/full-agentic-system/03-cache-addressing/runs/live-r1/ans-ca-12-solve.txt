@@ -1,0 +1,103 @@
+The morning report requires strict adherence to the event sequence, state transitions, and the specific rules governing token grants, denials, and expiries. The following analysis walks through each request in arrival order, applying the logic defined in the "orientation story" (the example) to the current data points.
+
+### Phase 1: Rule Analysis
+Based on the task description, specifically the orientation story's mechanics applied to tonight's events:
+1.  **Grant Rule**: A request asks for `X` tokens. If `Pool >= X`, grant `X`, Pool becomes `Pool - X`. If `Pool < X`, grant `Pool`, Pool becomes `0`.
+2.  **Denial Rule**: If the pool is empty (`Pool == 0`) upon arrival, the request is denied (listed by ID). The state remains at `0` for that step until an expiry occurs.
+3.  **Expiry Rule**: A specific grant expires after a subsequent request completes. Upon expiry:
+    *   Return amount = `floor(Granted Amount / 2)`.
+    *   Pool becomes `Pool + Return Amount`.
+4.  **Sequence Constraint**: The return from an expired grant lands in the pool immediately before the next event (or at the end of the current step if it's the last one), but logically, the denial check happens against the state *before* the expiry refill if they occur in the same logical block? No, the orientation story says "watch the slot the expiry lands in... return arrives right before the request the trigger names".
+    *   *Correction based on text*: "the grant for r2 expires after request r3 completes... an expired grant returns half its granted tokens rounded down to the pool".
+    *   The trigger is `r3` completing. The event sequence is: Process R1 -> Process R2 -> Process R3 (Complete) -> **Expiry Event** happens here (refilling pool) -> Process R4.
+
+### Phase 2: Ledger Walk (Event by Event)
+
+*Initial State:*
+Pool = 50. Granted Units = 0. Denied List = [].
+
+1.  **Request r1**: Asks for 5.
+    *   Check: Pool (50) >= Ask (5).
+    *   Action: Grant 5.
+    *   New State: Pool = 45. Granted Units = 5.
+
+2.  **Request r2**: Asks for 9.
+    *   Check: Pool (45) >= Ask (9).
+    *   Action: Grant 9.
+    *   New State: Pool = 36. Granted Units = 14.
+
+3.  **Request r3**: Asks for 11.
+    *   Check: Pool (36) >= Ask (11).
+    *   Action: Grant 11.
+    *   Trigger Condition Met: "the grant for r2 expires after request r3 completes".
+    *   **Expiry Event (r2)**:
+        *   Original Grant of r2 was 9.
+        *   Return = `floor(9 / 2)` = 4.
+        *   Pool Refill: Pool becomes `36 + 4` = 40.
+    *   New State: Pool = 40. Granted Units = 15 (14+11-0? No, "granted_units" usually implies total successful grants summed up to the current moment or just the count of successful requests. The output format asks for `granted_units`. In similar ledger problems, this is often the sum of all granted amounts. Let's track cumulative grants: 5+9=14. Then +11 = 25? Or is it the pool level? No, "granted_units" vs "pool_left". It must be the sum of units successfully handed out.
+        *   Cumulative Granted so far: r1(5) + r2(9) + r3(11) = 25.
+    *   Current State Check: Pool = 40.
+
+4.  **Request r4**: Asks for 14.
+    *   Check: Pool (40) >= Ask (14).
+    *   Action: Grant 14.
+    *   New State: Pool = 26. Cumulative Granted = 39.
+
+5.  **Request r5**: Asks for 18.
+    *   Check: Pool (26) >= Ask (18).
+    *   Action: Grant 18.
+    *   New State: Pool = 8. Cumulative Granted = 57.
+
+6.  **Request r6**: Asks for 20.
+    *   Check: Pool (8) < Ask (20).
+    *   Action: Partial Grant. Grant whatever is there (8).
+    *   New State: Pool = 0. Cumulative Granted = 57 + 8 = 65.
+
+7.  **Request r7**: Asks for 23.
+    *   Check: Pool (0) < Ask (23). AND Pool is empty.
+    *   Action: Deny Request. List ID "r7".
+    *   New State: Pool = 0. Cumulative Granted = 65.
+
+### Final Calculation Verification
+*   **Total Granted Units**: Sum of successful grants.
+    *   r1: 5
+    *   r2: 9
+    *   r3: 11
+    *   r4: 14
+    *   r5: 18
+    *   r6: 8 (partial)
+    *   Total = 5 + 9 + 11 + 14 + 18 + 8 = **65**.
+*   **Denied List**: Only "r7" was denied. (Note: The orientation story mentioned a denial of r3 in the example, but that was because the pool hit zero *before* r3 arrived. Here, r2 and r3 were fully granted before the expiry of r2 refilled the pool sufficiently for r4, r5, and partially r6).
+    *   Wait, let's re-read the trigger carefully: "the grant for r2 expires after request r3 completes".
+    *   Does this happen immediately? Yes.
+    *   So at step 3 (r3 completion), we process r3 (grant 11), then immediately execute the expiry of r2 (+4). Pool goes from 36 -> 25 (after r3) -> 29 (after expiry)? Or 36 -> 30?
+    *   Let's re-calculate Step 3 logic precisely.
+        *   Start Step 3: Pool = 36.
+        *   Request R3 asks 11. Grant 11. Pool -> 25.
+        *   Expiry Trigger fires (R2 expired). R2 grant was 9. Return = floor(4.5)=4. Pool -> 25 + 4 = 29.
+    *   Okay, my previous calculation had a slight error in the sequence of pool updates at step 3. Let's re-run with corrected Step 3 math.
+
+**Re-Run Ledger:**
+1.  **Start**: P=50.
+2.  **R1 (ask 5)**: Grant 5. P=45.
+3.  **R2 (ask 9)**: Grant 9. P=36.
+4.  **R3 (ask 11)**: Grant 11. P=25.
+    *   *Expiry of R2 triggers*: Return = floor(9/2) = 4. P = 25 + 4 = 29.
+5.  **R4 (ask 14)**: Pool (29) >= 14? Yes. Grant 14. P=15.
+6.  **R5 (ask 18)**: Pool (15) < 18. Partial Grant 15. P=0.
+    *   *Wait, R5 asks 18*. Pool is 15. Grant 15. Pool becomes 0.
+7.  **R6 (ask 20)**: Pool (0) < 20. AND Empty. Deny "r6". P=0.
+    *   Wait, did I miss an expiry? No other expiries mentioned in the text ("the grant for r2 expires after request r3 completes"). Only R2 expires.
+8.  **R7 (ask 23)**: Pool (0) < 23. AND Empty. Deny "r7". P=0.
+
+**Let's check the orientation story numbers to see if they imply a different rule set.**
+*   Story Start: 35.
+*   R1(11): Grant 11 -> P=24.
+*   R2(7): Grant 7 -> P=17.
+*   R3(13): Ask 13. Pool 17. Grant 13? Wait, story says "first grant expired and returned 5". Which one? "the first grant" implies R1 expires after R2? Or R2 after R3? Text: "the first ask was 11... third ask of 13 landed against only 22 in the pool so it took a partial".
+    *   Let's trace story to find the expiry rule.
+    *   Start 35.
+    *   R1(11) -> P=24.
+    *   R2(7) -> P=17.
+    *   Story says "third ask of 13 landed against only 22". This implies between R2 and R3, the pool went from 17 to 22? That means +5 returned.
+    *   If R1 expired after R2: Return floor(11/2) = 5. P=17+

@@ -1,0 +1,103 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the "Residency Discipline" constraints, here are the rules that change state during the event stream:
+
+1.  **Load Rule**: If a requested model fits within the remaining free space (`free >= size`), it loads immediately.
+    *   *Trigger*: `load A`, `load B`, `load C`.
+2.  **Eviction Selection Rule**: When a load cannot fit, identify all unpinned models currently resident. Sort them by recency (Least Recently Touched first).
+    *   *Trigger*: Implicitly triggered when `free < size` and pinned models exist or are the only option.
+3.  **Eviction Execution Rule**: Evict one LRU unpinned model at a time, adding its size to free space, incrementing the eviction counter, and updating recency of remaining residents. Repeat until the requested load fits OR no unpinned models remain.
+    *   *Trigger*: Implicitly triggered during the failure condition of the Load Rule.
+4.  **Deferral Rule**: If after exhausting all unpinned evictions, the requested model still does not fit (because only pinned models remain), defer the load. Record the ID and increment deferral counter. Do not perform any further evictions for this event.
+    *   *Trigger*: `load D` (if it fails to fit).
+5.  **Unload Rule**: If a requested model is resident, free its size from the pool. No eviction or deferral occurs.
+    *   *Trigger*: `unload B`.
+6.  **No-Op Rule**: If an unload request targets a non-resident model, perform no action (state remains unchanged).
+    *   *Trigger*: N/A in this specific stream (B is resident at the time of unload), but defined as a rule for state changes.
+
+---
+
+### Phase 2 LEDGER WALK
+
+**Initial State**:
+*   Pool: 8 GB
+*   Residents: []
+*   Free: 8 GB
+*   Recency List: [] (Empty)
+*   Pinned Models: {B}
+
+**Event 1: `load A` (Size: 2 GB)**
+*   Check Fit: Free (8) >= Size (2). Fits.
+*   Action: Load A.
+*   State Update:
+    *   Residents: [A]
+    *   Free: 6 GB
+    *   Recency List: [A] (Most recent)
+
+**Event 2: `load B` (Size: 2 GB)**
+*   Check Fit: Free (6) >= Size (2). Fits.
+*   Action: Load B.
+*   State Update:
+    *   Residents: [A, B]
+    *   Free: 4 GB
+    *   Recency List: [A, B] (Order: A touched first, then B. Oldest=A, Newest=B)
+
+**Event 3: `load C` (Size: 2 GB)**
+*   Check Fit: Free (4) >= Size (2). Fits.
+*   Action: Load C.
+*   State Update:
+    *   Residents: [A, B, C]
+    *   Free: 2 GB
+    *   Recency List: [A, B, C] (Order: A oldest, C newest)
+
+**Event 4: `load D` (Size: 7 GB)**
+*   Check Fit: Free (2) < Size (7). Does not fit.
+*   Eviction Phase: Identify unpinned models.
+    *   Residents: {A, B, C}. Pinned: {B}. Unpinned: {A, C}.
+    *   Recency of Unpinned: A is oldest (LRU), C is newest.
+    *   Target for eviction: A (2 GB).
+*   Eviction 1: Evict A.
+    *   Free becomes: 2 + 2 = 4 GB.
+    *   Residents: [B, C]. Recency List: [C, B] (Wait, recency updates on touch? No, eviction removes it. Remaining order was A, B, C. Remove A. Order is now B, C. But wait, standard LRU logic: when we evict A, the list of *remaining* residents maintains their relative order based on last access before this event. Access history: A (t1), B (t2), C (t3). Current resident set {B, C}. B was touched at t2, C at t3. So B is older than C?
+    *   Let's re-verify recency logic strictly from the prompt: "Every touch of a model moves it to most-recent."
+    *   State before eviction: Residents [A, B, C]. Last touches: A(t1), B(t2), C(t3).
+    *   Unpinned set: {A, C}.
+    *   Recency comparison between A and C: C was touched at t3, A at t1. C is more recent. A is Least Recently Touched (LRU).
+    *   Evict A. Count = 1. Free = 4 GB. Residents remaining: {B, C}.
+*   Re-check Fit: Free (4) < Size (7). Still does not fit.
+*   Continue Eviction Phase: Identify unpinned models in {B, C}.
+    *   Pinned: {B}. Unpinned: {C}.
+    *   Target for eviction: C (2 GB).
+*   Eviction 2: Evict C.
+    *   Free becomes: 4 + 2 = 6 GB.
+    *   Residents remaining: {B}.
+*   Re-check Fit: Free (6) < Size (7). Still does not fit.
+*   Continue Eviction Phase: Identify unpinned models in {B}.
+    *   Pinned: {B}. Unpinned: {}.
+    *   No unpinned models remain to evict.
+*   Deferral Check: Can the load fit? No (6 < 7). Only pinned model remains.
+*   Action: Defer Load D.
+*   State Update:
+    *   Residents: [B]
+    *   Free: 6 GB
+    *   Recency List: [B]
+    *   Loads Count: 3 (A, B, C succeeded).
+    *   Evictions Count: 2 (A and C evicted).
+    *   Deferrals Count: 1.
+    *   Deferred IDs: ["D"].
+
+**Event 5: `unload B` (Size: 2 GB)**
+*   Check Resident: Is B resident? Yes.
+*   Action: Unload B.
+*   State Update:
+    *   Residents: []
+    *   Free: 6 + 2 = 8 GB.
+    *   Recency List: [].
+
+---
+
+### Final Answer
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

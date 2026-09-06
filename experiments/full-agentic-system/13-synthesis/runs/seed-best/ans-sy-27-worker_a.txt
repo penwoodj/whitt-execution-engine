@@ -1,0 +1,90 @@
+### Phase 1 Rule Scan (First Half Only)
+*Rules governing the core scheduling, preemption, checkpointing, and state transitions for LOW jobs.*
+
+1.  **Arrival Order:** LOW jobs are queued in order of their start minutes; a resumed job outranks a fresh one at any tie.
+2.  **Preemption Rule:** HIGH arrival instantly preempts whatever LOW is running; while HIGH runs, nothing else runs.
+3.  **Checkpoint Banking:** A job banks a checkpoint every 2 completed minutes of running time (absolute minutes $s+2$, then every 2 mins after).
+4.  **Waste on Preemption:** Work past the last banked checkpoint is wasted and must be redone upon resume.
+5.  **Resume State:** Upon resume, a job owes all unbanked minutes since its last bank; it resumes with zero progress in those owed minutes.
+6.  **Core Utilization:** The core never idles while a LOW job is waiting; the next waiting LOW starts immediately when the current one finishes or is preempted.
+
+### Phase 2 Ledger Walk (First Half Only)
+*Applying events to the state of the core and LOW jobs.*
+
+**Initial State:** Minute 0. Core free. Queue: `LOW1` (start=0, len=4), `LOW2` (start=0, len=3).
+*Note: Both start at minute 0. Tie-breaker: Resumed vs Fresh. Neither is resumed yet. Order determined by arrival logic or strict tie-breaking if simultaneous. The prompt says "in order of their start minutes". Since both are 0, we look for the next discriminator. Usually, in such problems, if no other info exists, they might run concurrently or one takes precedence based on ID or arbitrary assignment. However, let's trace carefully.*
+*Re-reading:* "LOW jobs take the core in order of their start minutes". Both are 0. "a resumed LOW outranks a fresh one at any tie". Neither is resumed. This implies they are equal rank. How does the core pick? Usually, if simultaneous starts and no resume status, we assume sequential execution based on ID or arrival time (which is same). Let's assume `LOW1` takes it first as per typical "first mentioned" convention unless specified otherwise, OR check if they can run in parallel (no, single core).
+*Wait, let's look at the example logic:* In the orientation story, LOW1 starts 0, LOW2 starts 1. Here both start 0. If they are equal rank, and no other rule breaks the tie, we must assume a deterministic order. Let's assume `LOW1` runs first (ID priority or arrival list order).
+*Actually, let's re-read carefully:* "one core tonight... LOW jobs take the core in order of their start minutes". If start minutes are equal, and neither is resumed, they are effectively identical in rank. Is there a rule I missed? No. In such edge cases, standard practice is ID order or list order. Let's proceed with `LOW1` running first.
+
+**Minute 0:**
+*   Event: `LOW1` starts (Start Minute 0).
+*   State: Core busy with `LOW1`. `LOW1` progress: 0/4. Banked Checkpoints: None yet (needs 2 mins). Queue: `LOW2` waiting.
+
+**Minute 1:**
+*   Event: `LOW1` continues.
+*   State: Core busy with `LOW1`. `LOW1` progress: 1/4. Banked Checkpoints: None. Queue: `LOW2` waiting.
+
+**Minute 2:**
+*   Event: `HIGH` arrives at minute 2.
+*   Rule Application: Preemption. `HIGH` runs instantly. `LOW1` is preempted.
+*   State Analysis for `LOW1`:
+    *   Running time before preemption: 2 minutes (Minutes 0 and 1).
+    *   Checkpoint Banking Rule: "banks a checkpoint at minute s+2". Start $s=0$. Bank lands at $0+2 = 2$.
+    *   Condition: "a bank landing on the exact minute HIGH arrives still counts and nothing is wasted".
+    *   Result: `LOW1` has successfully banked a checkpoint at Minute 2. Work done (2 mins) is saved.
+*   State Analysis for Core: Switches to `HIGH`. `HIGH` runs for 6 minutes (Minutes 2, 3, 4, 5, 6, 7).
+*   Queue Status: `LOW2` has been waiting since Minute 0.
+
+**Minute 3:**
+*   Event: `HIGH` continues.
+*   State: Core busy with `HIGH`. `LOW1` paused (banked at 2). `LOW2` waiting.
+
+**Minute 4:**
+*   Event: `HIGH` continues.
+*   State: Core busy with `HIGH`. `LOW1` paused. `LOW2` waiting.
+
+**Minute 5:**
+*   Event: `HIGH` continues.
+*   State: Core busy with `HIGH`. `LOW1` paused. `LOW2` waiting.
+
+**Minute 6:**
+*   Event: `HIGH` continues (Last minute of HIGH).
+*   State: Core busy with `HIGH`. `LOW1` paused. `LOW2` waiting.
+
+**Minute 7:**
+*   Event: `HIGH` finishes. Core becomes free.
+*   Queue Status: `LOW2` is at the front. It has been waiting since Minute 0 (Start Minute 0).
+*   Action: `LOW2` starts immediately.
+*   State: Core busy with `LOW2`. `LOW1` is in "Resumed" state (Banked at 2, needs to resume from there? No, it was preempted *at* the bank. It resumes later if needed). Wait, `LOW1` finished its job? Length 4. It ran 0-1 (2 mins), then paused. It has 2 mins left.
+*   Queue: `LOW2` starts first because it is waiting and fresh? Or does `LOW1` resume immediately?
+    *   Rule: "a resumed LOW outranks a fresh one at any tie".
+    *   Current State of `LOW1`: Preempted at Minute 2. It has banked a checkpoint. It needs to run 2 more minutes to finish. Is it considered "Resumed" or just "Paused"? The rule distinguishes "resumed" vs "fresh". A job that was running and got stopped is "Resumed" when it starts again. `LOW2` is "Fresh" (never ran).
+    *   Tie-breaker: If both are available to run, the Resumed one (`LOW1`) outranks the Fresh one (`LOW2`).
+*   Action: Core switches to `LOW1` (Resumed) instead of `LOW2` (Fresh).
+
+**Minute 8:**
+*   Event: `LOW1` resumes.
+*   State: Core busy with `LOW1`. `LOW1` progress: 0/4 (Redoing the last 2 mins). Banked Checkpoint: Minute 2.
+    *   Note on Wasted Min: The prompt says "on preemption the work past the last checkpoint is wasted". Since the bank landed exactly at minute 2, and HIGH arrived at minute 2, nothing was wasted. Work done = 0 wasted.
+
+**Minute 9:**
+*   Event: `LOW1` continues.
+*   State: Core busy with `LOW1`. Progress: 1/4 (of the remaining). Total elapsed time since start: 3 mins of actual running? No, absolute minutes.
+    *   Running history: Mins 0-1 (Banked at 2). Mins 8-9 (Running).
+    *   Checkpoint logic for `LOW1`: It needs to run 2 more minutes to finish.
+    *   Bank check: Start was 0. Bank at 2. Next bank would be at $2+2=4$ relative to start? Or absolute time? "absolute minutes". So banks at 2, 4, 6... `LOW1` is currently running in absolute minute 8. It will reach absolute minute 10 next.
+    *   Does it need another bank? Length 4. Banks every 2 mins. Min 0-2 (Bank). Min 2-4 (Bank?). If it runs to finish, does it matter? It finishes at min 10.
+
+**Minute 10:**
+*   Event: `LOW1` continues.
+*   State: Core busy with `LOW1`. Progress: 2/4 of remaining. Total running time since resume: 3 mins (Mins 8, 9, 10). Wait, Minute 10 is the *end* of minute 10? Or start?
+    *   Let's count duration:
+        *   Resume starts at beginning of Minute 8.
+        *   Minute 8 runs -> 1 min done.
+        *   Minute 9 runs -> 2 mins done. (Checkpoint banked at absolute time $2+2=4$? No, relative to start of job? "absolute minutes". Start=0. Banks at 2, 4, 6... `LOW1` is running in minute 8. It will hit absolute minute 10 next.
+        *   Actually, let's just track remaining time. Length 4. Ran 0-1 (2 mins). Needs 2 more.
+        *   Minute 8: Runs 1 min. Remaining: 1.
+        *   Minute 9: Runs 1 min. Remaining: 0. **FINISHED**.
+    *   Correction on Timeline:
+        *   Start Mins 0, 1 (Duration 2). Banked at end of Min 1? Or "at minute s+2"? If start=0, bank lands at absolute time 2. This usually means after completing the interval [0, 2]. So after Minute 

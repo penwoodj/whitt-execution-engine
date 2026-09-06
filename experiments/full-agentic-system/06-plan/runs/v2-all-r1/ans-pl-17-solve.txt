@@ -1,0 +1,73 @@
+### Phase 1 RULE SCAN
+This phase lists every rule in the task that changes state during the event sequence (tonight's events), identifying the trigger and the specific action taken.
+
+| Rule Description | Trigger Event/Claim | Action / State Change |
+| :--- | :--- | :--- |
+| **Arrival & Costing** | Every attempt arrival (1st, 2nd, 3rd) | Deducts `attempt_cost` from budget immediately upon arrival. |
+| **Wait Accumulation** | Between failed attempts and before the next attempt | Adds `wait_seconds` to total spend (`wait_s`) after a failure is recorded. |
+| **Spend Calculation** | End of sequence (or mid-sequence for doubling check) | Total Spend = Sum(`attempt_cost`) + Sum(`wait_seconds`). |
+| **Suppression Check (Initial)** | After 2nd failed attempt (before 3rd arrival) | If `Total Spend` > `Budget`, triggers budget doubling logic. |
+| **Budget Doubling** | Triggered by initial suppression check failure | Doubles the current `Budget`. Sets `suppressed` to false pending re-check. |
+| **Suppression Check (Re-check)** | After budget doubling, before 3rd attempt execution | If `Total Spend` <= `Doubled Budget`, job runs (`suppressed`=false). If still >, suppressed=true. |
+| **Success Completion** | Arrival of 3rd attempt | Job completes successfully. No further costs added after success. |
+
+*Note: The "Expiry" and "Return" rules mentioned in the prompt are for a different event type (grant expiry) which does not occur in tonight's specific arrival sequence (Arrival -> Failure -> Wait -> Arrival -> Failure -> Wait -> Arrival).*
+
+---
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at a time in strict arrival order, showing the state after each step.
+
+**Initial State:**
+*   `Budget`: 30
+*   `Attempt Cost`: 3
+*   `Wait Sequence`: 3s (1st), 6s (2nd)
+*   `Total Spend`: 0
+*   `Attempts Count`: 0
+*   `Suppressed`: false
+
+**Event 1: Arrival of Attempt 1**
+*   **Action:** Deduct attempt cost.
+*   **Calculation:** `Spend` = 3 (cost).
+*   **State:** `Budget`=27, `Attempts`=1, `Spend`=3.
+
+**Event 2: Failure of Attempt 1 & Wait 1**
+*   **Action:** Record failure, add wait time to spend.
+*   **Calculation:** `Wait` = 3s. `Total Spend` = 3 (cost) + 3 (wait) = 6.
+*   **State:** `Attempts`=1, `Spend`=6.
+
+**Event 3: Arrival of Attempt 2**
+*   **Action:** Deduct attempt cost.
+*   **Calculation:** `Cost` = 3. `Total Spend` = 6 + 3 = 9.
+*   **State:** `Attempts`=2, `Spend`=9.
+
+**Event 4: Failure of Attempt 2 & Wait 2**
+*   **Action:** Record failure, add wait time to spend.
+*   **Calculation:** `Wait` = 6s. `Total Spend` = 9 + 6 = 15.
+*   **State:** `Attempts`=2, `Spend`=15.
+
+**Event 5: Suppression Check (Initial)**
+*   **Condition:** `Total Spend` (15) > `Budget` (30)? No.
+*   **Action:** Job is NOT suppressed yet. Proceed to next attempt.
+*   **State:** Unchanged.
+
+**Event 6: Arrival of Attempt 3**
+*   **Action:** Deduct attempt cost.
+*   **Calculation:** `Cost` = 3. `Total Spend` = 15 + 3 = 18.
+*   **State:** `Attempts`=3, `Spend`=18.
+
+**Event 7: Success of Attempt 3**
+*   **Action:** Job succeeds. Sequence ends.
+*   **Final Totals:**
+    *   `attempts`: 3 (Count of arrivals)
+    *   `wait_s`: 9 (Sum of waits: 3 + 6)
+    *   `budget_after`: 12 (Initial 30 - Spend 18)
+    *   `suppressed`: false
+
+---
+
+### Final Answer
+
+```json
+{"attempts": 3, "wait_s": 9, "budget_after": 12, "suppressed": false}
+```

@@ -1,0 +1,145 @@
+Phase 1 RULE SCAN:
+
+- Rule: Field removal triggers breaking change if field was required in v4 and absent in v5. Triggered by event: endpoint /api/v1/user/profile → field "email" removed in v5.  
+- Rule: Type narrowing from string to integer (or number) in a required field causes breaking change. Triggered by event: endpoint /api/v1/order/items → field "quantity" changed from string to int.  
+- Rule: Required field added in v5 without shim or fallback triggers breaking change. Triggered by event: endpoint /api/v1/user/settings → field "timezone" added as required.  
+- Rule: Field renamed with a shim parameter (e.g., `old_field` → `new_field`, with `shim=legacy`) is classified as soft-breaking. Triggered by event: endpoint /api/v1/user/profile → field "phone" renamed to "contact_phone", with `shim=legacy`.  
+- Rule: Endpoint deprecated in v4 and removed in v5 triggers consumer impact ranking as high-severity, marked as gone. Triggered by event: endpoint /api/v4/notifications → removed in v5.  
+- Rule: Type loosening (e.g., from int to string) in a non-required field is not breaking but additive; no change in breaking classification. Triggered by event: endpoint /api/v1/order/status → field "status" changed from int to string.  
+- Rule: Field type tightening (string to date-time) in required field causes breaking change if used in v4. Triggered by event: endpoint /api/v1/user/birthdate → field "birth_date" tightened from string to date-time.  
+- Rule: If a schema is unresolvable due to typo, treat as invalid and mark for fallback to v4 with error log. Triggered by event: file /tmp/opencode/schemadiff-run/v5/schema.yaml has typo in path "/user/profile" → missing closing quote.  
+- Rule: When a redirect is declared in prose (e.g., "redirects to /v1/user") and the endpoint is removed, classify as soft-breaking with migration hint. Triggered by event: endpoint /api/v4/user → redirected to /api/v1/user in v4 docs but removed in v5.  
+- Rule: If a field change affects requiredness or type without a shim, it is breaking; if a shim exists, it is soft-breaking. Triggered by event: endpoint /api/v1/order/item → field "price" changed from optional to required with no shim.
+
+Phase 2 LEDGER WALK:
+
+- After /api/v1/user/profile: field "email" removed (breaking), state updated: email absent in v5, marked as breaking.  
+- After /api/v1/order/items: field "quantity" type narrowed from string to int → breaking change applied.  
+- After /api/v1/user/settings: field "timezone" added as required → breaking change applied.  
+- After /api/v1/user/profile: field "phone" renamed to "contact_phone", with shim=legacy → soft-breaking classified, migration hint: use legacy_phone in v4-compatible calls.  
+- After /api/v4/notifications: endpoint removed in v5 → marked as deprecated and gone; consumer impact ranked highest.  
+- After /api/v1/order/status: field "status" type loosened from int to string → additive change only, no breaking classification.  
+- After /api/v1/user/birthdate: field "birth_date" tightened from string to date-time → breaking change applied.  
+- After schema.yaml typo in v5: unresolvable schema detected; fallback to v4 schema with error log written to /tmp/opencode/schemadiff-run/outputs/errors/v5-typo.log.  
+- After /api/v4/user: endpoint redirected in docs but removed in v5 → soft-breaking classified, migration hint: use /v1/user as redirect path for existing clients.  
+- After /api/v1/order/item: field "price" changed from optional to required with no shim → breaking change applied.
+
+{
+  "breaking_changes": [
+    {
+      "endpoint": "/api/v1/user/profile",
+      "field": "email",
+      "type": "removed",
+      "severity": "breaking",
+      "impact": "consumer must provide email via alternative field or fallback"
+    },
+    {
+      "endpoint": "/api/v1/order/items",
+      "field": "quantity",
+      "type": "narrowed",
+      "from": "string",
+      "to": "integer",
+      "severity": "breaking",
+      "impact": "existing clients must validate integer input; schema mismatch will fail"
+    },
+    {
+      "endpoint": "/api/v1/user/settings",
+      "field": "timezone",
+      "type": "added",
+      "required": true,
+      "severity": "breaking",
+      "impact": "clients must now supply timezone; missing value causes 400"
+    },
+    {
+      "endpoint": "/api/v1/user/birthdate",
+      "field": "birth_date",
+      "type": "tightened",
+      "from": "string",
+      "to": "date-time",
+      "severity": "breaking",
+      "impact": "existing string inputs will fail parsing; must be ISO 8601"
+    },
+    {
+      "endpoint": "/api/v1/order/item",
+      "field": "price",
+      "type": "required-added",
+      "from": "optional",
+      "to": "required",
+      "severity": "breaking",
+      "impact": "missing price field now returns 400"
+    }
+  ],
+  "soft_breaking_changes": [
+    {
+      "endpoint": "/api/v1/user/profile",
+      "field": "phone",
+      "new_name": "contact_phone",
+      "shim_parameter": "legacy",
+      "severity": "soft-breaking",
+      "migration_hint": "Use legacy_phone in v4 clients; map to contact_phone in v5"
+    },
+    {
+      "endpoint": "/api/v4/user",
+      "status": "redirected and removed",
+      "redirect_path": "/v1/user",
+      "severity": "soft-breaking",
+      "migration_hint": "Redirect all /v4/user calls to /v1/user; clients should update routing"
+    }
+  ],
+  "removed_endpoints": [
+    {
+      "endpoint": "/api/v4/notifications",
+      "reason": "deprecated in v4, removed in v5",
+      "impact_ranking": 1,
+      "migration_hint": "No migration path available; consumers must stop using this endpoint"
+    }
+  ],
+  "additive_changes": [
+    {
+      "endpoint": "/api/v1/order/status",
+      "field": "status",
+      "type_change": "string (loosened)",
+      "severity": "additive",
+      "impact": "new values allowed; no breaking behavior"
+    }
+  ],
+  "schema_errors": [
+    {
+      "file": "/tmp/opencode/schemadiff-run/v5/schema.yaml",
+      "error": "missing closing quote in path '/user/profile'",
+      "severity": "critical",
+      "resolution": "fallback to v4 schema with error log written"
+    }
+  ],
+  "consumer_impact_ranked": [
+    {
+      "impact": "highest",
+      "endpoint": "/api/v4/notifications",
+      "description": "entire endpoint removed; no fallback or redirect",
+      "migration_hint": "must be replaced by /api/v1/user/events"
+    },
+    {
+      "impact": "high",
+      "endpoint": "/api/v1/order/item",
+      "description": "required field added without shim",
+      "migration_hint": "validate price presence in all requests; add default fallback if needed"
+    },
+    {
+      "impact": "medium",
+      "endpoint": "/api/v1/user/profile",
+      "description": "field removed with no alternative",
+      "migration_hint": "use contact_phone or legacy_phone as fallback"
+    },
+    {
+      "impact": "low",
+      "endpoint": "/api/v1/order/status",
+      "description": "type loosened, additive only",
+      "migration_hint": "no action needed; clients can accept string values"
+    }
+  ],
+  "total_breaking_changes": 5,
+  "total_soft_breaking_changes": 2,
+  "total_removed_endpoints": 1,
+  "total_additive_changes": 1,
+  "schema_validation_errors": 1
+}

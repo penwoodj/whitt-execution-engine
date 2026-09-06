@@ -1,0 +1,87 @@
+### Step 1: Directory Structure Creation
+Create `/tmp/opencode/budget-run` with subdirectories `scripts`, `data`, `outputs`, `logs`, and `decisions`.
+```bash
+mkdir -p /tmp/opencode/budget-run/{scripts,data,outputs,logs,decisions}
+```
+
+### Step 2: Synthetic Data Generation (Python)
+Generate raw availability logs for three services over 30 days (1 minute intervals), embedding specific edge cases: missing checks, one service exhausting budget by day 9 via a slow grind, and another via a single bad hour.
+```python
+import os
+import random
+from datetime import timedelta
+
+# Configuration
+SERVICES = ['svc-999', 'svc-995', 'svc-990']
+TARGETS = {
+    'svc-999': 0.999,
+    'svc-995': 0.995,
+    'svc-990': 0.990
+}
+
+# Edge Case Logic
+def generate_logs():
+    os.makedirs('/tmp/opencode/budget-run/data', exist_ok=True)
+    
+    # Initialize counters for edge cases
+    svc_999_exhaustion_type = "slow_grind" 
+    svc_995_bad_hour_start_day = 14
+    
+    with open('/tmp/opencode/budget-run/data/raw_logs.csv', 'w') as f:
+        f.write("timestamp,service,status\n")
+        
+        base_time = datetime.now() - timedelta(days=30)
+        
+        for day in range(30):
+            current_date = base_time + timedelta(days=day)
+            
+            # Generate 1440 minutes per day (approx)
+            for minute in range(1440):
+                ts = current_date + timedelta(minutes=minute)
+                
+                for svc, target in TARGETS.items():
+                    # Base availability logic with noise
+                    is_down = random.random() < (1 - target * 0.95) 
+                    
+                    # Inject Edge Case: svc-999 slow grind exhaustion by day 9
+                    if svc == 'svc-999' and day <= 8:
+                        # Gradually increase error rate to burn budget completely
+                        burn_factor = (day / 8.0) * 1.5 
+                        is_down = random.random() < (1 - target + burn_factor * 0.02)
+                    
+                    # Inject Edge Case: svc-995 single bad hour on day 14
+                    if svc == 'svc-995' and day == 13 and 60 <= minute <= 70:
+                        is_down = True
+                        
+                    # Inject Edge Case: Missing checks (not failures) for svc-990 days 20-22
+                    if svc == 'svc-990' and 19 <= day <= 21 and random.random() < 0.3:
+                        status = "MISSING"
+                        is_down = False # Missing != Down
+                    else:
+                        status = "UP" if not is_down else "DOWN"
+
+                    f.write(f"{ts.isoformat()}, {svc}, {status}\n")
+                    
+    return 'raw_logs.csv'
+
+# Need to import datetime inside the script block for execution
+from datetime import datetime
+generate_logs()
+```
+
+### Step 3: Rules Definition (`rules.md`)
+Define explicit rules for handling missing checks, burn rate thresholds, and exhaustion classification.
+```markdown
+# Rules for Budget Analysis Pipeline
+
+1. **Missing Checks**: A status of "MISSING" is treated as `0` downtime minutes. It does not contribute to the error budget consumption. This prevents false positives where network drops are mistaken for service failures.
+2. **Burn Rate Threshold**: Sustainable burn rate = (Total Error Budget Minutes) / 30 days. Any day with actual burn > 3x sustainable is flagged as `CRITICAL`.
+3. **Exhaustion Classification**: 
+   - If budget hits 0 on Day N, check the cumulative minutes lost in the final hours of Day N-1 vs Day N.
+   - If loss is distributed over >2 hours: `slow_grind`.
+   - If loss is concentrated in <1 hour: `single_bad_hour`.
+4. **Percentage Denominators**: All percentages displayed must include the total sample size (e.g., "98% of 1440 checks").
+5. **Rounding**: No rounding applied to intermediate calculations or final minute counts. Precision maintained to integer minutes only.
+```
+
+### Step 4: Analysis

@@ -1,0 +1,93 @@
+### Phase 1 Rule Scan (First Half Only)
+Based on the text "night desk sy-02" and the specific rules governing the token pool for tonight's deploy window:
+
+1.  **Arrival/Grant Rule**: Requests land in strict arrival order; grants are partial when the pool cannot cover the full ask; a request arriving at an empty pool is denied and listed by id.
+2.  **Expiry Rule**: The grant for `r1` expires after request `r2` completes.
+3.  **Return Rule**: An expired grant returns half its granted tokens rounded down to the pool (specifically: `floor(granted_tokens / 2)`).
+
+### Phase 2 Ledger Walk (First Half Only)
+Applying events in strict arrival order with the rules above.
+*Initial State*: Pool = 40.
+
+1.  **Event**: `r1` asks for 5.
+    *   Rule: Grant partial/full if pool > 0.
+    *   Action: Grant min(5, 40) = 5.
+    *   State: Pool = 35. Granted so far: 5.
+
+2.  **Event**: `r2` asks for 8.
+    *   Rule: Grant partial/full if pool > 0.
+    *   Action: Grant min(8, 35) = 8.
+    *   State: Pool = 27. Granted so far: 13.
+
+3.  **Event**: `r3` asks for 12.
+    *   Rule: Grant partial/full if pool > 0.
+    *   Action: Grant min(12, 27) = 12.
+    *   State: Pool = 15. Granted so far: 25.
+
+4.  **Event**: `r4` asks for 14.
+    *   Rule: Grant partial/full if pool > 0.
+    *   Action: Grant min(14, 15) = 14.
+    *   State: Pool = 1. Granted so far: 39.
+
+5.  **Event**: `r5` asks for 17.
+    *   Rule: Grant partial/full if pool > 0. (Pool is 1, which is > 0).
+    *   Action: Grant min(17, 1) = 1.
+    *   State: Pool = 0. Granted so far: 40.
+
+6.  **Event**: `r6` asks for 21.
+    *   Rule: Arriving at an empty pool is denied and listed by id. (Pool is 0).
+    *   Action: Deny `r6`.
+    *   State: Pool = 0. Granted so far: 40. Denied list: [`r6`].
+
+7.  **Event**: Expiry Trigger (`r2` completes).
+    *   Rule: Grant for `r1` expires after `r2` completes. Return half of granted tokens rounded down.
+    *   Calculation: `floor(5 / 2)` = 2.
+    *   Action: Add 2 to pool.
+    *   State: Pool = 2.
+
+8.  **Event**: `r7` (Implicit next request? No, the list ends at `r6`).
+    *   Wait, let's re-read the input list carefully: "arrival order: r1 asks for 5; r2 asks for 8; r3 asks for 12; r4 asks for 14; r5 asks for 17; r6 asks for 21."
+    *   The expiry happens after `r2`. Does the system stop there? No, it processes all arrivals.
+    *   Did I miss a request between `r2` and the end of the list? No.
+    *   Is there an implicit `r7` that triggers the return? No, the text says "The grant for r1 expires after request r2 completes". This is a specific event in time.
+    *   Let's check if any other requests arrive *after* `r2` but before the end of the list provided in the prompt. The list ends at `r6`.
+    *   So, we have processed `r1` through `r6`. Then the expiry event occurs.
+    *   Are there more requests? The text says "requests land... arrival order: r1... r6". That is the complete set of arrivals for this window.
+    *   Therefore, the final state includes the return from `r1`.
+
+**Final State Calculation:**
+*   **Granted Units**: Sum of all successful grants (including partials).
+    *   `r1`: 5
+    *   `r2`: 8
+    *   `r3`: 12
+    *   `r4`: 14
+    *   `r5`: 1
+    *   Total Granted = 5 + 8 + 12 + 14 + 1 = 40.
+*   **Denied**: List of IDs for requests denied due to empty pool.
+    *   `r6` was denied (asked 21, pool had 0).
+    *   List: [`r6`].
+*   **Pool Left**: Remaining tokens after all events (arrivals and expiries) are processed.
+    *   After `r5`: Pool = 0.
+    *   After `r6` (denial): Pool remains 0.
+    *   Expiry Event: Returns `floor(5/2)` = 2 to pool.
+    *   Final Pool = 2.
+
+**Verification against "Orientation Story" traps:**
+*   Trap: "returns that land before the trigger event". The return happens after `r2` completes, which is correct per rule.
+*   Trap: "expired partial returns half of what was asked". Rule says "half its granted tokens". `r1` asked 5, got 5. Half of 5 is 2. Correct.
+*   Trap: "denials that quietly vanish because the pool refilled a moment later". The denial happens at arrival (pool=0). The refill happens *after* the expiry event which occurs after `r2`. Since `r6` arrives before `r2` completes, it is denied permanently. Correct.
+
+**Final JSON Construction:**
+*   `granted_units`: 40
+*   `denied`: ["r6"]
+*   `pool_left`: 2
+
+```json
+{
+  "granted_units": 40,
+  "denied": [
+    "r6"
+  ],
+  "pool_left": 2
+}
+```

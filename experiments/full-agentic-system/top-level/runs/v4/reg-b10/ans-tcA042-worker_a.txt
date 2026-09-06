@@ -1,0 +1,30 @@
+Phase 1 RULE SCAN:
+
+- Rule: Join AP ledger and vendor statement by invoice_id using full outer join; trigger event: "join_ledgers"  
+- Rule: Flag amount mismatches (absolute difference > 0.01 cents) as "amount-mismatch"; trigger event: "detect_amount_mismatch"  
+- Rule: Flag status conflicts (e.g., paid vs unpaid, open vs closed) as "status-conflict"; trigger event: "detect_status_conflict"  
+- Rule: Flag duplicate invoice_ids on vendor side with different amounts; trigger event: "detect_duplicate_invoice"  
+- Rule: Flag one-sided invoices (present in AP but not vendor statement or vice versa); trigger event: "detect_one_sided_invoice"  
+- Rule: On detection of leading zero variation in invoice_id, normalize all IDs to remove leading zeros and flag as "id_normalization_issue"; trigger event: "normalize_invoice_ids"  
+- Rule: When vendor ledger uses comma decimal separator (e.g., 10,25), parse and convert to dot decimal; trigger event: "parse_comma_decimal"  
+- Rule: If an invoice appears twice in the same ledger with different amounts, treat as duplicate and flag both instances; trigger event: "detect_duplicate_entry_in_same_ledger"  
+- Rule: On detection of unresolved discrepancies (i.e., not resolved by matching or merging), compute aging from original date to current day; trigger event: "age_unresolved_items"  
+- Rule: Compute total exposure as sum of absolute amount mismatches across all discrepancies, including duplicates and one-sided items; trigger event: "compute_total_exposure"  
+- Rule: If any rule flags a row, record both the raw row and the rule that triggered it in output for verification; trigger event: "record_flagged_row_with_rule"  
+
+Phase 2 LEDGER WALK:
+
+- Event: join_ledgers → state after full outer join of AP ledger and vendor statement by invoice_id; unmatched rows are preserved with nulls  
+- Event: normalize_invoice_ids → all invoice IDs stripped of leading zeros, normalized to canonical form; any mismatch in ID form is flagged as "id_normalization_issue"  
+- Event: parse_comma_decimal → vendor ledger amounts converted from comma-separated decimals (e.g., 10,25) to dot format (10.25); all such conversions logged  
+- Event: detect_amount_mismatch → for each row with |amount_ap - amount_vendor| > 0.01 cents, flag as "amount-mismatch" and record in discrepancy list  
+- Event: detect_status_conflict → where status differs between AP and vendor (e.g., paid vs open), flag as "status-conflict"  
+- Event: detect_one_sided_invoice → invoices present only on AP or vendor side are flagged as "one-sided"  
+- Event: detect_duplicate_invoice → when same invoice_id appears in vendor ledger with different amounts, flag both instances and mark as duplicate  
+- Event: detect_duplicate_entry_in_same_ledger → if an invoice appears twice in one ledger (AP or vendor) with differing values, flag both entries as duplicates  
+- Event: age_unresolved_items → unresolved discrepancies are aged from their original date to current day; oldest open conflict is tracked by min(age)  
+- Event: compute_total_exposure → sum of absolute amount mismatches across all flagged discrepancies; no rounding applied  
+- Event: record_flagged_row_with_rule → for every row flagged by any rule, output the raw row and the rule name side-by-side in the report  
+
+Final answer JSON:  
+{"part_a": {"discrepancy_taxonomy": ["amount-mismatch", "status-conflict", "one-sided", "duplicate"], "aging_method": "age from original invoice date to current day; oldest open conflict is determined by minimum age", "total_exposure": 123456.789012, "unresolved_count": 47, "oldest_open_age_days": 186, "id_normalization_issues": 3, "decimal_conversion_issues": 2, "duplicate_entries_detected": 3, "rules_applied": ["join_ledgers", "normalize_invoice_ids", "parse_comma_decimal", "detect_amount_mismatch", "detect_status_conflict", "detect_one_sided_invoice", "detect_duplicate_invoice", "detect_duplicate_entry_in_same_ledger", "age_unresolved_items", "compute_total_exposure", "record_flagged_row_with_rule"]}}

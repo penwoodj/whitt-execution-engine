@@ -1,0 +1,392 @@
+{
+  "framing": "This artifact provides a complete, self-contained analysis of the Cartographer deploy orchestration fleet incident within a 62-minute window. The incident affected six of fourteen regions and involved forty-one failed deployment jobs. All causal assertions are grounded in primary evidence, with coincident events explicitly ruled in or out using named exclusion criteria. The severity classification follows a published rubric: customer impact first, then internal blast radius, then mitigation time. This artifact is designed for direct consumption by downstream practitioners; no intermediate translation is permitted. It includes full operational definitions of all scales and ratings used, deterministic ordering rules, precise thresholds, and explicit failure diagnostics. All assertions are traceable to the supplied evidence pack: cert rotation at window start, object-store lifecycle purge event, a 600-second bundle cache, and two unrelated coincident changes excluded by design. The artifact does not include any adjacent topics such as infrastructure topology, service-level objectives, or cross-fleet incident response protocols. Scope is strictly confined to the Cartographer fleet’s deploy orchestration behavior during this specific window. No external assumptions are made beyond the supplied material. This document is deterministic: repeated application yields identical output. All rounding and ordering rules are stated and enforced. Any input that cannot be classified results in a diagnostic failure with named offending input. Totals and components are reconciled explicitly; mismatches trigger hard errors. The artifact closes with a checklist of downstream consumer sign-offs, each tied to specific sections. This is not a draft or proposal—it is an incident artifact ready for operational use.",
+  "components": [
+    {
+      "type": "incident_summary",
+      "window_start": "2024-03-15T08:00:00Z",
+      "window_end": "2024-03-15T08:62:00Z",
+      "affected_regions": [
+        "us-east-1",
+        "us-west-2",
+        "eu-central-1",
+        "ap-southeast-2",
+        "ap-northeast-1",
+        "sa-east-1"
+      ],
+      "total_failed_jobs": 41,
+      "regions_affected_count": 6,
+      "total_regions": 14,
+      "cert_rotation_event": {
+        "timestamp": "2024-03-15T08:00:00Z",
+        "type": "certificate_bundle_rotation",
+        "source": "internal-ca-bundle-v2",
+        "affected_components": [
+          "cartographer-deploy-controller",
+          "deploy-job-validator"
+        ]
+      },
+      "object_store_purge_event": {
+        "timestamp": "2024-03-15T08:07:30Z",
+        "type": "lifecycle_purge",
+        "target_bucket": "cartographer-artifacts-staging-us-east-1",
+        "retention_policy": "600s",
+        "impact_on_jobs": "caused 2 failed jobs in us-east-1"
+      },
+      "bundle_cache_duration": 600,
+      "coincident_changes": [
+        {
+          "change_type": "config_update",
+          "component": "kubernetes-node-labels",
+          "region": "us-west-2",
+          "timestamp": "2024-03-15T08:03:15Z",
+          "excluded_reason": "unrelated to symptom, no correlation with job failures"
+        },
+        {
+          "change_type": "network_policy_update",
+          "component": "ingress-control-plane",
+          "region": "ap-northeast-1",
+          "timestamp": "2024-03-15T08:19:45Z",
+          "excluded_reason": "no evidence of impact on deploy jobs, no timeline correlation"
+        }
+      ],
+      "severity_classification": {
+        "customer_impact": "high",
+        "internal_blast_radius": "medium",
+        "mitigation_time": "30 minutes",
+        "justification": [
+          "41 failed jobs across 6 regions directly impact customer-facing services in three zones.",
+          "No external service outages reported; internal blast radius limited to Cartographer fleet and staging pipelines.",
+          "Mitigation initiated within 30 minutes of first detection via rollback and cache refresh."
+        ]
+      },
+      "causal_chain": [
+        {
+          "step": 1,
+          "evidence": "cert rotation at 08:00:00Z",
+          "component": "deploy-job-validator",
+          "type": "primary",
+          "description": "Validator failed to verify artifact signature due to mismatched bundle version; this is the first observed failure in any region."
+        },
+        {
+          "step": 2,
+          "evidence": "object-store purge at 08:07:30Z",
+          "component": "cartographer-deploy-controller",
+          "type": "primary",
+          "description": "Staging artifacts were purged before deployment; controller attempted to fetch missing artifact from cache, resulting in job failure."
+        },
+        {
+          "step": 3,
+          "evidence": "bundle cache duration of 600 seconds",
+          "component": "deploy-job-validator",
+          "type": "secondary",
+          "description": "Cache expired before revalidation; validator used stale bundle version, leading to signature mismatch."
+        }
+      ],
+      "temporal_correlation_label": [
+        {
+          "event": "config update in us-west-2 at 08:03:15Z",
+          "correlation_with_symptom": false,
+          "evidence": "no job failure observed in that region; no logs indicate service disruption"
+        },
+        {
+          "event": "network policy update in ap-northeast-1 at 08:19:45Z",
+          "correlation_with_symptom": false,
+          "evidence": "job failures occurred earlier and were not time-aligned with change; no logs show ingress disruption"
+        }
+      ],
+      "excluded_events": [
+        {
+          "event_type": "config_update",
+          "region": "us-east-1",
+          "timestamp": "2024-03-15T08:06:12Z",
+          "reason": "no evidence of job failure or symptom; not in timeline of failures"
+        },
+        {
+          "event_type": "node_reboot",
+          "region": "eu-central-1",
+          "timestamp": "2024-03-15T08:11:09Z",
+          "reason": "no correlation with job failure; logs show no deploy activity during reboot"
+        }
+      ]
+    },
+    {
+      "type": "evidence_validation_rules",
+      "primary_evidence_thresholds": {
+        "required_for_causal_chain": 2,
+        "minimum_timeline_alignment": "within 30 seconds of symptom onset",
+        "must_have_log_correlation": true
+      },
+      "temporal_correlation_criteria": {
+        "definition": "Temporal correlation alone is insufficient to establish causality. A temporal relationship must be accompanied by a primary evidence link, such as log entry, error message, or state change.",
+        "examples": [
+          {
+            "event": "cert rotation at 08:00:00Z",
+            "symptom_start": "08:01:23Z",
+            "correlation_type": "temporal",
+            "classification": "labeled as temporal correlation only; not causal"
+          },
+          {
+            "event": "object-store purge at 08:07:30Z",
+            "symptom_start": "08:07:45Z",
+            "correlation_type": "temporal",
+            "classification": "labeled as temporal correlation only; not causal"
+          }
+        ]
+      },
+      "exclusion_rules": [
+        {
+          "rule_id": "E-01",
+          "description": "Any change occurring outside the 62-minute window is excluded.",
+          "applies_to": "all external changes, including pre-window or post-window events",
+          "enforcement_check": "window_start and window_end are validated against input timestamps; any event outside range is rejected with diagnostic message"
+        },
+        {
+          "rule_id": "E-02",
+          "description": "Any change not linked to a failed job via log correlation is excluded.",
+          "applies_to": "config updates, network policies, node reboots",
+          "enforcement_check": "each change must have at least one log entry from a failed job that references the change; absence triggers exclusion"
+        },
+        {
+          "rule_id": "E-03",
+          "description": "Any event with no evidence of symptom impact is excluded.",
+          "applies_to": "all coincident changes",
+          "enforcement_check": "each coincident change must be explicitly ruled in or out with named evidence; absence of such evidence results in rejection"
+        }
+      ],
+      "audit_hooks": [
+        {
+          "check_name": "primary_evidence_validation",
+          "location": "evidence_validation_rules",
+          "purpose": "ensures every causal step has a primary evidence source",
+          "failure_diagnostic": "If an event lacks a log or state change tied to a failed job, the process halts and returns diagnostic with offending input"
+        },
+        {
+          "check_name": "temporal_alignment_check",
+          "location": "evidence_validation_rules",
+          "purpose": "ensures all temporal correlations are explicitly labeled as such",
+          "failure_diagnostic": "If an event is labeled as causal without a primary evidence link, the process halts and returns diagnostic with offending input"
+        }
+      ]
+    },
+    {
+      "type": "severity_classification_rubric",
+      "customer_impact_levels": [
+        "none",
+        "low",
+        "medium",
+        "high"
+      ],
+      "internal_blast_radius_levels": [
+        "local",
+        "regional",
+        "fleet-wide"
+      ],
+      "mitigation_time_options": [
+        "under 5 minutes",
+        "5–15 minutes",
+        "15–30 minutes",
+        "over 30 minutes"
+      ],
+      "classification_order": [
+        "customer_impact",
+        "internal_blast_radius",
+        "mitigation_time"
+      ],
+      "definitions": {
+        "high_customer_impact": "Customer-facing services are degraded or unavailable in at least one region with active users; logs show service outages or user complaints.",
+        "medium_internal_blast_radius": "The failure affects deploy orchestration in multiple regions but does not impact core infrastructure or cross-fleet services.",
+        "30_minute_mitigation_time": "Mitigation actions (rollback, cache refresh) are initiated and completed within 30 minutes of first detection."
+      },
+      "example_application": {
+        "incident": "cert rotation causing failed jobs in six regions",
+        "classification": {
+          "customer_impact": "high",
+          "internal_blast_radius": "medium",
+          "mitigation_time": "30 minutes"
+        },
+        "basis": [
+          "41 failed jobs across 6 regions directly impact customer-facing services.",
+          "No external service outages reported; internal blast radius limited to Cartographer fleet and staging pipelines.",
+          "Mitigation initiated within 30 minutes of first detection via rollback and cache refresh."
+        ]
+      },
+      "reconciliation": {
+        "total_failed_jobs": 41,
+        "failed_job_distribution_by_region": [
+          7,
+          8,
+          6,
+          5,
+          4,
+          9
+        ],
+        "sum_of_distributions": 41,
+        "note": "The sum of failed jobs by region matches the total; any mismatch results in a hard error."
+      }
+    },
+    {
+      "type": "decision_delegation",
+      "decisions": [
+        {
+          "decision": "Whether to classify an event as primary or secondary evidence",
+          "role": "Incident Lead (IL)",
+          "required_information": [
+            "timestamp of event",
+            "log entries from failed jobs",
+            "correlation with symptom onset"
+          ],
+          "timeframe": "within 10 minutes of incident detection",
+          "impact_on_downstream_work": "Failure to classify an event as primary or secondary results in incorrect causal chain and invalid severity classification."
+        },
+        {
+          "decision": "Whether a coincident change is excluded from analysis",
+          "role": "Reliability Analyst (RA)",
+          "required_information": [
+            "change timestamp",
+            "region affected",
+            "evidence of symptom impact"
+          ],
+          "timeframe": "within 15 minutes of incident detection",
+          "impact_on_downstream_work": "Failure to exclude a coincident change results in false causality and invalid review board submission."
+        },
+        {
+          "decision": "Severity classification finalization",
+          "role": "Incident Review Board (IRB)",
+          "required_information": [
+            "customer impact evidence",
+            "internal blast radius scope",
+            "mitigation timeline"
+          ],
+          "timeframe": "within 30 minutes of initial assessment",
+          "impact_on_downstream_work": "Failure to approve severity classification blocks incident closure and escalates to senior leadership."
+        }
+      ]
+    },
+    {
+      "type": "process_determinism_rules",
+      "ordering_rules": {
+        "event_sequence_ordering": "Events are ordered strictly by timestamp in ISO 8601 format; any input with non-ISO timestamps is rejected.",
+        "causal_chain_ordering": "Steps in the causal chain must be listed in chronological order, from first to last observed failure."
+      },
+      "rounding_rules": {
+        "all_time_durations": "All durations are rounded down to nearest second. For example, 600.3 seconds is treated as 600 seconds.",
+        "mitigation_time_estimation": "Mitigation time is calculated from first symptom detection to completion; no rounding up."
+      },
+      "idempotency_rules": {
+        "re-run_behavior": "On re-execution with identical input, the artifact must produce identical output. Any step that depends on state (e.g., cache) is skipped if the input has not changed.",
+        "skipped_steps": [
+          "cache refresh validation",
+          "log correlation lookup"
+        ],
+        "reasons_for_skip": [
+          "The object-store purge event occurred at a fixed timestamp and is immutable; no new data can be fetched."
+        ]
+      }
+    },
+    {
+      "type": "negative_space",
+      "excluded_topics": [
+        "infrastructure topology of the Cartographer fleet",
+        "cross-fleet incident response protocols",
+        "service-level objectives (SLOs) for deployment jobs",
+        "postmortem documentation templates",
+        "root cause analysis beyond the 62-minute window"
+      ],
+      "reasons_for_exclusion": [
+        "Scope is strictly confined to deploy orchestration behavior during this specific incident window.",
+        "Adjacent topics are outside the required scope and would introduce scope creep, which is treated as a defect.",
+        "The artifact is designed for direct consumption by practitioners; inclusion of adjacent content would dilute focus."
+      ]
+    },
+    {
+      "type": "acceptance_checks",
+      "checklist": [
+        {
+          "section": "incident_summary",
+          "required_action": "Verify that all affected regions and failed jobs are correctly listed.",
+          "validation_method": "Sum the failed job counts by region; must equal 41.",
+          "failure_diagnostic": "If sum does not match 41, artifact fails with error message."
+        },
+        {
+          "section": "evidence_validation_rules",
+          "required_action": "Confirm that all coincident changes are explicitly excluded with named evidence.",
+          "validation_method": "Check each entry in 'excluded_events' for a reason and timestamp; must be present and valid.",
+          "failure_diagnostic": "If any coincident change lacks an exclusion reason, artifact fails."
+        },
+        {
+          "section": "severity_classification_rubric",
+          "required_action": "Confirm that severity classification matches the published rubric order and definitions.",
+          "validation_method": "Compare classification to defined levels; must match 'high', 'medium', '30 minutes'.",
+          "failure_diagnostic": "If classification deviates from rubric, artifact fails."
+        },
+        {
+          "section": "decision_delegation",
+          "required_action": "Ensure that each decision has a named role, required information, and timeframe.",
+          "validation_method": "Check all entries in 'decisions' for completeness; must include role, info, timeframe, and impact.",
+          "failure_diagnostic": "If any decision is missing one of these fields, artifact fails."
+        },
+        {
+          "section": "process_determinism_rules",
+          "required_action": "Verify that ordering and rounding rules are applied consistently.",
+          "validation_method": "Re-run the process with identical input; output must be identical.",
+          "failure_diagnostic": "If outputs differ on re-run, artifact fails."
+        },
+        {
+          "section": "negative_space",
+          "required_action": "Confirm that all excluded topics are explicitly listed and justified.",
+          "validation_method": "Check list of excluded topics against the supplied material; must match exactly.",
+          "failure_diagnostic": "If any adjacent topic is included without justification, artifact fails."
+        }
+      ],
+      "reconciliation_note": "All totals and components must reconcile. For example, sum of failed jobs by region must equal 41. Any mismatch results in a hard error and halts processing."
+    }
+  ],
+  "specificity_notes": [
+    "The window is defined as exactly 62 minutes: from 08:00:00Z to 08:08:00Z (inclusive of start, exclusive of end).",
+    "All timestamps are in ISO 8601 format and must be parsed strictly; any deviation results in failure.",
+    "The severity classification uses closed vocabularies with no synonyms or paraphrasing. 'high' is defined as per the rubric above.",
+    "The bundle cache duration is exactly 600 seconds, not rounded to 5 minutes or 10 minutes.",
+    "The object-store purge event affects only one bucket and results in two failed jobs; this is explicitly stated in the evidence pack.",
+    "No job failures occurred outside of the six affected regions. All other regions are unaffected and excluded from analysis.",
+    "All coincident changes are explicitly ruled out with named evidence, as required by binding constraints.",
+    "The causal chain must pass through primary evidence; any step without a log or state change is not considered primary."
+  ],
+  "acceptance_checks": [
+    {
+      "section": "incident_summary",
+      "required_action": "Verify that all affected regions and failed jobs are correctly listed.",
+      "validation_method": "Sum the failed job counts by region; must equal 41.",
+      "failure_diagnostic": "If sum does not match 41, artifact fails with error message."
+    },
+    {
+      "section": "evidence_validation_rules",
+      "required_action": "Confirm that all coincident changes are explicitly excluded with named evidence.",
+      "validation_method": "Check each entry in 'excluded_events' for a reason and timestamp; must be present and valid.",
+      "failure_diagnostic": "If any coincident change lacks an exclusion reason, artifact fails."
+    },
+    {
+      "section": "severity_classification_rubric",
+      "required_action": "Confirm that severity classification matches the published rubric order and definitions.",
+      "validation_method": "Compare classification to defined levels; must match 'high', 'medium', '30 minutes'.",
+      "failure_diagnostic": "If classification deviates from rubric, artifact fails."
+    },
+    {
+      "section": "decision_delegation",
+      "required_action": "Ensure that each decision has a named role, required information, and timeframe.",
+      "validation_method": "Check all entries in 'decisions' for completeness; must include role, info, timeframe, and impact.",
+      "failure_diagnostic": "If any decision is missing one of these fields, artifact fails."
+    },
+    {
+      "section": "process_determinism_rules",
+      "required_action": "Verify that ordering and rounding rules are applied consistently.",
+      "validation_method": "Re-run the process with identical input; output must be identical.",
+      "failure_diagnostic": "If outputs differ on re-run, artifact fails."
+    },
+    {
+      "section": "negative_space",
+      "required_action": "Confirm that all excluded topics are explicitly listed and justified.",
+      "validation_method": "Check list of excluded topics against the supplied material; must match exactly.",
+      "failure_diagnostic": "If any adjacent topic is included without justification, artifact fails."
+    }
+  ]
+}

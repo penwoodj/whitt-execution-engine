@@ -1,0 +1,76 @@
+### Phase 1: Rule Scan (Part B - Residency)
+
+**Rules Identified for Part B:**
+1.  **Capacity & Eviction Policy**: One 8GB card tonight; Models A-D resident sizes (A=1, B=2, C=3, D=4 GB); Model C is pinned and never evicted.
+2.  **Eviction Selection**: Evictions choose the least-recently-touched (LRU) unpinned model.
+3.  **Timing Costs**: Loads cost 30s; Unloads cost 10s.
+4.  **Load Execution Logic**: A load that cannot fit evicts as many LRU unpinned models as needed. If only pinned models remain and it still does not fit, the load defers.
+5.  **Deferred Load Definition**: A load is deferred after evicting every unpinned resident *and* room is still insufficient. The deferred id is that load's own id.
+6.  **No-Op Unload**: An unload for a model no longer resident is a no-op (does not count towards loads/evictions).
+7.  **Count Definitions**: Loads counts every executed load command. Evictions counts every actual eviction performed. Deferrals counts deferred loads.
+
+### Phase 2: Ledger Walk (Part B - Residency)
+
+**Initial State:**
+*   Total Capacity: 8 GB
+*   Residents: A(1), B(2), C(3), D(4). Sum = 10 GB.
+*   *Correction*: The prompt states "One 8GB card tonight... resident sizes: A1 B2 C3 D4". This implies the system starts with these models loaded, which exceeds capacity (10 > 8). However, standard interpretation of such tasks usually assumes a valid starting state or that the "resident sizes" list defines the *target* configuration. Given the explicit instruction to walk the stream `load A`, `load C`, etc., and the fact that Model C is pinned, let's re-evaluate the start.
+    *   If the system starts with A, B, C, D loaded (10GB), it is over capacity by 2GB immediately. This contradicts "One 8GB card".
+    *   Alternative interpretation: The list `A1 B2 C3 D4` describes the models available and their sizes, but not necessarily all loaded at start? No, "resident sizes" implies they are currently residents.
+    *   Let's look at the stream: `load A`, `load C`, `load D`, `unload D`.
+    *   If we assume the system starts empty (0GB), then:
+        1.  **Load A (1 GB)**: Fits in 8GB. No eviction needed. State: {A}. Used: 1/8.
+        2.  **Load C (3 GB)**: Fits in remaining 7GB. No eviction needed. State: {A, C}. Used: 4/8.
+        3.  **Load D (4 GB)**: Needs 4GB. Remaining is 4GB. Fits exactly. No eviction needed. State: {A, C, D}. Used: 7/8? Wait. A(1)+C(3)+D(4) = 8GB. Perfect fit.
+        4.  **Unload D (4 GB)**: Removes D. State: {A, C}. Used: 4GB.
+
+    *   Let's re-read carefully: "One 8GB card tonight... resident sizes: A1 B2 C3 D4". This phrasing is tricky. Does it mean the system *currently* holds these? If so, 10GB > 8GB.
+    *   However, looking at the previous attempt failure note and the strict rules: "A load that cannot fit evicts... if only pinned models remain... defers."
+    *   Let's assume the standard "Start Empty" logic for these specific "cache change" tasks unless explicitly stated "Initial State: [List]". The phrase "resident sizes" likely lists the properties of the models in the pool, not necessarily that all are loaded at t=0. If they were all loaded, the system would be broken immediately.
+    *   Let's trace with **Start Empty**:
+        1.  `load A (1 GB)`: Fits. Executed. Loads = 1. State: {A}.
+        2.  `load C (3 GB)`: Fits. Executed. Loads = 2. State: {A, C}.
+        3.  `load D (4 GB)`: Needs 4GB. Current used: 1+3=4. Available: 8-4=4. Fits exactly. Executed. Loads = 3. State: {A, C, D} (Total 8GB).
+        4.  `unload D (4 GB)`: Removes D. Evictions = 0. Deferrals = 0. Deferred = [].
+
+    *   Let's try the **Start Full** hypothesis just in case "resident sizes" means current load:
+        *   Current Load: A(1)+B(2)+C(3)+D(4) = 10GB. (Over capacity). This seems impossible for a valid state.
+        *   Perhaps B is not loaded? Or the list implies available models?
+        *   Given "Model C is pinned", it suggests C is always there. If A, B, D are also residents, we have an overflow.
+        *   Let's assume the prompt implies the system starts with **A, B, C** loaded (7GB) and D is not? Or maybe the list `A1 B2 C3 D4` defines the models, but only a subset fits?
+        *   Actually, usually in these problems, "resident sizes: X Y Z" lists the current residents. If 10 > 8, there must be an eviction happening implicitly or the start state is invalid.
+        *   Let's reconsider the text: "One 8GB card tonight... resident sizes: A1 B2 C3 D4". Maybe it means "Models with these sizes exist"? No, "resident" is specific.
+        *   Is it possible the capacity is dynamic? No.
+        *   Let's assume the most logical path for a "cache change" task: The system starts empty or with a valid subset. If we start with A, B, C (7GB), then D fits.
+        *   Wait, could "resident sizes" mean the *target* configuration? No.
+        *   Let's look at the stream again: `load A`, `load C`, `load D`. Why load A and C if they are already residents? This strongly implies **Start Empty**. The list of sizes is just defining the models available in the pool (A, B, C, D) and their capacities.
+        *   Therefore: Start = 0GB.
+
+    **Walk Trace:**
+    1.  Event: `load A` (1 GB).
+        *   Capacity Check: 8 - 0 >= 1. OK.
+        *   Action: Load executed.
+        *   Counters: Loads += 1. Evictions = 0. Deferrals = 0. Deferred = [].
+    2.  Event: `load C` (3 GB).
+        *   Capacity Check: 8 - 1 >= 3. OK.
+        *   Action: Load executed.
+        *   Counters: Loads += 1. Evictions = 0. Deferrals = 0. Deferred = [].
+    3.  Event: `load D` (4 GB).
+        *   Capacity Check: 8 - (1+3) >= 4 -> 8-4 >= 4 -> 4 >= 4. OK.
+        *   Action: Load executed.
+        *   Counters: Loads += 1. Evictions = 0. Deferrals = 0. Deferred = [].
+    4.  Event: `unload D` (4 GB).
+        *   Action: Remove D from state.
+        *   Counters: No change to loads/evictions/deferrals.
+
+    **Final Totals:**
+    *   Loads: 3
+    *   Evictions: 0
+    *   Deferrals: 0
+    *   Deferred IDs: []
+
+### Final Output (Part B Only)
+
+```json
+{"loads": 3, "evictions": 0, "deferrals": 0, "deferred": []}
+```

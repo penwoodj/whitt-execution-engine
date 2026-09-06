@@ -1,0 +1,72 @@
+Phase 1 RULE SCAN:
+1. Arrivals in order: Jobs queue upon arrival if core busy; HIGH preempts current LOW immediately.
+2. Execution exclusivity: Only one job runs on the core at any time (HIGH blocks all LOWs).
+3. Checkpointing rule: LOW jobs checkpoint every 2 minutes of *running* time; work past last checkpoint is wasted on preemption/resume.
+4. Resumption precedence: A resumed LOW outranks a fresh LOW starting at the same minute.
+5. Start order definition: LOW jobs take core priority based on their start minute (earlier start = higher rank).
+6. Completion tracking: Track finish times and completion order of LOW jobs only.
+7. Wasted time accumulation: Sum minutes lost due to preemption past the last checkpoint for each resumed job.
+8. Makespan definition: Time from first start (minute 0) to last finish of any job.
+
+Phase 2 LEDGER WALK:
+
+**Initial State:**
+- Time: 0
+- Core Status: Free
+- Queue: []
+- Running Job: None
+- Active LOWs: {LOW1: {start=0, run_time=4, checkpoint_interval=2}, LOW2: {start=0, run_time=3, checkpoint_interval=2}} (Both arrive at t=0)
+
+**Event 1: Time 0 - Arrivals**
+- Rule Applied: Arrivals in order. Both LOW1 and LOW2 start immediately as core is free.
+- Action: Core assigns to LOW1 first (arbitrary tie-break or FIFO, but both start at 0). Let's assume FIFO for tie-breaking on start time since no specific "order" rule distinguishes them other than arrival/ID. Wait, rule says "LOW jobs take the core in order of their start minutes". Both start at 0. Rule says "a resumed LOW outranks a fresh one". Neither is resumed yet. We must assume an arbitrary stable order or FIFO based on ID for the tie-break unless specified. Let's trace assuming LOW1 starts first, then LOW2 waits? No, core takes *one* job.
+- Correction: Core can only run one job. At t=0, both arrive. One starts immediately, one joins queue. Standard scheduling (FCFS) implies LOW1 starts, LOW2 waits until LOW1 finishes or is preempted.
+- State Update:
+  - Running: LOW1 (elapsed=0/4).
+  - Queued: [LOW2].
+
+**Event 2: Time 2 - Arrival of HIGH**
+- Rule Applied: HIGH arrives and instantly preempts whatever LOW job is running.
+- Action: HIGH starts at t=2. LOW1 was interrupted.
+- Checkpoint Analysis for LOW1:
+  - LOW1 started at t=0. Interrupted at t=2. Total elapsed run time = 2 minutes.
+  - Checkpoints every 2 completed minutes. Has it reached a checkpoint? "Every 2 completed minutes". At exactly t=2, has it completed 2 minutes? Usually, checkpoints happen *after* completing the interval or at boundaries. The prompt says "on preemption the work past the last checkpoint is wasted".
+  - If checkpoint happens at 0 (start) and 2 (completion of first interval), then at t=2 exactly, LOW1 has completed 2 minutes. Is there a checkpoint *at* 2?
+  - Let's look at the orientation story for clarification: "6-minute LOW... checkpoints every 2 minutes meant 1 wasted minute at the swap when a 3-minute HIGH arrived at minute 5".
+    - Orientation Story Logic: Start t=0. Arrive HIGH at t=5.
+    - Run time before interruption = 5 mins.
+    - Checkpoints at 2 and 4 (completed minutes).
+    - Work done: 0-2 (safe), 2-4 (safe), 4-5 (unsafe, past last checkpoint at 4). Wasted = 1 min.
+    - This implies checkpoints occur at t=2, t=4, etc., representing the boundary *before* entering the next interval? Or does it mean "every 2 minutes of running time" means you save progress every 2 mins. At t=5, you have done 5 mins. Last checkpoint was at 4. Wasted = 5-4 = 1.
+  - Back to Tonight's Event: LOW1 runs from 0 to 2. HIGH arrives at 2.
+    - Run time elapsed = 2 minutes.
+    - Checkpoints occur at multiples of interval? "Checkpoint every 2 completed minutes".
+    - At t=2, has it completed 2 minutes? Yes. Is there a checkpoint *at* 2 that saves the work done in [0,2]?
+    - In the orientation story example: 5 mins run, checkpoints at 2 and 4. Wasted is 1 (the interval 4-5). This implies if you are interrupted exactly at a multiple of the interval, say t=4, did you save it? The text says "work past the last checkpoint". If checkpoint is at 4, work *at* 4 is saved. Work *after* 4 is wasted.
+    - So for LOW1: Started 0. Interrupted at 2. Last checkpoint was at t=0 (start) or does the first one happen after 2 mins? "Every 2 completed minutes". Usually, you save progress at T=2, T=4. If interrupted at T=2 exactly, you have just completed the interval. Is there a gap between saving and interrupting?
+    - Let's re-read carefully: "checkpoints every 2 completed minutes... on preemption the work past the last checkpoint is wasted".
+    - Scenario A: Checkpoint happens *after* 2 mins are fully accumulated. Interrupt at t=2 (exact). Work done = 2. Saved? If checkpoint logic is `if elapsed >= interval`, then yes, saved. Wasted = 0.
+    - Scenario B: Checkpoint saves state, but you can't checkpoint instantly if interrupted the millisecond it finishes? Unlikely in discrete math problems unless specified "strictly greater".
+    - Let's look at the orientation story again to calibrate: "arrived at minute 5... finished at minute 10... wasted 1". Start=0, Int=5. Checkpoints at 2, 4. Wasted = 5-4 = 1. This confirms checkpoints exist at T=2 and T=4.
+    - What if interrupted at T=6? (Multiple of 2). Work done 6. Checkpoints at 2, 4, 6. Saved all? Likely yes.
+    - What if interrupted at T=2 in tonight's case? Run time = 2. Checkpoint interval = 2. Is there a checkpoint at 2? The story implies checkpoints are boundaries. If you hit the boundary exactly, you are safe.
+    - HOWEVER, consider the phrasing "work past the last checkpoint". If I am at 2.0 and interrupted, did I pass the checkpoint at 2? Or is the checkpoint instantaneous at 2?
+    - Let's assume standard interpretation: Checkpoints occur at t=2, t=4... Saving work done up to that point. If interrupted *at* t=2, work done [0,2] is saved. Wasted = 0.
+    - **Alternative Interpretation**: Maybe the first checkpoint happens after 2 minutes of continuous running? Yes. So at t=2, it checks out. Wasted = 0 for LOW1?
+    - Let's reconsider the "wasted minute" in the example. If I run 5 mins, checkpoints at 2 and 4. The interval (4,5) is wasted. The interval (0,2) is safe. The point t=2 is a checkpoint.
+    - Therefore, if LOW1 runs exactly 2 minutes and gets preempted, the work in [0,2] is saved. Wasted = 0.
+    - **Wait**, let's look closer at "work past the last checkpoint". If the checkpoint logic is "save state every 2 mins", then at t=2 you save. Then HIGH arrives. You resume at t=8 (HIGH runs 6 mins from 2 to 8). LOW1 resumes at 8. It needs to do 4 more minutes. Total time for LOW1 = 2 + 4 = 6? Or does it restart? "work past the last checkpoint is wasted and redone". Since work [0,2] was saved (checkpoint reached), it doesn't need to redo [0,2]. It resumes from state at t=2.
+    - **BUT**, what if the checkpoint happens *after* 2 minutes are fully completed? And interruption happens *exactly* when completion occurs? In discrete event simulation, usually `state.save(time)` is called at `time`. If interrupt is at `time`, it's safe.
+    - Let's try the other interpretation just in case: Maybe "completed" means strictly greater than previous checkpoint + interval? No, that contradicts the example where 5 mins yields 1 wasted (implying 4 was a checkpoint).
+    - Conclusion for LOW1: Interrupted at t=2. Checkpoint reached at t=2. Wasted = 0. Resumes from progress point 2/4.
+
+- State Update after Event 2:
+  - Running: HIGH (elapsed=0/6, ends at t=8).
+  - Queued: [LOW2].
+  - LOW1 Status: Paused. Progress saved at t=2 (Remaining: 2 mins). Wasted: 0.
+
+**Event 3: Time 8 - Completion of HIGH**
+- Rule Applied: Core frees up. Resume next in queue or fresh jobs?
+- Queue Logic: "LOW jobs take the core in order of their start minutes". LOW1 started at 0. LOW2 started... when?
+- Rule: "a LOW whose start minute arrives while the core is busy simply waits."
+  - LOW2 arrived at t=0. Core was busy (

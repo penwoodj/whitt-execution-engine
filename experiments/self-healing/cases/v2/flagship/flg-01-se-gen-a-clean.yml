@@ -1,0 +1,163 @@
+case_id: flg-01-se-gen-a-clean
+meta:
+  domain: software-eng
+  archetype: generate-artifact
+  complexity: A
+  class: clean
+  source: case-matrix row 1 (se-gen-a-clean)
+  words_prompt: ~1150
+task:
+  prompt: |
+    You are building the machine-readable interface contract for a payment gateway SDK called
+    "LedgerBridge" that four internal teams will code-generate clients against. The contract must
+    be complete enough that a client generator can produce working TypeScript and Python bindings
+    without human clarification, because the integration sprint starts Monday and there is no
+    buffer for back-and-forth questions.
+
+    COMPANY CONTEXT. LedgerBridge wraps the AcmePay v3 REST API. AcmePay exposes card payments,
+    refunds, and customer vault operations. Our platform team has already decided the SDK surface:
+    six operations maximum in v1, idempotency keys on every mutating call, and no batch operations
+    until v2. The SDK must expose errors as typed exceptions with stable machine codes, because our
+    alerting stack routes on error code prefixes. The SDK name in every file header and doc string
+    must be exactly "LedgerBridge" with version "1.0.0".
+
+    UPSTREAM API FACTS (from AcmePay v3 docs, verified last week):
+    - Base URL: https://api.acmepay.example/v3
+    - Auth: OAuth2 client-credentials. Token endpoint /oauth/token, tokens expire in 3600 seconds,
+      refresh is automatic but only one in-flight refresh is permitted per process.
+    - Card payment creation: POST /payments. Required fields: amount_minor (integer, cents),
+      currency (ISO 4217 three-letter), customer_ref (string, our CRM id), idempotency_key (UUIDv4).
+      Returns payment_id, status in {pending, captured, declined, refunded}.
+    - Refund: POST /refunds. Required: payment_id, amount_minor (must not exceed original),
+      idempotency_key. Partial refunds allowed; total refunded across all refunds must not exceed
+      the captured amount.
+    - Customer vault: POST /customers (create, returns customer_ref), GET /customers/{ref}
+      (retrieve), DELETE /customers/{ref} (soft delete, 30-day recovery window).
+    - Payment retrieval: GET /payments/{payment_id}.
+    - List payments: GET /payments?cursor=&limit=. Cursor-based pagination, limit 1-100, default 25.
+      Response contains next_cursor (empty string on last page) and data array.
+    - Rate limits: 100 writes per minute per client id, 1000 reads per minute. Headers
+      X-RateLimit-Remaining and X-RateLimit-Reset are returned on every response. On limit breach
+      the API returns HTTP 429 with error code "rate_limited" and a Retry-After header in seconds.
+    - Error envelope: {"error": {"code": "<machine_code>", "message": "<human>", "doc_url": "<url>"}}.
+      Known machine codes: invalid_request, authentication_failed, rate_limited, card_declined,
+      insufficient_funds, idempotency_conflict, not_found, internal_error.
+    - All timestamps are RFC 3339 UTC. Amounts are always integer minor units, never floats.
+
+    TEAM CONSTRAINTS FROM THE INTEGRATION REVIEW:
+    - TypeScript team needs operation names in camelCase; Python team needs snake_case; the
+      contract must declare both namings per operation.
+    - The alerting team requires the error_codes section to group codes by severity tier:
+      "retryable" (rate_limited, internal_error) versus "terminal" (everything else), each code
+      mapped to its tier.
+    - The platform team wants rate_limits to encode both write and read ceilings plus the
+      header names the SDK should surface for observability.
+    - Pagination section must define cursor semantics, the empty-string terminator, and the
+      default and maximum page sizes exactly as the upstream enforces them.
+    - No webhooks, no batch operations, no multi-currency conversion in v1. If the contract
+      mentions them at all it must be in a "deferred" note, not as operations.
+
+    IDEMPOTENCY SEMANTICS (binding on the contract). Every mutating operation carries a
+    client-supplied idempotency_key. The upstream stores request fingerprints keyed by
+    idempotency_key for twenty-four hours. A replay with the same key and an identical request
+    body returns the original response with a replayed flag set to true. A replay with the same
+    key but a different body returns HTTP 409 with error code idempotency_conflict; the contract
+    must classify this code as terminal and must document that generated clients should surface
+    it as a distinct exception type, because silently returning the cached response for a
+    mismatched body would corrupt refund accounting. The contract's operations must therefore
+    mark idempotency_key as required on create_payment, create_refund, and create_customer, and
+    must state explicitly that read operations forbid the key entirely rather than ignoring it.
+
+    RETRY POLICY GUIDANCE (binding on the contract). The error_codes section must embed, per
+    severity tier, the retry policy a generated client should implement: for the retryable tier,
+    exponential backoff with a base delay of two hundred fifty milliseconds, doubling, capped at
+    four attempts total, with full jitter, and honoring the Retry-After header whenever present
+    even when it exceeds the computed backoff; for the terminal tier, zero retries, immediate
+    raise. The contract must also state that authentication_failed is terminal at the operation
+    layer but may trigger exactly one token refresh followed by a single re-sign attempt before
+    surfacing the error, and that this refresh-retry is separate from and does not consume the
+    backoff budget.
+
+    OBSERVABILITY CONTRACT (binding on the contract). Generated clients must emit one metric per
+    operation per terminal outcome class, and the contract must specify the metric name template
+    as ledgerbridge.<operation>.<outcome> with outcomes in {ok, retryable_error, terminal_error}.
+    The rate_limits section must instruct clients to read X-RateLimit-Remaining and
+    X-RateLimit-Reset on every response and expose them on the response object, not merely log
+    them, because the platform team's adaptive throttling reads those fields directly. The
+    contract must specify a client-side timeout default of ten seconds per attempt for writes and
+    five seconds for reads, overridable per call, and must forbid generated clients from retrying
+    on timeout for mutating operations unless the idempotency key is guaranteed present, which in
+    v1 it always is.
+
+    YOUR TASK: produce the complete LedgerBridge SDK interface contract as a single JSON object.
+    It must contain, at minimum, these top-level keys: sdk_name, version, operations (array of
+    operation objects), auth (object), error_codes (object), rate_limits (object), pagination
+    (object). Each operation object must include: canonical name, camel_case name, snake_case
+    name, HTTP method, upstream path, request fields with types and required flags, response
+    fields with types, and which errors it can return. The auth object must cover token endpoint,
+    grant type, token lifetime seconds, and the single-flight refresh constraint. The error_codes
+    object must carry the tier mapping and the embedded retry policy from the paragraphs above.
+    The rate_limits object must carry the ceilings, the header names, and the metric name
+    template. Use exactly six operations: create_payment, create_refund, create_customer,
+    get_customer, get_payment, list_payments.
+
+    OUTPUT CONTRACT: one JSON object, nothing outside it. First character "{" and last character
+    "}". No markdown fences, no commentary, no trailing commas. Every string double-quoted. All
+    types expressed as "string", "integer", "boolean", "array", or "object". Amounts always
+    integer minor units. The artifact is consumed by a code generator that will fail hard on any
+    schema drift, extra top-level keys beyond a single optional "notes" field, or missing keys.
+
+    QUALITY BAR: an engineer reading only this JSON must be able to hand-write a correct client
+    for one operation in under ten minutes without consulting AcmePay docs. Numeric limits, header
+    names, status enums, recovery windows, backoff constants, timeout defaults, and metric name
+    templates must appear explicitly, not paraphrased. An acceptance reviewer will specifically
+    check that the six operation names match exactly, that idempotency requirements are stated
+    per operation, and that the retry and observability paragraphs above are reflected in the
+    error_codes and rate_limits sections rather than dropped as scope creep.
+  expected_schema:
+    type: object
+    required:
+      - sdk_name
+      - version
+      - operations
+      - auth
+      - error_codes
+      - rate_limits
+      - pagination
+    optional:
+      - notes
+    properties:
+      sdk_name: { type: string }
+      version: { type: string }
+      operations: { type: array }
+      auth: { type: object }
+      error_codes: { type: object }
+      rate_limits: { type: object }
+      pagination: { type: object }
+  output_contract: |
+    Single JSON object. First char "{", last char "}". No fences,
+    no commentary. One optional top-level "notes" key tolerated
+    beyond the seven required keys; any other extra key fails.
+failure:
+  class: clean
+  injection_profile:
+    attempts_failed: []
+    notes: |
+      Clean control case: attempt 1 output is schema-complete,
+      hallucination-free, confidence adequate (>=0.55), R >= theta.
+      Walks the happy path: init -> route -> budget -> attempt ->
+      detect -> triage -> gate -> judge_gate(skip, R clear of gray
+      zone) -> accept -> report.
+  signals: []
+expected:
+  final: accept
+  path: [attempt, classify, judge_gate, accept, report]
+  attempts_to_success: 1
+oracle:
+  llm_calls:
+    worker: 1
+    heavy: 0
+    judge: 0
+  gate_flags: { need_replan: false, need_judge: false, budget_exhausted: false }
+budget:
+  llm_call_ceiling: 6

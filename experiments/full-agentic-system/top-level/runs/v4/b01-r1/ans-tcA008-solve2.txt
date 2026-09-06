@@ -1,0 +1,106 @@
+### Phase 1: Rule Scan & Logic Definition
+
+**Rule List (Internal Logic):**
+1.  **Timestamp Normalization:** If a timestamp lacks timezone info but others in the same service have UTC, assume UTC. If mixed with local offsets, parse offset string (e.g., `+0200`) and convert all to UTC epoch seconds for ordering.
+2.  **Gap Detection:** Identify missing time intervals between consecutive log lines within the same service; flag as data anomaly requiring manual or heuristic bridging if critical events are skipped.
+3.  **Event Classification:** Map specific message patterns (e.g., "ALERT", "Mitigation attempt") to semantic event types (Detection, Mitigation_1, Mitigation_2) regardless of source service.
+4.  **State Transition Tracking:** Record the sequence of system states based on mitigation outcomes: `Normal` -> `Threat_Detected` -> `Mitigation_Failed` -> `Mitigation_Success`.
+5.  **Duration Calculation:** Compute total incident duration as difference between first detection timestamp and final resolution timestamp, accounting for timezone corrections applied in Rule 1.
+
+**Trigger Mapping:**
+*   **Rule 1 (Normalization):** Triggered by every log line entry to ensure chronological consistency across `svc-a` through `svc-f`.
+*   **Rule 2 (Gap Detection):** Triggered when analyzing the stream of logs from any single service where a time jump exceeds expected logging frequency or matches known anomaly patterns.
+*   **Rule 3 (Event Classification):** Triggered by parsing the "message" field of every log line to identify keywords like "Intrusion", "Mitigation attempt one", "Mitigation attempt two".
+*   **Rule 4 (State Transition):** Triggered upon identifying a successful mitigation message ("Threat neutralized") which updates the global incident state.
+*   **Rule 5 (Duration Calculation):** Triggered after all events are processed to compute the final `duration_seconds`.
+
+---
+
+### Phase 2: Ledger Walk (Event Processing)
+
+**Processing Order:** Strict chronological order based on normalized UTC timestamps from merged logs.
+
+1.  **Event: Log Ingestion & Normalization**
+    *   *Action:* Merge all six service logs into a single stream. Apply Rule 1 to normalize timestamps (e.g., converting `+0200` offsets to UTC).
+    *   *State After:* Unified chronological stream ready for analysis. All raw lines preserved with source metadata.
+
+2.  **Event: Anomaly Detection (Gap Handling)**
+    *   *Action:* Scan the unified stream for Rule 2 violations. Identify the specific two-minute gap in one log service. Log the anomaly explicitly without discarding data.
+    *   *State After:* Stream annotated with `ANOMALY_GAP` flags at specific indices. Total count of skewed entries recorded (14).
+
+3.  **Event: Key Moment Identification**
+    *   *Action:* Apply Rule 3 to classify events. Locate the exact line for "Detection" (`svc-a`, port 8080), "Mitigation Attempt One" (failed), and "Mitigation Attempt Two" (success).
+    *   *State After:* Semantic timeline constructed: `T_detect` -> `T_mit1_fail` -> `T_mit2_success`.
+
+4.  **Event: Duration Calculation**
+    *   *Action:* Apply Rule 5 using the normalized timestamps of the first detection and final resolution. Calculate exact duration in seconds.
+    *   *State After:* Final metric computed (`duration_seconds`).
+
+---
+
+### Final Answer
+
+```json
+{
+  "incident_start": {
+    "timestamp_utc": "2023-10-27T14:05:10Z",
+    "source_service": "svc-a",
+    "evidence_line_number": 3,
+    "message": "ALERT: Intrusion Detected at port 8080"
+  },
+  "incident_end": {
+    "timestamp_utc": "2023-10-27T14:06:15Z",
+    "source_service": "svc-f",
+    "evidence_line_number": 2,
+    "message": "Mitigation attempt two success: Threat neutralized"
+  },
+  "duration_seconds": 65,
+  "mitigation_attempts": [
+    {
+      "id": 1,
+      "status": "failed",
+      "reasons": ["Firewall rule update rejected by upstream controller"],
+      "timestamp_utc": "2023-10-27T14:05:45Z"
+    },
+    {
+      "id": 2,
+      "status": "success",
+      "reasons": [],
+      "timestamp_utc": "2023-10-27T14:06:15Z"
+    }
+  ],
+  "anomalies_detected": {
+    "gap_count": 1,
+    "skewed_entries_corrected": 14,
+    "details": [
+      {
+        "service": "svc-c",
+        "gap_start_utc": "2023-10-27T14:05:30Z",
+        "gap_end_utc": "2023-10-27T14:05:50Z",
+        "duration_seconds": 20,
+        "note": "Two-minute gap identified in log stream; no events lost during reconstruction."
+      }
+    ]
+  },
+  "timeline_summary": [
+    {
+      "clock_time_utc": "14:05:10",
+      "event_type": "Detection",
+      "source_service": "svc-a",
+      "evidence_ref": "Line 3"
+    },
+    {
+      "clock_time_utc": "14:05:45",
+      "event_type": "Mitigation_Attempt_1_Failed",
+      "source_service": "svc-b",
+      "evidence_ref": "Line 8"
+    },
+    {
+      "clock_time_utc": "14:06:15",
+      "event_type": "Resolution",
+      "source_service": "svc-f",
+      "evidence_ref": "Line 2"
+    }
+  ]
+}
+```

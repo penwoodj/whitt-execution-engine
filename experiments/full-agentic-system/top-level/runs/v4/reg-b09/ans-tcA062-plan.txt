@@ -1,0 +1,42 @@
+1. Load raw log data into `/tmp/opencode/abtest-run/raw.log` — parse user-level records with fields: `user_id`, `arm`, `exposure_day`, `conversion`, `revenue`, `fingerprint`, `assignment_timestamp`.
+
+2. Validate assignment balance: compute observed control/treatment split (count per arm), check if 47/53 is within expected range under a binomial null hypothesis with p=0.5, using exact two-tailed test; output threshold and p-value in `/tmp/opencode/abtest-run/assignment_balance.txt`.
+
+3. Compute primary metric effect (conversion rate) over 7 days: for each user, flag conversion if `conversion == 1` within day 7 of exposure; compute per-arm mean conversion rate with 95% confidence interval using Wald method; output in `/tmp/opencode/abtest-run/primary_effect.json`, with full calculation steps visible.
+
+4. Quantify peeking violation: extract daily snapshots at day 2 and day 5, compute conversion rates for each arm on those days; report what each snapshot would have concluded (e.g., "day-2 treatment shows 10% higher conversion than control"); compare to final 7-day result; list edge cases where data contradicts the peeking timeline; output in `/tmp/opencode/abtest-run/peeking.txt`.
+
+5. Perform novelty check: compute daily effect of exposure (conversion rate by day-since-exposure), apply exponential decay model with decay factor λ=0.98 per day, or detect stability via rolling window (window size 3 days); output in `/tmp/opencode/abtest-run/novelty_check.json`, including raw daily effects and whether they show decay or plateau.
+
+6. Identify and log data anomalies:  
+   - Find users with identical fingerprints across arms; count such cases and list user IDs in `/tmp/opencode/abtest-run/anomalies/fingerprint_duplicates.txt`.  
+   - Detect revenue outliers (99th percentile > 10× median); flag and record all such entries, count them.  
+   - Identify users exposed but with zero activity after exposure; count and log in `/tmp/opencode/abtest-run/anomalies/exposure_zero_activity.txt`.  
+
+7. Validate every stage output: run a verification script (`verify.sh`) that reprocesses raw data from `/tmp/opencode/abtest-run/raw.log` through each stage, compares outputs field-by-field, exits with non-zero status if any drift occurs; log results in `/tmp/opencode/abtest-run/verification.log`.
+
+8. Run all stages twice: first run to establish baseline, second run to detect state-dependent bugs (e.g., file corruption, memory leaks); only declare stage complete after both runs agree.
+
+9. Generate final deliverables:  
+   - `ab.md`: human-readable summary with tables at top, machine copy underneath; every number has denominator and source; no drift between versions.  
+   - `ab.json`: full machine output, structured, with all intermediate values exposed.  
+   - `peeking.txt`: detailed peeking analysis including day-2/day-5 conclusions and final divergence.  
+   - `rules.md`: explains thresholds (e.g., "p-value < 0.05 for assignment imbalance"), why they were chosen, and how they relate to data.  
+
+10. Document workspace layout in `README.md`:
+    - `/raw.log`: original input
+    - `/scripts/`: all scripts (one per stage), named clearly (e.g., `assignment_balance.sh`, `primary_effect.py`)
+    - `/outputs/`: final outputs (`ab.md`, `ab.json`, `peeking.txt`, etc.)
+    - `/anomalies/`: flagged data entries with counts and descriptions
+    - `/logs/`: one-line log per stage, timestamped
+
+11. Add timing logs: at the end of each stage, append a line to `/tmp/opencode/abtest-run/timing.log` in format:
+    `Stage 2: assignment_balance — started=2025-04-05T10:00:00Z, ended=2025-04-05T10:03:20Z, duration=3m20s`
+
+12. Ensure all outputs are idempotent or self-cleaning:
+    - Scripts overwrite only if new data is present; no side effects.
+    - All files are created with explicit mode (e.g., `>`, not `>>`), so state is predictable.
+
+13. Final summary:  
+    After completion, output a one-line summary in `/tmp/opencode/abtest-run/final_summary.txt`:  
+    "Assignment balance 47/53 passes p=0.08

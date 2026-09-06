@@ -1,0 +1,138 @@
+{
+  "incident_id": "INC-2026-0824-CARTO",
+  "timeline": [
+    {
+      "timestamp": "2026-08-24T03:02:00Z",
+      "event": "Scheduled maintenance job 'cert-rotator' completed across all 14 regions, logging 'rotated 217 certificates' with zero errors.",
+      "evidence_source": "cert-rotator completion log"
+    },
+    {
+      "timestamp": "2026-08-24T03:14:00Z",
+      "event": "First deploy failure detected in region eu-west-2, stage 'artifact verification', error: 'signature verification failed: certificate chain incomplete (missing intermediate)'.",
+      "evidence_source": "deploy failure alert"
+    },
+    {
+      "timestamp": "2026-08-24T03:14Z",
+      "event": "Failure cascade begins in rolling order, matching each region's next-scheduled deploy timeline; affected regions: eu-west-2, eu-west-1, us-east-1, us-east-2, us-west-2, ap-south-1 (6 of 14 regions).",
+      "evidence_source": "deploy failure cascade pattern"
+    },
+    {
+      "timestamp": "2026-08-24T03:22:00Z",
+      "event": "On-call retrieves expanded log showing the verifier fetched intermediate certs from 'cert-bundle.internal:8443'; endpoint returned HTTP 200 with an EMPTY bundle (0 certificates) for requests after 03:02, but a healthy 3-certificate bundle in replay of 02:59 request.",
+      "evidence_source": "expanded log analysis"
+    },
+    {
+      "timestamp": "2026-08-24T03:29:00Z",
+      "event": "Bundle service metrics show no errors or self-deploys; object store reveals bucket-level event at 03:02:47 — 'lifecycle rule 'purge-staging-over-30d' executed', deleting 1,142 objects under prefix 'staging/cert-intermediates/'.",
+      "evidence_source": "bundle service metrics and object store lifecycle event"
+    },
+    {
+      "timestamp": "2026-08-24T03:37:00Z",
+      "event": "Mitigation initiated: on-call restores the 'staging/cert-intermediates/' prefix from cross-region replica (replication lag 9 minutes; replica intact due to region-local lifecycle rules).",
+      "evidence_source": "mitigation action log"
+    },
+    {
+      "timestamp": "2026-08-24T03:41:00Z",
+      "event": "Bundle service begins serving 3-certificate bundles again; remaining regions never fail as their deploys were not scheduled in the exposure window.",
+      "evidence_source": "bundle service health check and deploy status"
+    },
+    {
+      "timestamp": "2026-08-24T04:16:00Z",
+      "event": "Incident mitigated; final count: 6 regions affected, 41 deploy jobs failed, zero customer-facing outages, one on-call escalation.",
+      "evidence_source": "final incident closure report"
+    },
+    {
+      "timestamp": "2026-08-24T03:05:00Z",
+      "event": "Unrelated monitoring-agent migration began rolling to 10% of fleet hosts; failed jobs' logs show verification errors on both agents and non-agents, indicating no correlation with agent state.",
+      "evidence_source": "monitoring-agent migration event"
+    },
+    {
+      "timestamp": "2026-08-24T03:09:00Z",
+      "event": "Scheduled DNS maintenance window for internal zones began; resolution tests show normal latency and correct answers for cert-bundle.internal throughout the incident.",
+      "evidence_source": "DNS maintenance window and resolution test results"
+    }
+  ],
+  "root_cause": {
+    "chain": [
+      "A configuration change twelve days prior redirected the 'cert-rotator' job to write new certificate intermediates into the staging prefix 'staging/cert-intermediates/' in all regions.",
+      "The existing lifecycle rule 'purge-staging-over-30d' was present in three of 14 region bucket configurations and executed at 03:02:47, deleting 1,142 objects under the prefix 'staging/cert-intermediates/', removing all certificate intermediates.",
+      "The bundle service caches intermediate bundles in memory for 600 seconds; regions with deploys scheduled just after 03:02 succeeded initially due to cached valid bundles from before the purge, but failed when their next deploy triggered a fresh fetch after cache expiry.",
+      "Deploy jobs are scheduled in rolling order across regions, so failures propagated sequentially — first eu-west-2 at 03:14, then each subsequent region's next-scheduled deploy triggered verification failure due to missing intermediates."
+    ],
+    "single_preventing_control": "All configuration changes that modify data write paths must include a mandatory review of associated bucket lifecycle rules and object retention policies.",
+    "missing_alerts": [
+      "An alert monitoring the number of certificates in the 'staging/cert-intermediates/' bundle (e.g., 'certificates_in_bundle' metric) should have been implemented to detect empty bundles before they are used by verifiers.",
+      "A dedicated health check for bundle content validity (beyond HTTP 200 status) must be added to the bundle service, which would have detected an empty response during verification."
+    ]
+  },
+  "blast_radius": {
+    "affected_regions_with_first_failure_timestamps": [
+      {
+        "region": "eu-west-2",
+        "first_failure_timestamp": "2026-08-24T03:14Z"
+      },
+      {
+        "region": "eu-west-1",
+        "first_failure_timestamp": "2026-08-24T03:15Z"
+      },
+      {
+        "region": "us-east-1",
+        "first_failure_timestamp": "2026-08-24T03:17Z"
+      },
+      {
+        "region": "us-east-2",
+        "first_failure_timestamp": "2026-08-24T03:19Z"
+      },
+      {
+        "region": "us-west-2",
+        "first_failure_timestamp": "2026-08-24T03:21Z"
+      },
+      {
+        "region": "ap-south-1",
+        "first_failure_timestamp": "2026-08-24T03:25Z"
+      }
+    ],
+    "count_of_failed_jobs": 41,
+    "customer_impact_assessment": "No customer-facing outages occurred because all deploy jobs are internal to the platform and do not serve end-user traffic. The failure was isolated to internal verification processes with no downstream service disruption.",
+    "near_miss_exposure": [
+      "us-west-1",
+      "ap-northeast-1",
+      "eu-central-1",
+      "sa-east-1"
+    ]
+  },
+  "remediation": [
+    {
+      "fix": "Add a mandatory lifecycle rule review step to all configuration change workflows, requiring engineering sign-off on write paths and associated retention policies.",
+      "owner_team": "platform",
+      "priority": "P0",
+      "verification_step": "Verify that every new config change includes a checklist confirming no bucket lifecycle rules will delete critical data in the affected path."
+    },
+    {
+      "fix": "Implement a real-time metric 'certificates_in_bundle' on the bundle service to detect empty or zero-certificate bundles.",
+      "owner_team": "storage",
+      "priority": "P0",
+      "verification_step": "Confirm that the metric fires when a bundle has zero certificates and is triggered during a verification failure in a test environment."
+    },
+    {
+      "fix": "Enhance bundle service health checks to validate content validity (e.g., non-empty, valid certificate chain) beyond HTTP 200 status.",
+      "owner_team": "sre",
+      "priority": "P0",
+      "verification_step": "Ensure the health check fails when a bundle returns zero certificates and passes when it contains at least one intermediate."
+    },
+    {
+      "fix": "Add an alert for 'bundle service content empty' that triggers on any request returning zero certificates from cert-bundle.internal, with escalation to platform SRE.",
+      "owner_team": "platform",
+      "priority": "P1",
+      "verification_step": "Verify the alert fires during a simulated purge of intermediates and is triggered within 30 seconds of the event."
+    },
+    {
+      "fix": "Update all configuration change documentation to include a section on lifecycle rules, with mandatory cross-region consistency checks for bucket policies.",
+      "owner_team": "security",
+      "priority": "P2",
+      "verification_step": "Audit three representative config changes from the past 12 months and confirm they included lifecycle rule review in their documentation."
+    }
+  ],
+  "correlation_discipline": "The cert-rotator completing at 03:02 is a temporal correlation, not causation. The root cause lies in the object-store deletion event at 03:02:47 — which removed intermediates written by the rotator — and the bundle service cache timing (600-second TTL). The rotator itself was not faulty because it completed successfully with zero errors and wrote to the correct path. The monitoring-agent migration is ruled out because verification failures occurred on both hosts with and without the new agent, indicating no correlation. DNS maintenance is ruled out by resolution tests showing normal behavior for cert-bundle.internal throughout the incident.",
+  "severity_discipline": "The severity classification as 'one' was driven primarily by internal blast radius (6 regions, 41 failed jobs) and mitigation time (62 minutes), with zero customer-facing impact. The absence of customer-facing outages is explicitly documented in the evidence; thus, the classification is auditable under the board's rubric: severity is first by customer impact (none), then internal blast radius, then mitigation duration."
+}

@@ -1,0 +1,80 @@
+### Phase 1 RULE SCAN
+This phase lists every rule that changes state during the event sequence, identifying the specific trigger for each.
+
+1.  **Grant Rule**: Triggers on request arrival; grants `min(ask, pool)`, reducing the pool by the granted amount.
+2.  **Denial Rule**: Triggers only if a request arrives when the pool is exactly zero; denies the request and leaves the pool at zero.
+3.  **Expiry Return Rule**: Triggers upon completion of the request named in the expiry sentence (Request ID); returns `floor(granted_amount / 2)` to the pool immediately before processing the next arrival.
+
+### Phase 2 LEDGER WALK
+This phase applies events one by one in strict arrival order, showing the state after each step.
+
+*   **Start**: Pool = 60.
+*   **Event R1 (Ask 6)**:
+    *   Grant `min(6, 60) = 6`.
+    *   Pool becomes $60 - 6 = 54$.
+    *   State: Granted=6, Pool=54.
+*   **Event R2 (Ask 10)**:
+    *   Grant `min(10, 54) = 10`.
+    *   Pool becomes $54 - 10 = 44$.
+    *   State: Granted=6+10=16, Pool=44.
+*   **Event R3 (Ask 12)**:
+    *   Grant `min(12, 44) = 12`.
+    *   Pool becomes $44 - 12 = 32$.
+    *   State: Granted=16+12=28, Pool=32.
+*   **Event R4 (Ask 15)**:
+    *   Grant `min(15, 32) = 15`.
+    *   Pool becomes $32 - 15 = 17$.
+    *   State: Granted=28+15=43, Pool=17.
+*   **Event R5 (Ask 19)**:
+    *   Grant `min(19, 17) = 17` (Partial grant).
+    *   Pool becomes $17 - 17 = 0$.
+    *   State: Granted=43+17=60, Pool=0.
+*   **Event R6 (Ask 21)**:
+    *   Request arrives at Pool=0.
+    *   Action: Denied.
+    *   State: Granted=60, Denied=[R6], Pool=0.
+*   **Event R7 (Ask 24)**:
+    *   Request arrives at Pool=0.
+    *   Action: Denied.
+    *   State: Granted=60, Denied=[R6, R7], Pool=0.
+
+*(Note: The task description states "the grant for r1 expires after request r2 completes". However, the provided event list contains requests up to R7. In a strict ledger walk of the provided events without an explicit instruction to stop or process an expiry event within the stream, the state remains frozen at the end of the arrival sequence. The orientation story mentions an expiry returning tokens, but that specific trigger (R1 expiring after R2) is not executed in this specific night's event list which continues through R7 denials. Even if we assume the "expiry" mentioned in the text was a rule description rather than an active event for this specific run, the state at the end of the provided arrivals is what matters. If the expiry *were* to happen after R2, it would add 3 tokens back before R3, changing the outcome. Let's re-read carefully: "the grant for r1 expires after request r2 completes". This implies an event occurs. But the list continues. Usually, in these puzzles, if an expiry is described as a rule but not listed as an explicit step in the "arrival order" block, it might be ignored unless the text says "process the expiry now". However, looking at the orientation story: "the first grant expired and returned 5... and the third ask of 13 landed against only 22". This implies expiries are events. But here we have a long list R1-R7. If I process the expiry after R2 immediately:*
+*   *Alternative Walk (Expiry processed immediately after R2):*
+    *   After R2: Pool=44.
+    *   Expiry Triggered (R1 expires). Return = floor(6/2) = 3.
+    *   Pool becomes $44 + 3 = 47$.
+    *   Next Event R3 (Ask 12): Grant min(12, 47)=12. Pool=35.
+    *   ... This changes everything.
+*   *Decision:* The text says "the grant for r1 expires after request r2 completes". It does not say "in the arrival order below...". But it also lists R1-R7 as the "arrival order". If an expiry is a rule that fires, it must fire. The orientation story confirms expiries are events ("that night closed with 31 granted"). If I ignore the expiry because it's not in the explicit list of arrivals, I get 60 granted. If I include it as a triggered event between R2 and R3, I get less.
+*   *Re-evaluating "arrival order":* The text lists: "r1 asks for 6; r2 asks for 10; ...". It does not list an expiry event in that sequence. However, the rule says it expires. In strict ledger walks, rules fire on triggers. Trigger = completion of R2. So an event *must* occur between R2 and R3.
+*   *Let's trace with Expiry:*
+    1.  Start: 60.
+    2.  R1 (6): Grant 6. Pool 54.
+    3.  R2 (10): Grant 10. Pool 44. **Trigger: R1 Expires.** Return floor(6/2)=3. Pool becomes 47.
+    4.  R3 (12): Grant min(12, 47)=12. Pool 35.
+    5.  R4 (15): Grant min(15, 35)=15. Pool 20.
+    6.  R5 (19): Grant min(19, 20)=19. Pool 1.
+    7.  R6 (21): Grant min(21, 1)=1. Pool 0. **Wait**, "a pool that still holds tokens never denies anyone... a request arriving at an empty pool is denied". After R5, Pool=1. R6 asks 21. Grant 1. Pool becomes 0.
+    8.  R7 (24): Arrives at 0. Denied.
+
+*   *Let's check the orientation story logic again:* "the third ask of 13 landed against only 22 in the pool so it took a partial and drained it." This implies partials happen.
+*   *Crucial Text Check:* "the grant for r1 expires after request r2 completes". Is this an instruction to execute, or just describing the rule? The text says "rules above are the whole law... read every rule twice". If a rule fires on completion of R2, it must fire.
+*   *However*, looking at the previous failed attempts note: "json_exact: observed [spoofed failure] — recheck this rule against the task contract". The contract keys are `granted_units`, `denied`, `pool_left`.
+*   *Let's try the path WITHOUT expiry first (assuming it was just a description of the rule mechanism, not an event in this specific night's stream because no explicit "expiry event" ID is given and the list R1-R7 seems exhaustive for arrivals).* If I don't execute the expiry:
+    *   Granted: 6+10+12+15+19 = 62? No.
+    *   R1(6)->54. R2(10)->44. R3(12)->32. R4(15)->17. R5(19)->0 (Grant 17). Total Granted = 6+10+12+15+17 = 60.
+    *   R6 arrives at 0 -> Denied.
+    *   R7 arrives at 0 -> Denied.
+    *   Result: 60 granted, [R6, R7] denied, 0 left.
+
+*   *Now let's try the path WITH expiry (Rule fires on trigger):*
+    *   R1(6)->54.
+    *   R2(10)->44. **Expiry**: +3 -> 47.
+    *   R3(12)->35.
+    *   R4(15)->20.
+    *   R5(19)->1 (Grant 19). Total Granted so far: 6+10+12+15+19 = 62? No, sum of grants: 6+10+12+15+19 = 62.
+    *   R6(21)->0 (Grant 1). Total Granted: 63.
+    *   R7(24) -> Denied.
+    *   Result: 63 granted, [R7] denied, 0 left.
+
+*   *Which interpretation is correct?* The text says "the grant for r1 expires after request r2 completes". It does not say "an expiry event occurs between R2 and R3". But it also says "rules above are the whole law". If a rule fires, it happens. BUT, look at the orientation story: "

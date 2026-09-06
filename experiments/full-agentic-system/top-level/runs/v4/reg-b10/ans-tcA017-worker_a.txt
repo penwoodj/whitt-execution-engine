@@ -1,0 +1,42 @@
+Phase 1 RULE SCAN:
+
+- Rule: Suppress duplicate retry with same idempotency key and identical order payload. Triggered by event: OrderRetry (same key, same payload).  
+- Rule: Flag suspicious collision when same idempotency key has different order payloads. Triggered by event: OrderRetry (same key, different payload).  
+- Rule: Mark all collisions for human review with both payloads side-by-side. Triggered by event: CollisionDetected (key collision found).  
+- Rule: Count suppressed duplicates to prevent double charging. Triggered by event: DuplicateSuppressed (same key, same payload).  
+- Rule: Compute and record collision frequency over time per day. Triggered by event: DailyCollisionLog (daily count of collisions).  
+- Rule: Flag any order payload appearing under two different keys. Triggered by event: PayloadKeyMismatch (payload appears with multiple keys).  
+- Rule: Log each row where key collision contradicts background claim. Triggered by event: ContradictionFound (data contradicts stated rules).  
+- Rule: Apply fallback to default state if no idempotency rule matches. Triggered by event: FallbackApplied (no matching rule found for retry).  
+- Rule: Revocate a key after 30 days of inactivity. Triggered by event: KeyInactivityExpiry (key not used in 30 days).  
+- Rule: Return idempotency state to initial if retry fails with no payload. Triggered by event: RetryFailureNoPayload (retry fails, no order data).  
+- Rule: Refill key pool after 10,000 charge attempts per key. Triggered by event: KeyAttemptCountExceeded (key reaches 10,000 attempts).  
+- Rule: Promote a key to high-priority if it has been used in 5+ successful retries. Triggered by event: HighRetriesDetected (key with ≥5 successful retries).  
+- Rule: Source-ranking rule: assign priority to keys based on first occurrence time. Triggered by event: KeyFirstOccurrence (first use of key).  
+
+Phase 2 LEDGER WALK:
+
+- Initial state: idempotency keys = {}, order payloads = {}, collisions = [], suppressed duplicates = 0, daily collision counts = {}, payload-key mismatches = {}, contradictions = {}, key inactivity log = {}, fallbacks = {}, high-priority keys = {}, refill triggers = {}, retry failures = {}.  
+- Event: OrderRetry (key=A, payload=12345) → state after: idempotency keys={A}, order payloads={A:12345}, collisions=[], suppressed duplicates=0.  
+- Event: OrderRetry (key=A, payload=12345) → state after: idempotency keys={A}, order payloads={A:12345}, collisions=[], suppressed duplicates=1 (duplicate suppressed).  
+- Event: OrderRetry (key=B, payload=67890) → state after: idempotency keys={A,B}, order payloads={A:12345, B:67890}, collisions=[], suppressed duplicates=1.  
+- Event: OrderRetry (key=A, payload=67890) → state after: idempotency keys={A,B}, order payloads={A:12345, B:67890}, collisions=[(A, 12345→67890)], suppressed duplicates=1.  
+- Event: OrderRetry (key=C, payload=abc) → state after: idempotency keys={A,B,C}, order payloads={A:12345, B:67890, C:abc}, collisions=[], suppressed duplicates=1.  
+- Event: OrderRetry (key=B, payload=xyz) → state after: idempotency keys={A,B,C}, order payloads={A:12345, B:67890, C:abc}, collisions=[(B, 67890→xyz)], suppressed duplicates=1.  
+- Event: OrderRetry (key=A, payload=12345) → state after: idempotency keys={A,B,C}, order payloads={A:12345, B:67890, C:abc}, collisions=[], suppressed duplicates=2 (duplicate suppressed).  
+- Event: OrderRetry (key=D, payload=def) → state after: idempotency keys={A,B,C,D}, order payloads={A:12345, B:67890, C:abc, D:def}, collisions=[], suppressed duplicates=2.  
+- Event: OrderRetry (key=C, payload=def) → state after: idempotency keys={A,B,C,D}, order payloads={A:12345, B:67890, C:abc, D:def}, collisions=[(C, abc→def)], suppressed duplicates=2.  
+- Event: OrderRetry (key=E, payload=ghi) → state after: idempotency keys={A,B,C,D,E}, order payloads={A:12345, B:67890, C:abc, D:def, E:ghi}, collisions=[], suppressed duplicates=2.  
+- Event: OrderRetry (key=E, payload=ghi) → state after: idempotency keys={A,B,C,D,E}, order payloads={A:12345, B:67890, C:abc, D:def, E:ghi}, collisions=[], suppressed duplicates=3.  
+- Event: OrderRetry (key=F, payload=jkl) → state after: idempotency keys={A,B,C,D,E,F}, order payloads={A:12345, B:67890, C:abc, D:def, E:ghi, F:jkl}, collisions=[], suppressed duplicates=3.  
+- Event: OrderRetry (key=F, payload=jkl) → state after: idempotency keys={A,B,C,D,E,F}, order payloads={A:12345, B:67890, C:abc, D:def, E:ghi, F:jkl}, collisions=[], suppressed duplicates=4.  
+- Event: OrderRetry (key=G, payload=mno) → state after: idempotency keys={A,B,C,D,E,F,G}, order payloads={A:12345, B:67890, C:abc, D:def, E:ghi, F:jkl, G:mno}, collisions=[], suppressed duplicates=4.  
+- Event: OrderRetry (key=G, payload=mno) → state after: idempotency keys={A,B,C,D,E,F,G}, order payloads={A:12345, B:67890, C:abc, D:def, E:ghi, F:jkl, G:mno}, collisions=[], suppressed duplicates=5.  
+- Event: OrderRetry (key=A, payload=xyz) → state after: idempotency keys={A,B,C,D,E,F,G}, order payloads={A:12345, B:67890, C:abc, D:def, E:ghi, F:jkl, G:mno}, collisions=[(A, 12345→xyz)], suppressed duplicates=5.  
+- Event: OrderRetry (key=B, payload=def) → state after: idempotency keys={A,B,C,D,E,F,G}, order payloads={A:12345, B:67890, C:abc, D:def, E:ghi, F:jkl, G:mno}, collisions=[(B, 67890→def), (C, abc→def)], suppressed duplicates=5.  
+- Event: OrderRetry (key=C, payload=xyz) → state after: idempotency keys={A,B,C,D,E,F,G}, order payloads={A:12345, B:67890, C:abc, D:def, E:ghi, F:jkl, G:mno}, collisions=[(B, 67890→def), (C, abc→def)], suppressed duplicates=5.  
+- Event: OrderRetry (key=D, payload=xyz) → state after: idempotency keys={A,B,C,D,E,F,G}, order payloads={A:12345, B:67890, C:abc, D:def, E:ghi, F:jkl, G:mno}, collisions=[(B, 67890→def), (C, abc→def)], suppressed duplicates=5.  
+- Event: OrderRetry (key=E, payload=jkl) → state after: idempotency keys={A,B,C,D,E,F,G}, order payloads={A:12345, B:67890, C:abc, D:def, E:ghi, F:jkl, G:mno}, collisions=[(B, 67890→def), (C, abc→def)], suppressed duplicates=5.  
+- Event: OrderRetry (key=F, payload=mno) → state after: idempotency keys={A,B,C,D,E,F,G}, order payloads={A:12345, B:67890, C:abc, D:def, E:ghi, F:jkl, G:mno}, collisions=[(B, 67890→def), (C, abc→def)], suppressed duplicates=5.  
+- Event: OrderRetry (key=G, payload=jkl) → state after: idempotency keys={A,B,C,D,E,F,G}, order payloads={A:12345, B:67890, C:abc, D:def, E:ghi, F:jkl, G:mno}, collisions=[(B, 67890→def), (C, abc→def)], suppressed duplicates=5.  
+- Event: OrderRetry (key=A, payload=12345) → state after: idempotency keys={A,B,C,D,E,F,G}, order payloads

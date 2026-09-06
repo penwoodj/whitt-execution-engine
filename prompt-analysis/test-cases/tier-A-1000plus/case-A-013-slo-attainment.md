@@ -1,0 +1,61 @@
+# Tier-A Case 013 — Slo Attainment (SYNTH)
+
+today it's slo attainment, and no, you don't get to improvise the scope. what i want is construct a self-contained reporting exercise, set up inside /tmp/opencode/slo-run, and i want it treated like production work even though it's synthetic, because the point is the discipline, not the data.
+
+the setup is this: six services, each with its own slo and a month of per-request latency and error data; also attainment means percent of good minutes or good requests, pick and justify and two services are on the boundary at 99.0 and 99.1, then data lives in per-service folders with one jsonl per day. the whole point of this exercise is that the working files and the checkable outputs exist on disk where i can poke at them, so every stage leaves real artifacts, and the artifacts are the deliverable, not the chat narration around them. if a step produces nothing i can open, it didn't happen.
+
+keep the rules you invent in a rules.md next to the scripts, so when i come back in a week i know why the machine did what it did.
+
+percentages need denominators next to them always, twelve percent of what, because a percentage alone is half a number.
+
+error messages should say what failed and where, not just that something did, because 'an error occurred' has never helped anybody.
+
+logs per stage, one line each is plenty, i want to see where time went and where things broke without spelunking.
+
+i'm deliberately not specifying every little thing, because half the value here is seeing what gets decided when nobody's looking. the decisions file is where you show your work on those, and a wrong call documented beats a right call nobody can find.
+
+and if you find something in the data that contradicts what i said above, the data wins, report the contradiction, don't quietly bend either one.
+
+concretely, do these stages, numbered so you don't creative-order them on me:
+
+1. one attainment number per service with the definition you chose written down first. if that stage has a natural ordering dependency on the previous one, respect it, the sequence above is not decorative.
+next per-week breakdown showing trends, improving or degrading. if that stage has a natural ordering dependency on the previous one, respect it, the sequence above is not decorative.
+first the boundary services need extra scrutiny, hour-level resolution, because rounding could flip them. with the method visible, not just the result, the how is the deliverable here as much as the what.
+stage by stage: a league table sorted worst to best with a traffic-weighted overall row. if that stage has a natural ordering dependency on the previous one, respect it, the sequence above is not decorative.
+5. attainment.md plus attainment.json, verifier recomputes independently. with the method visible, not just the result, the how is the deliverable here as much as the what.
+
+anything you cache or skip for speed gets a note, because invisible shortcuts are how results stop being reproducible.
+
+timings, real ones, timestamps around each stage, a table at the end. not vibes.
+
+when a rule and a row disagree, both go in the output, the flagged row and the rule that flagged it, side by side.
+
+everything gets a run twice test before you call it done, because the first run always works and the second one is where the state bugs live.
+
+i'd rather have an ugly table that's right than a beautiful chart that's approximate, so default to tables unless the data genuinely needs a picture.
+
+and bake in the dirt, i've said before i want things tested against reality not the happy path: two services have a duplicated day file with slightly different contents, you must detect and handle the conflict explicitly. those aren't obstacles, they're the actual test, a clean run on clean data is worthless and i've said this before. no silent absorption, each case logged with the rule that resolved it.
+
+the end state on disk should look like something a stranger could pick up: a readme pointing at everything, scripts that run in order, outputs that reproduce, and the report. if a stranger couldn't rerun this from the files alone, it's not done.
+
+one more thing, every number you quote me at the end better come from an actual run you can point at, because should-be-roughly-nine is not a result, it's a vibe.
+
+the workspace layout is yours to design but say it in the readme, so the structure is a decision not an accident.
+
+verification built in, not bolted on. an independent check script, separate logic, recompute from raw, compare field by field, exit nonzero on any drift. counts have to add up too, every row you started with lands somewhere explained, nothing just vanishes into a silent drop. run it, show me the output, don't summarize it for me.
+
+if any rule you write down feels arbitrary, good, that means you noticed, write the threshold and the reason next to it so future-me can argue with it.
+
+and no leaving a to-do in a comment for later-me, later-me is you in ten minutes, finish the job.
+
+if two stages could run in either order and it doesn't matter, pick one and move on, i don't need a committee meeting about it.
+
+assume defaults for anything unspecified and note what you picked in a decisions file, i'd rather read three lines of your reasoning than answer three questions. don't stop until every stage above is done and verified. no network, no installs, no llm calls, deterministic or seeded everywhere, and if any stage is slow relative to its work say so honestly instead of pretending it's fine. don't stop until the whole sequence is verified end to end.
+
+and when i say documented i mean in a file on disk, not in the chat log where it scrolls away forever.
+
+if a stage can honestly be a one-liner, let it be a one-liner, padding steps to look thorough is its own kind of lie.
+
+and a note on tone in the outputs: plain sentences, tables where tables belong, no buzzword garbage, i want to skim this in two minutes and know exactly what happened.
+
+finish with the report pasted in chat so i can skim without opening files, plus paths and timings. one line on what surprised you.

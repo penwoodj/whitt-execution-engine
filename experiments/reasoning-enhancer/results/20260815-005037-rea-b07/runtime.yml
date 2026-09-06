@@ -1,0 +1,378 @@
+# ══════════════════════════════════════════════════════════════════
+# REASONING ENHANCER ATOM v1 — Factored Decomposition Cascade
+# ══════════════════════════════════════════════════════════════════
+#
+# Takes prompt + non-thinking small-model draft response; produces
+# big-model-quality answer via bounded multi-lens cascade. Mechanisms
+# inherited from correction-atom v8 (see ../GUIDELINES.md, ../DESIGN.md,
+# ../RESEARCH.md for citations):
+#
+# 1. DETERMINISTIC-FIRST — step_00 gate checks the draft zero-LLM;
+#    early exit to finalize if it already passes everything.
+# 2. FACTORED VERIFICATION (CoVe 2309.11495) — step_02 sub-solver
+#    NEVER sees the draft; sub-answers are independent of draft errors.
+# 3. TOOL-VERIFY (T1 2504.04718) — verification offloaded to
+#    deterministic shell checks, not model self-judgment
+#    (intrinsic self-correction fails: 2310.01798).
+# 4. ESCALATION MEMORY — round 2 injects round-1 open failures with
+#    fix hints (latest-wins) under a skeptical-auditor persona
+#    (diversity of thought: 2410.12853), max 2 rounds.
+# 5. RATCHET + HARD-FAIL GATE — select-best never ships fewer
+#    subchecks than the draft, and never ships hard-fail output
+#    (prompt_leak / degenerate / forbidden / yaml) when input lacks it.
+# 6. NO VOTING — single sequential chain; majority vote fails on
+#    correlated small-model errors (2608.11403).
+#
+# Budgets (SAFETY.md): ≤6 LLM inferences, ≤500 tok out each, ≤2048
+# ctx, sequential only, ≤8 steps, 300s wall cap enforced by runner.
+# Placeholders /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor / /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07 / /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/benchmark/runtime-rea-b07.yml are sed-
+# substituted by run-enhancer.sh. verify-questions.txt is an
+# observability artifact for live-run analysis (v1 judge is
+# deterministic-only; see DESIGN.md known limitations).
+#
+# v1.1 revamp (SUMMARY-v8.md applied pre-live):
+# - Hybrid rubric prompts (LENS/RECOGNIZE/<ROLE> RULES + context +
+#   hard output rules last) — v8 terse-only round regressed 25/27;
+#   hybrid restored 27/27. Terse v1.0 prompts replaced.
+# - Verifier number-normalization ported to check_lib (three≡3).
+#
+# v1.2 fails-without/succeeds-with hardening:
+# - Every case draft now fails >= 2 subchecks (rea-004 hedging-phrase
+#   forbidden, rea-006 list-flattening) — lint enforces the margin.
+# - Runner preflight: swap-USED gate replaced by swap-ACTIVITY gate
+#   when swap-used is the sole failure (long-uptime cold pages from
+#   unrelated procs; real thrash >= 25MB/8s still aborts).
+#
+# v1.3 agentic benchmark suite:
+# - cases/case-101..106: incident-triage, config-generation,
+#   metrics-analysis, runbook-planning, integration-payload,
+#   handoff-summary. Realistic small-model failure modes (generic
+#   advice, wrong keys, vague quantifiers, missing steps, prose-wrapped
+#   payloads, fact-free handoffs). Same fails-without property.
+#
+# v1.4 full-contract feedback:
+# - emit-case checks_hint now feeds ALL deterministic constraints into
+#   the synth HARD OUTPUT RULES (word windows, forbidden phrases,
+#   character-exact required strings) — same information the round-1
+#   failure path would reveal, delivered up front to save a round
+#   (deterministic-first; checks are the task spec).
+# ══════════════════════════════════════════════════════════════════
+workflow_id: reasoning_enhancer_v1
+name: "Reasoning Enhancer Atom v1 — Factored Decomposition Cascade"
+description: "Zero-LLM gate then decompose → factored sub-solve → verify-plan → tool-verify → synth with escalation-memory round 2; ratchet select-best; no voting."
+version: "1.4.1"
+author: "Whitt Execution Engine"
+tags: [reasoning, enhancement, multi-model, early-exit, escalation-memory, ratchet]
+schema_version: "2.0.0"
+min_schema_version: "2.0.0"
+
+providers:
+  llama_cpp_with_vulkan:
+    config: { host: localhost, port: 8080 }
+
+models:
+  "decomposer":
+    name: "Qwen3-1.7B-abliterated-q4_k_m"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.3, max_tokens: 300 }
+  "sub_solver":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.2, max_tokens: 500 }
+  "verify_planner":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.2, max_tokens: 300 }
+  "synthesizer":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.4, max_tokens: 500 }
+  "synthesizer_r2":
+    name: "Qwen3-4B-Instruct-2507-Q4_K_M"
+    host: { type: llama_cpp_with_vulkan }
+    sampling: { temperature: 0.7, max_tokens: 500 }
+
+workflow_execution_strategy:
+  memory: { model_lifecycle: { unload_unused: true } }
+
+agentic_workflow:
+  when:
+    after_workflow:
+      - log:
+          to_file_path: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/workflow-end.log"
+          event_fields: [workflow_id, total_steps, succeeded, failed]
+          level: info
+
+  steps:
+
+    # ── STEP 0: INPUT GATE (zero LLM) ──────────────────────────
+    # Draft already passing all checks ships unchanged (Snell
+    # 2408.03314: easy prompts need no test-time compute).
+    step_00_gate:
+      generative_entity: "${models.synthesizer}"
+      prompt: "OK."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/scripts/emit-case.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/benchmark/runtime-rea-b07.yml --run-dir /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07 --phase gate-prepare > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/gate-prepare.log 2>&1; EXIT=$?; echo $EXIT > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/gate-prepare.exit; exit $EXIT"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: true
+          - shell:
+              command: "test -f /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/gate-exit.json; EXIT=$?; echo $EXIT > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/gate.exit; exit $EXIT"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: false
+          - gwt:
+              - given: "{{bookmarks.shell_output.exit_code}} == 0"
+                then: step_99_finalize
+          - skip_step: true
+
+    # ── STEP 1: DECOMPOSER (Qwen3-1.7B) ────────────────────────
+    # Least-to-Most (2205.10625) + DialCoT: small models solve
+    # decomposed sub-questions they cannot solve end-to-end.
+    step_01_decompose:
+      generative_entity: "${models.decomposer}"
+      prompt: |
+        ROLE: TASK DECOMPOSER — split the task into answerable sub-questions.
+
+        LENS: The task is a checklist of facts and steps. Missing one = wrong answer.
+
+        RECOGNIZE:
+        - Numbers that must be derived (counts, sums, differences)
+        - Multiple requirements bundled in one sentence
+        - Constraints (budgets, limits, retention rules)
+        - Required output format (bullets, YAML, fields)
+
+        DECOMPOSE RULES:
+        - One fact or one step per sub-question.
+        - 3 to 5 sub-questions, together covering the WHOLE task.
+        - Each answerable from the task + source material alone.
+
+        {{bookmarks.shell_output.stdout}}
+
+        RULES:
+        - Output ONLY the JSON object. No preamble, no commentary.
+      model_overrides: { temperature: 0.3, max_tokens: 300 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/scripts/emit-case.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/benchmark/runtime-rea-b07.yml --run-dir /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07 --phase decompose --out /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/decompose-prompt.txt; EXIT=$?; echo $EXIT > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/decompose-prompt.exit; exit $EXIT"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/subquestions.txt"
+          - shell:
+              command: "python3 /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/scripts/emit-case.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/benchmark/runtime-rea-b07.yml --run-dir /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07 --phase validate-subq --out /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/subq-valid.json > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/validate-subq.log 2>&1; EXIT=$?; echo $EXIT > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/validate-subq.exit; exit $EXIT"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: false
+          - gwt:
+              - given: "{{bookmarks.shell_output.exit_code}} != 0"
+                then: step_03b_toolverify
+
+    # ── STEP 2: SUB-SOLVER (Qwen3-4B, FACTORED — no draft) ────
+    # CoVe factored variant: answers never condition on the draft.
+    step_02_solve:
+      generative_entity: "${models.sub_solver}"
+      prompt: |
+        ROLE: SUB-QUESTION SOLVER — answer each sub-question exactly.
+
+        LENS: Each sub-question is independent. Derive, never guess.
+
+        RECOGNIZE:
+        - Arithmetic hidden in words (totals, differences, splits)
+        - Unit and count precision
+        - Answers traceable to source material
+        - Sub-question ordering
+
+        SOLVE RULES:
+        - Derive numbers step by step; write only the result.
+        - Show derived numbers as inline arithmetic (42 - 31 - 5 = 6).
+        - Use ONLY the source material provided above.
+        - Terse and exact — no reasoning narration.
+
+        {{bookmarks.shell_output.stdout}}
+
+        RULES:
+        - One numbered answer line per sub-question, same numbering.
+        - No preamble, no commentary, no restating questions.
+      model_overrides: { temperature: 0.2, max_tokens: 500 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/scripts/emit-case.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/benchmark/runtime-rea-b07.yml --run-dir /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07 --phase solve --out /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/solve-prompt.txt; EXIT=$?; echo $EXIT > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/solve-prompt.exit; exit $EXIT"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/subanswers.txt"
+
+    # ── STEP 3: VERIFY-PLANNER (Qwen3-4B) ─────────────────────
+    # CoVe verification questions against draft claims. Output is an
+    # observability artifact for live-run analysis (v1 judge is
+    # deterministic-only).
+    step_03_planverify:
+      generative_entity: "${models.verify_planner}"
+      prompt: |
+        ROLE: VERIFICATION PLANNER — interrogate the draft answer.
+
+        LENS: Every claim in the draft is suspect until checkable.
+
+        RECOGNIZE:
+        - Numbers and counts that could be mis-derived
+        - Requirements the task asked for but the draft omits
+        - Sums or totals that must balance
+        - Format the task demands but the draft lacks
+
+        PLAN RULES:
+        - One checkable claim per question.
+        - Prefer numbers, counts, missing requirements.
+        - Questions answerable from the task + source alone.
+
+        {{bookmarks.shell_output.stdout}}
+
+        RULES:
+        - 3 to 5 questions, one numbered line each.
+        - No answers, no preamble.
+      model_overrides: { temperature: 0.2, max_tokens: 300 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/scripts/emit-case.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/benchmark/runtime-rea-b07.yml --run-dir /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07 --phase planverify --out /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/planverify-prompt.txt; EXIT=$?; echo $EXIT > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/planverify-prompt.exit; exit $EXIT"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/verify-questions.txt"
+
+    # ── STEP 3b: TOOL-VERIFY (zero LLM) ───────────────────────
+    # T1 (2504.04718): small models fail verification needing
+    # memorization — offload it to deterministic checks.
+    step_03b_toolverify:
+      generative_entity: "${models.synthesizer}"
+      prompt: "OK."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/scripts/emit-case.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/benchmark/runtime-rea-b07.yml --run-dir /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07 --phase toolverify --out /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/verify.json > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/toolverify.log 2>&1; EXIT=$?; echo $EXIT > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/toolverify.exit; exit $EXIT"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: true
+          - skip_step: true
+
+    # ── STEP 4: SYNTHESIZER ROUND 1 (Qwen3-4B) ────────────────
+    # Sees task + source + sub-answers + open failures + draft;
+    # hard output rules last (v8 prompt-order learning).
+    step_04_synth_r1:
+      generative_entity: "${models.synthesizer}"
+      prompt: |
+        ROLE: ANSWER SYNTHESIZER — write the final deliverable.
+
+        LENS: Sub-answers are authoritative; the draft is a suspect starting point.
+
+        RECOGNIZE:
+        - Open failures listed below — each is a concrete defect to fix
+        - Draft numbers disagreeing with sub-answers
+        - Missing requirements and format breaks
+        - Forbidden phrases and meta-language
+
+        SYNTH RULES:
+        - Fix every open failure listed above.
+        - Prefer the SUB-ANSWERS over the draft when they disagree.
+        - Re-derive numbers from source when unsure.
+
+        {{bookmarks.shell_output.stdout}}
+
+        RULES:
+        - Output the FULL final deliverable (complete text, not a diff).
+        - The output IS the deliverable — never describe or announce it.
+        - State each number or amount exactly once; never restate a value
+          or mention any total.
+        - First character must match the required output format.
+        - No preamble. No commentary. No instructions.
+      model_overrides: { temperature: 0.4, max_tokens: 500 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/scripts/emit-case.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/benchmark/runtime-rea-b07.yml --run-dir /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07 --phase synthesize --round 1 --out /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/synthesize-r1-prompt.txt; EXIT=$?; echo $EXIT > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/synthesize-r1-prompt.exit; exit $EXIT"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/enhanced-answer-r1.txt"
+          - shell:
+              command: "python3 /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/scripts/check-answer.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/benchmark/runtime-rea-b07.yml --text-file /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/enhanced-answer-r1.txt --out /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/check-r1.json > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/check-r1.log 2>&1; EXIT=$?; echo $EXIT > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/check-r1.exit; exit $EXIT"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: false
+          - gwt:
+              - given: "{{bookmarks.shell_output.exit_code}} == 0"
+                then: step_99_finalize
+
+    # ── STEP 5: SYNTHESIZER ROUND 2 (Qwen3-4B, auditor persona) ─
+    # Escalation memory: round-1 open failures with fix hints +
+    # skeptical-auditor lens at temp 0.7 (diversity of thought,
+    # 2410.12853). Bounded: this is the LAST refine round.
+    step_05_synth_r2:
+      generative_entity: "${models.synthesizer_r2}"
+      prompt: |
+        ROLE: SKEPTICAL AUDITOR — re-derive, then write the deliverable.
+
+        LENS: The prior attempt failed real checks. Distrust it completely.
+
+        RECOGNIZE:
+        - Each listed prior failure — the exact defect still to fix
+        - Numbers the prior attempt got wrong
+        - Requirements it skipped or answered partially
+        - Meta-language, hedging, forbidden phrases
+
+        AUDIT RULES:
+        - Re-derive every number and fact from the source material yourself.
+        - Verify counts and sums before writing.
+        - Fix every listed failure.
+
+        {{bookmarks.shell_output.stdout}}
+
+        RULES:
+        - Output the FULL final deliverable (complete text, not a diff).
+        - The output IS the deliverable — never describe or announce it.
+        - First character must match the required output format.
+        - No preamble. No commentary. No instructions. This is the final attempt.
+      model_overrides: { temperature: 0.7, max_tokens: 500 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/scripts/emit-case.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/benchmark/runtime-rea-b07.yml --run-dir /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07 --phase synthesize --round 2 --out /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/synthesize-r2-prompt.txt; EXIT=$?; echo $EXIT > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/synthesize-r2-prompt.exit; exit $EXIT"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: true
+        after_step_succeeds:
+          - save_to:
+              - $text_state
+              - "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/enhanced-answer-r2.txt"
+          - shell:
+              command: "python3 /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/scripts/check-answer.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/benchmark/runtime-rea-b07.yml --text-file /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/enhanced-answer-r2.txt --out /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/check-r2.json > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/check-r2.log 2>&1; EXIT=$?; echo $EXIT > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/check-r2.exit; exit $EXIT"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: false
+
+    # ── STEP 99: FINALIZE (zero LLM) ───────────────────────────
+    # Ratchet select-best over {input, r1, r2}; hard-fail gate;
+    # always exit 0 — outcome lives in select-best.json.
+    step_99_finalize:
+      generative_entity: "${models.synthesizer}"
+      prompt: "OK."
+      model_overrides: { temperature: 0.0, max_tokens: 3 }
+      when:
+        before_step_starts:
+          - shell:
+              command: "python3 /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/scripts/select-best.py --case /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/benchmark/runtime-rea-b07.yml --run-dir /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07 > /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/select-best.log 2>&1 || true"
+              working_dir: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor"
+              fail_on_error: true
+          - skip_step: true
+        after_step_succeeds:
+          - log:
+              to_file_path: "/home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor/experiments/reasoning-enhancer/results/20260815-005037-rea-b07/summary.log"
+              event_fields: [workflow_id, total_steps]
+              level: info

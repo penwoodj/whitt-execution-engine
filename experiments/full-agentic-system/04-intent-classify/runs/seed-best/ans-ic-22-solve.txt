@@ -1,0 +1,96 @@
+### Phase 1 RULE SCAN
+
+Based on the task description and the "light night" rules (ignoring orientation numbers), here are the state-changing rules triggered by events:
+
+1.  **Arrival Event**: Triggers `wait_s` accumulation (adds current wait time) and `attempts` count increment; triggers cost calculation for the attempt itself.
+2.  **Attempt Execution Rule**: Checks if `current_spend + attempt_cost <= budget`. If true, allows execution; if false, triggers potential suppression logic.
+3.  **Suppression/Double-Budget Rule**: If spend exceeds budget (and it's not a re-check), the budget doubles exactly once (`budget = budget * 2`), and the state is immediately re-checked against this new doubled budget for the same event.
+4.  **Success Condition Rule**: After an attempt, if `failed_attempts < required_failures`, increment `failed_attempts`. If `failed_attempts == required_failures`, mark job as `succeeded` (stop processing further attempts).
+5.  **Expiry Return Rule** (Not triggered in this specific event list): Would return half of the granted amount before the next request, but no expiry events are present in tonight's arrival list.
+
+### Phase 2 LEDGER WALK
+
+Processing events in strict arrival order: `["flaky upstream forces retries tonight"]` which implies a sequence of attempts with waits observed as `2, 4`.
+
+**Initial State:**
+*   `budget`: 24 tokens
+*   `attempts`: 0
+*   `wait_s`: 0
+*   `failed_attempts`: 0 (Job needs 2 failures before the 3rd succeeds)
+*   `attempt_cost`: 2 tokens
+*   `required_failures`: 2
+
+**Event 1: First Attempt (Wait observed: 2s)**
+*   **Rule Apply**: Arrival triggers wait accumulation.
+    *   `wait_s` = 0 + 2 = 2.
+*   **Rule Apply**: Attempt execution cost check.
+    *   Spend so far = 2 (wait) + 2 (attempt) = 4.
+    *   Budget = 24.
+    *   4 <= 24? Yes. Job runs.
+*   **Rule Apply**: Outcome determination.
+    *   The prompt states "the job needs 2 failed attempts before the 3th succeeds". This implies Attempt 1 and Attempt 2 fail, Attempt 3 succeeds.
+    *   Result: Failed.
+    *   `failed_attempts` = 0 + 1 = 1.
+*   **State After Event 1**:
+    *   `attempts`: 1
+    *   `wait_s`: 2
+    *   `budget_after`: 24 - (2 + 2) = 20
+
+**Event 2: Second Attempt (Wait observed: 4s)**
+*   **Rule Apply**: Arrival triggers wait accumulation.
+    *   `wait_s` = 2 + 4 = 6.
+*   **Rule Apply**: Attempt execution cost check.
+    *   Spend so far = 6 (total waits) + 2 (attempt 1) + 2 (attempt 2) = 10.
+    *   Budget = 24.
+    *   10 <= 24? Yes. Job runs.
+*   **Rule Apply**: Outcome determination.
+    *   Result: Failed (needs 2 failures).
+    *   `failed_attempts` = 1 + 1 = 2.
+*   **State After Event 2**:
+    *   `attempts`: 2
+    *   `wait_s`: 6
+    *   `budget_after`: 24 - (6 + 4) = 14
+
+**Event 3: Third Attempt (Wait observed: ?)**
+*   **Logic Check**: The prompt says "after each failed attempt the retry waits, then runs. Waits observed: 2, 4."
+    *   This phrasing usually lists the waits that occurred *before* the attempts or between them.
+    *   Sequence interpretation:
+        1.  Wait 2s -> Attempt 1 (Fail).
+        2.  Wait 4s -> Attempt 2 (Fail).
+        3.  Next wait? The prompt says "each next wait doubles".
+            *   Start: 2s.
+            *   Next: 4s.
+            *   Next (for the successful attempt): Should be 8s? Or does the list "Waits observed: 2, 4" imply only those two waits happened before success?
+    *   Re-reading carefully: "first wait is 2s, each next wait doubles... Waits observed: 2, 4."
+    *   If the job needs 3 attempts (2 fails), there are 2 intervals between them.
+        *   Interval 1 (before Attempt 1): Wait 2s.
+        *   Interval 2 (between Attempt 1 and 2): Wait 4s.
+        *   Interval 3 (between Attempt 2 and 3): Wait should be 8s based on "each next wait doubles".
+    *   However, let's look at the constraint: "Waits observed: 2, 4." This might imply the total sum of waits is fixed by observation, or it lists the specific waits that occurred. Given the strict instruction "never recompute from scratch mid-stream" and "carry the state forward", we must assume the events provided are the ones that happened.
+    *   If only waits 2 and 4 were observed, perhaps the third attempt had no wait (immediate retry) or the list is exhaustive for the "observed" set in this specific scenario description?
+    *   Let's check the budget constraint with a hypothetical 8s wait: Spend = 6 (prev) + 8 (wait) + 2 (attempt) = 16. Budget 24. Still valid.
+    *   Let's check the "Waits observed: 2, 4" as an exhaustive list of waits that occurred in this specific run. If only 2 and 4 were added to `wait_s`, then `wait_s` is 6.
+    *   Is there a third wait? The text says "after each failed attempt the retry waits". There are 2 failed attempts. So there should be 2 waits. Wait 1 (before/at start) + Wait 2 (between fail 1 and 2). That accounts for 2 waits.
+    *   Does the successful attempt have a wait? Usually, retries happen after failures. The first attempt might not need a prior wait if it's the "first". But the text says "first wait is 2s". This implies Wait 1 exists before Attempt 1. Then "each next wait doubles" -> Wait 2 (4s) between Fail 1 and Fail 2.
+    *   What about before Attempt 3? The rule says "after each failed attempt the retry waits". So after Fail 2, there is a retry wait. That would be Wait 3 = 8s.
+    *   Why does the text say "Waits observed: 2, 4"? This contradicts the doubling rule if it implies only two waits exist total.
+    *   Alternative interpretation: The list "Waits observed: 2, 4" describes the specific values that were added to the ledger in this instance, overriding the theoretical doubling for the final step (perhaps due to a cap or simply the data provided). We must follow the explicit observation over the derived rule if they conflict in an event log context.
+    *   Let's assume `wait_s` = 2 + 4 = 6 is the final state of waits.
+    *   Attempt count: 3 (1 fail, 2 fails, 1 success).
+    *   Budget check with Spend=6+2+2+2 = 12? Or if there was a 8s wait?
+    *   Let's stick to the explicit "Waits observed" as the ground truth for `wait_s`. Sum = 6.
+    *   Total Spend = Wait_Sum (6) + Attempt_Costs (3 attempts * 2) = 12.
+    *   Budget = 24.
+    *   Suppression? No, 12 <= 24.
+
+**Final State Calculation:**
+*   `attempts`: 3 (The job succeeded on the 3rd attempt).
+*   `wait_s`: 6 (Sum of observed waits: 2 + 4).
+*   `budget_after`: Budget (24) - Spend (Wait_Sum 6 + Attempt_Costs 6) = 12.
+*   `suppressed`: false (Spend never exceeded budget, even if we assumed the theoretical 8th wait, spend would be 20 < 24).
+
+### Final Answer JSON
+
+```json
+{"attempts": 3, "wait_s": 6, "budget_after": 12, "suppressed": false}
+```

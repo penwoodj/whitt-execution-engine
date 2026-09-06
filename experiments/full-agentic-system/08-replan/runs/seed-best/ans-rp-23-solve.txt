@@ -1,0 +1,79 @@
+Based on the strict rules and events provided for "tonight," here is the step-by-step derivation and the final JSON output.
+
+### Phase 1: Rule List & Trigger Analysis
+The following rules govern the state changes during tonight's stream:
+
+1.  **Load Event**: Triggers a load attempt for the requested model/size. If successful, it increments `loads` (total granted) and adds the new resident to the pool. If deferred, it records the ID in `deferred`.
+2.  **Eviction Rule (Fit Check)**: Before a load can be added, if there is insufficient free space (< requested size), the system must evict unpinned models. Evictions are performed on the Least-Recently-Touched (LRT) unpinned model first. This continues until enough space exists or only pinned models remain.
+3.  **Deferred Load Rule**: If sufficient space cannot be created even after evicting *all* available unpinned residents, the load is deferred. The ID of this specific load event becomes an entry in the `deferred` list.
+4.  **Unload Event**: Removes a resident and frees their space immediately. This acts as the primary method to create space for future loads. No eviction logic applies here; it simply changes state (Space = Space + Model Size).
+5.  **Pinned Constraint**: Models marked "pinned" (like Model B in orientation, though not requested tonight) are never evicted. Tonight's stream does not involve pinned models being requested or existing initially as a constraint that blocks eviction unless they are the only ones left and space is still needed.
+
+### Phase 2: Ledger Walk
+We apply the events for "tonight" one by one in strict arrival order.
+*Initial State*: Empty card (0 GB used). Total Capacity = 8 GB. Free Space = 8 GB. Residents = []. Evictions = 0. Deferrals = 0. Loads = 0.
+
+**Event 1: `load A` (2 GB)**
+*   **Action**: Attempt to load Model A (2 GB).
+*   **Fit Check**: Current Used = 0. Free Space = 8. Required = 2. $8 \ge 2$. Fits easily.
+*   **Execution**: Add Resident A to pool. Update Used: $0 + 2 = 2$ GB.
+*   **State after Event**: Loads=1, Evictions=0, Deferrals=0, Residents=[A(2GB)].
+
+**Event 2: `load C` (4 GB)**
+*   **Action**: Attempt to load Model C (4 GB).
+*   **Fit Check**: Current Used = 2. Free Space = $8 - 2 = 6$. Required = 4. $6 \ge 4$. Fits easily.
+*   **Execution**: Add Resident C to pool. Update Used: $2 + 4 = 6$ GB.
+*   **State after Event**: Loads=2, Evictions=0, Deferrals=0, Residents=[A(2GB), C(4GB)].
+
+**Event 3: `load D` (3 GB)**
+*   **Action**: Attempt to load Model D (3 GB).
+*   **Fit Check**: Current Used = 6. Free Space = $8 - 6 = 2$. Required = 3. $2 < 3$. Does not fit.
+*   **Eviction Logic**: Need at least 1 more GB of free space ($3 - 2 = 1$). Look for unpinned models to evict.
+    *   Pool: [A(2GB), C(4GB)]. Both are unpinned (none marked pinned in tonight's request).
+    *   Eviction Candidate: LRT model is A or C? Since they loaded sequentially, A is older than C. Assume standard FIFO/LRU order where the first loaded is the least recently touched among equals without explicit timestamps, or strictly by load time. Let's evict **A** (2 GB).
+    *   Eviction Result: Remove A (2 GB). Free Space becomes $2 + 2 = 4$ GB. Used becomes $6 - 2 = 4$.
+*   **Re-check Fit**: Required = 3. Available Free = 4. Fits.
+*   **Execution**: Add Resident D to pool. Update Used: $4 + 3 = 7$ GB. Pool now [C(4GB), D(3GB)]. (A was evicted).
+*   **State after Event**: Loads=2, Evictions=1, Deferrals=0, Residents=[C(4GB), D(3GB)].
+
+**Event 4: `unload D` (3 GB)**
+*   **Action**: Unload Model D (3 GB).
+*   **Execution**: Remove Resident D. Update Used: $7 - 3 = 4$ GB. Free Space becomes $8 - 4 = 4$. Pool now [C(4GB)].
+*   **State after Event**: Loads=2, Evictions=1, Deferrals=0, Residents=[C(4GB)].
+
+### Final Calculation Summary
+*   **Total Loads Granted**: 2 (A and C were loaded; D was loaded after an eviction). Note: In this specific schema, "loads" usually counts successful insertions. A, C, D inserted once. However, looking at the orientation example logic ("three loads"), it counts the number of load *requests* that resulted in a resident being present or deferred. Wait, let's re-read the definition carefully from the text: "a load is only deferred after evicting...". The count `loads` typically refers to the total size granted or the number of successful insertion events?
+    *   Let's check the orientation example: "three loads, two evictions, one deferral". The stream was Load M, Load N, Load P, Load Q.
+        1. Load M (Success) -> Loads count?
+        2. Load N (Success) -> Loads count?
+        3. Load P (Evicted M, then Success). Did "Loads" increment for P? Yes.
+        4. Load Q (Deferred). This is the deferral.
+    *   If `loads` means "number of successful load events", it would be 3 (M, N, P). If it means "total GB loaded into the system history", it might differ.
+    *   However, standard state tracking usually tracks `loads` as a counter of how many times a load event successfully placed a model OR deferred it? No, the prompt distinguishes `deferred`. So `loads` likely counts successful placements.
+    *   Let's re-evaluate Event 3 (Load D). We evicted A. Then we loaded D. That is one successful load event for D.
+    *   Total Successful Load Events: A, C, D. Count = 3?
+    *   Let's look at the "orientation" text again: "three loads...". Stream: M, N, P, Q. M(OK), N(OK), P(Evict+OK), Q(Deferred). That is 3 successful loads and 1 deferred load. The count matches the number of non-deferred load events in the stream.
+    *   Applying to Tonight's Stream: Load A (Success), Load C (Success), Load D (Success after eviction), Unload D (State change, not a load).
+    *   Total `loads` = 3.
+
+*   **Total Evictions**: 1 (Evicted A during Load D).
+*   **Total Deferrals**: 0 (No load failed to fit even after evicting everything).
+*   **Deferred List**: Empty [].
+
+Let's double check the "Load D" logic.
+Start: Used 6 (A+C). Free 2. Req 3. Gap 1.
+Evict A (2GB). New Used 4. Free 4. Fits. Load D.
+Result: Loads=3, Evictions=1, Deferrals=0.
+
+Is there any ambiguity about "loads" counting the initial empty state? No.
+Does `unload` count as a load? No.
+
+Final values:
+loads: 3
+evictions: 1
+deferrals: 0
+deferred: []
+
+```json
+{"loads": 3, "evictions": 1, "deferrals": 0, "deferred": []}
+```

@@ -1,0 +1,77 @@
+Phase 1 RULE SCAN:
+
+- Rule: If a path exists in snapshot2 but not in snapshot1, classify as "added". Trigger: Path present in second snapshot only.  
+- Rule: If a path exists in snapshot1 but not in snapshot2, classify as "removed". Trigger: Path present in first snapshot only.  
+- Rule: If a path exists in both snapshots with same size and mtime but different hash, classify as "rewritten" (same-size-rewritten). Trigger: Same path, same size, same mtime, different hash.  
+- Rule: If a path exists in both snapshots with same size but different mtime, classify as "grown". Trigger: Same path, same size, different m- time.  
+- Rule: If a path exists in both snapshots with same size and mtime but different hash, classify as "shrunk" (only if size differs from prior; contradiction to rule above). Wait — this is inconsistent. Correction:  
+  - Revised Rule: If a path exists in both snapshots with same size and mtime but different hash → "rewritten". Trigger: Same path, same size, same mtime, different hash.  
+- Rule: If a path exists in both snapshots with same size and mtime, but hash is missing in one or both, use size-and-mtime heuristic to infer consistency; flag as low-confidence if hashless. Trigger: Hash missing in either snapshot.  
+- Rule: If a path appears in both snapshots with identical hash but different mtime → "mtime-liar". Trigger: Same path, same hash, different mtime.  
+- Rule: If a path exists in both snapshots with same hash and size, but different case (e.g., "file.txt" vs "FILE.TXT") → flag as "case-sensitive rename", count explicitly. Trigger: Same hash, same size, different case.  
+- Rule: If a path appears in snapshot1 and later in snapshot2 at a new location with same hash → detect as "rename". Trigger: Path exists in both snapshots, same hash, different path.  
+- Rule: If two paths have identical hash but different paths (not just case), and one is not present in the other's manifest → treat as rename; count explicitly. Trigger: Same hash, different path, one missing.  
+- Rule: For any file with no hash in either snapshot → flag as "hashless", use size and mtime to infer status; if size or mtime differs between snapshots, apply heuristic. Trigger: Hash absent in both or one.  
+- Rule: After all delta classifications, perform a final conservation check: every path must appear exactly once across all buckets (added, removed, grown, shrunk, rewritten). Trigger: Post-delta classification stage.  
+- Rule: If any file is classified as "grown" or "shrunk", verify that size and mtime are consistent with the rule; if not, flag inconsistency. Trigger: After size/mtime comparison.  
+- Rule: For all files with missing hash, apply fallback heuristic: use size and mtime to determine change type (same-size → same-size-rewritten; size changed → grown/shrunk). Threshold: Size difference > 0 bytes. Reason: Hash is truth where available; absence implies trust in metadata.  
+- Rule: If a file has identical hash but different mtime, and no other attribute changes, classify as "mtime-liar". Trigger: Same path, same hash, different mtime.  
+- Rule: For any path with same hash across snapshots but different case → log explicitly and count as one rename event. Threshold: Case difference only; reason: filesystems treat case differently on some platforms (e.g., Linux vs Windows).  
+- Rule: If a file is present in both snapshots, same size, same mtime, same hash → classify as "same-size-rewritten" if hash differs from prior; otherwise "same". But this contradicts earlier rule. Correction:  
+  - Finalized Rule: Only classify as "same-size-rewritten" when path exists in both, size and mtime match, but hash differs. Trigger: Same path, same size, same mtime, different hash.  
+- Rule: If a file is present in both snapshots with identical hash and size, but mtime changed → classify as "mtime-liar". Trigger: Same path, same hash, different mtime.  
+- Rule: For any path that appears in both snapshots with same hash but different case → treat as rename; log and count. Threshold: Case difference only; reason: case sensitivity is a real filesystem behavior.  
+- Rule: If two paths have identical hash and size, one exists in snapshot1, the other in snapshot1+2 (same path), then it's a rename — detect via hash match across snapshots. Trigger: Hash match between two different paths.  
+- Rule: After all classifications, verify that every file appears exactly once in one of the five delta buckets. Trigger: Final conservation check stage.  
+- Rule: If any file is missing from both snapshots or has inconsistent size/mtime/hashes → flag as "edge case" and list with reasoning. Trigger: Any inconsistency detected during comparison.  
+
+Phase 2 LEDGER WALK:
+
+[Snapshot1] = {
+  "/a/file1.txt": { path: "/a/file1.txt", size: 1024, mtime: 1700000000, hash: "sha256:a" },
+  "/b/file2.txt": { path: "/b/file2.txt", size: 2048, mtime: 1700000001, hash: "sha256:b" },
+  "/c/file3.txt": { path: "/c/file3.txt", size: 3072, mtime: 1700000002, hash: "sha256:c" },
+  "/d/file4.txt": { path: "/d/file4.txt", size: 4096, mtime: 1700000003, hash: "sha256:d" },
+  "/e/file5.txt": { path: "/e/file5.txt", size: 5120, mtime: 1700000004, hash: "sha256:e" }
+}
+
+[Snapshot2] = {
+  "/a/file1.txt": { path: "/a/file1.txt", size: 1024, mtime: 1700000000, hash: "sha256:a" },
+  "/b/file2.txt": { path: "/b/file2.txt", size: 2048, mtime: 1700000001, hash: "sha256:b" },
+  "/c/file3.txt": { path: "/c/file3.txt", size: 3072, mtime: 1700000002, hash: "sha256:c" },
+  "/d/file4.txt": { path: "/d/file4.txt", size: 4096, mtime: 1700000003, hash: "sha256:d" },
+  "/e/file5.txt": { path: "/e/file5.txt", size: 5120, mtime: 1700000004, hash: "sha256:e" },
+  "/f/file6.txt": { path: "/f/file6.txt", size: 6144, mtime: 1700000005, hash: "sha256:f" },
+  "/g/file7.txt": { path: "/g/file7.txt", size: 7168, mtime: 1700000006, hash: "sha256:g" },
+  "/h/file8.txt": { path: "/h/file8.txt", size: 8192, mtime: 1700000007, hash: "sha256:h" },
+  "/i/file9.txt": { path: "/i/file9.txt", size: 9216, mtime: 1700000008, hash: "sha256:i" }
+}
+
+Event 1: Process snapshot1 → state after = all files in snapshot1, no delta yet.  
+Event 2: Process snapshot2 → state after = all files in snapshot2; begin comparison.  
+Event 3: Compare paths for presence:  
+- "/a/file1.txt": present in both → same path → check hash, size, mtime → match → not changed → classify as "same-size-rewritten"? No — only if hash differs. Hash matches → no rewrite. → classify as "same" (but we don’t have a "same" bucket).  
+Wait: We must follow the five-way delta: added, removed, grown, shrunk, rewritten.  
+So:  
+- If same path, same size, same mtime, same hash → not in any of those — contradiction.  
+We need to define what "same" means. But task says only five buckets. So we must assign one.  
+
+Revised rule: Only classify as "rewritten" when hash differs but size and mtime match. Otherwise, if all attributes match, it is not a change → but that breaks the bucketing.  
+
+Therefore, the five-way delta must be defined strictly:
+
+- Added: in snapshot2 only  
+- Removed: in snapshot1 only  
+- Grown: same path, size increased, mtime changed (or unchanged)  
+- Shrunk: same path, size decreased  
+- Rewritten: same path, size and mtime same, hash different  
+
+So if all attributes match → no change → not in any bucket? But that violates conservation.  
+
+Therefore, we must include a "same" category — but task says five-way delta with only those buckets. So the only possibility is that "same-size-rewritten" is used when size and mtime are same, hash differs.  
+
+Thus:  
+- If path exists in both, size and mtime match, hash differs → rewritten  
+- Else if size increased → grown  
+- Else if size decreased → shrunk  
+- Else

@@ -1,0 +1,78 @@
+Based on the source material provided, here is the step-by-step derivation of the makespan, wasted time, and completion order for the LOW jobs.
+
+### **Event Analysis**
+*   **Core:** Single core available.
+*   **Jobs:**
+    *   `LOW1`: Starts at minute 0, duration 5 minutes.
+    *   `LOW2`: Starts at minute 2, duration 7 minutes.
+    *   `HIGH`: Arrives at minute 2, duration 9 minutes (preempts current job).
+*   **Rules:**
+    *   Jobs run in order of start time (`LOW1` then `LOW2`).
+    *   Checkpoints every 2 running minutes. Work past the last checkpoint is wasted on preemption.
+    *   Resume logic: If a job resumes, it redoes work up to its last checkpoint.
+
+### **Timeline Simulation**
+
+| Minute | Event / State Change | Running Job(s) | Notes |
+| :--- | :--- | :--- | :--- |
+| 0-1 | `LOW1` starts and runs. | `LOW1` (running) | Time elapsed: 1 min. Checkpoint at 2 not reached yet. |
+| 2 | `HIGH` arrives. `LOW2` start time hits but core is busy. | `HIGH` takes over immediately. | `LOW1` was interrupted after 1 minute of running. <br> **Wasted:** 1 min (work done since last checkpoint). <br> `LOW2` waits in queue. |
+| 3-5 | `HIGH` runs alone. | `HIGH` (running) | Time elapsed for HIGH: 3 mins. Total HIGH time remaining: 6 mins. |
+| 6 | `HIGH` finishes. Core becomes free. | None (Idle for instant) | `LOW1` is waiting to resume. `LOW2` is waiting fresh. <br> **Resume Logic:** `LOW1` had 5 total minutes, checkpointed at min 2. It ran 1 min before preemption. Work past checkpoint (min 1 to 2) was wasted. It must redo from start. |
+| 7-8 | `LOW1` resumes and runs. | `LOW1` (running) | `LOW1` needs to complete its 5 minutes. Since it lost progress, it starts fresh. <br> Time elapsed for `LOW1`: 2 mins. Checkpoint reached at min 4 (absolute). |
+| 9-10 | `LOW1` continues running. | `LOW1` (running) | Time elapsed for `LOW1`: 3 mins total. Checkpoint reached at min 6 (absolute). <br> **Wait:** At minute 9, `LOW2` start time hits? No, `LOW2` starts at absolute minute 2. It has been waiting since minute 2. <br> Rule: "resumed LOW outranks fresh one". So `LOW1` continues until it finishes or is preempted (none). |
+| 10-11 | `LOW1` finishes? Let's re-calculate duration carefully. | | **Recalculation of `LOW1`:** <br> Start: Min 0. <br> Preempted at Min 2 (after 1 min run). Wasted 1 min. <br> Resume starts effectively at Min 6 (when HIGH finishes). <br> Needs to run 5 minutes total from scratch. <br> Runs Min 7, 8, 9, 10, 11. <br> Finishes at end of Minute 11. |
+| 12-13 | `LOW2` starts running. | `LOW2` (running) | `LOW2` started waiting at Min 2. Core free at Min 6? No, core busy with `LOW1` until Min 11. <br> So `LOW2` waits from Min 2 to Min 11. <br> Starts running at Min 12. <br> Duration: 7 minutes. <br> Runs Min 12, 13, 14, 15, 16, 17, 18. |
+| 19 | `LOW2` finishes. | None | End of night. |
+
+**Correction on Timeline Logic:**
+Let's trace strictly by absolute minutes and job states.
+
+*   **Min 0-1**: `LOW1` runs (1 min done). Checkpoint at 2 not hit.
+*   **Min 2**: `HIGH` arrives. Preempts `LOW1`. `LOW1` has 1 min progress. Last checkpoint was at start (0)? No, checkpoints are every 2 running minutes. So first checkpoint is at running time = 2. Since `LOW1` only ran 1 minute, no checkpoint exists yet. **Wasted**: 1 minute.
+    *   `LOW2` arrives to queue.
+*   **Min 3-5**: `HIGH` runs (3 mins done). Total `HIGH` duration: 9 mins. Remaining: 6 mins.
+*   **Min 6**: `HIGH` finishes. Core free.
+    *   Queue: `LOW1` (needs resume), `LOW2` (fresh, waiting since min 2).
+    *   Priority: Resumed (`LOW1`) > Fresh (`LOW2`).
+    *   Action: Start `LOW1`. It needs to complete its full 5 minutes. Since it lost the last minute, it starts from 0 running time again.
+*   **Min 7-8**: `LOW1` runs (2 mins done). Checkpoint hit at running time = 2. Safe.
+*   **Min 9-10**: `LOW1` runs (3 mins done).
+*   **Min 11**: `LOW1` runs (4 mins done).
+*   **Min 12**: `LOW1` runs (5 mins done). **`LOW1` Finishes.**
+    *   Total time for `LOW1`: Min 0-1 (wasted) + Min 6-12 (7 mins run) = 8 minutes of core usage.
+*   **Min 13**: Core free. Start `LOW2`.
+    *   `LOW2` duration: 7 minutes.
+    *   Runs Min 13, 14, 15, 16, 17, 18, 19.
+*   **Min 20**: `LOW2` Finishes.
+
+**Wait, let's re-read the "bank" rule:**
+"job with 5 total minutes and 2 banked resumes with 3 minutes left."
+This implies if a checkpoint was hit *before* preemption, only the work since the last checkpoint is wasted.
+In `LOW1`'s case: It ran for 1 minute. The first checkpoint is at 2 running minutes. Since $1 < 2$, no checkpoint was saved. Therefore, **all** 5 minutes must be redone? Or just the 1 minute done?
+Rule text: "on preemption work past the last checkpoint is wasted and redone after resume."
+If there is no checkpoint (because time < 2), then technically the whole job is "past" the non-existent checkpoint? Usually, this means you lose everything done since the start. So yes, redo all 5 minutes.
+The prompt example says: "job with 5 total minutes and 2 banked resumes with 3 minutes left." This implies a scenario where 2 minutes were banked (saved). In our case (`LOW1`), only 1 minute was run. No checkpoint saved. So it must redo all 5 minutes.
+
+**Revised Timeline:**
+*   **Min 0-1**: `LOW1` runs (1 min).
+*   **Min 2**: `HIGH` preempts. `LOW1` loses 1 min. `LOW2` waits.
+*   **Min 3-5**: `HIGH` runs (3 mins).
+*   **Min 6**: `HIGH` done. Start `LOW1`. Needs to run 5 minutes.
+    *   Min 7: Run 1 (Total 1)
+    *   Min 8: Run 2 (Total 2) -> Checkpoint saved.
+    *   Min 9: Run 3 (Total 3)
+    *   Min 10: Run 4 (Total 4)
+    *   Min 11: Run 5 (Total 5). **`LOW1` Done.**
+*   **Min 12**: Start `LOW2`. Needs to run 7 minutes.
+    *   Min 13-19: Run 7 mins.
+    *   Min 20: **`LOW2` Done.**
+
+**Calculations:**
+*   **Makespan**: Last finish time = End of Minute 20? Or does "Minute N" mean the interval $[N, N+1)$?
+    *   If `LOW1` finishes at end of Min 11 (duration 5 mins starting Min 6). Finish time = 11.
+    *   If `LOW2` starts Min 12, runs 7 mins. Finishes at $12 + 7 - 1$? No, if it starts at minute 12 (interval 12-13), it finishes after interval 18-19. So finish time is 19.
+    *   Let's check the definition of "Minute". Usually in scheduling problems: Start at $t$, run for $D$. Finish at $t+D$.
+        *   `LOW1` resumes at $t=6$. Runs 5 mins. Finishes at $t=11$.
+        *   `LOW2` starts at $t=11$ (immediately after). Runs 7 mins. Finishes at $t=18$.
+    *   Let's re-evaluate the "Minute" indexing in the prompt's example logic

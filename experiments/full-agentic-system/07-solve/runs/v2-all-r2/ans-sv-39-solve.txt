@@ -1,0 +1,73 @@
+### Phase 1 RULE SCAN
+*Every rule in the task that changes state during the event or claim list:*
+
+1.  **Arrival Rule**: LOW jobs enter the waiting pool ordered by their start minute; a resumed job outranks a fresh one at any tie. (Trigger: LOW job definition/arrival).
+2.  **Core Allocation Rule**: The core runs a LOW job if no HIGH is present and the queue is non-empty; otherwise, it runs nothing until an event triggers a change. (Trigger: Time advancement with waiting jobs).
+3.  **Checkpoint Banking Rule**: A job banks a checkpoint at `start_or_resume + 2` minutes absolute time, plus every 2 running minutes after that point. (Trigger: Job start or resume).
+4.  **Preemption Rule**: HIGH arrival instantly preempts the current LOW job if one is running. (Trigger: HIGH arrival event).
+5.  **Waste Calculation Rule**: Minutes run past the last banked checkpoint on a LOW job are wasted and must be redone upon resume. (Trigger: Preemption/Completion of HIGH).
+6.  **Resume Priority Rule**: When the core becomes free after preemption or completion, it picks the highest priority waiting LOW (resumed > fresh, lower start minute first). (Trigger: Core free event).
+
+---
+
+### Phase 2 LEDGER WALK
+*Applying events one at a time in strict arrival order:*
+
+**Fact Bullets:**
+*   LOW1: Duration 4 min, Start Minute 0.
+*   LOW2: Duration 3 min, Start Minute 3.
+*   HIGH: Arrival Minute 5, Duration 4 min.
+
+| minute | core | event |
+| :--- | :--- | :--- |
+| 0 | LOW1 (Start) | LOW1 starts at t=0 (Bank@2). Runs t[0..1]. |
+| 1 | LOW1 (Running) | LOW1 runs t[1]. Remaining: 3 min. Bank@4 reached? No (needs +2 running). |
+| 2 | LOW1 (Running) | LOW1 runs t[2]. Remaining: 2 min. **Bank@4 reached** (2 running mins elapsed since start). |
+| 3 | LOW1 (Running) | LOW1 runs t[3]. Remaining: 1 min. LOW2 starts at t=3 but waits (core busy). Bank@6 reached? No. |
+| 4 | LOW1 (Running) | LOW1 runs t[4]. **FINISH** at t=5. Total run: 4 min. Wasted: 0. Core free. |
+| 5 | HIGH (Start) | HIGH Arrives. Preempts nothing (LOW1 finished). **BUT WAIT**: Re-evaluating strict minute logic vs table line "finish". If LOW1 finishes at t=5, does it occupy t=4? Yes. Does it finish at the end of minute 4 or start of minute 5? Rule: "occupies minutes s .. s+n-1 and FINISHES AT minute s+n". Start 0, n=4 -> Occupies 0,1,2,3. Finishes at 4. |
+| **Correction on Walk**: Let's re-walk strictly based on the rule `Finishes At = Start + Duration`. |
+| **Re-Walk Table:** |
+| minute | core | event |
+| 0 | LOW1 (Start) | LOW1 starts t=0. Bank@2. Runs min 0. |
+| 1 | LOW1 (Running) | LOW1 runs min 1. Bank@4? No (needs +2 running). |
+| 2 | LOW1 (Running) | LOW1 runs min 2. **Bank@4 reached** (2 mins elapsed since start). |
+| 3 | LOW1 (Running) | LOW1 runs min 3. Wait, LOW2 starts at t=3 but waits. |
+| 4 | LOW1 (Running) | LOW1 runs min 4. **FINISHES AT minute 5** (0+4). Core frees up at end of minute 4? No, finishes *at* minute 5 means it is done for the duration of minute 4 and ready for minute 5? Or does it finish at the instant minute 5 starts? "Finishes At minute s+n". Start 0, n=4 -> Finishes At 4. |
+| **Let's try the other interpretation common in discrete event simulation**: Job occupies [s, s+1, ..., s+n-1]. Finish time is s+n. |
+| t=0: LOW1 starts. Occupies min 0. Bank@2 (absolute). |
+| t=1: LOW1 runs min 1. Bank@4? No. |
+| t=2: LOW1 runs min 2. **Bank@4 reached** (running mins = 3? Wait. Start at 0. Run min 0, 1, 2. That is 3 running minutes. Bank at +2 means after 2 running minutes. So bank hits after min 1 and min 2 complete? Or absolute time s+2=2? Rule: "banks a checkpoint at minute s+2". Start s=0 -> Bank at t=2. Correct. |
+| t=3: LOW1 runs min 3. Bank@6 (s+4). |
+| t=4: LOW1 runs min 4. **FINISHES AT minute 5**. Core frees up at end of minute 4? No, finishes *at* minute 5 implies the state is "Finished" starting from minute 5? Or does it mean the job completes the work required to reach time 5? Let's assume standard: Work done in [0,1], [1,2], [2,3], [3,4]. Job ends. Next event at t=5 starts new job or HIGH arrives. |
+| **CRITICAL CHECK**: LOW2 starts at minute 3. At t=3, core is busy with LOW1. LOW2 waits. |
+| t=5: HIGH Arrives. Runs for 4 mins (occupies 5,6,7,8). Finishes at 9. |
+| **Resume Logic**: After HIGH finishes at 9, core is free. Waiting queue: LOW2 (Start 3). Only one job. Starts at 9. |
+| **Wasted Calculation**: Did LOW1 waste anything? It finished naturally before HIGH arrived. No preemption of running time occurred. Bank was hit at t=2. Total run 4 mins. Wasted = 0. |
+| **Order**: LOW1 finished at 5. LOW2 starts at 9, runs 3 mins (9,10,11). Finishes at 12. Order: LOW1, LOW2. |
+| **Makespan**: Max finish time = 12? Or does HIGH define the clock? "makespan counts from the last finish". Last finish is LOW2 at 12? Or HIGH finishes at 9? Usually makespan includes the longest running entity or the system completion. Task says: "makespan counts from the the last finish." If LOW2 finishes at 12, that is the last finish. But wait, does HIGH preemption logic imply something else? |
+| **Re-read Preemption**: "HIGH arrives... instantly preempting whatever LOW job is running". In this scenario (Interpretation A), LOW1 finished before HIGH arrived. So no preemption. |
+| **Is there a trap?** "LOW2 runs 3 minutes starting at minute 3." Does it wait? Yes, core busy. |
+| **Checkpoints**: LOW1 banks at t=2. Runs 4 mins total. Wasted = 0. |
+| **Timeline Check**:
+    *   T=0: LOW1 starts.
+    *   T=5: LOW1 finishes (0+4).
+    *   T=5: HIGH arrives? Or does it arrive and find core free? If core is free at T=5, can HIGH start immediately? Yes.
+    *   T=9: HIGH finishes (5+4).
+    *   T=9: LOW2 starts (was waiting since T=3).
+    *   T=12: LOW2 finishes (9+3).
+    *   Makespan = 12. Wasted = 0. Order = ["LOW1", "LOW2"].
+
+*Wait, let's check the "Orientation Rehearsal" logic again to ensure I'm not missing a "busy core" nuance.*
+Rehearsal: LOW1 (7m) @ 0. HIGH (2m) @ 3.
+T=0..2: LOW1 runs. Bank at T=2 (s+2).
+T=3: HIGH arrives. Preempts LOW1.
+LOW1 wasted: Total 7, Banked 2 (at T=2). Wait, running mins = 3 (min 0,1,2). Did it bank after min 2? "Banks a checkpoint at minute s+2". Yes. So 3 mins run, last bank at t=2. Wasted = Total - Banked = 7-2 = 5? No, in rehearsal example: "LOW1 held core minutes 0, 1 and 2... 3rd minute was unbanked... so 1 minute wasted".
+Ah! The rule is "Banks a checkpoint at s+2 AND again every 2 running minutes after".
+Rehearsal Walk:
+Start s=0. Bank at t=2 (s+2).
+Running mins: Min 0, Min 1, Min 2 complete? Or does it bank *after* completing minute 2?
+Text: "a job that starts or resumes at minute s banks a checkpoint at minute s+2". This is absolute time.
+Text: "and again every 2 running minutes after".
+In Rehearsal: T=0,1,2 run (3 mins). Bank at t=2.
+If HIGH arrives at T=3,

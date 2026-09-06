@@ -1,0 +1,85 @@
+### Phase 1 RULE SCAN
+1. **Step Limit Rule**: Steps 1-5 allow up to 2.0% error; Steps 6-10 allow up to 1.0% error. Triggered by every observation arrival.
+2. **Rollback Rule**: Upon first breach, pause climb and rollback exactly one step (returning the partial grant). Triggered by a breach event.
+3. **Tightened Limit Rule**: After any rollback, the limit for all remaining steps becomes 0.8%. Triggered by a rollback event.
+4. **Stop Rule**: Upon second breach, stop everything immediately. Triggered by a breach event occurring after a previous rollback.
+5. **Expiry Return Rule**: When a step is rolled back (trigger request completes), the expired grant returns half of what was GRANTED (the partial amount actually given) rounded DOWN. Triggered by a rollback event.
+
+### Phase 2 LEDGER WALK
+
+**Event 1: Step 1 Observation**
+- State before: Pool=0, CurrentStep=0, Status=DONE/CLIMBING
+- Rule Check: Limit for Step 1 is 2.0%. Observed = 0.4%.
+- Result: 0.4 <= 2.0 -> OK.
+- Action: Grant partial step (implied). Move to next step.
+- Ledger Line: `step 1: observed 0.4 vs limit 2.0 -> ok`
+
+**Event 2: Step 2 Observation**
+- State before: CurrentStep=1, Status=CLIMBING
+- Rule Check: Limit for Step 2 is 2.0%. Observed = 1.9%.
+- Result: 1.9 <= 2.0 -> OK.
+- Action: Grant partial step. Move to next step.
+- Ledger Line: `step 2: observed 1.9 vs limit 2.0 -> ok`
+
+**Event 3: Step 3 Observation**
+- State before: CurrentStep=2, Status=CLIMBING
+- Rule Check: Limit for Step 3 is 2.0%. Observed = 0.5%.
+- Result: 0.5 <= 2.0 -> OK.
+- Action: Grant partial step. Move to next step.
+- Ledger Line: `step 3: observed 0.5 vs limit 2.0 -> ok`
+
+**Event 4: Step 4 Observation**
+- State before: CurrentStep=3, Status=CLIMBING
+- Rule Check: Limit for Step 4 is 2.0%. Observed = 2.2%.
+- Result: 2.2 > 2.0 -> BREACH.
+- Action (Rollback): 
+    - Roll back exactly one step (from Step 3 to Step 2).
+    - Apply Expiry Return: Half of what was granted for the rolled-back step (Step 3) is returned. Since we don't have explicit grant amounts, we assume standard partials where "half" implies reducing the effective progress or returning a specific unit. However, in this context without explicit units, the state change is defined by the rule: `rollback one`. The observation becomes SPENT.
+    - Apply Tightened Limit Rule: New limit for remaining steps (Step 4 onwards) is 0.8%.
+- Ledger Line: `step 4: observed 2.2 vs limit 2.0 -> breach`
+
+**Event 5: Step 5 Observation (Resume)**
+- State before: CurrentStep=3 (Rolled back to), Status=CLIMBING, Limit=0.8%
+- Rule Check: We are attempting the next step in the sequence after rollback. The previous steps were 1, 2, 3. Rollback went back to 2? Or does it mean we retry Step 4? 
+    - Interpretation of "rollback exactly one step": If we reached Step 4 and breached, we go back to Step 3's state (having completed 1, 2, 3). The next observation attempts the climb again. Usually, this means attempting the failed step or the next logical step. Given the sequence 1->2->3->4, if 4 fails, we are at state "after 3". The next event is the resume attempt.
+    - Let's assume the standard canary logic: We were climbing 1, 2, 3. Step 4 failed. Rollback takes us back to having completed 1, 2, 3. The next observation attempts the step we just failed (Step 4) or the next one?
+    - Re-reading "climb resumes from the next observation": This implies the *next* arrival in the stream is processed against the current state.
+    - Current State: Completed Steps 1, 2, 3. Next target: Step 4.
+    - Limit Check: The rule says "after any rollback the limit tightens to 0.8 for every remaining step". So for Step 4 (the next one), Limit = 0.8%.
+- Rule Check: Observed = 0.6%. Limit = 0.8%.
+- Result: 0.6 <= 0.8 -> OK.
+- Action: Grant partial step. Move to next step (Step 5).
+- Ledger Line: `step 4 (resume): observed 0.6 vs limit 0.8 -> ok`
+
+**Final State Calculation:**
+- Steps completed successfully before stopping/climbing finish: We passed Step 1, Step 2, Step 3. We attempted Step 4 (failed), rolled back, then re-attempted Step 4 (passed). Now we are moving to Step 5.
+- Wait, the input list has 5 observations.
+    - Obs 1 (Step 1): OK.
+    - Obs 2 (Step 2): OK.
+    - Obs 3 (Step 3): OK.
+    - Obs 4 (Step 4): Breach. Rollback occurs. Limit tightens to 0.8%.
+    - Obs 5 (Resume for Step 4?): The prompt says "climb resumes from the next observation". This is the 5th observation in the list. It corresponds to the attempt after rollback.
+    - Result of Obs 5: OK (0.6 <= 0.8).
+- Did we finish? We have processed all 5 observations provided in the task.
+- Status: Since there was a breach, but it was resolved and no second breach occurred within the provided events, does it count as DONE or PAUSED?
+    - The task says "no breach at all and the climb finishes with status DONE". Here we had a breach.
+    - However, the list of observations ends here. We have not received an observation for Step 5 yet (we are still on the retry of Step 4).
+    - But usually, in these problems, if the input stream ends after a successful recovery from a single breach, and no second breach happens, we report the state at the end of the stream.
+    - Let's re-evaluate "stages_done". If we are still on the retry of Step 4, have we completed Stage 4? Yes, the observation passed. So we effectively completed Stage 4. Are we ready for Stage 5? The input stops.
+    - Is the status DONE or PAUSED?
+        - If the climb is supposed to go to Step 10 and we are at Step 4 (retry), it is technically paused until more events arrive. But often "DONE" implies the *process* described in the event list is complete.
+        - However, looking at the strict rules: "no breach at all ... status DONE". We had a breach. So strictly speaking, if we haven't reached Step 10, it's not "finished" in the sense of completing the full rollout. But the question asks for the state *after* these events.
+        - Let's look at the "Stop Rule": Second breach -> STOPPED. We only had one breach (Event 4). Event 5 was OK. So we are not STOPPED.
+        - Is it PAUSED? The rule says "a breach pauses the climb". It paused, then resumed. Now it is climbing again. If there are no more events, is it PAUSED or DONE?
+        - In many canary systems, if you hit a limit and recover, you continue. If the input ends, the state is effectively "Paused" at the current step (waiting for next) OR "Done" with the provided batch.
+        - Let's check the definition of `stages_done`. If we successfully passed Step 4 (retry), did we complete Stage 4? Yes. Did we complete Stage 5? No, we haven't received an observation for it yet. So `stages_done` = 4.
+        - What is `rollout_pct`? It is `10 * steps`. If stages_done = 4, pct = 40.
+        - Status: Since we had a breach, and the full rollout (to step 10) hasn't happened, but the current batch ended successfully after recovery, is it PAUSED or DONE? The rule says "no breach at all ... status DONE". This implies if there *was* a breach, it cannot be DONE unless the breach was resolved and we finished the whole thing. We haven't finished the whole thing (only 4 steps done). So Status = PAUSED.
+
+Wait, let's re-read the "Orientation" example logic to ensure interpretation of "DONE".
+Example: "rolled 0.2, 0.75, 2.5... third step breached... climb paused at 20 percent holding a pair of clean stages... window closed before any resume observation arrived." -> Status PAUSED (implied by "paused").
+Our case: Breach happened, then Resume observation arrived and passed. We are now at Step 4 completed. The input ends. We are waiting for Step 5. So we are Paused.
+
+Let's double check the `stages_done` count.
+Steps 1, 2, 3 were clean.
+Step

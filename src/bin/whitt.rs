@@ -202,6 +202,11 @@ enum Commands {
         /// Minimum free /tmp space in MB required
         #[arg(long, default_value = "1024")]
         min_tmp_space: u64,
+
+        /// Resume an interrupted workflow run from its checkpoint.jsonl
+        /// (completed steps are skipped, outputs restored)
+        #[arg(long)]
+        resume: bool,
     },
 
     /// Load and validate unified YAML workflow configuration
@@ -325,8 +330,17 @@ async fn main() -> Result<()> {
             agent_command(&cli.url, cli.model, task, max_steps, cli.verbose, AgentOpts { allowed_tools, forbidden_tools, allowed_paths, forbidden_paths }).await
         }
 
-        Commands::Benchmark { prompt, max_tokens, models_dir, model_list, prompts, output, filter_size_max, filter_size_min, filter_name, compare_gpu_cpu, output_dir, workflow, preflight, cooldown, load_timeout, min_tmp_space } => {
+        Commands::Benchmark { prompt, max_tokens, models_dir, model_list, prompts, output, filter_size_max, filter_size_min, filter_name, compare_gpu_cpu, output_dir, workflow, preflight, cooldown, load_timeout, min_tmp_space, resume } => {
             tracing::info!("[WHT-BEN001] benchmark command, max_tokens={}, prompts={}", max_tokens, prompts);
+
+            if let Some(ref wf) = workflow {
+                if !std::path::Path::new(wf).exists() {
+                    anyhow::bail!(
+                        "--workflow file not found: {} — refusing to run (no fallback to discovery benchmark)",
+                        wf
+                    );
+                }
+            }
 
             if workflow.is_none() && (models_dir.is_some() || model_list.is_some()) {
                 tracing::warn!("[DEPRECATED] Direct benchmark mode (--models-dir/--model-list without --workflow) is deprecated. Use --workflow flag instead. See docs/benchmarks/workflows/ for YAML templates.");
@@ -357,7 +371,7 @@ async fn main() -> Result<()> {
                     min_tmp_space_mb: min_tmp_space,
                 };
 
-                let mut runner = BenchmarkRunner::new(config);
+                let mut runner = BenchmarkRunner::new(config).with_resume(resume);
                 let result = runner.run().await.context("Benchmark run failed")?;
 
                 match output.as_str() {

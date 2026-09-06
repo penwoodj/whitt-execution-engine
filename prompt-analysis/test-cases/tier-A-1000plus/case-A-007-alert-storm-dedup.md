@@ -1,0 +1,61 @@
+# Tier-A Case 007 — Alert Storm Dedup (HEAVY)
+
+the task is alert storm dedup, and the details are below, all of them. build me a full working analysis pipeline, that's the job, workspace is /tmp/opencode/alert-run, and read the whole thing before starting because the constraints at the end apply to every step, not just the last one.
+
+context so you're not guessing: a monitoring system that fired 2000 alerts in one bad hour, after that alerts have service, severity, message template, and timestamp, and most alerts are the same underlying incident fanned out across services, and severities are critical, warning, info, and one fat-fingered CRITICAL. think of this as a miniature version of the real jobs i hand off: messy inputs, stated rules, honest outputs. the rules you invent matter as much as the numbers you compute, because i'm going to reuse this when the data is real and i need to trust the machinery.
+
+the whole point of this exercise is that the working files and the checkable outputs exist on disk where i can poke at them, so every stage leaves real artifacts, and the artifacts are the deliverable, not the chat narration around them. if a step produces nothing i can open, it didn't happen.
+
+one more thing, every number you quote me at the end better come from an actual run you can point at, because should-be-roughly-nine is not a result, it's a vibe.
+
+and no leaving a to-do in a comment for later-me, later-me is you in ten minutes, finish the job.
+
+and when i say documented i mean in a file on disk, not in the chat log where it scrolls away forever.
+
+the asks, in order, and each one writes its own output so i can see where things broke when they break:
+
+stage by stage: group alerts into incidents by template and time proximity, define the rule and write it down. and be precise about what counts as done for that one, because vague is where shortcuts hide.
+after that count incidents, the biggest one, its span, and its service blast radius. edge cases belong in the output, not in your head, list what you hit and what you did with each.
+first find alerts that fired more than ten times for the same thing, the noise makers. and be precise about what counts as done for that one, because vague is where shortcuts hide.
+stage by stage: severity normalization pass including the all-caps typo. and be precise about what counts as done for that one, because vague is where shortcuts hide.
+5. storm-report.md plus storm.json, and the grouping rule goes in a rules.md. with the method visible, not just the result, the how is the deliverable here as much as the what.
+
+the data has problems, deliberately, and handling them is part of the job not an error condition: timestamps are in two formats mixed together and eight alerts have timestamps out of order. those aren't obstacles, they're the actual test, a clean run on clean data is worthless and i've said this before. every one of those needs a documented disposition, handled, quarantined, or rejected, with the rule cited.
+
+timings, real ones, timestamps around each stage, a table at the end. not vibes.
+
+logs per stage, one line each is plenty, i want to see where time went and where things broke without spelunking.
+
+the workspace layout is yours to design but say it in the readme, so the structure is a decision not an accident.
+
+error messages should say what failed and where, not just that something did, because 'an error occurred' has never helped anybody.
+
+when a rule and a row disagree, both go in the output, the flagged row and the rule that flagged it, side by side.
+
+if two stages could run in either order and it doesn't matter, pick one and move on, i don't need a committee meeting about it.
+
+keep the rules you invent in a rules.md next to the scripts, so when i come back in a week i know why the machine did what it did.
+
+the end state on disk should look like something a stranger could pick up: a readme pointing at everything, scripts that run in order, outputs that reproduce, and the report. if a stranger couldn't rerun this from the files alone, it's not done.
+
+anything you cache or skip for speed gets a note, because invisible shortcuts are how results stop being reproducible.
+
+percentages need denominators next to them always, twelve percent of what, because a percentage alone is half a number.
+
+everything gets a run twice test before you call it done, because the first run always works and the second one is where the state bugs live.
+
+and a note on tone in the outputs: plain sentences, tables where tables belong, no buzzword garbage, i want to skim this in two minutes and know exactly what happened.
+
+verification is a first-class deliverable here. independent recomputation from the raw files, its own code path, and a conservation check that everything entering the pipeline is accounted for at the end, kept, rejected, merged, flagged, the books have to balance. nonzero exit on failure, actual output shown in your report.
+
+don't stop halfway to ask me questions you can answer yourself. names, orderings, column formats, those are yours. only come back at a real fork that changes what i asked for, and there isn't one hiding in here. don't skip steps and don't tell me it's done until the verifier has passed and you've actually looked at the outputs yourself. and keep it dependency free, standard library only, this machine gets cranky.
+
+i'd rather have an ugly table that's right than a beautiful chart that's approximate, so default to tables unless the data genuinely needs a picture.
+
+and if you find something in the data that contradicts what i said above, the data wins, report the contradiction, don't quietly bend either one.
+
+if a stage can honestly be a one-liner, let it be a one-liner, padding steps to look thorough is its own kind of lie.
+
+if any rule you write down feels arbitrary, good, that means you noticed, write the threshold and the reason next to it so future-me can argue with it.
+
+finish with the report pasted in chat so i can skim without opening files, plus paths and timings. one line on what surprised you.

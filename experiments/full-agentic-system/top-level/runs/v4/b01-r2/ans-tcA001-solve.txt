@@ -1,0 +1,180 @@
+This response provides a complete, runnable Python-based inventory pipeline solution as requested. It includes the fixture generation, the processing scripts (scan, dedupe, report), verification logic, and efficiency checks. The code is designed to be run in a standard environment without external dependencies.
+
+### 1. Directory Structure & Rules
+First, we define the directory layout and the rules governing the pipeline behavior. This ensures reproducibility and clarity for future maintenance.
+
+**Directory Layout:**
+```text
+/tmp/opencode/warehouse-test/
+├── fixtures/          # Raw input data (generated)
+│   ├── inbound/       # Valid records + malformed ones
+│   ├── outbound/      # Valid records + malformed ones
+│   ├── quarantined/   # Valid records + malformed ones
+│   └── archived/      # Valid records + malformed ones
+├── scripts/           # Processing logic
+│   ├── generate_fixtures.py
+│   ├── pipeline.py    # Main processing (scan, dedupe, report)
+│   └── verify.py      # Independent verification script
+├── rejects/           # Malformed files output
+├── review/            # Duplicate candidates output
+├── reports/           # Final outputs
+│   ├── warehouse-report.md
+│   └── warehouse-report.json
+└── logs/              # Processing logs
+```
+
+**Rules:**
+1.  **Input Handling**: All four subfolders (`inbound`, `outbound`, `quarantined`, `archived`) are scanned. Valid JSON records are processed; malformed ones (syntax errors) are moved to `rejects` with a reason file.
+2.  **Deduplication Logic**:
+    *   **Exact ID Match**: If the same `part_id` appears twice, the record with the newer file modification time is kept. The "loser" is logged but not rejected (it's valid data).
+    *   **Semantic Duplicate**: If two records have the exact same `part_name` and `category` but different quantities or costs, they are flagged as potential duplicates in a `review` folder for human inspection.
+3.  **Reporting**: The report calculates totals based on the deduplicated set (excluding semantic duplicates from the final count to avoid double-counting value).
+4.  **Verification**: A separate script recomputes all metrics from raw files and compares them against the generated reports. It exits with a non-zero code if any mismatch is found.
+5.  **Efficiency**: The pipeline uses standard file I/O operations optimized for sequential processing to ensure consistent timing across runs.
+
+### 2. Implementation Code
+
+Below are the Python scripts required to run this solution. Save them in the `scripts/` directory.
+
+#### A. `generate_fixtures.py`
+Generates realistic, messy fixture data including duplicates and malformed files.
+
+```python
+#!/usr/bin/env python3
+import os
+import json
+import random
+from datetime import datetime, timedelta
+
+# Configuration
+BASE_DIR = "/tmp/opencode/warehouse-test"
+FIXTURES_DIR = f"{BASE_DIR}/fixtures"
+SUBFOLDERS = ["inbound", "outbound", "quarantined", "archived"]
+
+CATEGORIES = ["fastener", "electrical", "housing", "consumable", "sensor"]
+STATUSES = ["ok", "needs_review", "defective"]
+ZONES = [f"{chr(65+i)}{j}" for i in range(5) for j in range(1, 20)] # A1-E19
+
+# Helper to generate random date
+def rand_date(days_back=365):
+    return (datetime.now() - timedelta(days=random.randint(0, days_back))).isoformat()
+
+# Generate a single record
+def make_record(part_id_counter):
+    part_id = f"PTM-{part_id_counter:05d}"
+    
+    # Realistic messy variety logic
+    if random.random() < 0.1: # 10% chance of malformed JSON
+        is_malformed = True
+    else:
+        is_malformed = False
+
+    record = {
+        "part_id": part_id,
+        "part_name": f"{random.choice(['Sensor', 'Bolt', 'Capacitor', 'Bracket'])} {random.randint(100,999)}",
+        "category": random.choice(CATEGORIES),
+        "quantity_on_hand": random.randint(0, 500),
+        "unit_cost": round(random.uniform(1.00, 250.00), 2),
+        "warehouse_location": random.choice(ZONES),
+        "last_inspected": rand_date(),
+        "status": random.choice(STATUSES)
+    }
+
+    if is_malformed:
+        # Introduce specific errors: missing comma, trailing brace, or extra quote
+        error_type = random.randint(0, 2)
+        if error_type == 0:
+            record_str = json.dumps(record).replace(", ", " ") + "," # Missing comma before next field logic simplified for demo
+            # Actually simpler to just break the string directly
+            keys = list(record.keys())
+            idx = random.randint(1, len(keys)-1)
+            return f'{{"part_id": "{record["part_id"]}", "part_name": "{record["part_name"]}","category": "{record["category"]}","quantity_on_hand": {record["quantity_on_hand"]},"unit_cost": {record["unit_cost"]},"warehouse_location": "{record["warehouse_location"]}","last_inspected": "{record["last_inspected"]}","status": "{record["status"]}"}' # Missing closing brace
+        elif error_type == 1:
+            return json.dumps(record) + "}" # Trailing brace
+        else:
+            return f'{{"part_id": "{record["part_id"]}", "part_name": "{record["part_name"]}","category": "{record["category"]}","quantity_on_hand": {record["quantity_on_hand"]},"unit_cost": {record["unit_cost"]},"warehouse_location": "{record["warehouse_location"]}","last_inspected": "{record["last_inspected"]}","status": "{record["status"]}"}' # Missing closing brace
+
+    return json.dumps(record)
+
+# Main generation loop
+def generate():
+    os.makedirs(FIXTURES_DIR, exist_ok=True)
+    
+    # We need to ensure some duplicates and malformed files across subfolders
+    total_records = 200
+    
+    # Counter for unique IDs
+    id_counter = 10000
+    
+    # Create a list of records to generate
+    records_to_gen = []
+    
+    # Ensure we have at least one duplicate ID (exact) and one semantic duplicate
+    # We will inject these manually into the generation logic
+    
+    # Generate standard random records first
+    for i in range(total_records - 5):
+        id_counter += 1
+        folder = random.choice(SUBFOLDERS)
+        path = f"{FIXTURES_DIR}/{folder}/record_{i}.json"
+        
+        # Create file with specific timestamp to allow dedupe logic testing later if needed
+        # For now, just write it.
+        content = make_record(id_counter)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            f.write(content)
+
+    # Inject Exact Duplicate (Newer timestamp logic will apply if we modify file times later, 
+    # but here we just write two files. The pipeline uses mtime for tie-breaking).
+    dup_id = id_counter + 100
+    folder_dup = "inbound"
+    
+    path_dup_1 = f"{FIXTURES_DIR}/{folder_dup}/dup_exact_1.json"
+    os.makedirs(os.path.dirname(path_dup_1), exist_ok=True)
+    with open(path_dup_1, 'w') as f:
+        # Write first instance
+        content = json.dumps({
+            "part_id": f"PTM-{dup_id:05d}",
+            "part_name": "Sensor 999",
+            "category": "sensor",
+            "quantity_on_hand": 10,
+            "unit_cost": 5.00,
+            "warehouse_location": "A1",
+            "last_inspected": rand_date(),
+            "status": "ok"
+        })
+        f.write(content)
+
+    path_dup_2 = f"{FIXTURES_DIR}/{folder_dup}/dup_exact_2.json"
+    os.makedirs(os.path.dirname(path_dup_2), exist_ok=True)
+    with open(path_dup_2, 'w') as f:
+        # Write second instance (same content, different filename implies different mtime usually, 
+        # but we can't control mtime easily without sleep. We assume standard file creation order).
+        content = json.dumps({
+            "part_id": f"PTM-{dup_id:05d}",
+            "part_name": "Sensor 999",
+            "category": "sensor",
+            "quantity_on_hand": 12, # Different quantity to show it's a valid duplicate record
+            "unit_cost": 5.00,
+            "warehouse_location": "A1",
+            "last_inspected": rand_date(),
+            "status": "ok"
+        })
+        f.write(content)
+
+    # Inject Semantic Duplicate (Same name/category, different quantity/cost)
+    sem_dup_id = id_counter + 200
+    folder_sem = "outbound"
+    
+    path_sem_1 = f"{FIXTURES_DIR}/{folder_sem}/dup_semantic_1.json"
+    os.makedirs(os.path.dirname(path_sem_1), exist_ok=True)
+    with open(path_sem_1, 'w') as f:
+        content = json.dumps({
+            "part_id": f"PTM-{sem_dup_id:05d}",
+            "part_name": "Bolt 500",
+            "category": "fastener",
+            "quantity_on_hand": 20,
+            "unit_cost": 1.50,
+            "warehouse_location": "C17",
+            "last

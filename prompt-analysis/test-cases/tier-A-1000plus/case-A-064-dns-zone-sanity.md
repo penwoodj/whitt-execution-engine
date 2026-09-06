@@ -1,0 +1,61 @@
+# Tier-A Case 064 — Dns Zone Sanity (SYNTH)
+
+next up, dns zone sanity, whole thing specced below. i want you to build a small but complete tool with its own verification for me, the whole thing lives under /tmp/opencode/dns-run and nothing outside that folder gets touched, i mean it, no repo files, no home directory surprises, i've cleaned up after tools that did that before and i'm not doing it again.
+
+the shape of the data: a zone file dump, 200 records, a, cname, mx, txt, ns, plus sanity rules: cname cannot coexist with other records on a name, mx must point to a name with an a record, no orphans, then one dangling cname chain of depth 3 exists. ttl inconsistency across a record set matters for cache coherence. think of this as a miniature version of the real jobs i hand off: messy inputs, stated rules, honest outputs. the rules you invent matter as much as the numbers you compute, because i'm going to reuse this when the data is real and i need to trust the machinery.
+
+and if you find something in the data that contradicts what i said above, the data wins, report the contradiction, don't quietly bend either one.
+
+the deliverables have two audiences, me skimming on a phone and a verifier grinding line by line, so every report needs the human table up top and the machine copy underneath, same numbers, no drift between them. the day those two disagree is the day i stop trusting the whole setup.
+
+the workspace layout is yours to design but say it in the readme, so the structure is a decision not an accident.
+
+one more thing, every number you quote me at the end better come from an actual run you can point at, because should-be-roughly-nine is not a result, it's a vibe.
+
+timings, real ones, timestamps around each stage, a table at the end. not vibes.
+
+concretely, do these stages, numbered so you don't creative-order them on me:
+
+1. parse the zone file strictly, every line classified or flagged. actual numbers in the output, computed, not eyeballed, and traceable back to input rows.
+cname exclusivity check, mx target resolution, orphan and dangling-chain detection with the chain printed. and don't round anything into meaninglessness, i'd rather see the ugly precise number than a tidy lie.
+3. ttl variance report per name, records on one name with wildly different ttls. and be precise about what counts as done for that one, because vague is where shortcuts hide.
+after that the fix list, record, problem, suggested repair, ordered by severity. actual numbers in the output, computed, not eyeballed, and traceable back to input rows.
+5. dns.md plus dns.json plus fixes.csv. edge cases belong in the output, not in your head, list what you hit and what you did with each.
+
+logs per stage, one line each is plenty, i want to see where time went and where things broke without spelunking.
+
+i'd rather have an ugly table that's right than a beautiful chart that's approximate, so default to tables unless the data genuinely needs a picture.
+
+keep the rules you invent in a rules.md next to the scripts, so when i come back in a week i know why the machine did what it did.
+
+now the mess, because a pipeline that only works on clean data is worthless to me: one record has a wildcard label, comments hide two actual records, and a cname points at a name defined only outside this zone which is legal, do not flag it. those aren't obstacles, they're the actual test, a clean run on clean data is worthless and i've said this before. write down what you did with each defect and why, in the file, not the chat.
+
+and a note on tone in the outputs: plain sentences, tables where tables belong, no buzzword garbage, i want to skim this in two minutes and know exactly what happened.
+
+when a rule and a row disagree, both go in the output, the flagged row and the rule that flagged it, side by side.
+
+if a stage can honestly be a one-liner, let it be a one-liner, padding steps to look thorough is its own kind of lie.
+
+and when i say documented i mean in a file on disk, not in the chat log where it scrolls away forever.
+
+and no leaving a to-do in a comment for later-me, later-me is you in ten minutes, finish the job.
+
+on outputs: every stage writes to its own subfolder under the workspace, naming is yours but be consistent, and the final report goes both human, markdown with actual tables, and machine, json with the same numbers. i'll be checking that the two agree, and i'll be unhappy if they don't.
+
+error messages should say what failed and where, not just that something did, because 'an error occurred' has never helped anybody.
+
+verification is a first-class deliverable here. independent recomputation from the raw files, its own code path, and a conservation check that everything entering the pipeline is accounted for at the end, kept, rejected, merged, flagged, the books have to balance. nonzero exit on failure, actual output shown in your report.
+
+if two stages could run in either order and it doesn't matter, pick one and move on, i don't need a committee meeting about it.
+
+if any rule you write down feels arbitrary, good, that means you noticed, write the threshold and the reason next to it so future-me can argue with it.
+
+anything you cache or skip for speed gets a note, because invisible shortcuts are how results stop being reproducible.
+
+everything gets a run twice test before you call it done, because the first run always works and the second one is where the state bugs live.
+
+don't skip steps and don't tell me it's done until the verifier has passed and you've actually looked at the outputs yourself. and keep it dependency free, standard library only, this machine gets cranky. assume defaults for anything unspecified and note what you picked in a decisions file, i'd rather read three lines of your reasoning than answer three questions. don't stop until every stage above is done and verified.
+
+percentages need denominators next to them always, twelve percent of what, because a percentage alone is half a number.
+
+finish with the report pasted in chat so i can skim without opening files, plus paths and timings. one line on what surprised you.

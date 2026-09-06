@@ -1,0 +1,98 @@
+To determine the makespan, wasted minutes, and completion order, we must simulate the core's activity minute-by-minute based on the gathered events and rules.
+
+**Gathered Events:**
+1.  **LOW1**: Starts at Minute 0, Duration 5 mins. Checkpoints every 2 running minutes (at min 2, 4). Banks checkpoints at start+2 and every 2 running mins.
+    *   Running schedule: [0-2], [2-4], [4-6]...
+    *   Checkpoint status: Banked after minute 2 and minute 4 of absolute time? Let's trace carefully. Rule says "checkpoint every 2 completed minutes of running time".
+        *   Starts at 0.
+        *   Minute 1 (abs): Running.
+        *   Minute 2 (abs): Running (2 mins total). Checkpoint reached. Work saved: 0-2.
+        *   Minute 3 (abs): Running (3 mins total).
+        *   Minute 4 (abs): Running (4 mins total). Checkpoint reached. Work saved: 0-4.
+    *   **Note**: The rule also mentions "job with 5 total minutes and 2 banked resumes with 3 minutes left". This implies the checkpoint at absolute minute 4 is NOT considered a valid save for the specific scenario where HIGH preempts, OR that the checkpoint logic requires a specific condition. Let's re-read: "bank landing on exact minute HIGH arrives still counts".
+    *   Wait, let's look at the phrasing: "after resume job redoes every minute past its last bank". If HIGH arrives at 3, does it pre-empt? Yes.
+    *   Is there a checkpoint at absolute minute 4? Yes (2 running mins completed). But if HIGH arrives at 3 and runs for 8 minutes until completion of LOW1 would be at 5+3=8? No, LOW1 needs 5 mins. It finishes at abs min 5 if uninterrupted.
+    *   Let's check the checkpoint bank logic again: "job that starts or resumes at minute s banks a checkpoint at minute s+2".
+        *   Start s=0. Bank at 2.
+        *   Resume (if preempted) at s=3 (for LOW1). New start s=3. Bank at 5.
+    *   So, if preemption happens at min 3:
+        *   Last valid bank was at min 2.
+        *   Running time from last bank to preemption: Min 2 to Min 3 = 1 minute.
+        *   Wasted work: Minute 3 of absolute time (which is the 1st minute since checkpoint).
+    *   Let's verify with the text "job with 5 total minutes and 2 banked resumes with 3 minutes left". This implies that at preemption, only 2 mins are saved. Total needed 5. Remaining = 3. This matches if the checkpoint was at min 2 (saving 0-2) and we lost minute 3 (1 min). Wait, if we lose minute 3, we have done 0-2 (saved), tried 3 (lost). So remaining to do is 4? No.
+    *   Let's re-read: "after resume job redoes every minute past its last bank".
+        *   If checkpoint at 2 saves work [0-2].
+        *   We run [3] -> Preempted. Work [3] is lost.
+        *   Resume at 3. Need to do [3,4,5]. That is 3 minutes. Matches "resumes with 3 minutes left".
+    *   Okay, so for LOW1:
+        *   Min 0-2: Runs (Saved).
+        *   Min 3: HIGH arrives. Preempts LOW1. LOW1 runs for 1 min here. This minute is wasted because it's past the checkpoint at 2.
+        *   Resume LOW1 later. Needs to do 3 minutes.
+
+2.  **LOW2**: Starts at Minute 2, Duration 7 mins. Checkpoints every 2 running minutes.
+    *   Rule: "LOW whose start minute arrives while core is busy simply waits". Core busy with LOW1 until min 3. So LOW2 starts waiting.
+    *   Core becomes free for LOW jobs when HIGH finishes or LOW1 resumes? No, rule says "core never idles... next waiting LOW starts in that same minute".
+    *   Let's trace the timeline strictly.
+
+**Timeline Simulation:**
+
+*   **Minute 0**: LOW1 starts. (Running: LOW1)
+*   **Minute 1**: LOW1 runs (2 mins total). Checkpoint at Min 2 reached.
+*   **Minute 2**: LOW1 runs (3 mins total). Checkpoint at Min 4 will be next? No, checkpoint every 2 running mins.
+    *   Running time: 0-1 (1 min), 1-2 (2 min). Total 2 mins completed by end of Min 2. Checkpoint reached at absolute Minute 3? Or during the transition?
+    *   Standard interpretation: Work done in [0, 1] and [1, 2]. At end of Minute 2, 2 minutes are complete. Checkpoint saved.
+    *   So at start of Min 3, LOW1 has saved [0-2].
+*   **Minute 3**: HIGH arrives (Duration 8 mins).
+    *   Current running: LOW1. Saved work: [0-2] (2 mins).
+    *   Active time in current minute for LOW1: Minute 3 is the 3rd minute of running.
+    *   Since checkpoint was at end of Min 2, any work done in Min 3 is past the checkpoint.
+    *   HIGH preempts immediately upon arrival (or effectively starts).
+    *   **Wasted**: The portion of LOW1's task attempted in Minute 3. (1 minute).
+    *   State: HIGH running.
+
+*   **Minute 4**: HIGH runs. (Running: HIGH)
+    *   LOW2 is waiting. Core busy with HIGH.
+
+*   **Minute 5**: HIGH runs.
+    *   LOW2 still waiting.
+
+*   **Minute 6**: HIGH runs.
+    *   LOW1 resumes? No, "while HIGH runs nothing else runs". So LOW1 waits.
+    *   Wait, rule: "resume a job redoes every minute past its last bank... so a jo[b] with 5 total minutes and 2 banked resumes with 3 minutes left."
+    *   Does LOW1 resume? Only when core is free from HIGH.
+
+*   **Minute 7**: HIGH runs. (HIGH has run 4 mins: 3,4,5,6... wait).
+    *   Let's count HIGH duration: Starts Min 3. Runs for 8 minutes.
+    *   Time slots for HIGH: [3-4], [4-5], [5-6], [6-7], [7-8], [8-9], [9-10], [10-11]. (End of Min 11).
+    *   Let's re-evaluate the minute indices.
+        *   HIGH starts at beginning of Minute 3.
+        *   Runs for 8 minutes -> Finishes at end of Minute 10? Or end of Minute 11?
+        *   "Runs 8 minutes to completion". If it occupies [3,4], [4,5]... that's 8 intervals. Interval 1: 3-4. ... Interval 8: 10-11. So finishes at end of Min 11.
+    *   Let's check LOW2 start time again. "LOW2 runs 7 minutes starting at minute 2".
+        *   At Min 2, LOW2 requested but core busy (HIGH not started yet? No HIGH starts at 3).
+        *   Wait, HIGH starts at Min 3. Core is free for LOWs until Min 3?
+        *   "LOW whose start minute arrives while core is busy simply waits".
+        *   At Min 2: LOW1 is running (started 0). Core busy with LOW1. LOW2 waits.
+        *   At Min 3: HIGH preempts LOW1. Core busy with HIGH. LOW2 still waits.
+    *   So LOW2 cannot start until HIGH finishes?
+    *   "core never idles while a LOW job is waiting". This usually means if HIGH finishes, the next LOW starts immediately.
+
+    **Let's restart timeline with precise intervals:**
+
+    *   **0-2**: LOW1 runs. (2 mins). Checkpoint reached at end of Min 2?
+        *   Rule: "checkpoint every 2 completed minutes".
+        *   At end of Min 2, 2 mins completed. Checkpoint saved.
+    *   **3-4**: HIGH runs (Interval 1 of HIGH). LOW1 preempted. Work in this interval (1 min) is wasted.
+        *   Wasted count: 1 min for LOW1.
+    *   **4-5**: HIGH runs (Interval 2).
+    *   **5-6**: HIGH runs (Interval 3).
+    *   **6-7**: HIGH runs (Interval 4).
+    *   **7-8**: HIGH runs (Interval 5).
+    *   **8-9**: HIGH runs (Interval 6).
+    *   **9-10**: HIGH runs (Interval 7).
+    *   **10-11**: HIGH runs (Interval 8). High finishes at end of Min 11.
+
+    *   **When does LOW2 start?**
+        *   Core becomes free for LOWs when HIGH finishes? Or can it run during? No, "while HIGH runs nothing else runs".
+        *   So LOW2 starts at beginning of Minute 12 (immediately after High).
+        *   LOW2 Duration: 7 minutes

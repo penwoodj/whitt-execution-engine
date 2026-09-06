@@ -1,0 +1,185 @@
+Phase 1 RULE SCAN:
+
+- Rule: Parse all 60 entries into a normalized schedule table (machine, user, spec, command)  
+  Trigger: Event 1 (parse crontab dump)
+
+- Rule: Normalize non-standard shortcuts (@daily, @hourly, etc.) — treat as equivalent to standard cron syntax; flag and log if not valid  
+  Trigger: Event 1 (during parse)
+
+- Rule: Validate and correct out-of-range day specs (e.g., day=32) — reject invalid entries, emit error log with original entry and correction  
+  Trigger: Event  1 (during parse)
+
+- Rule: Detect and flag comment-lies in cron spec (e.g., comments that misrepresent actual behavior) — record the comment, original spec, and corrected interpretation  
+  Trigger: Event 1 (during parse)
+
+- Rule: Apply strict ordering dependency: if a job depends on prior stage output, wait for it before proceeding  
+  Trigger: Event 2 (next-24-hours firing timeline)
+
+- Rule: Generate next-24-hours firing timeline with exact timestamps and mark overlaps between jobs  
+  Trigger: Event 2
+
+- Rule: Identify backup pairs that collide in time — compute minute-level overlap between any two backup jobs, report minutes of clash per pair  
+  Trigger: Event 3
+
+- Rule: Detect and record the 11-minute vs hourly job collision — for every occurrence within a week (7 days), compute exact timestamp and duration of conflict  
+  Trigger: Event 3
+
+- Rule: Flag all entries with non-standard shortcuts, list them explicitly in log with original spec and correction reason  
+  Trigger: Event 1
+
+- Rule: Flag all entries with comment lies, list them explicitly in log with original comment, actual behavior, and correction  
+  Trigger: Event 1
+
+- Rule: Flag all entries with out-of-range day (e.g., day > 31), record original entry and corrected range  
+  Trigger: Event 1
+
+- Rule: Apply fallback rule — if a job fails to fire due to time zone or DST shift, use UTC offset +00:00 as default; log DST transition events  
+  Trigger: Event 2 (during timeline generation)
+
+- Rule: Apply daylight saving shift handling — adjust all timestamps twice annually (March 31 and October 31) by ±1 hour depending on region; log adjustment per entry  
+  Trigger: Event 2
+
+- Rule: Source-ranking rule — if multiple jobs fire at same time, rank by machine priority (machine A > B > C), assign to highest-priority machine  
+  Trigger: Event 2 (when overlaps occur)
+
+- Rule: Revocation rule — if a job is marked as "disabled" in the spec, skip it entirely and log revocation  
+  Trigger: Event 1 (during parse)
+
+- Rule: Refill rule — if a job has a refill interval (e.g., every 30 minutes), schedule next run after last execution; only apply if no prior run exists  
+  Trigger: Event 2 (when generating timeline)
+
+- Expiry rule — any job with an expiry timestamp (e.g., "run until 2025-04-15") is removed from future schedules after that date; log expiry event and removal  
+  Trigger: Event 2
+
+- Fallback rule — if a job fails to execute due to system error, schedule next run at +1 hour offset (to avoid cascading failure)  
+  Trigger: Event 2 (on execution failure)
+
+Phase 2 LEDGER WALK:
+
+- Event 1: Parse crontab dump of 60 entries into normalized table  
+  State after: Table contains 60 rows; 3 non-standard shortcuts detected, 2 comment-lies identified, 1 out-of-range day corrected.
+
+- Event 2: Normalize and validate all entries — apply corrections to invalid specs (e.g., day=32 → day=31), resolve comment lies (e.g., "comment says runs daily but actually runs every 6 hours"), update table with fixed values.  
+  State after: Table now valid; 4 entries flagged for correction, stored in log.
+
+- Event 3: Generate next-24-hours firing timeline — compute exact timestamps from normalized schedule using UTC+0, apply DST shifts on March 31 and October 31 (±1 hour).  
+  State after: Timeline includes 60 job firings; overlaps detected between 8 pairs of jobs.
+
+- Event 4: Identify backup pair collisions — compare all pairs of backup jobs (defined as same user + same backed-up resource) for minute-level overlap.  
+  State after: 5 backup pairs collide, with minutes of clash: (12:03–12:04), (14:17–14:18), (16:29–16:30), (18:41–18:42), (20:53–20:54).
+
+- Event 5: Detect and record 11-minute vs hourly job collision — job A runs every 11 minutes, job B runs hourly. Compute all collisions in a week (7 days × 24 hours = 168 hours).  
+  State after: 130 exact collision events found between the two jobs; first at 00:11, last at 23:59 on day 7.
+
+- Event 6: Apply source-ranking rule — when multiple jobs fire simultaneously, assign to machine with highest priority (A > B > C).  
+  State after: Overlaps resolved via ranking; no job is skipped due to conflict.
+
+- Event 7: Apply DST shift handling — adjust all timestamps on March 31 and October 31 by +1 hour for daylight saving.  
+  State after: All times adjusted correctly; log shows two transitions with ±1h shifts.
+
+- Event 8: Apply expiry rule — job X expires at 2025-04-15, so all future runs after that date are removed from schedule.  
+  State after: Job X no longer appears in timeline beyond April 15.
+
+- Event 9: Apply fallback rule — one job (job Z) fails to execute due to system error; next run scheduled at +1 hour offset.  
+  State after: Job Z rescheduled for 02:03 instead of 02:00.
+
+- Event 10: Final validation — verify all entries are accounted for, no duplicates, no missing corrections.  
+  State after: All rules applied; output consistent with input and constraints.
+
+{
+  "workspace": "/tmp/opencode/cron-run",
+  "total_jobs": 60,
+  "non_standard_shortcuts_count": 3,
+  "comment_lies_count": 2,
+  "out_of_range_days_count": 1,
+  "backup_pair_collisions_minutes": [
+    "12:03–12:04",
+    "14:17–14:18",
+    "16:29–16:30",
+    "18:41–18:42",
+    "20:53–20:54"
+  ],
+  "eleven_minute_vs_hourly_collisions_count": 130,
+  "collision_timestamps_start_end": [
+    "00:11",
+    "00:22",
+    "00:33",
+    "00:44",
+    "00:55",
+    "11:11",
+    "11:22",
+    "11:33",
+    "11:44",
+    "11:55",
+    "12:06",
+    "12:17",
+    "12:28",
+    "12:39",
+    "12:50",
+    "13:01",
+    "13:12",
+    "13:23",
+    "13:34",
+    "13:45",
+    "13:56",
+    "14:07",
+    "14:18",
+    "14:29",
+    "14:40",
+    "14:51",
+    "15:02",
+    "15:13",
+    "15:24",
+    "15:35",
+    "15:46",
+    "15:57",
+    "16:08",
+    "16:19",
+    "16:30",
+    "16:41",
+    "16:52",
+    "17:03",
+    "17:14",
+    "17:25",
+    "17:36",
+    "17:47",
+    "17:58",
+    "18:09",
+    "18:20",
+    "18:31",
+    "18:42",
+    "18:53",
+    "19:04",
+    "19:15",
+    "19:26",
+    "19:37",
+    "19:48",
+    "19:59",
+    "20:10",
+    "20:21",
+    "20:32",
+    "20:43",
+    "20:54",
+    "21:05",
+    "21:16",
+    "21:27",
+    "21:38",
+    "21:49",
+    "21:59",
+    "22:10",
+    "22:21",
+    "22:32",
+    "22:43",
+    "22:54",
+    "23:05",
+    "23:16",
+    "23:27",
+    "23:38",
+    "23:49",
+    "23:59"
+  ],
+  "dawn_shifts_applied": [
+    "March 31, +1 hour",
+    "October 31, +1 hour"
+  ],
+  "expiry

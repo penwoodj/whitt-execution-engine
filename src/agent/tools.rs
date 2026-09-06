@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tracing::debug;
+use tracing::{debug, warn};
 use crate::backend::llm_backend::{LlmBackend, ChatMessage};
 use crate::model::registry::{ModelLifecycle, ThreadSafeModelRegistry};
 use crate::agent::sandbox::{ToolSandbox, SandboxConfig, FileOperation};
@@ -191,10 +191,13 @@ impl Tool for ModelLoadTool {
 
         match self.backend.load_model(model_name).await {
             Ok(_) => {
-                let _ = self.registry
+                if let Err(e) = self.registry
                     .lock()
-                    .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?
-                    .set_state(model_name, ModelLifecycle::Loaded);
+                    .map_err(|e| anyhow::anyhow!("Lock error: {}", e))
+                    .and_then(|r| r.set_state(model_name, ModelLifecycle::Loaded).map_err(|e| anyhow::anyhow!("{}", e)))
+                {
+                    warn!("[tools] registry state update failed for {}: {}", model_name, e);
+                }
 
                 Ok(ToolResult {
                     tool_name: "model_load".to_string(),
@@ -204,13 +207,16 @@ impl Tool for ModelLoadTool {
                 })
             }
             Err(e) => {
-                let _ = self.registry
+                if let Err(e2) = self.registry
                     .lock()
-                    .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?
-                    .set_state(
+                    .map_err(|e| anyhow::anyhow!("Lock error: {}", e))
+                    .and_then(|r| r.set_state(
                         model_name,
                         ModelLifecycle::Error(e.to_string()),
-                    );
+                    ).map_err(|e| anyhow::anyhow!("{}", e)))
+                {
+                    warn!("[tools] registry state update failed for {}: {}", model_name, e2);
+                }
 
                 Ok(ToolResult {
                     tool_name: "model_load".to_string(),
@@ -272,10 +278,13 @@ impl Tool for ModelUnloadTool {
 
         match self.backend.unload_model(model_name).await {
             Ok(_) => {
-                let _ = self.registry
+                if let Err(e) = self.registry
                     .lock()
-                    .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?
-                    .set_state(model_name, ModelLifecycle::Unloaded);
+                    .map_err(|e| anyhow::anyhow!("Lock error: {}", e))
+                    .and_then(|r| r.set_state(model_name, ModelLifecycle::Unloaded).map_err(|e| anyhow::anyhow!("{}", e)))
+                {
+                    warn!("[tools] registry state update failed for {}: {}", model_name, e);
+                }
 
                 Ok(ToolResult {
                     tool_name: "model_unload".to_string(),

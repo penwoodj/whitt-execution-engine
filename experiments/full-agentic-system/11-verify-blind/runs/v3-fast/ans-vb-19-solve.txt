@@ -1,0 +1,84 @@
+### Phase 1 RULE SCAN
+This phase lists every rule from the task that changes state during the event stream (Load A, Load B, Load C, Load D, Unload B), including expiry, return, revocation, refill, promotion, fallback, or source-ranking rules.
+
+1.  **Capacity Rule**: The total resident size cannot exceed the card capacity (8 GB).
+2.  **Pinning Rule**: Model B is pinned and never evicted; it remains resident until explicitly unloaded.
+3.  **Eviction Selection Rule**: Evictions target the least-recently-touched (LRU) *unpinned* model only.
+4.  **Recency Update Rule**: Every successful load or touch of a resident moves that model to the most-recent position in the recency list.
+5.  **Eviction Counting Rule**: Each model evicted increments the `evictions` counter, regardless of whether the subsequent load fits immediately after.
+6.  **Deferred Load Rule**: If a load cannot fit even after evicting all unpinned models (because only pinned models remain), the load is deferred; no eviction occurs for this specific step, and the load ID is recorded in `deferred`.
+7.  **Load Success Definition**: A "load" counts towards `loads` only if it successfully occupies space on the card.
+8.  **Unload Rule**: Unloading a model frees its size immediately; unloading a non-resident model is a no-op (no state change).
+9.  **Deferred List Order Rule**: The `deferred` list must contain IDs in strict arrival order of the deferred events.
+
+**Trigger Mapping:**
+*   Load A (2 GB): Triggers Capacity Check, Recency Update.
+*   Load B (2 GB): Triggers Capacity Check, Pinning Constraint (fits without eviction), Recency Update.
+*   Load C (2 GB): Triggers Capacity Check, Recency Update.
+*   Load D (7 GB): Triggers Capacity Check -> Eviction Selection (Model A) -> Capacity Check (Fits) -> Recency Update.
+*   Unload B: Triggers Unload Rule (Frees 2 GB).
+
+---
+
+### Phase 2 LEDGER WALK
+This phase applies the events one at a time in strict arrival order, showing the state after each event.
+
+**Initial State:**
+*   Capacity: 8 GB
+*   Residents: []
+*   Free Space: 8 GB
+*   Recency List (Oldest -> Newest): []
+*   Loads: 0
+*   Evictions: 0
+*   Deferrals: 0
+*   Deferred IDs: []
+
+**Event 1: Load A (2 GB)**
+*   Action: Check capacity. Current free = 8 GB. Required = 2 GB. Fits? Yes.
+*   State Change: Add Model A (2 GB). Update Recency [A].
+*   Result: Success.
+*   Ledger Line: `Load A -> resident {A} free {6} recency {A}`
+
+**Event 2: Load B (2 GB)**
+*   Action: Check capacity. Current free = 6 GB. Required = 2 GB. Fits? Yes.
+*   State Change: Add Model B (2 GB). Update Recency [A, B]. Note: B is pinned but fits easily.
+*   Result: Success.
+*   Ledger Line: `Load B -> resident {A, B} free {4} recency {A, B}`
+
+**Event 3: Load C (2 GB)**
+*   Action: Check capacity. Current free = 4 GB. Required = 2 GB. Fits? Yes.
+*   State Change: Add Model C (2 GB). Update Recency [A, B, C].
+*   Result: Success.
+*   Ledger Line: `Load C -> resident {A, B, C} free {2} recency {A, B, C}`
+
+**Event 4: Load D (7 GB)**
+*   Action: Check capacity. Current free = 2 GB. Required = 7 GB. Fits? No.
+*   Eviction Step 1: Identify unpinned LRU model. Residents: A (unpinned), B (pinned), C (unpinned). Recency: A is oldest. Target: Model A.
+*   Action: Evict Model A (2 GB). Increment `evictions`. Update Free Space to 4 GB. Update Recency [B, C].
+*   Check Capacity Again: Current free = 4 GB. Required = 7 GB. Fits? No.
+*   Eviction Step 2: Identify unpinned LRU model. Residents: B (pinned), C (unpinned). Recency: C is oldest (since A was evicted, C becomes the next candidate for "least recently touched" among unpinned? Wait, recency list order matters. After A evicted, list is [B, C]. B is pinned. C is unpinned. Is there any other unpinned? No. Only C is unpinned. So C is the LRU unpinned).
+*   Action: Evict Model C (2 GB). Increment `evictions`. Update Free Space to 6 GB. Update Recency [B].
+*   Check Capacity Again: Current free = 6 GB. Required = 7 GB. Fits? No.
+*   Final Check: Only pinned models remain (Model B). Cannot fit remaining space (6 < 7).
+*   Action: Defer Load D. Increment `deferrals`. Record ID "D". Do not evict further.
+*   Result: Deferred.
+*   Ledger Line: `Load D -> resident {B} free {6} recency {B}`
+
+**Event 5: Unload B (2 GB)**
+*   Action: Check if Model B is resident. Yes.
+*   State Change: Remove Model B (2 GB). Update Free Space to 8 GB. Update Recency [].
+*   Result: Success.
+*   Ledger Line: `Unload B -> resident {} free {8} recency {}`
+
+---
+
+### Final Answer Calculation
+Based on the Phase 2 walk:
+*   **Loads**: Successful loads occurred for A, B, C. Load D was deferred. Total = 3.
+*   **Evictions**: Model A evicted (1). Model C evicted (1). Total = 2.
+*   **Deferrals**: Load D deferred. Total = 1.
+*   **Deferred IDs**: ["D"].
+
+```json
+{"loads": 3, "evictions": 2, "deferrals": 1, "deferred": ["D"]}
+```

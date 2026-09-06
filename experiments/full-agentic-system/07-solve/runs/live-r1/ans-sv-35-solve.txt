@@ -1,0 +1,81 @@
+The task requires simulating a scheduling environment with specific rules for job execution, checkpointing (banking), preemption by a `HIGH` priority job, and resumption of preempted jobs (incurred waste). The final output must be a JSON object containing the makespan (total time from start to finish), total wasted minutes due to preemption past checkpoints, and the order in which the low-priority jobs complete.
+
+**Rules & Logic Application:**
+1.  **Events:**
+    *   `t=0`: Start `LOW1` (duration 5 min). Core busy with `LOW1`.
+    *   `t=2`: Start `LOW2` (duration 3 min). `HIGH` arrives (duration 9 min).
+        *   At this exact moment, the core is busy. The rule states: "a LOW job finishes or is preempted... next waiting LOW starts". However, `LOW1` started at 0 and has not finished yet. Does it wait? The rule says "a LOW whose start minute arrives while the core is busy simply waits."
+        *   So at `t=2`, `LOW1` continues (it was running). `LOW2` enters the waiting queue. `HIGH` preempts whoever is running.
+        *   Wait, re-reading: "instantly preempting whatever LOW job is running". Since `LOW1` is running, `LOW1` gets preempted at `t=2`.
+    *   **Checkpoint/Bank Calculation for `LOW1`:**
+        *   Rule: "A job that starts or resumes at minute s banks a checkpoint at minute s+2 and again every 2 running minutes after".
+        *   `LOW1` started at `s=0`.
+        *   Banks at `t = 0 + 2 = 2`.
+        *   Since the preemption happens exactly at `t=2`, and "a bank landing on the exact minute HIGH arrives still counts", no work is wasted yet. The job had run for 2 minutes, which matches its first banked checkpoint.
+    *   **Resumption of `LOW1`:**
+        *   Preemption occurs at `t=2`.
+        *   `HIGH` runs from `t=2` to `t=2+9 = 11`. During this time, no other job runs.
+        *   At `t=11`, `HIGH` finishes.
+    *   **Queue Management after `HIGH`:**
+        *   Waiting queue: `[LOW2]` (entered at `t=2`).
+        *   Core is free at `t=11`.
+        *   Rule: "the next waiting LOW starts". `LOW2` starts.
+    *   **Execution of `LOW2`:**
+        *   Starts at `s=11`. Duration 3 min.
+        *   Runs from `t=11` to `t=14`.
+        *   Banks at `t = 11 + 2 = 13`. No preemption occurs during this run (no other events mentioned).
+        *   Finishes at `t=14`. Order: `LOW2`, then `LOW1`.
+    *   **Resumption of `LOW1` (Part 2):**
+        *   Core free at `t=14`. Queue now has `[LOW1]` (preempted earlier).
+        *   Does a resumed job outrank a fresh one? Yes, but there is only one.
+        *   `LOW1` resumes at `s=14`.
+        *   **Waste Calculation:**
+            *   Total duration of `LOW1`: 5 min.
+            *   Work completed before preemption: It ran from `t=0` to `t=2`. That is exactly 2 minutes.
+            *   Checkpoint banked at `t=2`.
+            *   Remaining work needed: $5 - 2 = 3$ minutes.
+            *   Since the job resumes with exactly what was left past the last checkpoint, **waste** is determined by how much time elapsed since the *last* checkpoint but before preemption. Here, it ran exactly to the checkpoint (`t=0` to `t=2`). So 0 minutes were wasted?
+            *   Let's re-read carefully: "on preemption the work past the last checkpoint is wasted". Since the bank was at `t=2` and preemption happened at `t=2`, there was no work done *past* the checkpoint. Waste = 0.
+    *   **Execution of `LOW1` (Part 3):**
+        *   Starts `s=14`. Needs 3 minutes.
+        *   Runs from `t=14` to `t=17`.
+        *   Banks at `t = 14 + 2 = 16`.
+        *   Finishes at `t=17$.
+    *   **Makespan:**
+        *   Last finish time: `t=17`.
+        *   Start was `t=0`. Makespan (duration) is 17. Or simply the final timestamp if starting from 0. The example uses "makespan ... minutes from the first start". So $17 - 0 = 17$.
+
+**Verification of Queue Logic:**
+*   At `t=2`: `LOW1` running, preempted. `LOW2` enters queue.
+*   Wait, did `LOW2` enter the queue? "a LOW whose start minute arrives while the core is busy simply waits". Yes.
+*   Is there a conflict between `LOW1` and `LOW2` for the next slot?
+    *   At `t=11`, only `HIGH` finishes.
+    *   Queue contains: `LOW2` (fresh, arrived at 2), `LOW1` (resumed).
+    *   Rule: "a resumed LOW outranks a fresh one". So `LOW1` goes first? Or does arrival time matter?
+    *   Text: "LOW jobs take the core in order of their start minutes... a resumed LOW outranks a fresh one at any tie".
+    *   This implies if there's no tie (different times), they go by start minute. But `LOW1` is already running/pending resume, and `LOW2` is waiting. Usually, preempted jobs are treated as "higher priority" to maintain fairness or because they are active. The text says "a resumed LOW outranks a fresh one". This suggests if both are available (or one resumes), the resumed one goes first.
+    *   Let's check the example logic provided in the prompt ("for orientation only"):
+        *   Example: `LOW1` preempted at 3 (after bank). `HIGH` runs. Then "Both LOWs were then waiting: the core went to LOW1... resumed or not." This explicitly states the **resumed** job goes first over a fresh waiting job.
+    *   So, after `HIGH` finishes at `t=11`, the queue has `LOW2` (fresh) and `LOW1` (awaiting resume). `LOW1` is "resumed" status relative to its previous run. Thus `LOW1` runs first.
+
+**Revised Sequence:**
+1.  **0-2**: `LOW1` runs (minutes 0, 1, 2). Banks at 2.
+2.  **2-11**: `HIGH` runs. Preempts `LOW1`. `LOW1` has 3 minutes of work done exactly up to checkpoint. Waste = 0. `LOW2` waits in queue.
+3.  **11-14**: Queue selection: `LOW1` (resumed) vs `LOW2` (fresh). Resumed wins. `LOW1` runs (minutes 5, 6, 7... wait, relative to start it needs 3 more). Runs minutes 11, 12, 13? No, "run them minutes 5 to 10" in the example was relative to job time. Here: `LOW1` runs for 3 minutes absolute: $t=11, 12, 13$.
+    *   Wait, does it run at integer minutes or continuous? The prompt uses "minute 0", "minute 2". Continuous simulation is standard.
+    *   `LOW1` needs 3 minutes. Runs $t \in [11, 14]$.
+    *   Banks at $t = 14 + 2$ (start of resume) ? No, rule: "banks a checkpoint at minute s+2". If resumes at $s=11$, banks at $13$.
+    *   Work done in this segment: 3 minutes. Total completed: $2 + 3 = 5$. Job finished? Yes, total was 5.
+    *   Wait, if it finishes at `t=14`, then `LOW2` waits again.
+    *   Is `LOW1` finished at `t=14`? Start resume `s=11`. Duration needed 3. End `t=14`. Yes.
+4.  **14-17**: Now queue has `LOW2` (fresh). Only job is `LOW2`. Starts $s=14$. Needs 3 minutes. Runs $t \in [14, 17]$. Banks at $s+2 = 16$. Finishes at $t=17$.
+
+**Results:**
+*   **Makespan**: 17.
+*   **Wasted Min**: 0 (Preemption happened exactly on the checkpoint).
+*   **Order**: `LOW1` finished first (at 14), then `LOW2` finished second (at 17). Order: `["LOW1", "LOW2"]`.
+
+Let's double check the "Wasted" logic.
+Prompt text: "on preemption the work past the last checkpoint is wasted".
+Checkpoint 1 of `LOW1`: Start 0 -> Bank at $0+2=2$.
+Run time elapsed

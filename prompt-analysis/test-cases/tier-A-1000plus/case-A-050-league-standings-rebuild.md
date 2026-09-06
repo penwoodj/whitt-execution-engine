@@ -1,0 +1,61 @@
+# Tier-A Case 050 — League Standings Rebuild (SYNTH)
+
+the subject this time is league standings rebuild, and i want it done like i mean it. let's construct a self-contained reporting exercise, entirely inside /tmp/opencode/league-run, no llm calls, no network, nothing stochastic unless i say it's seeded, and at the end i want to be able to point a skeptical stranger at the outputs and have them check every claim.
+
+so the scenario: a season of 132 match results as messy rows; also some rows are corrections superseding earlier results, marked replayed or void. standings: points, then head-to-head, then goal difference, the rule order matters; also two teams tie on everything at the end and the rulebook has one more clause. think of this as a miniature version of the real jobs i hand off: messy inputs, stated rules, honest outputs. the rules you invent matter as much as the numbers you compute, because i'm going to reuse this when the data is real and i need to trust the machinery.
+
+and a note on tone in the outputs: plain sentences, tables where tables belong, no buzzword garbage, i want to skim this in two minutes and know exactly what happened.
+
+if a stage can honestly be a one-liner, let it be a one-liner, padding steps to look thorough is its own kind of lie.
+
+and no leaving a to-do in a comment for later-me, later-me is you in ten minutes, finish the job.
+
+this is the kind of task where the tempting move is to demo the happy path and gesture at the rest. don't. the mess is specified precisely because that's where the value is, and a clean run on clean data tells me nothing about whether the thing works.
+
+the work, stage by stage, and i want stage logging loud enough that i can follow along after the fact:
+
+1. parse and apply corrections in order, supersession chain preserved in an audit log. and that one gets checked by the verifier too, it's not just a produce-and-hope step.
+compute standings under the stated tiebreak order, show work for the tied teams. edge cases belong in the output, not in your head, list what you hit and what you did with each.
+3. the full-tie pair resolved by the final clause, quoted and applied. and don't round anything into meaninglessness, i'd rather see the ugly precise number than a tidy lie.
+after that a what-if table with the void matches counted, for the arguments. if that stage has a natural ordering dependency on the previous one, respect it, the sequence above is not decorative.
+5. standings.md plus standings.json plus supersession.log. and that one gets checked by the verifier too, it's not just a produce-and-hope step.
+
+the data has problems, deliberately, and handling them is part of the job not an error condition: one correction corrects a correction, two matches have scores as strings, and a team renamed mid-season appears under both names. those aren't obstacles, they're the actual test, a clean run on clean data is worthless and i've said this before. write down what you did with each defect and why, in the file, not the chat.
+
+anything you cache or skip for speed gets a note, because invisible shortcuts are how results stop being reproducible.
+
+timings, real ones, timestamps around each stage, a table at the end. not vibes.
+
+the workspace layout is yours to design but say it in the readme, so the structure is a decision not an accident.
+
+everything gets a run twice test before you call it done, because the first run always works and the second one is where the state bugs live.
+
+and if you find something in the data that contradicts what i said above, the data wins, report the contradiction, don't quietly bend either one.
+
+logs per stage, one line each is plenty, i want to see where time went and where things broke without spelunking.
+
+shape of the deliverables: scripts in a scripts folder, outputs in an outputs folder, the rules and decisions each in their own file at the root of the workspace, and a final report i can read start to finish in two minutes. paths in the report, not just filenames, so i can go look.
+
+keep the rules you invent in a rules.md next to the scripts, so when i come back in a week i know why the machine did what it did.
+
+percentages need denominators next to them always, twelve percent of what, because a percentage alone is half a number.
+
+and when i say documented i mean in a file on disk, not in the chat log where it scrolls away forever.
+
+verification is a first-class deliverable here. independent recomputation from the raw files, its own code path, and a conservation check that everything entering the pipeline is accounted for at the end, kept, rejected, merged, flagged, the books have to balance. nonzero exit on failure, actual output shown in your report.
+
+no network, no installs, no llm calls, deterministic or seeded everywhere, and if any stage is slow relative to its work say so honestly instead of pretending it's fine. don't stop until the whole sequence is verified end to end. don't skip steps and don't tell me it's done until the verifier has passed and you've actually looked at the outputs yourself. and keep it dependency free, standard library only, this machine gets cranky.
+
+if two stages could run in either order and it doesn't matter, pick one and move on, i don't need a committee meeting about it.
+
+one more thing, every number you quote me at the end better come from an actual run you can point at, because should-be-roughly-nine is not a result, it's a vibe.
+
+error messages should say what failed and where, not just that something did, because 'an error occurred' has never helped anybody.
+
+when a rule and a row disagree, both go in the output, the flagged row and the rule that flagged it, side by side.
+
+if any rule you write down feels arbitrary, good, that means you noticed, write the threshold and the reason next to it so future-me can argue with it.
+
+i'd rather have an ugly table that's right than a beautiful chart that's approximate, so default to tables unless the data genuinely needs a picture.
+
+finish with the report pasted in chat so i can skim without opening files, plus paths and timings. one line on what surprised you.

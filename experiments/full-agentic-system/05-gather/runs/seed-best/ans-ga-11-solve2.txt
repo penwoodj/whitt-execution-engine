@@ -1,0 +1,55 @@
+Based on the source material provided, here is the step-by-step derivation for the canary rollout status.
+
+### **Phase 1: Rule List**
+The following rules govern the state changes during the event list (verbatim from "TONIGHT'S EVENTS"):
+
+1.  **Limit Rule**: Steps 1–5 allow up to 2.0% error; Steps 6–10 allow up to 1.0% error.
+2.  **Stage Completion Rule**: A clean observation at position $N$ completes Stage $N$, setting rollout to $10\% \times N$.
+3.  **Breach Handling Rule**: A breaching observation (rate > limit) is spent; no stage is completed, and the system rolls back to the last *completed* stage's values.
+4.  **Post-Rollback Limit Rule**: After any rollback, the limit for all remaining steps tightens to 0.8%.
+5.  **Termination Rules**:
+    *   Two breaches $\rightarrow$ Status `STOPPED`.
+    *   Exactly one breach and list ends $\rightarrow$ Status `PAUSED`.
+    *   No breaches $\rightarrow$ Status `DONE`.
+
+### **Phase 2: Ledger Walk**
+Processing the 7 observations in strict arrival order against the current limit.
+
+| Position | Rate (%) | Limit (%) | Verdict | Stage Completed | Rollout After |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 1 | 0.6 | 2.0 | Clean | Stage 1 | 10% |
+| 2 | 0.9 | 2.0 | Clean | Stage 2 | 20% |
+| 3 | 1.4 | 2.0 | Clean | Stage 3 | 30% |
+| 4 | 2.0 | 2.0 | Clean | Stage 4 | 40% |
+| 5 | 0.5 | 2.0 | Clean | Stage 5 | 50% |
+| 6 | 1.1 | 1.0 | Breach (Rate > Limit) | None | 50% (Rollback to last clean stage) |
+| 7 | 1.5 | 0.8* | Breach (Rate > Tightened Limit) | None | 50% (Rollback maintained) |
+
+*\*Note: After the breach at Step 6, the limit tightens to 0.8% for remaining steps per Rule #4.*
+
+**Analysis of Termination:**
+*   There was exactly **one** breach (at Step 6). The second observation at Step 7 also breached because the rate (1.5%) exceeded the tightened limit (0.8%), but this does not count as a "second breach" in terms of stopping the process immediately; rather, it is part of the sequence where the list ends after one initial failure event that triggered the rollback logic.
+*   However, let's re-evaluate the definition of "Second Breach". The rule states: "a second breach stops everything with status STOPPED".
+    *   Step 6 was a breach (1.1 > 1.0). This is the **first** breach.
+    *   Step 7 was a breach (1.5 > 0.8). This is the **second** breach.
+*   Since there are two breaches in total, the status becomes `STOPPED`.
+
+Wait, let's re-read the specific termination clause carefully: "exactly one breach and the list ends: status PAUSED". Does Step 7 count as a second breach? Yes, it is a distinct observation where the rate exceeds the limit.
+*   Breach Count = 2.
+*   Therefore, Status = `STOPPED`.
+
+Let's double-check the "Rollback" logic vs "Stop" logic.
+Rule: "a second breach stops everything with status STOPPED".
+Observation 6: Rate 1.1 > Limit 1.0 (Breach #1). Rollback occurs. Limit becomes 0.8.
+Observation 7: Rate 1.5 > Limit 0.8 (Breach #2). Stop condition met.
+
+Final State Calculation:
+*   **Stages Done**: The last *completed* stage was Stage 5 (from Observation 5). Observations 6 and 7 did not complete stages. So, `stages_done` = 5.
+*   **Rollout Pct**: The rollout is held at the values of the last completed stage. Last completed stage was 5. Rollout = $10\% \times 5$ = 50%.
+*   **Status**: Two breaches occurred $\rightarrow$ `STOPPED`.
+
+### **Final Answer**
+
+```json
+{"rollout_pct": 50, "stages_done": 5, "status": "STOPPED"}
+```
