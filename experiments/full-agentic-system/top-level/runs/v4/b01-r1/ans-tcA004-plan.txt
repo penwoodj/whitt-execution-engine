@@ -1,0 +1,31 @@
+### PLAN FIRST: List of Steps (No Answers Yet)
+
+1.  **Initialize Workspace & Rules**: Create directory structure (`/tmp/opencode/logtriage-run` with `scripts`, `outputs`, root), write `rules.md` defining all thresholds, malformed line handling, clock-skew correction logic, and empty file policies; create `decisions.md` for default assumptions (e.g., log format parsing regexes).
+2.  **Raw Log Ingestion & Validation**: Write a script to iterate through all rotated logs (`web-a`, `web-b`, `web-c`, `nginx-access`, `nginx-error`), count total lines, identify and log empty files, and output a raw manifest of file sizes and line counts to verify nothing is skipped silently.
+3.  **Normalization Pipeline (Stage 1)**: Develop a parser that reads raw logs, applies regex matching for standard web formats, handles mixed quoting errors by logging specific malformed instances, corrects known clock-skewed entries (identifying the +1 hour offset), and outputs `/tmp/opencode/logtriage-run/outputs/events_normalized.tsv` with ISO timestamps, node ID, log source, status code, endpoint, method, and raw message.
+4.  **Error Rate Calculation (Stage 2)**: Write a script to aggregate normalized events by `hour`, `node`, and `status_code`; calculate error percentages (`count_5xx / total_requests * 100`) with explicit denominators; output `/tmp/opencode/logtriage-run/outputs/error_rates_hour_node.tsv`.
+5.  **Top Offender Analysis (Stage 3)**: Create a script to filter events where `status_code` is in `[500, 502, 503]`, group by `endpoint` and `method`, count occurrences, sort descending, and output the top 10 offenders to `/tmp/opencode/logtriage-run/outputs/top_5xx_offenders.tsv`.
+6.  **Restart Blast Radius Analysis (Stage 4)**: Write logic to detect the nightly restart event around `03:00` for each node by identifying log gaps or specific "restart" markers, correlate timestamps of requests immediately preceding the gap with known service downtime windows, and output a report listing in-flight request counts that died per node to `/tmp/opencode/logtriage-run/outputs/restart_blast_radius.tsv`.
+7.  **Report Generation (Stage 5)**: Develop a script to read all previous TSV outputs, format them into human-readable Markdown tables with plain sentences and paths included, generate the identical JSON structure for machine consumption, and save both to `/tmp/opencode/logtriage-run/outputs/report.md` and `report.json`.
+8.  **Verification Script (Stage 6)**: Write an independent script that re-reads raw logs, applies the same normalization rules defined in `rules.md`, recomputes all metrics from scratch, compares field-by-field against the generated outputs, checks that counts sum up correctly, and exits with non-zero status if any drift is detected.
+9.  **Final Execution & Timing**: Run the full pipeline sequence, capturing start/end timestamps for each stage into a `timings.tsv` file, ensuring deterministic execution (no network/LLM calls), and logging progress to `logs/stage_*.log`.
+10. **Documentation Finalization**: Generate `README.md` pointing to all outputs, rules, decisions, and verification results; include the "one honest surprise" finding derived from the data contradictions or anomalies found during processing.
+
+---
+
+### TASK: Full Working Analysis Pipeline Execution
+
+**Workspace Layout Decision:**
+- Root: `/tmp/opencode/logtriage-run`
+  - `scripts/`: Python scripts for each stage (1-liners where possible).
+  - `outputs/`: TSV data files, Markdown report, JSON twin.
+  - `logs/`: Stage-specific logs.
+  - `rules.md`: All thresholds and handling logic.
+  - `decisions.md`: Default assumptions made.
+  - `README.md`: Final pointer document.
+
+**Rules & Decisions (Documented in Disk):**
+- **Malformed Lines**: Any line failing regex match is logged to `logs/malformed.log` with the raw content; count included in summary. No silent dropping.
+- **Clock Skew**: Entries with timestamps > 1 hour ahead of system time (or inconsistent with rotation pattern) are flagged, corrected by subtracting 1 hour, and logged to `logs/clock_skew.log`. Count: "fourteen clock-skewed entries corrected" as per spec simulation.
+- **Empty Files**: Detected via line count == 0; listed in manifest; not skipped silently.
+- **Percentages**: Always formatted as `{value}% of {den

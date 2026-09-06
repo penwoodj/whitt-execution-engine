@@ -1,0 +1,64 @@
+Phase 1 RULE SCAN:
+
+- Rule: Closed → Open transition on 5 failures. Trigger: 5 consecutive failure events in sequence (failure count reaches 5). Threshold: 5; reason: minimum threshold to trigger open state, based on observed failure rate in production systems.
+- Rule: Open → Half-open after cool-down of 30 seconds. Trigger: After 30 seconds from last trip, and only if no new failures during that period. Threshold: 30 seconds; reason: standard recovery interval to allow probing without re-triggering.
+- Rule: Half-open → Probe one at a time, blocking all other calls until probe completes. Trigger: During half-open state, each probe is serialized. Reason: prevents flapping by ensuring only one probe runs at a time.
+- Rule: Half-open probe succeeds → Return to Closed. Trigger: A single successful probe in the half-open state. Threshold: 1 success; reason: confirms service availability after failure period.
+- Rule: Half-open probe fails → Stay in Half-open, increment failure count. Trigger: Probe fails (response status ≥500 or timeout). Threshold: 1; reason: maintains state stability during recovery attempts.
+- Rule: Open state expires after 30 seconds cool-down. Trigger: After 30 seconds from last failure event. Threshold: 30 seconds; reason: prevents indefinite blocking due to transient issues.
+- Rule: Failure count resets on successful probe (only if in half-open). Trigger: A successful probe during half-open. Threshold: 1 success; reason: allows state reset without re-triggering full failure count.
+- Rule: Duplicate call ID detected → Flag and reject the event, log as duplicate. Trigger: When a call with identical id appears twice in trace. Threshold: 1; reason: prevents double-counting of failures or successes.
+- Rule: Cool-down ambiguity during open state (failure arrives while cool-down is active) → Treat as failure, increment trip count, extend cool-down to 60 seconds. Trigger: A failure event occurs within the 30-second cool-down window after a previous trip. Threshold: 1; reason: avoids premature recovery due to timing overlap.
+- Rule: Flap detection (state changes between open and half-open within 5 seconds) → Increment flap count, log as flapping period. Trigger: State transitions from open → half-open or half-open → open within 5 seconds of each other. Threshold: 5 seconds; reason: identifies oscillation that may indicate unstable service.
+- Rule: Trip count reset on successful probe (only in half-open). Trigger: A successful probe during half-open state. Threshold: 1 success; reason: allows recovery without re-counting failures.
+- Rule: Source-ranking rule — prioritize probes from known healthy endpoints first. Trigger: During half-open probing, if multiple endpoints exist. Threshold: N/A; reason: improves reliability by routing to stable sources first.
+- Rule: Fallback path triggered when all probes fail in half-open state. Trigger: After 3 consecutive failed probes in half-open state. Threshold: 3 failures; reason: prevents infinite looping and ensures fallback service is used.
+
+Phase 2 LEDGER WALK:
+
+[timestamp=10:00:00] Initial state: Closed (failure_count=0, last_failure_time=null, current_state="closed", cool_down_end=null)
+[timestamp=10:00:05] Call ID: F1 → failure → failure_count=1, state=closed
+[timestamp=10:00:10] Call ID: F2 → failure → failure_count=2, state=closed
+[timestamp=10:00:15] Call ID: F3 → failure → failure_count=3, state=closed
+[timestamp=10:00:20] Call ID: F4 → failure → failure_count=4, state=closed
+[timestamp=10:00:25] Call ID: F5 → failure → failure_count=5, state=open (trip triggered), cool_down_end=10:00:55
+[timestamp=10:00:30] Call ID: P1 (probe) → probe in half-open mode → blocked; all other calls paused. state=half-open (failure_count=5, last_failure_time=10:00:25)
+[timestamp=10:00:35] Probe P1 fails → failure_count=6, state=half-open (flap count=1), no reset
+[timestamp=10:00:40] Call ID: F6 → failure → failure_count=7, state=half-open (no trip due to cool-down active)
+[timestamp=10:00:45] Call ID: P2 (probe) → probe in half-open mode → blocked; all other calls paused. state=half-open
+[timestamp=10:00:50] Probe P2 fails → failure_count=8, state=half-open (flap count=2)
+[timestamp=10:00:55] Cool-down expires → state transitions to half-open (failure_count=8), cool_down_end=null
+[timestamp=10:00:56] Call ID: P3 (probe) → probe in half-open mode → blocked; all other calls paused. state=half-open
+[timestamp=10:01:00] Probe P3 succeeds → failure_count resets to 0, state=closed (trip count reset), cool_down_end=null
+[timestamp=10:01:05] Call ID: F7 → success → no change in state; failure_count remains 0
+[timestamp=10:01:10] Call ID: F8 → success → no change in state; failure_count remains 0
+[timestamp=10:01:15] Call ID: F9 → success → no change in state; failure_count remains 0
+[timestamp=10:01:20] Call ID: F10 → success → no change in state; failure_count remains 0
+[timestamp=10:01:25] Call ID: F11 → failure → failure_count=1, state=closed
+[timestamp=10:01:30] Call ID: F12 → failure → failure_count=2, state=closed
+[timestamp=10:01:35] Call ID: F13 → failure → failure_count=3, state=closed
+[timestamp=10:01:40] Call ID: F14 → failure → failure_count=4, state=closed
+[timestamp=10:01:45] Call ID: F15 → failure → failure_count=5, state=open (trip triggered), cool_down_end=10:01:75
+[timestamp=10:01:50] Probe P4 → probe in half-open mode → blocked; all other calls paused. state=half-open
+[timestamp=10:01:55] Probe P4 fails → failure_count=6, state=half-open (flap count=3)
+[timestamp=10:02:00] Call ID: F16 → failure → failure_count=7, state=half-open
+[timestamp=10:02:05] Call ID: P5 → probe in half-open mode → blocked; all other calls paused. state=half-open
+[timestamp=10:02:10] Probe P5 fails → failure_count=8, state=half-open (flap count=4)
+[timestamp=10:02:15] Cool-down expires → state transitions to half-open (failure_count=8), cool_down_end=null
+[timestamp=10:02:20] Call ID: P6 → probe in half-open mode → blocked; all other calls paused. state=half-open
+[timestamp=10:02:25] Probe P6 succeeds → failure_count resets to 0, state=closed (trip count reset), cool_down_end=null
+[timestamp=10:02:30] Call ID: F17 → success → no change in state; failure_count remains 0
+[timestamp=10:02:35] Call ID: F18 → success → no change in state; failure_count remains 0
+[timestamp=10:02:40] Call ID: F19 → success → no change in state; failure_count remains 0
+[timestamp=10:02:45] Call ID: F20 → success → no change in state; failure_count remains 0
+[timestamp=10:02:50] Call ID: F21 → failure → failure_count=1, state=closed
+[timestamp=10:02:55] Call ID: F22 → failure → failure_count=2, state=closed
+[timestamp=10:03:00] Call ID: F23 → failure → failure_count=3, state=closed
+[timestamp=10:03:05] Call ID: F24 → failure → failure_count=4, state=closed
+[timestamp=10:03:10] Call ID: F25 → failure → failure_count=5, state=open (trip triggered), cool_down_end=10:03:40
+[timestamp=10:03:15] Probe P7 → probe in half-open mode → blocked; all other calls paused. state=half-open
+[timestamp=10:03:20] Probe P7 fails → failure_count=6, state=half-open (flap count=5)
+[timestamp=10:03:25] Call ID: F26 → failure → failure_count=7, state=half-open
+[timestamp=10:03:30] Call ID: P8 → probe in half-open mode → blocked; all other calls paused. state=half-open
+[timestamp=10:03:35] Probe P8 fails → failure_count=8, state=half-open (flap count=6)
+[timestamp=10:03:40]

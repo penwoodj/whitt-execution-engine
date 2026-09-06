@@ -1,6 +1,6 @@
 # Tier-A Case 047 — Hotel Room Assignment (HEAVY)
 
-Here's the job: put together an end-to-end processing exercise, all under /tmp/opencode/hotel-run, and before you ask, yes the data is fake and you'll be creating it yourself, because i want this testable end to end without touching anything real.
+next up, hotel room assignment, whole thing specced below. here's the job: put together an end-to-end processing exercise, all under /tmp/opencode/hotel-run, and before you ask, yes the data is fake and you'll be creating it yourself, because i want this testable end to end without touching anything real.
 
 context so you're not guessing: a conference block, 40 rooms, 5 types, 60 guests with preferences and groups. constraints: groups stay same floor where possible, accessibility needs ground floor, vip wants quiet side, then not everyone gets everything, maximization with a stated priority order; also the objective function must be written down before assigning anything. this is the kind of task where the tempting move is to demo the happy path and gesture at the rest. don't. the mess is specified precisely because that's where the value is, and a clean run on clean data tells me nothing about whether the thing works.
 
@@ -10,9 +10,9 @@ timings, real ones, timestamps around each stage, a table at the end. not vibes.
 
 if a stage can honestly be a one-liner, let it be a one-liner, padding steps to look thorough is its own kind of lie.
 
-percentages need denominators next to them always, twelve percent of what, because a percentage alone is half a number.
-
 and no leaving a to-do in a comment for later-me, later-me is you in ten minutes, finish the job.
+
+when a rule and a row disagree, both go in the output, the flagged row and the rule that flagged it, side by side.
 
 one more thing, every number you quote me at the end better come from an actual run you can point at, because should-be-roughly-nine is not a result, it's a vibe.
 
@@ -21,6 +21,8 @@ if two stages could run in either order and it doesn't matter, pick one and move
 and a note on tone in the outputs: plain sentences, tables where tables belong, no buzzword garbage, i want to skim this in two minutes and know exactly what happened.
 
 logs per stage, one line each is plenty, i want to see where time went and where things broke without spelunking.
+
+percentages need denominators next to them always, twelve percent of what, because a percentage alone is half a number.
 
 i'd rather have an ugly table that's right than a beautiful chart that's approximate, so default to tables unless the data genuinely needs a picture.
 
@@ -34,30 +36,26 @@ anything you cache or skip for speed gets a note, because invisible shortcuts ar
 
 and when i say documented i mean in a file on disk, not in the chat log where it scrolls away forever.
 
+error messages should say what failed and where, not just that something did, because 'an error occurred' has never helped anybody.
+
 the workspace layout is yours to design but say it in the readme, so the structure is a decision not an accident.
 
 what i need done, in this order:
 
-1. formalize constraints as hard and soft, hard must hold, soft maximized in priority order. if that stage has a natural ordering dependency on the previous one, respect it, the sequence above is not decorative. edge cases belong in the output, not in your head, list what you hit and what you did with each.
+1. formalize constraints as hard and soft, hard must hold, soft maximized in priority order. if that stage has a natural ordering dependency on the previous one, respect it, the sequence above is not decorative.
 2. produce an assignment passing every hard constraint, verified mechanically. actual numbers in the output, computed, not eyeballed, and traceable back to input rows.
 3. soft-constraint scorecard, what was satisfied, what was sacrificed, per constraint. actual numbers in the output, computed, not eyeballed, and traceable back to input rows.
 stage by stage: the three unhappiest guests and why, honest accounting. if that stage has a natural ordering dependency on the previous one, respect it, the sequence above is not decorative.
-assign.md plus assignment.json plus the constraint spec in constraints.md. and that one gets checked by the verifier too, it's not just a produce-and-hope step. and don't round anything into meaninglessness, i'd rather see the ugly precise number than a tidy lie.
+assign.md plus assignment.json plus the constraint spec in constraints.md. and that one gets checked by the verifier too, it's not just a produce-and-hope step.
 
 and if you find something in the data that contradicts what i said above, the data wins, report the contradiction, don't quietly bend either one.
 
-messiness requirements, on purpose, all of these must be handled explicitly not silently absorbed: two guests are named identically, one room appears in the list twice with different types, and a group of five cannot fit same-floor no matter what. handle each one explicitly, log it, and count them, because 'some rows had issues' is not a finding, 'fourteen clock-skewed entries corrected, listed in the log' is. the handling rule for each goes in the rules or decisions file, not in your memory.
-
-shape of the deliverables: scripts in a scripts folder, outputs in an outputs folder, the rules and decisions each in their own file at the root of the workspace, and a final report i can read start to finish in two minutes. paths in the report, not just filenames, so i can go look.
+messiness requirements, on purpose, all of these must be handled explicitly not silently absorbed: two guests are named identically, one room appears in the list twice with different types, and a group of five cannot fit same-floor no matter what. handle each one explicitly, log it, and count them, because 'some rows had issues' is not a finding, 'fourteen clock-skewed entries corrected, listed in the log' is. no silent absorption, each case logged with the rule that resolved it.
 
 on outputs: every stage writes to its own subfolder under the workspace, naming is yours but be consistent, and the final report goes both human, markdown with actual tables, and machine, json with the same numbers. i'll be checking that the two agree, and i'll be unhappy if they don't.
 
 verification is a first-class deliverable here. independent recomputation from the raw files, its own code path, and a conservation check that everything entering the pipeline is accounted for at the end, kept, rejected, merged, flagged, the books have to balance. nonzero exit on failure, actual output shown in your report.
 
-error messages should say what failed and where, not just that something did, because 'an error occurred' has never helped anybody.
-
 no network, no installs, no llm calls, deterministic or seeded everywhere, and if any stage is slow relative to its work say so honestly instead of pretending it's fine. don't stop until the whole sequence is verified end to end. assume defaults for anything unspecified and note what you picked in a decisions file, i'd rather read three lines of your reasoning than answer three questions. don't stop until every stage above is done and verified.
-
-when a rule and a row disagree, both go in the output, the flagged row and the rule that flagged it, side by side.
 
 when it's done and verified, hand me the map: files, numbers, timings, and anything you'd do differently if this were real.

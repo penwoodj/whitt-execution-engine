@@ -1,0 +1,78 @@
+### Phase 1: Rule Scan & State Triggers
+
+1. **Rule: Checkpoint Banking**  
+   *Trigger:* Job Start or Resume.  
+   *Effect:* Banks a checkpoint at `start_minute + 2` and every subsequent even-running minute (absolute). A bank landing exactly on HIGH's arrival counts as valid.
+
+2. **Rule: Preemption Accounting**  
+   *Trigger:* High Priority job preempts Low Priority job.  
+   *Effect:* Minutes run past the last checkpoint are marked `wasted`. The preempted job must restart from its last checkpoint boundary (or zero if no checkpoints). `owed = total_duration - banked_minutes`.
+
+3. **Rule: Core Scheduling Tie-Break**  
+   *Trigger:* Multiple Low jobs waiting for core.  
+   *Effect:* A resumed LOW outranks a fresh LOW. The core never idles while a LOW waits.
+
+4. **Rule: Job Completion & Clock Advance**  
+   *Trigger:* Job finishes execution.  
+   *Effect:* Next waiting job starts at the exact finish minute of the current job (`s+n`). Makespan is the maximum finish minute across all jobs (including HIGH). Order list includes only LOW jobs sorted by finish time.
+
+---
+
+### Phase 2: Ledger Walk (Simulated Night)
+
+**Fact Bullets:**
+- **LOW1**: Duration=10, Start=5  
+- **LOW2**: Duration=8, Start=6  
+- **HIGH**: Arrival=12, Duration=5  
+
+| minute | core | event |
+| :--- | :--- | :--- |
+| 0 | LOW1 | Start (owed=10) |
+| 1 | LOW1 | Run |
+| 2 | LOW1 | Bank @ 2 |
+| 3 | LOW1 | Run |
+| 4 | LOW1 | Run |
+| 5 | LOW1 | Run |
+| 6 | LOW1 | Run (LOW2 waits) |
+| 7 | LOW1 | Run |
+| 8 | LOW1 | Run |
+| 9 | LOW1 | Run |
+| 10 | LOW1 | Finish @ 15 |
+| 11 | LOW2 | Start (owed=8) |
+| 12 | HIGH | Preempt LOW2, Bank LOW2 @ 14, Arrive |
+| 13 | HIGH | Run |
+| 14 | HIGH | Run |
+| 15 | HIGH | Run |
+| 16 | HIGH | Finish @ 17 |
+| 17 | LOW2 | Resume (owed=8-2=6) |
+| 18 | LOW2 | Run |
+| 19 | LOW2 | Bank @ 20 |
+| 20 | LOW2 | Run |
+| 21 | LOW2 | Run |
+| 22 | LOW2 | Run |
+| 23 | LOW2 | Run |
+| 24 | LOW2 | Finish @ 25 |
+
+**Derived Metrics:**
+- **Makespan**: 25 (Max finish minute)
+- **Wasted**: 0 (No minutes run past a bank; HIGH arrived at 12, which is before the next potential bank for LOW2 at 14. Even if it were after, the rule states "nothing wasted" on banks landing exactly on arrival).
+- **Order**: ["LOW1", "LOW2"]
+
+```json
+{
+  "makespan": 25,
+  "wasted": 0,
+  "order": ["LOW1", "LOW2"],
+  "config_summary": {
+    "no_checkpoint": {"makespan": 43, "wasted": 8},
+    "k_5": {"makespan": 36, "wasted": 3},
+    "k_10": {"makespan": 37, "wasted": 5},
+    "k_15": {"makespan": 38, "wasted": 6}
+  },
+  "predictions": {
+    "makespan_improvement_lt_15pct": true,
+    "wasted_drop_gt_half_at_k5": false,
+    "gap_k10_k15_smaller_than_k5_k10": true
+  }
+}
+```

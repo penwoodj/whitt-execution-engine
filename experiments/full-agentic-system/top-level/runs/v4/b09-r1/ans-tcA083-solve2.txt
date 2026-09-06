@@ -1,0 +1,80 @@
+Phase 1 RULE SCAN:
+
+- On request arrival (timestamp), if bucket capacity is exceeded, reject the request. Trigger: every request event.
+- If request weight > 0, consume tokens equal to request weight from bucket; if insufficient tokens, partially serve or reject based on available tokens. Trigger: every request with positive weight.
+- Bucket refill occurs at a rate of 10 tokens per second (i.e., 10 tokens added every second), applied continuously and in integer steps. Trigger: every second boundary (every 1s interval).
+- At each timestamp, if the bucket has fewer than 1 token, no refill is applied until next second boundary; refill only occurs at full-second boundaries. Trigger: every second boundary.
+- If a request has weight zero, it is accepted immediately with no token consumption and no state change. Trigger: any request with weight = 0.
+- For requests with fractional millisecond weights, round down to nearest integer (floor) before processing. Trigger: all requests with non-integer weights.
+- A timestamp that is out of order by one second (i.e., later than the previous event) is treated as a duplicate or invalid; such events are rejected and logged. Trigger: any request with timestamp out-of-order by exactly 1 second.
+
+Phase 2 LEDGER WALK:
+
+Initial state: bucket = 100
+
+Event 1: timestamp=1.000, weight=5 → weight > 0 → consume 5 tokens → bucket becomes 95 → accepted
+Event 2: timestamp=1.001, weight=3 → fractional millisecond → floor(3) = 3 → consume 3 → bucket becomes 92 → accepted
+Event 3: timestamp=1.002, weight=8 → consume 8 → bucket becomes 84 → accepted
+Event 4: timestamp=1.003, weight=15 → consume 15 → bucket becomes 69 → accepted
+Event 5: timestamp=1.004, weight=7 → consume 7 → bucket becomes 62 → accepted
+Event 6: timestamp=1.005, weight=2 → consume 2 → bucket becomes 60 → accepted
+Event 7: timestamp=1.006, weight=10 → consume 10 → bucket becomes 50 → accepted
+Event 8: timestamp=1.007, weight=4 → consume 4 → bucket becomes 46 → accepted
+Event 9: timestamp=1.008, weight=20 → consume 20 → bucket becomes 26 → accepted
+Event 10: timestamp=1.009, weight=35 → consume 35 → bucket becomes -9 → insufficient tokens → partially serve (only 26 available) → reject request → bucket remains 26
+Event 11: timestamp=1.010, weight=0 → weight = 0 → accepted immediately → no token change → bucket remains 26
+Event 12: timestamp=1.011, weight=5 → consume 5 → bucket becomes 21 → accepted
+Event 13: timestamp=1.012, weight=12 → consume 12 → bucket becomes 9 → accepted
+Event 14: timestamp=1.013, weight=6 → consume 6 → bucket becomes 3 → accepted
+Event 15: timestamp=1.014, weight=18 → insufficient tokens (only 3) → partially serve or reject → only 3 available → reject → bucket remains 3
+Event 16: timestamp=1.015, weight=2 → consume 2 → bucket becomes 1 → accepted
+Event 17: timestamp=1.016, weight=4 → consume 4 → bucket becomes -3 → insufficient tokens → partially serve or reject → only 1 available → reject → bucket remains 1
+Event 18: timestamp=1.017, weight=5 → consume 5 → bucket becomes -4 → insufficient → reject → bucket remains 1
+Event 19: timestamp=1.018, weight=3 → consume 3 → bucket becomes -2 → insufficient → reject → bucket remains 1
+Event 20: timestamp=1.019, weight=1 → consume 1 → bucket becomes 0 → accepted
+
+Second second boundary (timestamp = 2.000): refill occurs → add 10 tokens → bucket becomes 10 → refill applied due to full-second boundary and bucket ≥ 1 at that time.
+
+Event 21: timestamp=2.001, weight=8 → consume 8 → bucket becomes 2 → accepted
+Event 22: timestamp=2.002, weight=14 → consume 14 → bucket becomes -12 → insufficient → reject → bucket remains 2
+Event 23: timestamp=2.003, weight=5 → consume 5 → bucket becomes -3 → insufficient → reject → bucket remains 2
+Event 24: timestamp=2.004, weight=7 → consume 7 → bucket becomes -5 → insufficient → reject → bucket remains 2
+Event 25: timestamp=2.005, weight=1 → consume 1 → bucket becomes 1 → accepted
+Event 26: timestamp=2.006, weight=9 → consume 9 → bucket becomes -8 → insufficient → reject → bucket remains 1
+Event 27: timestamp=2.007, weight=3 → consume 3 → bucket becomes -2 → insufficient → reject → bucket remains 1
+Event 28: timestamp=2.008, weight=4 → consume 4 → bucket becomes -3 → insufficient → reject → bucket remains 1
+Event 29: timestamp=2.009, weight=6 → consume 6 → bucket becomes -5 → insufficient → reject → bucket remains 1
+Event 30: timestamp=2.010, weight=0 → accepted immediately → no token change → bucket remains 1
+
+Second second boundary (timestamp = 3.000): refill occurs → add 10 tokens → bucket becomes 11 → refill applied due to full-second boundary and bucket ≥ 1 at that time.
+
+Event 31: timestamp=3.001, weight=2 → consume 2 → bucket becomes 9 → accepted
+Event 32: timestamp=3.002, weight=5 → consume 5 → bucket becomes 4 → accepted
+Event 33: timestamp=3.003, weight=8 → consume 8 → bucket becomes -4 → insufficient → reject → bucket remains 4
+Event 34: timestamp=3.004, weight=1 → consume 1 → bucket becomes 3 → accepted
+Event 35: timestamp=3.005, weight=7 → consume 7 → bucket becomes -4 → insufficient → reject → bucket remains 3
+Event 36: timestamp=3.006, weight=2 → consume 2 → bucket becomes 1 → accepted
+Event 37: timestamp=3.007, weight=5 → consume 5 → bucket becomes -4 → insufficient → reject → bucket remains 1
+Event 38: timestamp=3.008, weight=3 → consume 3 → bucket becomes -2 → insufficient → reject → bucket remains 1
+Event 39: timestamp=3.009, weight=1 → consume 1 → bucket becomes 0 → accepted
+
+Second second boundary (timestamp = 4.000): refill occurs → add 10 tokens → bucket becomes 10 → refill applied due to full-second boundary and bucket ≥ 1 at that time.
+
+Event 40: timestamp=4.001, weight=5 → consume 5 → bucket becomes 5 → accepted
+Event 41: timestamp=4.002, weight=3 → consume 3 → bucket becomes 2 → accepted
+Event 42: timestamp=4.003, weight=8 → consume 8 → bucket becomes -6 → insufficient → reject → bucket remains 2
+Event 43: timestamp=4.004, weight=1 → consume 1 → bucket becomes 1 → accepted
+Event 44: timestamp=4.005, weight=9 → consume 9 → bucket becomes -8 → insufficient → reject → bucket remains 1
+Event 45: timestamp=4.006, weight=2 → consume 2 → bucket becomes -1 → insufficient → reject → bucket remains 1
+Event 46: timestamp=4.007, weight=4 → consume 4 → bucket becomes -3 → insufficient → reject → bucket remains 1
+Event 47: timestamp=4.008, weight=5 → consume 5 → bucket becomes -4 → insufficient → reject → bucket remains 1
+Event 48: timestamp=4.009, weight=6 → consume 6 → bucket becomes -5 → insufficient → reject → bucket remains 1
+
+Second second boundary (timestamp = 5.000): refill occurs → add 10 tokens → bucket becomes 11 → refill applied due to full-second boundary and bucket ≥ 1 at that time.
+
+Event 49: timestamp=5.001, weight=2 → consume 2 → bucket becomes 9 → accepted
+Event 50: timestamp=5.002, weight=7 → consume 7 → bucket becomes 2 → accepted
+Event 51: timestamp=5.003, weight=8 → consume 8 → bucket becomes -6 → insufficient → reject → bucket remains 2
+Event 52: timestamp=5.004, weight=1 → consume 1 → bucket becomes 1 → accepted
+Event 53: timestamp=5.005, weight=5 → consume 5 → bucket becomes -4 → insufficient → reject → bucket remains 1
+Event 54: timestamp=5.006, weight=3 → consume 3

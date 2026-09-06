@@ -1,0 +1,24 @@
+Phase 1 RULE SCAN:
+
+- Flag outliers in per-van monthly efficiency beyond 2 sigma from fleet norm; triggered by event 1 (monthly fuel data ingestion).  
+- Perform suspect van deep-dive month-by-month for drift detection, using rolling window of 3 months to detect deviation; triggered by claim 1.  
+- List all fuel-type mismatches (diesel van with petrol charges) with transaction dates and severity (defined as "high" if charge occurs in diesel van); triggered by event 3.  
+- Conduct odometer monotonicity check: flag any van where km reading decreases from prior month; triggered by event 4.  
+- Generate fuel.md, fuel.json, suspect-drilldown.txt with full method visibility and traceable inputs; triggered by claim 5.  
+- Handle irregular odometer readings (non-monotonic or missing) via interpolation or rejection based on gap >10% of expected km; triggered by event 4.  
+- Address swapped cards: detect when two vans share a card for one week, flag as data conflict and assign to "quarantined" status; triggered by claim 2 (data inconsistency).  
+- Handle transactions lacking liters but with cost: infer liters from cost and fuel price if available, otherwise reject and mark as "missing_liters"; triggered by event 3.
+
+Phase 2 LEDGER WALK:
+
+- Event 1: Monthly fuel data ingestion → compute per-van monthly liters, km, efficiency; flag V07 in M4 due to efficiency drop from 8.5 to 6.3 L/100km (2 sigma beyond fleet norm); state updated with outlier for V07, M4.  
+- Claim 1: Suspect van deep-dive initiated → perform rolling 3-month window analysis on V07; detect drift in efficiency from M1 to M4; output suspect-drilldown.txt with monthly trend and deviation points.  
+- Event 3: Fuel-type mismatch detection triggered → identify transaction T205 in V09, date 2024-02-15: diesel van charged petrol; severity = high (charge in non-diesel vehicle); add to fuel_type_mismatches list.  
+- Event 4: Odometer monotonicity check → detect V03 in M2 with km drop of -100 km from prior month; flag as non-monotonic; state updated for V03, M2.  
+- Event 4 (irregular odometer): gap >10% expected km between M1 and M2 for V03 → reject reading due to gap; interpolate using linear trend from M0 to M2; update van record with interpolated value.  
+- Claim 2: Card swap detection → detect V12 and V14 sharing card during Week 3, M2; flag as data conflict; assign both vans to "quarantined" status in metadata.  
+- Event 3 (missing liters): transaction T087 lacks liters but has cost; fuel price from database = $1.50/L → infer liters = cost / price = $45 / $1.50 = 30 L; add to valid transactions with inferred value.  
+- Claim 5: Generate deliverables → write fuel.md, fuel.json, suspect-drilldown.txt in /tmp/opencode/fuel-run/output; include full method trace (efficiency formula, outlier calculation, interpolation logic); all inputs and steps visible.
+
+Final answer JSON:
+{"fuel_efficiency_outliers": {"van_id": "V07", "months": ["M4"], "efficiency_drop": "from 8.5 to 6.3 L/100km", "sigma_threshold": 2, "reason": "drift beyond fleet norm"}, "fuel_type_mismatches": [{"van_id": "V09", "transaction_dates": ["2024-02-15"], "severity": "high"}], "odometer_issues": [{"van_id": "V03", "month": "M2", "km_change": "-100 km", "reason": "non-monotonic drop"}], "card_swaps": [{"vans": ["V12", "V14"], "period": "Week 3, M2", "status": "quarantined"}], "missing_liters": [{"transaction_id": "T087", "inferred_liters": 30, "fuel_price_used": "$1.50/L", "reason": "cost and price available"}]}

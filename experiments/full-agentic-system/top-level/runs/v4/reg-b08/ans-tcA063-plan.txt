@@ -1,0 +1,60 @@
+**PLAN FIRST: Step-by-step execution plan with formulas or rules (no answers yet)**
+
+1. Initialize workspace at `/tmp/opencode/backup-run` with directory structure:  
+   `mkdir -p /tmp/opencode/backup-run/{scripts,outputs,logs}`  
+
+2. Create a `rules.md` file at root containing all policy rules and thresholds, including:  
+   - Daily backup retention: 7 days  
+   - Weekly backup retention: 4 weeks (from last Sunday)  
+   - Monthly backup retention: 12 months (from first day of month)  
+   - Corruption rate per snapshot: 1% (seeded uniformly)  
+   - Promotion rules: weekly and monthly backups promoted only if they are not overwritten by newer ones; ambiguity resolved via day-of-week and month-day comparison  
+   - Restore drill eligibility: only snapshots that meet retention policy for the requested date are eligible  
+
+3. Generate a daily backup schedule from Day 1 to Day 365 using a deterministic seed (e.g., `seed=2024`), storing each day’s backup metadata in JSON format per day, with fields:  
+   - `date`: ISO string of backup date  
+   - `size_mb`: random integer between 1 and 100 MB (uniform distribution)  
+   - `corruption_flag`: boolean (1% chance per snapshot, seeded via `random(0–99) < 1`)  
+
+4. For each day, simulate a deletion of the oldest daily backup if it exceeds retention period (7 days), and promote eligible backups to weekly tier if it's a Sunday, and to monthly tier if it’s the first day of month — with explicit handling when both weekly and monthly fall on same day:  
+   - If a date is both a Sunday and the 1st of a month → promote only the monthly backup (prioritize monthly)  
+
+5. Log all deletions and promotions daily in `logs/promotions.log` as:  
+   `[YYYY-MM-DD] DELETION: <backup_id> (age >7 days)`  
+   `[YYYY-MM-DD] PROMOTION: <backup_id> → weekly/monthly`  
+
+6. Simulate corruption events per snapshot: for each backup, independently apply 1% chance of corruption using `random() < 0.01`, and record in `logs/corruption.log`:  
+   `[YYYY-MM-DD] CORRUPTED: <backup_id> (size=<size>, date=<date>)`  
+
+7. Define fallback policy when a retained snapshot corrupts:  
+   - If daily backup corrupts → fall back to the next older daily backup (if exists and not corrupted)  
+   - If weekly backup corrupts → fall back to the most recent daily backup that is still within 7-day retention  
+   - If monthly backup corrupts → fall back to the last weekly backup if available, otherwise to the last daily backup  
+   - If no fallback possible → mark as failed and log with rule name  
+
+8. For each restore drill (randomly selected every 10 days), simulate a request for a snapshot at a given date:  
+   - Requested date is randomly chosen from 1–365, with equal probability  
+   - Check if the requested snapshot exists in retention policy and is intact (not corrupted)  
+   - If it does → success; if not → failure  
+   - Log each drill attempt in `logs/drills.log`:  
+     `[YYYY-MM-DD] DRILL: request_date=<date>, found=<yes/no>, intact=<yes/no>`  
+
+9. Compute restore-drill pass rate as:  
+   `(number of successful drills) / (total number of drills)` → must include denominator and context ("out of 36.5 drills")  
+
+10. Generate `outputs/backup.md` with a human-readable table showing:  
+    - Date, Size (MB), Retention Tier (Daily/Weekly/Monthly), Corrupted? (Yes/No), Fallback Used? (Yes/No)  
+    All entries must be ordered chronologically by date  
+
+11. Generate `outputs/sim-log.csv` with one row per backup event, including:  
+    - Date, Type (daily/weekly/monthly), Size (MB), Corrupted?, Deletion?, Promotion?, Fallback?  
+    All fields must match the raw simulation data exactly  
+
+12. Generate `outputs/summary.json` with structured output containing:  
+    - Total days simulated: 365  
+    - Daily backups created: 365  
+    - Weekly backups created: 52 (one per week)  
+    - Monthly backups created: 12  
+    - Corrupted snapshots total: X  
+    - Corruption events with fallbacks: Y  
+    - Restore drills attempted: Z

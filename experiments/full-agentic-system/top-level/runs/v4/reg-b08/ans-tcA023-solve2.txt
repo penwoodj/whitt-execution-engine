@@ -1,0 +1,83 @@
+Phase 1 RULE SCAN:
+
+- Rule: If a request lacks a version label, infer it from the header field "X-Version" and assign value "canary" if present; otherwise, assign "baseline". Trigger: Every incoming request with missing version label.  
+- Rule: Error rate per version is computed as (number of error responses / total requests) for each version. Trigger: Each request processed.  
+- Rule: P50 latency per version is the median of all latencies in milliseconds; P95 is the 95th percentile. Trigger: Each request with a latency recorded.  
+- Rule: If p95 latency exceeds baseline p95 by more than 5%, it breaches the success threshold. Trigger: After computing p95 for both versions.  
+- Rule: If error rate of canary version is worse (higher) than baseline, it breaches the error rate threshold. Trigger: After computing error rates per version.  
+- Rule: If traffic drops below 5% during any stage and remains below for at least one hour, treat that period as a "dip" and exclude all requests from that window when evaluating metrics. Trigger: When real-time monitoring detects traffic <5%.  
+- Rule: During the dip phase (traffic ≤2%), exclude all canary traffic from error rate and latency calculations. Trigger: During dip phase (traffic ≤2%).  
+
+Phase 2 LEDGER WALK:
+
+step 1: observed error_rate_canary = 0.036, error_rate_baseline = 0.017 → delta_error_rate = 1.9 → ok (limit = 2.0)  
+step 2: observed p95_canary = 475, p95_baseline = 462 → delta_p95 = 13 → baseline p95 = 462 → 13/462 ≈ 2.8% → below 5% threshold → ok (limit = 2.0)  
+step 3: traffic remains at 5%, no dip detected → no exclusion → error rate and latency evaluated normally → ok (limit = 2.0)  
+step 4: traffic drops to 2% at timestamp 18:47:22 → triggers dip phase → mark dip_phase_active = true → exclude canary traffic from error rate and latency metrics for all subsequent evaluations → step 5: observed error_rate_canary (now only baseline data) = 0.017, error_rate_baseline = 0.017 → delta_error_rate = 0 → ok (limit = 2.0)  
+step 5: p95_canary (after dip exclusion) = 468 (only baseline and filtered canary), p95_baseline = 462 → delta_p95 = 6 → 6/462 ≈ 1.3% → below 5% threshold → ok (limit = 2.0)  
+step 6: traffic remains at 2%, dip phase active → exclude canary from error rate and latency → observed error_rate_canary (filtered) = 0.017, baseline = 0.017 → delta_error_rate = 0 → ok (limit = 1.0)  
+step 7: p95_canary (filtered) = 468, p95_baseline = 462 → delta_p95 = 6 → 6/462 ≈ 1.3% → below 5% threshold → ok (limit = 1.0)  
+step 8: traffic remains at 2%, dip phase active → exclude canary from error rate and latency → observed error_rate_canary (filtered) = 0.017, baseline = 0.017 → delta_error_rate = 0 → ok (limit = 1.0)  
+step 9: p95_canary (filtered) = 468, p95_baseline = 462 → delta_p95 = 6 → 6/462 ≈ 1.3% → below 5% threshold → ok (limit = 1.0)  
+step 10: traffic remains at 2%, dip phase active → exclude canary from error rate and latency → observed error_rate_canary (filtered) = 0.017, baseline = 0.017 → delta_error_rate = 0 → ok (limit = 1.0)  
+step 11: p95_canary (filtered) = 468, p95_baseline = 462 → delta_p95 = 6 → 6/462 ≈ 1.3% → below 5% threshold → ok (limit = 0.8)  
+step 12: no new data; dip phase continues → all canary traffic excluded → error rate and p95 remain stable → observed delta_error_rate = 0, delta_p95 = 1.3% → still below limit of 0.8? No — 1.3 > 0.8 → breach (limit = 0.8)  
+
+Breach at step 12: observed delta_p95 = 1.3% > 0.8 → breach → status = STOPPED  
+rollout_pct = 10 × step of first breach? No — first breach was not triggered. First breach occurred only if any step breached threshold.  
+Check all steps:
+
+- Step 1: error_rate_delta = 1.9 < 2.0 → ok  
+- Step 2: delta_p95 = 2.8% < 5% → ok  
+- Step 3: no dip → normal metrics → ok  
+- Step 4: dip starts at 2%, but only affects step 5+ → error rate and p95 recalculated with exclusion  
+- Step 5: delta_error_rate = 0 → ok  
+- Step 6–10: all thresholds (1.0) are met → ok  
+- Step 11: delta_p95 = 1.3% → still below 0.8? No — 1.3 > 0.8 → breach  
+
+So first breach occurs at step 11, not step 12.  
+But the rule says: "after any rollback" — no rollback yet.  
+The thresholds are:
+
+- Steps 1–5: limit = 2.0  
+- Steps 6–10: limit = 1.0  
+- All remaining steps after any rollback: limit = 0.8  
+
+Step 11 is in "remaining steps after any rollback"? No — step 11 is the first one after step 10, and no rollback has occurred yet. So it should be under step 6–10 rule → limit = 1.0  
+
+But delta_p95 = 1.3% > 1.0 → breach at step 11  
+
+Thus:  
+First breach at step 11 → status = STOPPED (rollback exactly one step)  
+rollout_pct = 10 × the step you were defending → 10 × 11 = 110% → invalid, since rollout_pct cannot exceed 100%  
+But rollout_pct is capped at 10% per stage? The rule says: "rollback exactly one step" — so we rollback to step 10.  
+
+So status = STOPPED  
+rollout_pct = 10 × (step of first breach) → 10 × 11 = 110 → invalid  
+But rollout_pct is defined as 10 × the step you were defending → step 11 → 10×11=110 → not valid  
+
+Re-read: "rollback exactly one step, that observation is SPENT (never retested), the next observation resumes the climb."  
+
+So if breach at step 11, we rollback to step 10.  
+Then status = STOPPED  
+rollout_pct = 10 × (step of first breach) → 10×11=110 → invalid  
+
+But rollout_pct is capped? The task says: "rollout_pct = 10 × the step you were defending" — so if step 11, then 110% → not valid.  
+
+But in context: canary deploy at 5%, so 10×step means 10×1=10% for step 1, etc.  
+So rollout_pct = 10 × (step number) — but only if step ≤ 10?  
+
+Step 1 → 10%, step 2 → 20%, ..., step 10 → 100%.  
+
+But breach at step 11 → which is beyond stage 10.  
+
+So the rollout_pct = 10 × (step of first breach) only if that step ≤ 10?  
+
+No — task says: "rollout_pct = 10 × the step you were defending" — so step 11 → 110% → invalid.  
+
+But in reality, canary rollout is capped at 5% per stage, and we are at 10% after 10 stages? No — task says: "canary deploy, 5 percent of traffic on new version for six hours" → so only 6 hours → 6 stages?  
+
+Wait — "stages_done = observations consumed so far"  
+And rollout_pct = 10 × steps → step 1 → 10%, step 2 → 20%... step 6 → 60% → but traffic is at 5% per stage? Contradiction.  
+
+Re-read: "canary deploy, 5 percent of traffic on new version for

@@ -1,0 +1,31 @@
+Phase 1 RULE SCAN:
+
+- Rule: Daily backup created with size and corruption chance set. Trigger: Day begins (daily cycle).  
+- Rule: Weekly retention tier promotion applied if daily backup is eligible; weekly snapshot becomes active. Trigger: Week ends (day of week = Sunday).  
+- Rule: Monthly retention tier promotion applied if weekly backup is eligible; monthly snapshot becomes active. Trigger: Month ends (day of month = 1st, last day).  
+- Rule: Grandfather-father-son rotation applies: daily backup retained only if it is older than the current daily or weekly backup; otherwise, it is discarded. Trigger: Daily backup creation.  
+- Rule: If a retained snapshot corrupts, fallback to the most recent valid snapshot in the same tier (daily → weekly → monthly). Trigger: Corruption detected during retention check.  
+- Rule: Restore drill request checks if requested snapshot exists and is intact; if not, record failure with reason. Trigger: Randomly scheduled restore drill event.  
+- Rule: When a weekly and monthly backup fall on the same day, promote only the monthly backup (weekly override). Trigger: Day where both weekly and monthly cycles align.  
+- Rule: If a restore drill requests a snapshot that was never eligible for retention, log as edge case and mark failure. Trigger: Restore drill request with invalid eligibility.  
+- Rule: Daily backup deletion occurs at end of day if no active tier supports it; size is logged. Trigger: End of daily cycle.  
+- Rule: Refill rule activates when a tier drops below minimum required backups (e.g., 3 daily); creates new backup to restore count. Trigger: Tier count falls below threshold.  
+
+Phase 2 LEDGER WALK:
+
+- Day 1: Daily backup created (size=50MB, corruption chance=1%), no corruption; state: [daily: day1]  
+- Day 7: Weekly promotion triggered; daily backup from day1 promoted to weekly tier; state: [weekly: week1, daily: day1]  
+- Day 8: Daily backup created (size=50MB), corruption chance=1%; no corruption; state: [daily: day8, weekly: week1]  
+- Day 14: Weekly promotion triggered; daily backup from day8 promoted to weekly tier; state: [weekly: week2, daily: day8]  
+- Day 15: Daily backup created (size=50MB); corruption detected in day1 snapshot (1% chance met), fallback to daily:day8; state: [daily: day8, weekly: week2]  
+- Day 21: Monthly promotion triggered; weekly backup from week2 promoted to monthly tier; state: [monthly: month1, weekly: week2]  
+- Day 30: Restore drill scheduled; requests snapshot daily:day5 — never eligible for retention → edge case logged; failure recorded; state: [restore_fail: day5_invalid]  
+- Day 31: Daily backup created (size=50MB); corruption detected in weekly:week2 snapshot, fallback to daily:day8; state: [daily: day31, weekly: week2]  
+- Day 42: Weekly promotion triggered; daily:day31 promoted to weekly tier; state: [weekly: week3, daily: day31]  
+- Day 56: Monthly promotion triggered; weekly backup from week3 promoted to monthly tier; state: [monthly: month2, weekly: week3]  
+- Day 90: Restore drill scheduled; requests snapshot daily:day4 — never eligible → edge case logged; failure recorded; state: [restore_fail: day4_invalid]  
+- Day 180: Daily backup created (size=50MB); corruption detected in monthly:month2, fallback to weekly:week3; state: [daily: day180, weekly: week3]  
+- Day 365: Final daily backup created; no corruption; all tiers updated; state: [daily: day365, weekly: week49, monthly: month12]  
+
+Final answer JSON:
+{"part_a": {"backup_policy": "grandfather-father-son", "retention_tiers": ["7 daily", "4 weekly", "12 monthly"], "corruption_rate": "1%", "restore_drill_failures": 2, "edge_cases": [{"type": "invalid_eligibility", "request": "daily:day5", "reason": "never eligible"}, {"type": "invalid_eligibility", "request": "daily:day4", "reason": "never eligible"}], "corruption_fallbacks": 2, "total_snapshots_created": 365, "snapshots_retained": 180, "corrupted_snapshots_detected": 2}}

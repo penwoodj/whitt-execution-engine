@@ -1,0 +1,66 @@
+### Phase 1: RULE SCAN
+**Logic Changes & State Transitions Identified**
+The following rules are active in the task logic that change state during the event or claim list processing (including expiry, return, revocation, refill, promotion, fallback, source-ranking):
+
+1.  **Rule: `pass_rate_calculation`** -> *State Change:* Computes float percentage per test; triggers on every build record processed.
+2.  **Rule: `suspicion_flagging`** -> *State Change:* Sets boolean flag `is_suspicious`; triggers when pass rate is between 5% and 95%.
+3.  **Rule: `cluster_detection`** -> *State Change:* Identifies consecutive failures or same-day bunching; triggers on flagged tests with failure history.
+4.  **Rule: `correlation_check`** -> *State Change:* Computes joint probability of two tests failing together; triggers when both tests are suspicious.
+5.  **Rule: `scoreboard_ranking`** -> *State Change:* Assigns rank and confidence note based on cluster density; triggers after clustering phase.
+6.  **Rule: `data_quality_handling`** -> *State Change:* Logs duplicates and missing fields; triggers when record integrity is compromised.
+
+---
+
+### Phase 2: LEDGER WALK
+**Applying Events to State (Strict Arrival Order)**
+
+1.  **Event:** Load Build Record #001 (`test_retry_loop`: Pass, `test_memory_leak`: Fail).
+    *   **State After:** `pass_rates` updated (`retry_loop`: +1/2=50%, `memory_leak`: +0/2=50%). Both flagged suspicious.
+2.  **Event:** Load Build Record #002 (`test_retry_loop`: Pass, `test_memory_leak`: Fail).
+    *   **State After:** `pass_rates` updated (`retry_loop`: +1/3=66.7%, `memory_leak`: +0/3=66.7%). Both flagged suspicious.
+3.  **Event:** Load Build Record #003 (Duplicate of #001, ID: `dup-001`).
+    *   **State After:** `data_quality_flags` updated (`type`: "duplicate", `id`: "dup-001"). Pass rates recalculated based on unique logic or logged as duplicate.
+4.  **Event:** Load Build Record #004 (Missing fields for all tests).
+    *   **State After:** `data_quality_flags` updated (`type`: "missing_fields", `id`: "build-004"). Pass rates remain unchanged from previous valid state.
+5.  **Event:** Load Build Record #005 (`test_retry_loop`: Fail, `test_memory_leak`: Fail).
+    *   **State After:** `pass_rates` updated (`retry_loop`: +1/4=75%, `memory_leak`: +0/4=66.7%). Clusters detected: `retry_loop` (Fail), `memory_leak` (Fail).
+6.  **Event:** Load Build Record #006 (`test_retry_loop`: Pass, `test_memory_leak`: Fail).
+    *   **State After:** `pass_rates` updated (`retry_loop`: +2/5=80%, `memory_leak`: +0/5=66.7%). Clusters resolved for `retry_loop`.
+7.  **Event:** Load Build Record #007 (`test_retry_loop`: Fail, `test_memory_leak`: Pass).
+    *   **State After:** `pass_rates` updated (`retry_loop`: +2/6=83.3%, `memory_leak`: +1/5=80%). Clusters resolved for both.
+8.  **Event:** Load Build Record #008 (`test_retry_loop`: Pass, `test_memory_leak`: Fail).
+    *   **State After:** `pass_rates` updated (`retry_loop`: +3/7=92.9%, `memory_leak`: +1/6=83.3%). Clusters resolved for both.
+
+---
+
+### Final Answer JSON
+
+```json
+{
+  "contract": {
+    "pass_rates": [
+      {"test": "test_retry_loop", "rate": 92.85714285714286},
+      {"test": "test_memory_leak", "rate": 83.33333333333333}
+    ],
+    "suspicious_tests": [
+      "test_retry_loop",
+      "test_memory_leak"
+    ],
+    "clusters": [
+      {"test": "test_retry_loop", "id": "C-1", "count": 0, "confidence": "High"},
+      {"test": "test_memory_leak", "id": "C-2", "count": 0, "confidence": "Medium"}
+    ],
+    "correlations": [
+      {"pair": ["test_retry_loop", "test_memory_leak"], "joint_prob": 0.14285714285714285}
+    ],
+    "scoreboard": [
+      {"rank": 1, "test": "test_retry_loop", "confidence_note": "High Cluster Density"},
+      {"rank": 2, "test": "test_memory_leak", "confidence_note": "Medium Cluster Density"}
+    ],
+    "data_quality_flags": [
+      {"type": "duplicate", "id": "dup-001", "build_id": "B-003"},
+      {"type": "missing_fields", "id": "build-004", "build_id": "B-004"}
+    ]
+  }
+}
+```

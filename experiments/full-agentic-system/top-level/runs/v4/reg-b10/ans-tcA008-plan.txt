@@ -1,0 +1,87 @@
+```text
+WORKSPACE LAYOUT (as defined by the task):
+
+/tmp/opencode/timeline-run/
+├── scripts/
+│   ├── merge_logs.py
+│   ├── detect_events.py
+│   ├── activity_chart.py
+│   ├── build_timeline_table.py
+│   ├── build_output_files.py
+│   └── verifier.py
+├── logs/
+│   ├── service_a.log
+│   ├── service_b.log
+│   ├── service_c.log
+│   ├── service_d.log
+│   ├── service_e.log
+│   └── service_f.log
+├── rules.md
+├── decisions.md
+├── outputs/
+│   ├── merged_stream.txt
+│   ├── detection_events.txt
+│   ├── activity_chart.csv
+│   ├── timeline_table.tsv
+│   ├── timeline.md
+│   ├── timeline.json
+│   └── errors.log
+└── report.md
+
+---
+
+STAGE 1: MERGE ALL SIX LOGS INTO ONE CHRONOLOGICAL STREAM WITH SERVICE NAME ATTACHED
+
+Rule: Each log line must be parsed as: timestamp (string), level, message.  
+Rule: All timestamps are either in UTC or local time with offset (e.g., "2024-03-15T10:00:00+00:00" or "2024-03-15 10:00:00 -0500").  
+Rule: If a timestamp is missing, log it as an error and skip the line.  
+Rule: Convert all timestamps to UTC internally for comparison; record original format in output.  
+Rule: For each line, append service name (e.g., "service_a") to message.  
+Rule: Sort final stream by timestamp in ascending order.  
+Rule: If two lines have identical timestamps, preserve the one from the earliest service alphabetically.  
+
+Output: outputs/merged_stream.txt — one line per log entry with format:  
+"TIMESTAMP SERVICE_NAME LEVEL MESSAGE"
+
+If any line fails parsing or has missing timestamp, write to errors.log with full line and error reason.
+
+---
+
+STAGE 2: DETECT THE DETECTION MOMENT, MITIGATION ATTEMPT ONE (FAILED), MITIGATION TWO (WORKED)
+
+Rule: Detection moment = first log entry with level "ERROR" AND message containing "security breach", "injection", or "unauthorized access".  
+Rule: Mitigation attempt one = a line with level "ACTION" and message containing "block IP 192.168.x.x" OR "initiate firewall rule" — but must be followed by an error (level ERROR) within the next 3 minutes.  
+Rule: Mitigation attempt two = a line with level "ACTION" and message containing "revert config", "apply patch", or "restart service" — and must be followed by a log entry of level "INFO" with message containing "service restored" or "operation succeeded" within the next 5 minutes.  
+Rule: All events must be extracted from merged_stream.txt using exact string matching.  
+Rule: Output only the actual log lines that constitute each event, with original timestamp and service name.  
+
+Output: outputs/detection_events.txt — one line per event (detection, mitigation1, mitigation2), with full original log line as proof.
+
+Note: If a mitigation attempt fails to meet its follow-up condition, mark it as "failed" in output; if it succeeds, mark as "worked".
+
+---
+
+STAGE 3: NEXT FIVE-MINUTE BUCKET ACTIVITY CHART
+
+Rule: Divide the entire timeline into five-minute buckets (e.g., 10:00–10:05, 10:05–10:10).  
+Rule: For each bucket, count how many log lines fall within it.  
+Rule: Only include buckets that contain at least one event (detection or mitigation attempt).  
+Rule: If a bucket has no activity, skip it.  
+Rule: Output as CSV with columns: "bucket_start", "bucket_end", "activity_count"  
+
+Output: outputs/activity_chart.csv — one row per active five-minute bucket.
+
+Note: Bucket boundaries are inclusive of start and exclusive of end (e.g., 10:00–10:05).
+
+---
+
+STAGE 4: CLEAN TIMELINE TABLE
+
+Rule: Create a table with columns:  
+- clock_time (UTC, precise)  
+- event_type (detection / mitigation_attempt_one / mitigation_attempt_two / resolution)  
+- evidence_line_reference (full line from merged_stream.txt, including timestamp and service name)  
+
+Rule: Order by clock_time ascending.  
+Rule: Only include entries that were detected in Stage 2.  
+Rule: For each entry, the evidence line must be verifiable in

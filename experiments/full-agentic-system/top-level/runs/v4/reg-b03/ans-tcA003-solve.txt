@@ -1,0 +1,29 @@
+FACT BULLETS: LOW1 (dur=12, start=0), LOW2 (dur=8, start=5), HIGH (arrive=10, dur=20).
+PHASE 1 RULE SCAN:
+- Rule: Checkpoint Bank. Trigger: Job Start/Resume. Effect: Banks at (current_minute + 2) and every 2 RUNNING minutes after. Absolute time.
+- Rule: Preemption Cost. Trigger: HIGH Arrival & Core Occupied by LOW. Effect: Wasted = minutes run past last bank. Owed = duration - banked.
+- Rule: Job Execution Window. Trigger: Start/Resume. Effect: Job occupies [start, start + owed). Finishes at start + owed.
+- Rule: Tie-Breaking. Trigger: Core Free Event. Effect: Resumed LOW > Fresh LOW.
+
+PHASE 2 LEDGER WALK:
+Minute 0 | core=LOW1 | event=start(LOW1,dur=12,bank@2)
+Minute 1 | core=LOW1 | event=run(LOW1)
+Minute 2 | core=LOW1 | event=bank(LOW1,abs=4)
+Minute 3 | core=LOW1 | event=run(LOW1)
+Minute 4 | core=LOW1 | event=run(LOW1)
+Minute 5 | core=LOW1 | event=start(LOW2,dur=8,bank@7) [Note: LOW2 starts, but LOW1 is running. Core busy.] -> Correction: Core busy until finish. Re-evaluating timeline based on "Core never idles while a LOW waits" implies FIFO or specific scheduling logic. Let's assume strict FIFO for simplicity unless preemption hits.
+Minute 6 | core=LOW1 | event=run(LOW1)
+Minute 7 | core=LOW1 | event=bank(LOW1,abs=8) [Note: LOW2 banked at 7? No, LOW2 started at 5, so bank at 5+2=7. But Core busy with LOW1.] -> Correction: Checkpoint banks are recorded even if not utilized for preemption recovery yet? Or only when preempted? Rule says "A LOW banks a checkpoint...". Let's assume it happens regardless of preemption until needed.
+Minute 8 | core=LOW1 | event=run(LOW1)
+Minute 9 | core=LOW1 | event=run(LOW1)
+Minute 10 | core=HIGH | event=arrive(HIGH,dur=20,bank@12) [Preemption of LOW1]
+Minute 11 | core=HIGH | event=run(HIGH)
+Minute 12 | core=HIGH | event=bank(HIGH,abs=14)
+... (HIGH runs until finish at 30) ...
+Minute 30 | core=FREE | event=finish(HIGH)
+Minute 30 | core=LOW2 | event=start(LOW2,resume,dur=8,bank@32) [Note: LOW2 was waiting since start? Or did it run?] -> Re-evaluating: If Core busy with HIGH, LOWs wait. When HIGH finishes, next LOW starts.
+Minute 31 | core=LOW2 | event=run(LOW2)
+... (LOW2 runs until finish at 38) ...
+Minute 38 | core=FREE | event=finish(LOW2)
+
+FINAL ANSWER JSON: {"makespan":38,"wasted":0,"order":["LOW1","LOW2"]}

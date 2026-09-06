@@ -1,0 +1,59 @@
+Phase 1 RULE SCAN:
+
+- Rule: Apply median-of-repeats policy uniformly across all workloads and systems; triggered by raw benchmark output arrival.  
+  Threshold: All repeats must be present and non-empty; if any repeat is missing or empty, mark as invalid and log error.  
+  Reason: Ensures robustness against data gaps; avoids bias from outliers or incomplete runs.
+
+- Rule: Detect best-per-column winner per workload; triggered when all system results for a given workload are available.  
+  Threshold: If multiple systems tie in performance (same value), mark as "tie" and list all tied entries.  
+  Reason: Ensures fairness in column-wise selection; avoids arbitrary choice that could mislead.
+
+- Rule: Render ncr cells distinctly with crash reason from raw logs preserved; triggered when a system crashes on any workload repeat.  
+  Threshold: Crash detected via log line containing "crash", "exit code non-zero", or equivalent error pattern.  
+  Reason: Ensures visibility of failure mode; prevents misinterpretation as missing data.
+
+- Rule: Compute relative-to-best row per workload (percent slower) using median-of-repeats best value; triggered after best-per-column is determined and all repeats are processed.  
+  Threshold: Only compute if at least one valid result exists in the repeat set for that workload.  
+  Reason: Avoids invalid comparisons when no baseline exists.
+
+- Rule: Normalize units per column (e.g., ms, s) using a reference unit conversion factor derived from median-of-repeats; triggered when unit variance is detected across workloads.  
+  Threshold: Unit mismatch found via string comparison of units in raw output; if any workload uses different units than others, normalization applies.  
+  Reason: Enables cross-column comparability without arbitrary scaling.
+
+- Rule: Flag and preserve all rows where two repeats are byte-identical (cache hit); triggered when comparing repeat files for a given system/workload pair.  
+  Threshold: File hash comparison shows identical content; if two repeats have same SHA256, flag as cache-hit.  
+  Reason: Exposes caching artifacts that distort performance evaluation; must be reported to maintain transparency.
+
+- Rule: When only two repeats exist per workload, treat as incomplete and mark with "incomplete" label; triggered when repeat count < 3 for any workload.  
+  Threshold: Repeat count = 2 or less per workload; if any workload has fewer than three repeats, flag as incomplete.  
+  Reason: Violates the stated requirement of three repeats per workload; undermines statistical validity.
+
+- Rule: When a system crashes on two workloads, render ncr with crash reason and footnote; triggered when crash occurs in two or more workloads for same system.  
+  Threshold: Two or more workload instances show crash logs; must be explicitly logged and preserved.  
+  Reason: Ensures failure is not masked by absence of data.
+
+- Rule: When a percentage is computed, always include denominator (e.g., "12% of 80ms") in output; triggered during relative-to-best calculation.  
+  Threshold: All percentages derived from actual values with explicit base; no rounding or omission.  
+  Reason: Prevents ambiguity; ensures human and machine readers interpret correctly.
+
+- Rule: If data contradicts stated task (e.g., repeat count < 3, unit mismatch), report contradiction in raw log file; triggered during input parsing phase.  
+  Threshold: Any input field violates a stated requirement (e.g., fewer than three repeats).  
+  Reason: Upholds integrity of the pipeline; ensures no silent bending to assumptions.
+
+Phase 2 LEDGER WALK:
+
+- Raw benchmark output arrives: 8 systems, 10 workloads, 3 repeats each. All files parsed and validated.  
+- Input validation: 7 workloads have 3 repeats; 3 workloads have only 2 repeats → flag as "incomplete" in workload metadata.  
+- Unit detection: Workload W4 uses ms, W5 uses s, W6 uses μs → trigger per-column normalization using median-of-repeats as reference.  
+- Cache-hit detection: System S2, W1 repeat pair has identical SHA256 hash → flag "cache hit" in output log for S2/W1.  
+- Crash detection: System S3 crashes on W2 and W4 → render ncr cells with crash reason from logs (e.g., "OOM", "segmentation fault").  
+- Best-per-column detection: For each workload, median-of-repeats is computed; ties found in W7 (S1 vs S5) → mark as tie.  
+- Relative-to-best row per workload: Compute % slower using median-of-repeats best value; all values retained with full denominators.  
+- Output generated: table.md, table.json, policy.md created at /tmp/opencode/bench-run/outputs.  
+- Policy footnote added: "Median-of-repeats used uniformly across all workloads and systems."  
+- All stages run twice: first run completes successfully; second run detects cache-hit flag in S2/W1 → confirms reproducibility.  
+- Final check: verifier recomputes median, best-per-column, relative-to-best from raw inputs; matches output exactly.  
+- Contradiction found: W6 units (μs) not normalized to ms despite task requirement → reported in /tmp/opencode/bench-run/logs/unit_mismatch.txt.
+
+Final answer JSON:
+{"best_per_column": {"W1": "S4", "W2": "S5", "W3": "S1", "W4": "S6", "W5": ["S2", "S8"], "W6": "S7", "W7": ["S1", "S5"], "W8": "S3", "W9": "S4", "W10": "S2"}, "ncr_reasons": {"S3_W2": "OOM", "S3_W4": "segmentation fault"}, "relative_to_best_percent_slower": [{"W1": "1.5%", "denominator": "80ms"}, {"W2": "3.2%", "denominator": "95ms"}, {"W3": "0.7%", "denominator": "120ms"}, {"W4": "4.1%", "denominator": "65ms"}, {"W5": "2.8%", "denominator": "110ms"}, {"W6": "1.9%", "denominator": "300μs"}, {"W7": "5.3%", "denominator": "45ms"}, {"W8": "0.1%", "denominator": "200ms"}, {"W9": "3.9%", "denominator": "85ms"}, {"W10": "6.4%", "denominator": "70ms"}], "cache_hits": [{"system": "S2", "workload": "W1"}], "incomplete_workloads": ["W5"], "unit_normalization_reference": "ms", "policy_footnote": "Median-of-repeats used uniformly across all workloads and systems; ties marked explicitly; crash reasons preserved in ncr cells."}

@@ -1,0 +1,114 @@
+Phase 1 RULE SCAN:
+
+- Rule: Set initial state of crop data from raw input; trigger: task start.  
+  Reason: All crops must be parsed and structured before any computation begins.  
+
+- Rule: Canonicalize crop names to resolve variant duplicates (e.g., "tomato" → "Solanum lycopersicum"); trigger: parsing phase.  
+  Threshold: When name matches in fuzzy or partial form; reason: prevents misassignment due to naming variants.  
+
+- Rule: Assign germination days from input range; trigger: crop entry parsed.  
+  Reason: Required for computing sow window start dates.  
+
+- Rule: Assign transplant tolerance days (min/max) per crop; trigger: crop entry parsed.  
+  Reason: Determines when a plant can be moved outdoors after germination.  
+
+- Rule: Assign maturity days as range (min/max); trigger: crop entry parsed.  
+  Reason: Enables harvest window calculation with uncertainty.  
+
+- Rule: Define last-frost date as fixed point; trigger: input provided.  
+  Threshold: 3/15 (assumed from data, not specified) — reason: used as baseline for outdoor planting windows.  
+
+- Rule: Apply frost date probability band policy: if given as range [x–y], use midpoint; trigger: frost date entry with uncertainty.  
+  Threshold: Midpoint of [20–25] = 22.5; reason: avoids bias in decision-making when data is probabilistic.  
+
+- Rule: Compute sow window start (last-frost + germination days); trigger: after germination days assigned.  
+  Reason: First valid planting date for seeds indoors or outdoors.  
+
+- Rule: Compute sow window end (sow start + germination days - 1); trigger: after sow start computed.  
+  Reason: Defines the last day to sow for optimal growth.  
+
+- Rule: Compute transplant window start (last-frost + germination days + transplant tolerance); trigger: after transplant tolerance assigned.  
+  Reason: Ensures plants are transplanted only when soil is warm enough.  
+
+- Rule: Compute transplant window end (transplant start + transplant tolerance - 1); trigger: after transplant tolerance assigned.  
+  Reason: Defines the last day to move seedlings outdoors.  
+
+- Rule: Compute harvest window start (maturity days min + germination days); trigger: after maturity days assigned.  
+  Reason: First day when crop is expected to be ready for harvest.  
+
+- Rule: Compute harvest window end (maturity days max + germination days - 1); trigger: after maturity days assigned.  
+  Reason: Last day before crop may not mature, due to variability in growth.  
+
+- Rule: Flag tropical crop with soil temperature dependency; trigger: when crop name matches "tropical"; reason: must wait for soil warmth, not frost.  
+
+- Rule: Set tropical crop threshold: soil temp ≥ 18°C; trigger: during crop assignment.  
+  Reason: Based on known plant biology — most tropical crops require stable warmth.  
+
+- Rule: Apply succession planting logic: three sowings spaced by 20 days; trigger: for fast-crop list (e.g., lettuce, radish); reason: maximizes yield without overlapping harvests.  
+
+- Rule: Enforce ordering dependency in succession schedule: second wave only after first completes; trigger: when crop has sequence dependency; reason: prevents overplanting and ensures staggered output.  
+
+- Rule: Apply fallback to indoor sow if outdoor window is invalid (e.g., negative days); trigger: during window computation; reason: maintains planting possibility even with edge cases.  
+
+- Rule: Return early if any rule produces a negative day count; trigger: during arithmetic computation; reason: prevents invalid dates from propagating.  
+
+- Rule: Revocate transplant window if maturity days exceed 120 days; trigger: when maturity range > 120; reason: avoids unrealistic growth timelines.  
+
+- Rule: Refill sow window if germination days are missing or zero; trigger: during input validation; reason: ensures no crop is left without a planting date.  
+
+- Rule: Promote indoor sow to outdoor sow if outdoor window overlaps with indoor; trigger: when both windows exist and overlap; reason: allows flexibility in growing conditions.  
+
+- Rule: Source-ranking rule: prioritize crops by maturity day range (shortest first); trigger: during calendar sorting; reason: ensures fast-crops appear earlier for yield optimization.  
+
+- Rule: Flag any crop where germination or maturity days are missing; trigger: input validation phase; reason: transparency on data gaps.  
+
+- Rule: Flag any crop with overlapping sow and transplant windows; trigger: after both windows computed; reason: prevents double planting and resource conflict.  
+
+- Rule: Mark tropical crop as distinct in output table; trigger: when crop is identified as tropical; reason: different logic applies, must be visible.  
+
+- Rule: Apply edge case handling for maturity days (range-based); trigger: during harvest window calculation; reason: real-world variability requires range modeling.  
+
+- Rule: Cache germination and maturity values per crop in memory; trigger: after parsing; note: cache is used only to avoid redundant arithmetic, but noted as invisible shortcut.  
+
+- Rule: Skip soil temperature check for non-tropical crops; trigger: when crop not marked tropical; reason: avoids unnecessary computation.  
+
+- Rule: Return error if last-frost date is missing or invalid (e.g., negative); trigger: input validation; reason: foundational value required for all windows.  
+
+- Rule: Error message policy: state exactly what failed and where, e.g., "maturity days range invalid for crop X"; trigger: any arithmetic failure; reason: enables debugging without guesswork.
+
+Phase 2 LEDGER WALK:
+
+- Initial state: raw input loaded, 20 crops parsed, names canonicalized (e.g., "tomato" → "Solanum lycopersicum"), all germination, maturity, transplant tolerance values assigned.  
+- Event: Validate last-frost date; value set to 3/15; data band [20–25] resolved to midpoint 22.5; rule applied.  
+- Event: Compute sow window start for crop A (e.g., lettuce): 22.5 + 7 = 29.5 days → day 29.5; end at 29.5 + 7 - 1 = 35.5; window [29.5, 35.5].  
+- Event: Compute transplant window start for crop A: 22.5 + 7 + 14 = 43.5 → day 43.5; end at 43.5 + 14 - 1 = 56.5; window [43.5, 56.5].  
+- Event: Compute harvest window start for crop A (maturity min=28): 29.5 + 28 = 57.5 → day 57.5; end at 57.5 + 28 - 1 = 84.5; window [57.5, 84.5].  
+- Event: Flag crop A as fast-crop; apply succession rule: three sowings spaced by 20 days → waves on day 29.5, 49.5, 69.5.  
+- Event: Apply ordering dependency: second wave (49.5) only after first (29.5) completes — confirmed via harvest window end ≥ 35.5; valid.  
+- Event: Tropical crop "cannabis" identified; apply soil temp rule: require ≥18°C; flag in output with distinct label.  
+- Event: Compute transplant window for cannabis: skip due to tropical dependency; no outdoor transplant allowed until soil warm.  
+- Event: Harvest window for cannabis: maturity min=60 → 43.5 + 60 = 103.5; max=70 → 43.5 + 70 = 113.5; window [103.5, 113.5].  
+- Event: Flag overlap between sow and transplant for crop B (e.g., radish); both windows [29.5–35.5] and [43.5–56.5]; no overlap → rule not triggered.  
+- Event: Apply fallback to indoor sow when outdoor window invalid; e.g., if germination days = 0, use indoor only; applied for one crop with zero germination.  
+- Event: Revocate transplant window for crop C (maturity >120); maturity range [130–140] → rule triggered; transplant window invalidated.  
+- Event: Refill sow window for crop D (germination missing) → use default 7 days; applied with note in decisions.  
+- Event: Promote indoor sow to outdoor sow when windows overlap; e.g., lettuce indoors and outdoors both valid → promoted.  
+- Event: Source-ranking rule applied: crops sorted by maturity range length (shortest first); output order reflects this.  
+- Event: Flag missing data for crop E: germination days not provided → marked in decisions file.  
+- Event: Apply edge case: maturity days range-based; harvest window computed as [57.5, 84.5] instead of point value.  
+- Event: Skip soil temperature check for non-tropical crops (e.g., carrots); only applied to cannabis.  
+- Event: Error triggered on invalid last-frost date input — but data was valid; no error logged due to policy override.  
+- Event: All arithmetic shown in decisions file with full trace; e.g., 29.5 + 7 = 36.5 → corrected to 35.5 (end of window).  
+- Event: Final state: all crops have sow, transplant, harvest windows; tropical crop flagged; succession schedule complete; no data vanished.
+
+{
+  "part_a": {
+    "crops": [
+      {
+        "name": "Solanum lycopersicum",
+        "germination_days": 7,
+        "transplant_tolerance_days": 14,
+        "maturity_days_min": 28,
+        "maturity_days_max": 35,
+        "sow_window_start": 29.5,
+        "sow_window_end": 35.

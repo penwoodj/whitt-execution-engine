@@ -1,0 +1,73 @@
+### PLAN FIRST: Steps for Queue Lag Report Generation
+
+1.  **Initialize Workspace & Generate Synthetic Data**: Create `/tmp/opencode/queue-run` directory structure (`scripts`, `outputs`, root config files). Generate a Python script to synthesize raw lag snapshots (2 days, 4 consumers, partitions), including specific anomalies: missing 20-min window data, backward offset jumps for `worker-2`, and 3 rebalance events.
+2.  **Define Rules & Methodology**: Create `rules.md` with explicit thresholds (e.g., burst definition, lag correlation logic) and rationale. Create `decisions.md` to log how specific mess types (missing data, backward offsets) will be handled before processing begins.
+3.  **Implement Data Ingestion Script**: Write `scripts/ingest.py` to generate the raw CSV artifact in `outputs/raw_lag.csv`. Ensure it includes timestamps for all stages and logs progress to a file.
+4.  **Implement Analysis Logic (Lag & Throughput)**: Write `scripts/analyze.py` to compute per-consumer/partition metrics (max, mean), identify burst windows, calculate throughput via offset deltas, and correlate lag spikes with rebalance timestamps. Handle missing data by flagging rows rather than dropping them silently.
+5.  **Implement Worker-2 Diagnosis**: Add specific logic within `scripts/analyze.py` to isolate whether `worker-2`'s issues are due to inherent slowness or hot partition sticking, outputting computed numbers.
+6.  **Generate Final Reports**: Create `outputs/lag-report.md` (human readable), `outputs/lag.json` (machine readable), and the one-paragraph methodology note within the markdown file.
+7.  **Implement Verification Script**: Write `scripts/verify.py` to independently recompute key metrics from raw data, compare field-by-field against analysis output, and exit with non-zero status if any drift exists.
+8.  **Execute Run & Capture Artifacts**: Execute the pipeline twice (idempotent check), capturing timestamps for each stage into a final timing table in `outputs/timing_table.csv`.
+9.  **Final Output Assembly**: Ensure all files (`rules.md`, `decisions.md`, scripts, outputs) exist with correct paths documented in a root-level summary or readme if not self-evident.
+
+---
+
+### TASK EXECUTION: Queue Lag Report Generation
+
+I will now execute the full plan directly within the specified directory structure. All artifacts will be created on disk. No interactive prompts will be used.
+
+#### 1. Initialize Workspace & Generate Synthetic Data
+
+Creating `/tmp/opencode/queue-run` and generating the synthetic data generator script.
+
+```python
+import os
+import csv
+import random
+from datetime import datetime, timedelta
+
+# Configuration for synthetic data generation
+WORKSPACE = "/tmp/opencode/queue-run"
+SCRIPTS_DIR = f"{WORKSPACE}/scripts"
+OUTPUTS_DIR = f"{WORKSPACE}/outputs"
+
+os.makedirs(SCRIPTS_DIR, exist_ok=True)
+os.makedirs(OUTPUTS_DIR, exist_ok=True)
+
+# Define synthetic parameters
+NUM_CONSUMERS = 4
+CONSUMER_NAMES = ["worker-1", "worker-2", "worker-3", "worker-4"]
+PARTITIONS = [0, 1, 2]
+DURATION_HOURS = 48 # 2 days
+SAMPLE_INTERVAL_MINUTES = 1
+
+# Anomaly definitions
+REBALANCE_EVENTS = [
+    {"timestamp_offset_min": 65, "consumer_affected": None}, # Early rebalance
+    {"timestamp_offset_min": 300, "consumer_affected": CONSUMER_NAMES[2]}, # Mid-day rebalance
+    {"timestamp_offset_min": 480, "consumer_affected": CONSUMER_NAMES[1]}  # Late rebalance (worker-2)
+]
+
+# Worker-2 specific issues: Bursty lag and backward offsets
+WORKER2_ISSUES = {
+    "burst_start_min": 75,
+    "burst_end_min": 90,
+    "backward_offset_occurs_at_min": 145
+}
+
+def generate_raw_lag_csv():
+    start_time = datetime.now() - timedelta(hours=DURATION_HOURS)
+    
+    # Generate timestamps
+    current_minute = 0
+    rows = []
+    
+    while current_minute <= DURATION_HOURS * 60:
+        timestamp = start_time + timedelta(minutes=current_minute)
+        
+        # Check for missing data window (20 minutes starting at minute 180)
+        if 180 <= current_minute < 200:
+            continue
+            
+        row_data = {
+            "timestamp": timestamp.strftime("%Y-%m-%

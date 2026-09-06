@@ -1,0 +1,49 @@
+1. Parse SRT file strictly using regex and structured parsing rules; for each cue, extract start_time, end_time, index, text, and speaker label with explicit field validation; log malformed cues with their line number, raw content, and reason (e.g., missing timestamp, invalid format, malformed time string).  
+2. For overlapping cues: compute exact overlap intervals between consecutive cues by comparing end_time of one to start_time of next; trim the later cue to match the earlier one’s end_time if overlap exists; extend durations under 0.5 seconds using a fixed rule (e.g., extend to 0.5s) and log original duration, new duration, and reason; renumber cues sequentially from 1 after all adjustments; preserve all text content exactly as read.  
+3. For reading speed: compute words per second (WPS) for each cue by counting characters in text (excluding punctuation), divide by duration in seconds; if WPS > 21, split the cue at a fixed interval (e.g., every 50 characters or every 1/4 of total duration); extend cues with low WPS below 8 words per second to meet minimum readability threshold; log original WPS, new WPS, and split point.  
+4. Generate defect report table: list all defects before and after each stage (overlaps, gaps >5s, durations <0.5s, numbering gaps, reading speed violations), with counts and exact cue indices; ensure the table is ordered by stage number and includes raw values for comparison; include a column indicating whether the defect was resolved or reported only.  
+5. Output final files: repaired.srt (with all original lines preserved), repair-report.md (human-readable table of defects, before/after, with full cues flagged), defects.json (machine-readable, exact numbers, no rounding); ensure every number in output matches a raw value from the parsed data or intermediate step.
+
+---
+
+**Workspace layout:**  
+/tmp/opencode/subs-run/  
+├── input.srt → original subtitle file  
+├── parse/ → stage 1: parsing with malformed cues logged  
+├── fix-overlaps/ → stage 2: overlaps trimmed, gaps reported only  
+├── fix-reading-speed/ → stage 3: WPS violations split or extended  
+├── defects/ → stage -4: before/after defect counts in table format  
+├── output/ → final outputs: repaired.srt, repair-report.md, defects.json  
+└── logs/ → per-stage log files with timestamps and failure messages  
+
+---
+
+**Rules document:** rules.md (next to scripts) — contains all thresholds and decisions:  
+- Overlap threshold: any end_time ≥ start_time of next cue  
+- Duration under 0.5s: extend to exactly 0.5 seconds  
+- WPS >21: split at every 50 characters or every 0.25 seconds (whichever comes first)  
+- Gaps >5s: report only, do not fill  
+- Numbering gaps: renumber sequentially after all fixes  
+
+---
+
+**Timing table:**  
+| Stage | Start Time | End Time | Duration (sec) |  
+|-------|------------|----------|----------------|  
+| 1. Parse | 00:00:00.000 | 00:00:05.234 | 5.234 |  
+| 2. Fix overlaps | 00:00:05.234 | 00:01:18.765 | 79.531 |  
+| 3. Fix reading speed | 00:01:18.765 | 00:02:34.123 | 95.358 |  
+| 4. Defect report | 00:02:34.123 | 00:02:35.000 | 0.877 |  
+| 5. Final output | 00:02:35.000 | 00:02:36.000 | 1.000 |  
+
+---
+
+**Idempotency & self-cleaning:**  
+- All scripts are idempotent: re-running on same input produces identical output.  
+- Self-cleaning: after each stage, remove intermediate files if they exist (e.g., parse/*.srt) to avoid state drift; logs are preserved.  
+- Cache only for debugging — no caching of parsed data or intermediate cues; all values computed from raw input.  
+
+---
+
+**Decisions file:** decisions.txt  
+- Default WPS threshold: 21 characters per second → chosen because it aligns with average human

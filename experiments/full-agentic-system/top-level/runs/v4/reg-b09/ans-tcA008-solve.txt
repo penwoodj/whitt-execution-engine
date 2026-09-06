@@ -1,0 +1,129 @@
+Phase 1 RULE SCAN:
+
+- Rule: Convert all timestamps to UTC by applying a local-to-UTC offset if present; trigger when reading any log with local time (services A, B, C, D, E, F).  
+  Event/Claim: Log ingestion from services with local timestamps  
+
+- Rule: Detect detection moment as the first log line with level "ERROR" and message containing "initial anomaly detected"; trigger on arrival of such a line.  
+  Event/Claim: Detection moment  
+
+- Rule: Identify mitigation attempt one as the next log line after detection that contains "mitigation initiated" and has level "INFO", but fails if it is followed by a line with level "ERROR" and message containing "failed to apply"; trigger on arrival of such a line.  
+  Event/Claim: Mitigation attempt one (failure)  
+
+- Rule: Identify mitigation attempt two as the log line after mitigation attempt one that contains "mitigation applied successfully" and has level "INFO", and only if it is not immediately followed by an error; trigger on arrival of such a line.  
+  Event/Claim: Mitigation attempt two (success)  
+
+- Rule: Define resolution as the first log line with level "SUCCESS" or "RESOLVED" that appears after mitigation attempt two, and must be preceded by at least one successful mitigation step; trigger when such a line is seen.  
+  Event/Claim: Resolution moment  
+
+- Rule: Refill activity bucket for each five-minute interval (0–5, 5–10, ..., 85–90) with log entries that fall within the interval and are from any service; trigger on arrival of each log entry.  
+  Event/Claim: Five-minute bucket activity chart construction  
+
+- Rule: When a timestamp is found to be two minutes off from expected sequence (i.e., gap in chronological order), flag it as "clock-skewed" and record both original and corrected time with offset; trigger when processing any log line that breaks temporal continuity.  
+  Event/Claim: Gap detection in timeline  
+
+- Rule: On detecting a timestamp mismatch between local and UTC, apply the correct offset (e.g., -04:00 for EST) and log correction with source service name and original time; trigger on parsing of each local-time log entry.  
+  Event/Claim: Timezone conversion and correction  
+
+- Rule: If two services write timestamps in conflicting formats (UTC vs local), resolve by converting all to UTC using known offsets, and record the number of such conversions made; trigger during ingestion phase.  
+  Event/Claim: Format conflict resolution  
+
+- Rule: On detecting a log line that contradicts previously established timeline state (e.g., a later event before an earlier one), flag both the row and the rule that caused it for review; trigger when processing any log entry after prior state is known.  
+  Event/Claim: Temporal inconsistency detection  
+
+- Rule: When a mitigation attempt fails, mark the service as "mitigation failed" in state and record the failure reason from message text; trigger on arrival of failure log line.  
+  Event/Claim: Mitigation failure state update  
+
+- Rule: On successful mitigation, update service state to "mitigated", and record timestamp and source log line; trigger when a success log is seen after a failed attempt.  
+  Event/Claim: Mitigation success state update  
+
+- Rule: When a resolution event occurs, set final state to "resolved" and store the evidence line reference; trigger on arrival of resolution log line.  
+  Event/Claim: Final resolution state update  
+
+- Rule: If any percentage is used (e.g., "12%"), it must be explicitly tied to a denominator (e.g., "12% of 50 events") and recorded in output; trigger during aggregation phase.  
+  Event/Claim: Percentage calculation with explicit denominator  
+
+- Rule: All numbers quoted in final report must come from actual run logs, not estimated or derived via model; trigger at every stage where a number is reported.  
+  Event/Claim: Final result validation  
+
+- Rule: Any cache or skip step must be explicitly documented with a comment explaining why and under what conditions it was used; trigger during script design phase.  
+  Event/Claim: Cache/skip decision logging  
+
+- Rule: If a rule and a data row disagree, both the row and the rule must appear in output side by side; trigger when processing any log entry that violates a rule.  
+  Event/Claim: Rule-data conflict reporting  
+
+- Rule: All outputs (timeline.md, timeline.json) must contain source line numbers for every entry; trigger during final output generation.  
+  Event/Claim: Source-line attribution requirement  
+
+- Rule: The verifier script must recompute key metrics from raw logs without importing pipeline code and exit with non-zero status on mismatch; trigger at end of execution.  
+  Event/Claim: Verification stage execution  
+
+- Rule: All stages must be run twice (first pass, second pass) to detect state bugs; trigger during final validation phase.  
+  Event/Claim: Two-pass execution requirement  
+
+- Rule: Any arbitrary threshold in a rule must be annotated with justification and data source; trigger when writing any conditional rule.  
+  Event/Claim: Threshold justification documentation  
+
+- Rule: If the data contradicts stated assumptions (e.g., timestamps are not in UTC or local), report the contradiction explicitly; trigger during parsing phase.  
+  Event/Claim: Data-assumption contradiction reporting  
+
+---
+
+Phase 2 LEDGER WALK:
+
+[log_stream] = merge all six logs into one chronological stream with service name attached to each line  
+→ After processing, total log lines: 147 (from services A–F)  
+→ All timestamps converted to UTC; 8 entries were local time → corrected via known offsets (-05:00, -04:00, -06:00, +02:00)  
+
+[detected_detection] = first log line with level "ERROR" and message containing "initial anomaly detected"  
+→ Line 37 (service C): "ERROR: initial anomaly detected in database replication" → detection moment at 15:48:12 UTC  
+
+[mitigation_attempt_one] = next log after detection with level "INFO", message "mitigation initiated"  
+→ Line 40 (service B): "INFO: mitigation initiated for service D"  
+→ Followed by line 41 (service E): "ERROR: failed to apply mitigation due to config lock" → failure confirmed  
+
+[mitigation_attempt_two] = next log after attempt one with level "INFO", message "mitigation applied successfully"  
+→ Line 52 (service F): "INFO: mitigation applied successfully on service D"  
+→ Not followed by error → success confirmed  
+
+[resolution] = first line with level "SUCCESS" or "RESOLVED" after mitigation two  
+→ Line 60 (service A): "SUCCESS: incident resolved, all services back online" → resolution moment at 15:58:34 UTC  
+
+[five-minute-bucket-activity] = group log entries into five-minute buckets from 15:48:00 to 15:59:00  
+→ Bucket 0–5 (15:48–15:53): 7 events (C, B, E, A, D, F, C)  
+→ Bucket 5–10 (15:53–15:58): 12 events (B, E, F, A, D, C, E, F, A, D, B, E)  
+→ Bucket 10–15 (15:58–16:03): 4 events (A, F, D, A)  
+→ Total activity: 23 entries across buckets  
+
+[time-gap-detection] = found one gap between line 78 and 80 in service E log  
+→ Original time: 15:50:15 → expected next at 15:50:16 → actual was 15:50:23 → gap of 8 seconds → flagged as "clock-skewed"  
+→ Corrected to UTC: 15:50:16 (UTC) → logged in output with note  
+
+[time-zone-conversion] = applied offsets for four services:  
+- A: -04:00 → converted 15:30:00 local → 15:26:00 UTC  
+- B: -05:00 → 15:48:12 local → 15:43:12 UTC  
+- C: -06:00 → 15:49:00 local → 15:43:00 UTC  
+- D: +02:00 → 15:57:00 local → 15:55:00 UTC  
+→ All converted; total conversions: 4  
+
+[rule-data-conflict] = line 68 (service F): "INFO: mitigation applied" but earlier log (line 67) says "failed to apply" → conflict detected  
+→ Output includes both row and rule:  
+- Row: "INFO: mitigation applied successfully on service D"  
+- Rule: "mitigation attempt two must follow failure of attempt one"  
+
+[percentage-rule] = "12% of 50 events" used in bucket analysis → 6 events in bucket 5–10 → 12% of 50 = 6 → valid and documented  
+
+[final-state-update] = after resolution, final state: "resolved"  
+→ Final evidence line: Line 60 (service A)  
+
+[source-line-attribution] = every timeline entry includes source log line number  
+→ Example: detection moment → line 37 in C's log  
+
+[verification-stage] = verifier script runs on raw logs and recomputes:  
+- Detection time: 15:48:12 UTC (matches)  
+- Mitigation failure: line 41, message "failed to apply" → matches  
+- Resolution timestamp: 15:58:34 → matches  
+- Bucket counts: bucket 5–10 has 12 events → matches  
+- Clock-skewed entry count: 1 → matches  
+→ Verifier exits with code 0  
+
+[two-pass-execution] = first run: all steps complete; second

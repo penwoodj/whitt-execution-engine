@@ -1,0 +1,63 @@
+### PLAN FIRST (Steps & Formulas/Rules)
+
+1.  **Workspace Initialization**: Create directory structure `/tmp/opencode/jsqlite-run` with subfolders `src`, `data`, `output/raw`, `output/normalized`, `output/reports`, `logs`.
+2.  **Schema Design (`schema.md`)**: Define normalized SQLite schema (Products, Suppliers, Tags) with explicit types; rule: "Denormalized JSON input must be split into atomic tables to ensure referential integrity."
+3.  **Load Script Construction**: Write Python script using only `json`, `sqlite3`, `datetime`, `re`; rule: "Type coercion happens at load time; invalid rows go to quarantine table, not silent drop."
+4.  **Data Loading Execution**: Run loader against raw JSON; formula: `Total Input = Valid + Rejected + Quarantined`; output: `load-report.md` with error counts per type.
+5.  **Indexing Strategy**: Create indexes on `(product_id)`, `(supplier_name)`, `(tags)` based on anticipated query patterns; rule: "Measure timing before/after index creation."
+6.  **Query Execution & Timing**: Run three specific queries against indexed DB; output: JSON results with precise millisecond timestamps for each stage.
+7.  **Verification Script**: Create independent recomputation logic that reads raw JSON and re-applies rules to verify conservation of records (`Input == Output + Rejected`).
+8.  **Documentation Generation**: Write `rules.md` (thresholds/reasons), `decisions.md` (defaults), and `README.md` (structure); rule: "All thresholds must be explicit with rationale."
+9.  **Final Report Assembly**: Generate human-readable Markdown report with tables comparing raw vs normalized counts; rule: "Percentages always include denominator."
+10. **Double-Run Test**: Execute full pipeline twice; compare outputs for state consistency; rule: "Non-zero exit code on any discrepancy between run 1 and run 2."
+
+---
+
+### TASK EXECUTION
+
+I will now build the complete analysis pipeline inside `/tmp/opencode/jsqlite-run`. This solution uses **only Python standard library** (`json`, `sqlite3`, `datetime`, `re`, `os`, `sys`, `pathlib`). No external dependencies, no LLMs, no network.
+
+The pipeline handles messy data explicitly: missing fields, nested arrays, currency symbols, and comma-separated tags. Every decision is documented in files on disk.
+
+#### 1. Directory Structure & Initialization
+
+```bash
+mkdir -p /tmp/opencode/jsqlite-run/{src,data,output/raw,output/normalized,output/reports,logs}
+cd /tmp/opencode/jsqlite-run
+```
+
+*Note: Since you did not provide the actual `catalog.json` file or the target `target.db`, I will generate a synthetic messy dataset and an empty target DB to demonstrate the full pipeline functionality. The code is designed to accept your specific files if placed in `/tmp/opencode/jsqlite-run/data/`.*
+
+#### 2. Schema Design (`schema.md`) & Rationale
+
+**File:** `output/reports/schema.md`
+
+```markdown
+# Normalized Schema Rationale
+
+## Tables
+
+### products (Main Catalog)
+- **id**: INTEGER PRIMARY KEY AUTOINCREMENT
+- **name**: TEXT NOT NULL (Cleaned, trimmed)
+- **description**: TEXT (Nullable)
+- **price_numeric**: REAL NOT NULL (Currency stripped, converted to float)
+- **currency_code**: TEXT CHECK(currency_code IN ('USD', 'EUR')) (Explicit type)
+- **tags**: TEXT (Comma-separated string for quick filtering, normalized)
+- **created_at**: DATETIME DEFAULT CURRENT_TIMESTAMP
+
+### suppliers
+- **id**: INTEGER PRIMARY KEY AUTOINCREMENT
+- **name**: TEXT NOT NULL UNIQUE
+- **region**: TEXT (Nullable)
+
+### product_suppliers (Junction Table)
+- **product_id**: INTEGER REFERENCES products(id)
+- **supplier_id**: INTEGER REFERENCES suppliers(id)
+- **PRIMARY KEY (product_id, supplier_id)**
+
+## Rules for Normalization
+1.  **Atomicity**: Nested JSON arrays (suppliers) are flattened into a junction table to prevent duplication and allow many-to-many relationships.
+2.  **Type Safety**: Prices stored as strings in input are coerced to REAL in DB. Currency symbols ($) removed before conversion.
+3.  **Tag Normalization**: Comma-separated strings split, trimmed, lowercased, and rejoined for consistent indexing.
+4.  **Quarantine Strategy**: Rows missing required fields (id, name) or containing invalid currencies are NOT deleted silently; they are logged in `load-report.md` and stored in a separate `products_quarantine` table if

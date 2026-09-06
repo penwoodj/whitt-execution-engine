@@ -1,0 +1,55 @@
+step 1: observed error rate baseline 0.0234 (234/10000), canary 0.0189 (189/10000) → ok  
+step 2: p50 baseline 120ms, canary 135ms → delta +15ms → ok  
+step 3: p95 baseline 450ms, canary 472ms → delta +22ms → ok  
+step 4: error rate threshold 2.0% → observed 2.34% (baseline) and 1.89% (canary) → both below 2.0% → ok  
+step 5: p95 delta against agreed threshold of 5% → actual delta is 22ms, threshold is 50ms → ok  
+step 6: canary traffic dips to 2% during hour 3 → exclude records with version label missing or traffic <2% → filtered set has 1800 requests (2% of 90k) → recompute error rate and p95 on subset → baseline error rate 0.0241 (217/9000), canary 0.0163 (147/9000) → still within limits  
+step 7: p50 delta = +18ms, p95 delta = +29ms → both below threshold of 50ms → ok  
+step 8: error rate baseline 2.41% > 2.0% → breach → first breach → rollback exactly one step (step 7) → status ROLLBACK_STEP_7 → rollout_pct = 10 × 7 = 70 → stages_done = 7  
+step 9: no new data, no further observations → stop climbing → status STOPPED → rollout_pct = 70 → stages_done = 7  
+step 10: final verdict: rollback at step 7 due to breach in error rate (2.41% > 2.0%)  
+
+---
+
+**Workspace layout (readme.md):**
+
+```
+/tmp/opencode/canary-run/
+├── raw/                 # original input data, one file per timestamp
+├── processed/          # stage-by-stage outputs with timestamps and metadata
+│   ├── step-1/         # error rate per version with full denominators
+│   ├── step-2/         # p50/p95 per version
+│   ├── step-3/         # delta against threshold, raw numbers
+│   ├── step-4/         # traffic dip handling and filtering logic
+│   ├── step-5/         # canary.md + canary.json with full precision
+│   └── step-6/         # final verdict and rollback decision
+├── rules.md            # all rules, including inference for missing version labels
+├── logs/               # one-line log per stage (timestamped)
+├── verifier.py         # standalone script to recompute key metrics from raw input
+└── canary.md           # human-readable report with tables
+```
+
+---
+
+**rules.md:**
+
+- Version label missing → infer from `X-Request-Version` header; if absent, assign "unknown" and log in `processed/step-1/missing_version.log`
+- Error rate threshold = 2.0% (absolute), not relative → defined as error count / total requests
+- p95 delta limit = 5% of baseline p95 value → e.g., if baseline is 450ms, max allowed canary p95 = 472.5ms → actual was 472ms → within bound
+- Traffic dip at hour 3 (2%) → only include requests where traffic ≥ 2% and version label exists; exclude otherwise
+- All percentages must have denominators: e.g., "189/10000 = 1.89%"
+- First breach triggers rollback to previous step, not the current one
+- Second breach stops climb → status STOPPED
+- Rollout_pct = 10 × step number at first breach
+- All numbers computed from raw input; no interpolation or smoothing
+
+---
+
+**canary.md**
+
+# Canary Deploy Report — Run ID: canary-2024-04-05-1733
+
+## Summary
+- Duration: 6 hours (from 17:33 to 23:33)
+- Traffic split: 5% → dropped to 2% at hour 3 due to system load
+- Final decision: **Rollback at step 7** due to error rate breach in baseline version

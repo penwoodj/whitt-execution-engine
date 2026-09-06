@@ -1,0 +1,71 @@
+### PLAN FIRST (Steps & Formulas)
+
+1.  **Setup Workspace**: Create `/tmp/opencode/subs-run` with subfolders `raw`, `parsed`, `repaired`, `reports`, `logs`, `rules`.
+2.  **Generate Test Data**: Write a Python script to create `input.srt` containing: 800 cues, overlaps, >5s gaps, <0.5s durations, numbering gaps, mixed timestamp delimiters (`,` and `.`), out-of-order timestamps, and multi-line speaker labels.
+3.  **Strict Parser (`parse_srt.py`)**: Read `input.srt`; tokenize lines; validate index continuity; extract start/end times handling both delimiters; flag malformed cues in a list without crashing; output to `parsed/`.
+4.  **Defect Analyzer (`analyze_defects.py`)**: Load parsed data; calculate overlaps, gaps, short durations, word-per-second (WPS) rates; identify out-of-order timestamps and label anomalies; generate defect counts for the "Human Table".
+5.  **Repair Engine (`repair_srt.py`)**: 
+    *   Sort cues by start time (handling out-of-order).
+    *   Resolve overlaps: Trim end of later cue to match start of earlier cue.
+    *   Resolve gaps >5s: Report only, do not fill.
+    *   Extend short durations (<0.5s): Add 0.1s to duration, adjust end time.
+    *   Renumber indices sequentially starting at 1.
+    *   Output repaired `repaired.srt`.
+6.  **Reading Speed Pass (`speed_check.py`)**: Calculate WPS for all cues; identify cues >21 chars/sec (using average word length approx or raw char count if words not distinct, assuming "characters per second" implies visual density); split long cues or extend duration to meet threshold; log changes.
+7.  **Defect Comparison (`compare_defects.py`)**: Run defect analyzer on repaired data; generate table comparing Pre- vs Post- counts (Overlaps, Gaps, Short Durations, High WPS).
+8.  **Report Generator (`generate_reports.py`)**: Create `repair-report.md` with Human Tables and JSON blocks; create `defects.json`; ensure numbers match exactly between Markdown and JSON.
+9.  **Rules Documentation**: Write `rules.md`, `decisions.md`, and `readme.md`.
+10. **Verification Script (`verify.py`)**: Independently re-parse `repaired.srt`; re-calculate all metrics; compare against `defects.json` and `repair-report.md`; exit non-zero if any drift found.
+11. **Execution & Timing**: Run pipeline with timestamps logged to `logs/`; capture real wall-clock times for each stage.
+12. **Double-Run Test**: Execute full pipeline twice; verify state consistency (idempotency).
+
+---
+
+### TASK EXECUTION
+
+#### 0. Workspace Initialization
+
+```bash
+mkdir -p /tmp/opencode/subs-run/{raw,parsed,repaired,reports,logs,rules}
+cd /tmp/opencode/subs-run
+```
+
+#### 1. Generate Test Data (`generate_data.py`)
+
+This script creates the deliberately broken `input.srt`.
+
+```python
+import random
+import os
+
+def generate_test_srt():
+    base_dir = "/tmp/opencode/subs-run/raw"
+    os.makedirs(base_dir, exist_ok=True)
+    
+    # Configuration for 800 cues with specific defects
+    num_cues = 800
+    
+    # We will construct a list of (index, start, end, text) tuples manually to inject defects
+    cues = []
+    current_time = 1000
+    
+    # Helper to add random text
+    def rand_text():
+        return f"Line {random.randint(1,5)}: The quick brown fox jumps over the lazy dog. " + \
+                f"This is a sentence with some words to increase length for speed testing."
+
+    # Generate mostly normal cues first
+    for i in range(num_cues):
+        duration = random.uniform(2.0, 4.5)
+        start = current_time
+        end = start + duration
+        text = rand_text()
+        cues.append((i+1, start, end, text))
+        current_time += duration
+
+    # Inject Defects
+    
+    # 1. Overlaps: Modify last 20 cues to overlap with previous
+    for i in range(len(cues)-20):
+        if random.random() < 0.3:
+            cues[i+1][1] = cues[i][1] -

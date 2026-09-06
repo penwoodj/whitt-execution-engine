@@ -1,0 +1,40 @@
+1. Create workspace at `/tmp/opencode/sec-sweep-run` with structure:  
+   `scripts/`, `outputs/`, `rules.md`, `sweep.md`, `sweep.json`, `README.md`
+
+2. Download or generate synthetic access logs for two weeks (e.g., 14 days) from a public-facing box, simulating real-world patterns including IPv6 addresses, truncated log lines, and timestamp drift of ±30 seconds across files.
+
+3. Parse raw log files into structured records using standard tools (e.g., `awk`, `perl`, or `python`), preserving full fields: timestamp, IP address, path, status code, request method, size, and any truncation flags.
+
+4. For each log line, extract the IP, timestamp, path, and status code; if IPv6 is present, flag it explicitly with a "v6" tag in metadata; if truncated mid-field (e.g., missing path or status), record the field gap and mark as "truncated".
+
+5. Validate timestamps: for each log entry, check against known time range (start to end of two weeks); if timestamp is outside bounds or drifts >30 seconds from expected, flag with "timestamp_drift" and note offset.
+
+6. Compute failed-login frequency by IP: filter entries where status code == 4xx or 5xx and path matches login pattern (e.g., `/login`, `/auth`, `/signin`); count per unique IP; output top 20 IPs with counts, including IPv6 addresses.
+
+7. Detect path scanning: identify distinct 404 paths from the same source IP; group by (IP, path), filter only when status == 404 and path is not a known legitimate route (e.g., `/static/`, `/api/v1/`); count unique (IP, path) pairs per source; output list of such distinct 404 paths with counts.
+
+8. Identify /admin hammer: detect requests to `/admin` with status code == 200 or 302; compute request rate over time windows (e.g., 1-minute intervals); define "hammer" as >50 requests per minute from same IP in a 5-minute window; record start time, stop time, and total count of such requests.
+
+9. Define whitelist pass: create a list of known legitimate crawlers (e.g., `bot-a`, `bot-b`, `googlebot`, `bingbot`) with defined patterns (e.g., path `/robots.txt`, `/sitemap.xml`, method `GET`); exclude any entry matching these patterns from failed-login and scanning detection; compute how many entries were filtered by whitelist.
+
+10. For each stage, generate a machine-readable output in JSON format (`sweep.json`) and a human-readable table (`outputs/stage_x.md`) with actual numbers, denominators (e.g., "12% of 456"), and full traceability to input rows.
+
+11. Write rules.md: document every rule used, including thresholds, reasoning, and edge cases; for example:  
+    - Failed login threshold: status == 401 or 403 on `/login` path → count per IP  
+    - Path scanning: 404 with path not in whitelist → group by (IP, path)  
+    - /admin hammer: >50 requests/min from same IP over 5 minutes → define window and rate calculation  
+
+12. Write sweep.md: describe each stage in plain language, step-by-step, with no jargon; include inputs, outputs, rules applied, and key decisions.
+
+13. Write sweep.json: store all computed values as JSON objects per stage, including counts, timestamps, IP addresses, path patterns, and metadata (e.g., truncated lines, timestamp drifts).
+
+14. Run each stage twice in sequence: first run to establish baseline; second run to detect state bugs or idempotency issues; if any output differs between runs, flag it with a log entry.
+
+15. For every rule that flags a row, write the full input line and the rule name side-by-side in outputs/stage_x.md when a row is flagged — even if it's not in top 20 or not in scanning list.
+
+16. When a rule and input disagree (e.g., a path is scanned but should be whitelisted), include both the raw log line and the rule that rejected it, with clear labeling.
+
+17. Build a standalone verifier script (`verifier.py` or `verify.sh`) that:  
+    - Takes raw input files as arguments  
+    - Recomputes all key numbers (e.g., failed login counts, path scanning count) using only the raw data and rules from rules.md  
+    - Outputs results to `outputs/verified_output.md`

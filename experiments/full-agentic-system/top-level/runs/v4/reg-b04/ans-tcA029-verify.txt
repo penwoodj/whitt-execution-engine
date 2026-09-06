@@ -1,0 +1,232 @@
+### Phase 1: Data Generation & Messiness Injection
+**Goal:** Create three fake CSV files with specific messiness (TSV masquerading as CSV, duplicate headers, casing issues) under `/tmp/opencode/csvmerge-run`.
+
+```bash
+mkdir -p /tmp/opencode/csvmerge-run/inputs /tmp/opencode/csvmerge-run/outputs /tmp/opencode/csvmerge-run/scripts /tmp/opencode/csvmerge-run/rules
+
+# Source A: Billing (Highest Trust). Clean, standard CSV.
+cat > /tmp/opencode/csvmerge-run/inputs/source_billing.csv << 'EOF'
+customer_id,email_address,name,balance
+101,john@example.com,John Doe,500.50
+102,jane@example.com,Jane Smith,200.00
+103,bob@example.com,Bob Jones,750.25
+EOF
+
+# Source B: CRM (Medium Trust). Contains "Duplicate header row mid-file" messiness.
+cat > /tmp/opencode/csvmerge-run/inputs/source_crm.csv << 'EOF'
+customer_id,email,name,status
+101,john@example.com,John Doe,active
+customer_id,email,name,status
+102,jane@example.com,Jane Smith,pending
+103,bob@example.com,Bob Jones,active
+104,alice@example.com,Alice Brown,new
+EOF
+
+# Source C: Spreadsheet (Lowest Trust). Contains "TSV masquerading as CSV" and casing issues.
+cat > /tmp/opencode/csvmerge-run/inputs/source_spreadsheet.tsv << 'EOF'
+customer_id	EMAIL_ADDRESS	name	balance
+102	JANE@EXAMPLE.COM	Jane Smith	250.00
+103	Bob_Jones	bob@example.com	800.00
+104	ALICE@EXAMPLE.COM	Alice Brown	100.00
+EOF
+
+echo "Phase 1 Complete: Inputs generated."
+```
+
+### Phase 2: Rules Definition (`rules.md`)
+**Goal:** Document thresholds and logic for normalization, conflict resolution, and messiness handling.
+
+```markdown
+# rules.md - Data Merge Logic & Thresholds
+
+## 1. Header Normalization
+- **Rule:** Map all source headers to canonical set: `customer_id`, `email_address`, `name`, `balance`.
+- **Mapping:**
+  - `customer_id` -> `customer_id` (Exact match)
+  - `email` OR `EMAIL_ADDRESS` -> `email_address` (Case-insensitive, strip underscores if present in value? No, keep value raw, normalize key).
+  - `name` -> `name`
+  - `balance` -> `balance`
+- **Threshold:** If a column exists but name differs significantly (e.g., `cust_id`), treat as error unless mapping defined. Here we assume strict mapping for this test.
+
+## 2. Messiness Handling
+- **TSV Masquerading:** Detect files where delimiter is `\t` instead of `,`. Convert to CSV before processing.
+- **Duplicate Headers:** If a row matches header schema exactly but appears mid-file, skip that row entirely. Log count.
+- **Casing:** Email addresses are case-insensitive for matching (`john@example.com` == `JOHN@EXAMPLE.COM`). Values in output will be lowercased to ensure consistency.
+
+## 3. Conflict Resolution (Trust Order)
+- **Hierarchy:** Billing > CRM > Spreadsheet.
+- **Logic:** For any row where multiple sources provide data:
+  - Primary Key: `customer_id`.
+  - If values differ, take value from highest trust source available for that column.
+  - If only one source has a value (others null/missing), use that value.
+
+## 4. Output Requirements
+- **Merged.csv:** Final clean table with canonical headers and resolved values.
+- **Conflicts.csv:** List of `customer_id`, columns where conflict occurred, list of conflicting values, and winning value.
+- **Ledger-summary.json:** JSON object containing row counts (in/out), dropped rows reasons, messiness instances handled, and verification status.
+
+## 5. Verification Thresholds
+- **Row Count Check:** Sum of unique `customer_id`s in output must equal count of distinct IDs found across inputs after deduplication logic.
+- **Drift Check:** Any field where resolved value != source value (highest trust) must be logged in Conflicts.csv.
+```
+
+### Phase 3: Execution Script (`scripts/run_merge.sh`)
+**Goal:** Run the multi-stage job, handling messiness and conflicts explicitly.
+
+```bash
+#!/bin/bash
+set -e # Loud failures on error
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE_DIR="/tmp/opencode/csvmerge-run"
+INPUTS="$BASE_DIR/inputs"
+OUTPUTS="$BASE_DIR/outputs"
+RULES="$BASE_DIR/rules.md"
+
+# --- Stage 1: Normalize Inputs & Handle Messiness ---
+echo "[$(date +%s)] STAGE 1: Normalizing inputs and handling messiness..."
+
+# Function to detect delimiter and convert TSV to CSV if needed
+normalize_file() {
+    local input="$1"
+    local output="$2"
+    
+    # Check for tab character in first line (simple heuristic)
+    if head -n 1 "$input" | grep -q $'\t'; then
+        echo "[$(date +%s)]   Messiness: Detected TSV masquerading as CSV in $(basename "$input"). Converting..."
+        # Convert tabs to commas, preserving data integrity
+        tr '\t' ',' < "$input" > "$output"
+    else
+        cp "$input" "$output"
+    fi
+}
+
+# Process Source A (Billing) - Clean
+normalize_file "$INPUTS/source_billing.csv" "$OUTPUTS/normalized_billing.csv"
+
+# Process Source B (CRM) - Has duplicate header mid-file
+cp "$INPUTS/source_crm.csv" "$OUTPUTS/normalized_crm_raw.csv"
+# Remove duplicate header row logic: if line 2 is identical to line 1, skip it.
+awk 'NR==1 || $0 != prev { print } { prev=$0 }' "$OUTPUTS/normalized_crm_raw.csv" > "$OUTPUTS/normalized_crm.csv"
+
+# Process Source C (Spreadsheet) - Already handled by normalize_file above
+normalize_file "$INPUTS/source_spreadsheet.tsv" "$OUTPUTS/normalized_spreadsheet.csv"
+
+echo "[$(date +%s)] STAGE 1 Complete."
+
+# --- Stage 2: Merge & Conflict Resolution ---
+echo "[$(date +%s)] STAGE 2: Merging and resolving conflicts..."
+
+# Create a temporary working directory for the merge logic
+WORK_DIR="$OUTPUTS/merge_work"
+mkdir -p "$WORK_DIR"
+
+# Helper to parse CSV (simple awk based parser assuming no quotes in values for this test)
+parse_csv() {
+    local file=$1
+    # Skip header, print fields separated by | for easier joining
+    tail -n +2 "$file" | while IFS=',' read -r id email name balance; do
+        echo "${id}|${email}|${name}|${balance}"
+    done
+}
+
+# Function to resolve conflict based on trust order: Billing(1) > CRM(2) > Spreadsheet(3)
+resolve_row() {
+    local id=$1
+    
+    # Get values from each source (lowercase emails for comparison, keep original casing in output if unique? 
+    # Requirement says "emails have inconsistent casing" -> normalize to lower for consistency)
+    
+    # Source A (Billing)
+    val_a=$(grep "^${id}|" "$WORK_DIR/billing_parsed.txt" 2>/dev/null | head -1 || echo "")
+    
+    # Source B (CRM)
+    val_b=$(grep "^${id}|" "$WORK_DIR/crm_parsed.txt" 2>/dev/null | head -1 || echo "")
+    
+    # Source C (Spreadsheet)
+    val_c=$(grep "^${id}|" "$WORK_DIR/spreadsheet_parsed.txt" 2>/dev/null | head -1 || echo "")
+
+    local final_id="" final_email="" final_name="" final_balance=""
+    local conflict_cols=""
+    local conflict_details=""
+
+    # Logic: Find highest trust source that has data for this ID
+    if [ -n "$val_a" ]; then
+        # Billing wins everything
+        IFS='|' read -r fid fem fn fb <<< "$val_a"
+        final_id="$fid"; final_email=$(echo "$fem" | tr '[:upper:]' '[:lower:]'); final_name="$fn"; final_balance="$fb"
+    elif [ -n "$val_b" ]; then
+        # CRM wins
+        IFS='|' read -r fid fem fn fb <<< "$val_b"
+        final_id="$fid"; final_email=$(echo "$fem" | tr '[:upper:]' '[:lower:]'); final_name="$fn"; final_balance="$fb"
+    elif [ -n "$val_c" ]; then
+        # Spreadsheet wins (fallback)
+        IFS='|' read -r fid fem fn fb <<< "$val_c"
+        final_id="$fid"; final_email=$(echo "$fem" | tr '[:upper:]' '[:lower:]'); final_name="$fn"; final_balance="$fb"
+    fi
+
+    # Check for conflicts to log in Conflicts.csv
+    if [ -n "$val_b" ] && [ -n "$val_a" ]; then
+        IFS='|' read -r bid bem bn bb <<< "$val_b"
+        IFS='|' read -r aid aem an ab <<< "$val_a"
+        
+        local cols=""
+        if [ "$bem" != "$aem" ] && [ -n "$aem" ]; then cols="$cols,email"; fi
+        if [ "$bn" != "$an" ] && [ -n "$an" ]; then cols="$cols,name"; fi
+        if [ "$bb" != "$ab" ] && [ -n "$ab" ]; then cols="$cols,balance"; fi
+        
+        if [ -n "$cols" ]; then
+            echo "${final_id},${cols},${aem}:${bem},${an}:${bn},${ab}:${bb},${final_email},${final_name},${final_balance}" >> "$WORK_DIR/conflicts.csv"
+        fi
+    elif [ -n "$val_c" ] && ([ -n "$val_b" ] || [ -n "$val_a" ]); then
+         # Conflict between lower trust and higher trust (or just existence)
+         # Actually, if Billing exists, no conflict with CRM/Spreadsheet regarding "who wins", 
+         # but we might log that Spreadsheet value was ignored. 
+         # Strict interpretation: Conflict = Disagreement on values. If Billing has it, others are irrelevant for the final value, 
+         # unless Billing is null.
+         pass
+    fi
+
+    echo "${final_id},${final_email},${final_name},${final_balance}" >> "$OUTPUTS/merged.csv"
+}
+
+# Parse normalized files into simple text format (id|email|name|balance)
+parse_csv "$OUTPUTS/normalized_billing.csv" > "$WORK_DIR/billing_parsed.txt"
+parse_csv "$OUTPUTS/normalized_crm.csv" > "$WORK_DIR/crm_parsed.txt"
+parse_csv "$OUTPUTS/normalized_spreadsheet.csv" > "$WORK_DIR/spreadsheet_parsed.txt"
+
+# Clear conflicts file
+> "$WORK_DIR/conflicts.csv"
+
+# Process all unique IDs found in any source
+cat "$WORK_DIR/billing_parsed.txt" "$WORK_DIR/crm_parsed.txt" "$WORK_DIR/spreadsheet_parsed.txt" | cut -d'|' -f1 | sort -u > "$WORK_DIR/all_ids.txt"
+
+while read id; do
+    resolve_row "$id"
+done < "$WORK_DIR/all_ids.txt"
+
+echo "[$(date +%s)] STAGE 2 Complete."
+
+# --- Stage 3: Verification & Reporting ---
+echo "[$(date +%s)] STAGE 3: Verifying and generating reports..."
+
+# Count rows
+ROW_IN_BILLING=$(tail -n +2 "$INPUTS/source_billing.csv" | wc -l)
+ROW_IN_CRM=$(awk 'NR==1 || $0 != prev { count++ } { prev=$0 }' "$INPUTS/source_crm.csv" | tail -n +2 | wc -l) # Approximate raw, let's use actual parsed count
+# Better: Count lines in normalized files minus headers
+ROW_IN_BILLING=$(($(wc -l < "$OUTPUTS/normalized_billing.csv") - 1))
+ROW_IN_CRM=$(($(wc -l < "$OUTPUTS/normalized_crm.csv") - 1))
+ROW_IN_SPREADSHEET=$(($(wc -l < "$OUTPUTS/normalized_spreadsheet.csv") - 1))
+
+# Total unique IDs processed (Output rows)
+ROW_OUT=$(tail -n +2 "$OUTPUTS/merged.csv" | wc -l)
+
+# Dropped rows calculation: 
+# Input A: 3, Input B: 4 (after removing dup header), Input C: 3. 
+# Unique IDs in inputs: 101, 102, 103, 104 = 4 unique customers.
+# Output should have 4 rows.
+# Wait, Source A has 101,102,103. Source B adds 104. Source C adds nothing new (102,103,104).
+# Total Unique IDs = 4.
+# Rows dropped? 
+# Input rows processed: 3 + 4 + 3 = 10.
+# Output rows: 4.
+# Dropped = 6. Reason: Duplicate headers (1), TSV conversion (0 rows lost, just format change), Merging duplicates (

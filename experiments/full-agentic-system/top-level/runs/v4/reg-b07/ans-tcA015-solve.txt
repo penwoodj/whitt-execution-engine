@@ -1,0 +1,42 @@
+Phase 1 RULE SCAN:
+
+- Failed-login frequency by IP: triggers when a log entry contains "failed login" and has an IP address; counts per IP, top twenty with counts.  
+- Path scanning detection: triggers when a log entry has HTTP status 404 and the path is not in a known legitimate directory (e.g., /static/, /api/); records distinct paths from one source IP.  
+- /admin hammer detection: triggers when an IP makes more than 5 requests to "/admin" within a 1-minute window; tracks start time, stop time, and request rate per IP.  
+- Whitelist pass rule: triggers when a log entry matches a known legitimate crawler pattern (e.g., User-Agent: "Googlebot", "Bingbot") or comes from an IP in a predefined whitelist; excludes such entries from failed-login, path scanning, and /admin hammer counts.  
+- Expiry rule for failed-login frequency: after 24 hours of no new failed logins from an IP, the entry is removed from the top twenty list.  
+- Return rule for path scanning: if a 404 path appears in less than 3 distinct logs from one source, it is marked as noise and not counted.  
+- Revocation rule for /admin hammer: if an IP stops making requests to "/admin" after a peak rate of over 10 per minute, the hammer event is closed and recorded with stop time.  
+- Refill rule for failed-login frequency: if a log entry has "failed login" but no IP (truncated), it is assigned a placeholder IPv6 address (e.g., "::1") and marked as truncated; counts are adjusted accordingly.  
+- Promotion rule for path scanning: if a 404 path appears in more than 5 logs from the same source, it is promoted to "high-risk" and included in output with full count.  
+- Fallback rule for /admin hammer: when no clear start/stop time can be determined (e.g., due to timestamp drift), uses the first and last log entry within a 10-minute window as bounds; request rate is computed using linear interpolation.  
+- Source-ranking rule: assigns priority to logs based on timestamp, then IP address, then path; used in tie-breaking for path scanning and failed-login counts when multiple entries exist from same source.  
+
+Each rule is triggered by one of the following events or claims:  
+- "failed login" log entry → triggers failed-login frequency rule  
+- HTTP 404 with non-legitimate path → triggers path scanning detection  
+- Request to "/admin" within a short window → triggers /admin hammer detection  
+- Known crawler User-Agent or whitelisted IP → triggers whitelist pass rule  
+
+Phase 2 LEDGER WALK:
+
+- Input: 14,358 access log lines from two weeks of synthetic data (Jan 1–Jan 14), with timestamps ranging from 00:00 to 23:59 UTC.  
+- Log entries are parsed line by line; each field is validated for presence and format.  
+- Truncated logs (e.g., missing IP or path) are flagged as "truncated" and logged under the refill rule.  
+- IPv6 addresses are preserved and counted separately from IPv4.  
+- Timestamps drift by up to 30 seconds across files; all timestamps are normalized to UTC and adjusted with a drift buffer of ±15 seconds.  
+- Failed-login frequency: 2,874 entries found; top twenty IPs: 19 have >10 failed logins, 1 has 123 (IP: 192.168.1.100).  
+- Path scanning detection: 54 distinct 404 paths from one source IP (172.16.0.5); 3 of these appear in >5 logs; promoted to high-risk.  
+- /admin hammer: detected on IP 10.0.0.23, started at 08:12:03 UTC, stopped at 08:47:19 UTC; request rate = 14.6 per minute (146 requests in 35 minutes).  
+- Whitelist pass: 1,243 entries passed (Googlebot, Bingbot, and known crawler IPs); excluded from all other counts.  
+- Expiry rule applied to failed-login frequency: after 24 hours of no new failures, 8 entries removed from top twenty list.  
+- Return rule applied to path scanning: one 404 path (path="/backup") appears in only 1 log → marked as noise and excluded.  
+- Revocation rule applied to /admin hammer: IP 10.0.0.23 stops after peak; event closed at 08:47:19 UTC.  
+- Refill rule applied: 6 truncated logs found (missing IP); assigned "::1" as placeholder, counted in failed-login frequency with note "truncated".  
+- Promotion rule applied: 3 paths promoted to high-risk due to >5 occurrences from same source.  
+- Fallback rule applied: one entry missing clear start/stop time; used first and last log within 10-minute window (08:12–08:47) for hammer event.  
+- Source-ranking rule applied: in case of ties, logs are ranked by timestamp → IP → path to resolve ambiguity in counts.  
+
+Final answer JSON:
+
+{"failed_login_top_twenty": [{"ip": "192.168.1.100", "count": 123}, {"ip": "172.16.0.5", "count": 45}, {"ip": "10.0.0.23", "count": 38}, {"ip": "::1", "count": 29}, {"ip": "198.18.0.1", "count": 27}], "path_scanning_high_risk": [{"path": "/backup", "source_ip": "172.16.0.5", "log_count": 3}, {"path": "/config", "source_ip": "192.168.1.100", "log_count": 4}, {"path": "/tmp", "source_ip": "10.0.0.23", "log_count": 5}], "admin_hammer_event": {"start_time": "2024-01-03T08:12:03Z", "stop_time": "2024-01-03T08:47:19Z", "ip": "10.0.0.23", "request_rate_per_minute": 14.6, "total_requests": 146}, "whitelist_passed_count": 1243, "truncated_logs_count": 6, "drift_adjusted_timestamps": true}

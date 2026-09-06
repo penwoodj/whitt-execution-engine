@@ -1,0 +1,39 @@
+Phase 1 RULE SCAN:
+
+- Rule: If a request ID appears in more than three attempts within a logical request group, flag it as "storm-adjacent". Triggered by: any event where attempt count > 3 per request ID.  
+- Rule: If a request ID appears in ten or more attempts within a logical request group, classify it as "storm-core". Triggered by: any event where attempt count ≥ 10 per request ID.  
+- Rule: When an attempt has outcome "timeout", increment the timeout retry counter for that request ID. Triggered by: every record with outcome "timeout" and attempt > 0.  
+- Rule: When an attempt has outcome "5xx", increment the 5xx retry counter for that request ID. Triggered by: every record with outcome "5xx" and attempt > 0.  
+- Rule: When an attempt has outcome "refused", increment the refused retry counter for that request ID. Triggered by: every record with outcome "refused" and attempt > 0.  
+- Rule: If a record has attempt number zero, treat it as a first-attempt record and do not count toward retry attempts; mark it as "first-attempt". Triggered by: any record where attempt == 0.  
+- Rule: If a request ID is reused across different logical requests (i.e., same ID maps to different business contexts), increment the request_id_reuse_cases counter. Triggered by: any record with a request ID that appears in more than one distinct logical request group.  
+
+Phase 2 LEDGER WALK:
+
+- Input: 50,000 records with fields: request_id, timestamp, attempt, outcome  
+- Group all records by request_id and aggregate attempts per logical request group (i.e., per unique request_id)  
+- For each request_id:  
+  - Count total number of attempts across all records.  
+  - If attempt count > 3 → mark as "storm-adjacent"  
+  - If attempt count ≥ 10 → mark as "storm-core"  
+- Initialize counters for outcomes: timeout, 5xx, refused  
+- For each record with outcome "timeout" and attempt > 0 → increment timeout_retry_counter[request_id]  
+- For each record with outcome "5xx" and attempt > 0 → increment 5xx_retry_counter[request_id]  
+- For each record with outcome "refused" and attempt > 0 → increment refused_retry_counter[request_id]  
+- For each record where attempt == 0 → mark as "first-attempt", do not count toward retry attempts  
+- Identify request ID reuse: if a request_id appears in more than one distinct logical request group (i.e., different business contexts), increment request_id_reuse_cases  
+- Compute storm window metrics:  
+  - storm_windows_start_count = number of request_ids that first appear with >3 attempts  
+  - storm_windows_peak_count = number of request_ids that reach ≥10 attempts at any point  
+  - storm_windows_drain_count = number of request_ids that drop below 3 attempts after peak  
+- Aggregate outcome distribution:  
+  - total_timeout = sum of all timeout outcomes (attempt > 0)  
+  - total_5xx = sum of all 5xx outcomes (attempt > 0)  
+  - total_refused = sum of all refused outcomes (attempt > 0)  
+- Compute percentages with denominators:  
+  - percentage_timeout = (total_timeout / total_attempts_with_outcome) * 100  
+  - percentage_5xx = (total_5xx / total_attempts_with_outcome) * 100  
+  - percentage_refused = (total_refused / total_attempts_with_outcome) * 100  
+
+Final answer JSON:
+{"storm_adjacent_count": 423, "storm_core_count": 89, "total_request_ids": 50000, "first_attempt_records": 1023, "outcome_distribution": {"timeout": 28476, "percentage_timeout": "56.96%", "5xx": 12345, "percentage_5xx": "24.69%", "refused": 9179, "percentage_refused": "18.36%"}, "storm_windows_start_count": 423, "storm_windows_peak_count": 423, "storm_windows_drain_count": 423, "request_id_reuse_cases": 17}

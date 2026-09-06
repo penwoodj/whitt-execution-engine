@@ -1,0 +1,71 @@
+```plaintext
+1. Initialize workspace directory structure:
+   mkdir -p /tmp/opencode/logtriage-run/{scripts,outputs}
+   touch /tmp/opencode/logtriage-run/rules.md
+   touch /tmp/opencode/logtri- age-run/decisions.txt
+   touch /tmp/opencode/logtriage-run/verification.log
+
+2. List all log files under /tmp/opencode/logtriage-run/logs/, filter for:
+   - web-a, web-b, web-c access and error logs (suffix: .access.log or .error.log)
+   - daily rotation pattern: YYYY-MM-DD_HHMMSS format
+   - total 7 days of data (14:00–17:00 peak traffic window)
+
+3. For each log file:
+   - Read line by line, parse with strict field separation using whitespace or tab
+   - Extract timestamp from first field (assume ISO8601 or YYYY-MM-DD HH:MM:SS), validate format
+   - If malformed (e.g., mixed quoting, missing fields), record error and flag with reason
+   - For clock-skewed entries (detected via time offset > 3600s vs. reference), log and correct to nearest valid hour
+   - For empty files, count and log explicitly: "File X is empty"
+   - Normalize event structure:
+     {
+       timestamp: ISO8601,
+       node: "web-a" or "web-b" or "web-c",
+       method: HTTP method (GET/POST/etc),
+       endpoint: path after domain,
+       status_code: integer (200, 301, 429, 500, 503)
+     }
+   - Store one event per line in outputs/events.jsonl
+
+4. Parse events into hourly error rate per node:
+   - Group by node and hour of day (HH:00–HH:59)
+   - Count total requests per node-hour
+   - Count 429, 500, 503 entries per group
+   - Compute percentage = (error_count / request_count) * 100
+   - Denominator must be shown explicitly (e.g., "1.2% of 876 requests")
+   - Output as table in outputs/error_rate_per_hour_per_node.md and outputs/error_rate_per_hour_per_node.json
+
+5. Identify top ten endpoints by 5xx count:
+   - Filter events where status_code in [500, 503]
+   - Group by endpoint (path)
+   - Sum 5xx counts per path
+   - Sort descending, take top 10
+   - Output as table: endpoint | count | method used to derive (e.g., "counted from 500/503 only")
+   - Store in outputs/top_10_endpoints.md and outputs/top_10_endpoints.json
+
+6. Detect 03:00 restart blast radius:
+   - Identify log entries where node is active at 02:59–03:00 (before restart) and then inactive after
+   - Look for requests that appear to be in flight (e.g., status_code=200 or 429, but timestamp < 03:00)
+   - After 03:00, same endpoint with no response or 5xx/503
+   - Define "in-flight" as:
+     - Request started before 03:00 (timestamp < 03:00:00)
+     - No matching response in next 10 minutes (or until next log entry after 03:00)
+     - Status code not 2xx or 3xx
+   - Flag such requests as "lost" and count them per endpoint
+   - Output table: endpoint | lost_request_count | reason (e.g., "no response within 10min")
+   - Store in outputs/restart_blast_radius.md and outputs/restart_blast_radius.json
+
+7. Generate human-readable markdown report:
+   - Top section: clear, plain sentences with no jargon
+   - Tables for error rate per hour per node, top endpoints, restart blast radius
+   - Each table includes full denominators and units
+   - All numbers must match machine output exactly
+   - Include raw counts in parentheses where relevant (e.g., "12.3% of 876 requests")
+   - No charts — only tables
+
+8. Generate machine-readable JSON twin:
+   - Same structure as markdown, but nested JSON objects
+   - Every field matches the human table exactly
+   - All values are numbers or strings with no rounding
+   - Store in outputs/report.json
+
+9. Run verification script independently:

@@ -1,0 +1,73 @@
+PLAN FIRST:
+1. Create directory structure under /tmp/opencode/warehouse-test with subfolders: inbound, outbound, quarantined, archived, scripts, rejects, review, reports.
+2. Generate 200 fixture JSON files across the four data folders with realistic variety including malformed entries and duplicate part_ids.
+3. Write rules.md defining deduplication logic (part_id priority by mtime, part_name+category fuzzy matching) and output conventions.
+4. Create stage1_scan.py to merge valid records into manifest.json and quarantine invalid ones with reasons.
+5. Create stage2_dedupe.py to apply dedup rules, output clean_manifest.json, duplicate_losers.log, and review_candidates.json.
+6. Create stage3_compute.py to calculate metrics (total parts, value, category breakdowns, defective rate, top 5 expensive items, zone values).
+7. Create stage4_report.py to generate warehouse-report.md (human readable) and warehouse-report.json (machine readable) ensuring byte-level consistency.
+8. Create verify_independent.py to recompute all metrics from raw fixtures without importing pipeline functions and compare against report outputs.
+9. Execute full pipeline: python3 scripts/stage1_scan.py && python3 scripts/stage2_dedupe.py && python3 scripts/stage3_compute.py && python3 scripts/stage4_report.py.
+10. Run verification: python3 verify_independent.py and check exit code 0.
+11. Perform timing pass: run pipeline 3 times, capture wall clock per stage, output table, identify slow stages.
+12. Create efficiency version (scripts/efficiency_stage*.py) optimizing I/O or logic while maintaining byte-identical outputs.
+13. Re-run full pipeline with efficiency scripts and verify against original reports to ensure no drift.
+14. Output final summary with file paths, run times, exit codes, and one-line surprises.
+
+TASK:
+I will now execute the plan step-by-step using Python standard library only, creating all files under /tmp/opencode/warehouse-test without touching any other location.
+
+```python
+import os
+import sys
+import json
+import random
+import datetime
+import shutil
+import time
+from pathlib import Path
+
+# Configuration
+BASE_DIR = "/tmp/opencode/warehouse-test"
+DATA_DIRS = ["inbound", "outbound", "quarantined", "archived"]
+SCRIPTS_DIR = os.path.join(BASE_DIR, "scripts")
+REJECTS_DIR = os.path.join(BASE_DIR, "rejects")
+REVIEW_DIR = os.path.join(BASE_DIR, "review")
+REPORTS_DIR = os.path.join(BASE_DIR, "reports")
+
+# Ensure directories exist and are clean
+for d in [BASE_DIR] + DATA_DIRS + ["scripts", "rejects", "review", "reports"]:
+    path = Path(d)
+    if not path.exists():
+        path.mkdir(parents=True)
+    elif any(path.iterdir()):
+        shutil.rmtree(path)
+        path.mkdir()
+
+# Helper: Generate realistic fixture data with intentional messiness
+def generate_fixture_data():
+    categories = ["fastener", "electrical", "housing", "consumable", "sensor"]
+    statuses = ["ok", "needs_review", "defective"]
+    
+    # Pre-generate some part_ids to allow duplicates later
+    base_part_ids = [f"PTM-{str(i).zfill(5)}" for i in range(1, 201)]
+    
+    records = []
+    
+    for idx, pid in enumerate(base_part_ids):
+        # Introduce intentional duplicates: ~3% chance of duplicate part_id
+        if random.random() < 0.03:
+            pid = base_part_ids[random.randint(0, len(base_part_ids)-1)]
+        
+        name_templates = {
+            "fastener": ["Bolt", "Nut", "Washer", "Screw", "Clip"],
+            "electrical": ["Connector", "Resistor", "Capacitor", "LED", "Switch"],
+            "housing": ["Cover", "Bracket", "Mount", "Frame", "Shell"],
+            "consumable": ["Gasket", "Filter", "Lubricant", "Pad", "Seal"],
+            "sensor": ["Temp Probe", "Pressure Sensor", "Light Detector", "Vibration Unit", "Flow Meter"]
+        }
+        
+        name = f"{random.choice(name_templates[pid.split('-')[1]])} {random.randint(1,99)}"
+        # Introduce duplicate names with different IDs (~5% chance)
+        if random.random() < 0.05:
+            name = f"{random

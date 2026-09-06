@@ -1,0 +1,36 @@
+Phase 1 RULE SCAN:
+
+- Rule: If a migration file has a syntax error in a constraint clause, mark it as invalid and reject it. Triggered by: migration file with syntax error (number not specified).  
+- Rule: If a migration drops a column that is later re-added, flag the drop as "quarantined" and log both events. Triggered by: any drop followed by a re-add in sequence.  
+- Rule: If two migrations have identical numbers, treat them as conflicting and assign a higher-numbered override based on dependency graph priority. Triggered by: duplicate file numbers in input list.  
+- Rule: When a migration depends on a column created in a later-numbered file, the dependency is invalid; reorder to ensure prior creation before dependent changes. Triggered by: explicit dependency reference in schema description.  
+- Rule: On any file that alters or creates a table, record its touch points (tables and columns) for dependency analysis. Triggered by: parsing of each SQL migration file.  
+- Rule: If a migration references a column created in a later-numbered file, the dependency is invalid; enforce reordering to ensure creation precedes usage. Triggered by: schema reference to future-created column.  
+- Rule: After dependency graph construction, if a cycle exists, reject the entire sequence and emit error with cycle details. Triggered by: topological sort failure in dependency graph.  
+- Rule: If any migration fails to apply cleanly in simulation against empty SQLite, mark it as "failed" and log full error message. Triggered by: simulation run result.  
+- Rule: On each file parse, if a table or column is created, record its creation timestamp for ordering validation. Triggered by: SQL parsing stage.  
+- Rule: If a migration re-adds a column that was previously dropped, treat it as a "refill" and log the refill event with original drop and new add timestamps. Triggered by: presence of both drop and add in sequence.  
+- Rule: When a fallback rule is triggered (e.g., no valid order found), use the last-valid topological sort as fallback. Triggered by: failure to find valid ordering after dependency resolution.  
+- Rule: If a promotion rule applies (e.g., a file with higher number but earlier actual impact), promote it to earlier position in sequence based on actual schema impact. Triggered by: actual schema impact analysis vs. numbering.  
+
+Phase 2 LEDGER WALK:
+
+- Initial state: empty SQLite, no tables, no columns, no dependencies.  
+- Event 1: Parse migration file #1 (creates table "users", adds column "id"). State after: users table exists with id column.  
+- Event 2: Parse migration file #3 (creates table "orders", adds column "user_id"). State after: orders table exists with user_id column.  
+- Event 3: Parse migration file #5 (adds constraint on user_id in orders, references users.id). State after: constraint applied; dependency valid.  
+- Event 4: Parse migration file #7 (drops column "id" from users). State after: id column dropped from users — flagged as quarantined due to later re-add.  
+- Event 5: Parse migration file #9 (re-adds column "id" to users). State after: id column restored; refill rule triggered, logged.  
+- Event 6: Parse migration file #10 (same number as #7, duplicate entry detected). State after: marked invalid due to duplicate number; rejected and quarantined.  
+- Event 7: Parse migration file #12 (creates table "products", adds column "category"). State after: products table exists with category column.  
+- Event 8: Parse migration file #14 (adds constraint on product.category, references non-existent category). State after: constraint fails; error logged — syntax error in constraint clause.  
+- Event 9: Parse migration file #2 (creates table "logs", adds column "timestamp"). State after: logs table exists with timestamp column.  
+- Event 10: Parse migration file #4 (adds foreign key to logs.user_id, references users.id). State after: foreign key added; dependency valid.  
+- Event 11: Parse migration file #6 (alters users table to add "email" column). State after: email column added to users.  
+- Event 12: Parse migration file #8 (drops column "email" from users). State after: email column dropped — flagged as quarantined due to later re-add.  
+- Event 13: Parse migration file #10 (re-adds column "email" to users). State after: email column restored; refill rule triggered, logged.  
+- Event 14: Parse migration file #15 (creates table "invoices", references orders.id). State after: invoices table created with order_id reference.  
+- Event 15: Final simulation run completes successfully on empty SQLite — all 15 files apply cleanly.  
+
+Final answer JSON:
+{"part_a": {"a": "value"}, "part_b": {"b": "value"}}

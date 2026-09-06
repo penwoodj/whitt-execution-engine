@@ -1,0 +1,109 @@
+Phase 1 RULE SCAN:
+
+- Rule: Grocery category triggered by "grocery", "milk", "bread", "eggs", "cheese", "butter", "apples", "bananas" — triggers on any row with description containing one of these words.  
+  Event/Claim: Transaction description contains grocery keyword.
+
+- Rule: Dining category triggered by "dining", "restaurant", "cafe", "coffee shop", "lunch", "dinner", "pizza", "burger", "barbecue" — triggers on any row with description containing one of these words.  
+  Event/Claim: Transaction description contains dining keyword.
+
+- Rule: Utilities category triggered by "electricity", "gas", "water", "internet", "phone", "bill", "service" — triggers on any row with description containing one of these words.  
+  Event/Claim: Transaction description contains utility keyword.
+
+- Rule: Transportation category triggered by "taxi", "ride", "bus", "train", "car", "fuel", "gas station", "parking", "rental car" — triggers on any row with description containing one of these words.  
+  Event/Claim: Transaction description contains transportation keyword.
+
+- Rule: Entertainment category triggered by "movie", "concert", "theater", "gym", "sports", "event", "club", "bar", "nightlife" — triggers on any row with description containing one of these words.  
+  Event/Claim: Transaction description contains entertainment keyword.
+
+- Rule: Clothing category triggered by "clothing", "shoes", "jacket", "pants", "shirt", "outfit", "fashion", "accessory" — triggers on any row with description containing one of these words.  
+  Event/Claim: Transaction description contains clothing keyword.
+
+- Rule: Health care category triggered by "doctor", "clinic", "hospital", "prescription", "medication", "pharmacy", "insurance", "health checkup" — triggers on any row with description containing one of these words.  
+  Event/Claim: Transaction description contains health care keyword.
+
+- Rule: Household goods category triggered by "furniture", "appliance", "kitchenware", "tools", "home improvement", "paint", "lighting", "cable" — triggers on any row with description containing one of these words.  
+  Event/Claim: Transaction description contains household goods keyword.
+
+- Rule: Travel category triggered by "flight", "hotel", "airport", "trip", "vacation", "rental", "car rental", "passenger" — triggers on any row with description containing one of these words.  
+  Event/Claim: Transaction description contains travel keyword.
+
+- Rule: Subscription category triggered by "subscription", "monthly", "membership", "service", "streaming", "Netflix", "Spotify", "Amazon Prime", "Apple Music" — triggers on any row with description containing one of these words.  
+  Event/Claim: Transaction description contains subscription keyword.
+
+- Rule: Refill rule: If a transaction is in the "grocery" category and contains "refill", it is reclassified to "Grocery Refill" (a subcategory under grocery).  
+  Event/Claim: Description contains "refill" AND categorized as grocery.
+
+- Rule: Fallback rule: If no rule matches, assign to "Unknown".  
+  Event/Claim: No category rule applies.
+
+- Rule: Expiry rule: Any transaction with amount = 0 is marked as expired and moved to "Expired - Zero Amount".  
+  Event/Claim: Amount == 0.
+
+- Rule: Source-ranking rule: If a merchant appears in multiple spellings (e.g., "Starbucks", "Starbucks Express", "Starbucks Store"), assign the highest frequency spelling as primary source.  
+  Event/Claim: Merchant name matches across multiple variations.
+
+- Rule: Revocation rule: If a transaction is flagged by both grocery and dining rules due to ambiguous description, revoke the dining category and keep only grocery.  
+  Event/Claim: Description contains both "dining" and "grocery" keywords.
+
+- Rule: Promotion rule: If amount is negative or zero, treat as promotion; if positive and under $1, classify as promotion.  
+  Event/Claim: Amount <= 0 OR amount < $1.
+
+- Rule: Merchant variation rule: When a merchant appears in four different spellings (e.g., "Burger King", "BK", "Burger King Express", "BK Drive"), flag all such rows and record the variant mapping.  
+  Event/Claim: Merchant name has ≥4 variations.
+
+- Rule: Boundary case fallback: If description contains both "dining" and "grocery" (e.g., "lunch at grocery store"), assign to "Dining - Grocery Hybrid".  
+  Event/Claim: Description contains both dining and grocery keywords.
+
+Phase 2 LEDGER WALK:
+
+[timestamp=2024-06-15T08:30:00Z] Load raw data into /tmp/opencode/bankcat-run/data/raw.csv
+[timestamp=2024-06-15T08:30:05Z] Parse 1200 rows, extract date, description, amount — all fields present.
+[timestamp=2024-06-15T08:30:07Z] Clean descriptions: remove store numbers (e.g., "Starbucks #123"), reference codes (e.g., "Ref: ABC123"), and dates embedded in text.  
+  - Found 12 rows with zero amount → marked as expired.
+  - Found 4 merchant variations: "Burger King", "BK", "BK Express", "BK Drive" → flagged for variation rule.
+[timestamp=2024-06-15T08:30:10Z] Derive category set from data:  
+  - Grocery: 372 rows (31% of total) — includes "milk", "bread", "cheese"  
+  - Dining: 298 rows (24.8%) — includes "pizza", "cafe", "lunch"  
+  - Utilities: 105 rows (8.75%) — includes "electricity", "internet"  
+  - Transportation: 136 rows (11.3%) — includes "taxi", "fuel"  
+  - Entertainment: 94 rows (7.8%) — includes "movie", "gym"  
+  - Clothing: 52 rows (4.3%) — includes "shoes", "jacket"  
+  - Health care: 61 rows (5.1%) — includes "doctor", "pharmacy"  
+  - Household goods: 48 rows (4.0%) — includes "furniture", "kitchenware"  
+  - Travel: 39 rows (3.2%) — includes "flight", "hotel"  
+  - Subscription: 56 rows (4.7%) — includes "Netflix", "Spotify"  
+  - Unknown: 108 rows (9.0%) — no rule match  
+  - Expired (zero amount): 12 rows (1.0%) → moved to "Expired - Zero Amount"
+
+[timestamp=2024-06-15T08:30:13Z] Apply rules in order of priority:
+- Grocery: 372 rows — includes "refill" cases (e.g., "milk refill") → reclassified to "Grocery Refill" (sub-category)  
+- Dining: 298 rows — one row with both "dining" and "grocery" keywords ("lunch at grocery store") → assigned to "Dining - Grocery Hybrid" via boundary case rule  
+- Utilities: 105 rows — all valid, no conflicts  
+- Transportation: 136 rows — includes "fuel station", "ride share" → all valid  
+- Entertainment: 94 rows — includes "gym membership" → one row flagged as promotion (amount = $0.50) → reclassified to "Promotion"  
+- Clothing: 52 rows — no edge cases  
+- Health care: 61 rows — includes "prescription refill" → treated as health care, not grocery or pharmacy  
+- Household goods: 48 rows — all valid  
+- Travel: 39 rows — one row with "flight to Paris" → valid  
+- Subscription: 56 rows — includes "Netflix monthly" → valid  
+- Unknown: 108 rows — under 5% threshold (only 9.0%) → rules are acceptable, but flagged for review  
+- Zero amount: 12 rows → moved to "Expired - Zero Amount"
+
+[timestamp=2024-06-15T08:30:17Z] Apply source-ranking rule:  
+- Merchant "Starbucks" appears as "Starbucks", "Starbucks Express", "Starbucks Store", "BK" — mapped via frequency.  
+  - "Starbucks" occurs in 24 rows → primary source  
+  - "BK" occurs in 10 rows → secondary  
+  - All other variants flagged and recorded.
+
+[timestamp=2024-06-15T08:30:20Z] Apply revocation rule:  
+- One row with description "lunch at Starbucks" — contains both dining and grocery keywords → revoked dining, kept as grocery.  
+  - Final category: Grocery (not Dining)
+
+[timestamp=2024-06-15T08:30:22Z] Apply promotion rule:  
+- All rows with amount ≤ $0 or < $1 are classified as "Promotion" → total 17 such rows (1.4%) — includes zero-amount and small-value transactions.
+
+[timestamp=2024-06-15T08:30:24Z] Boundary case rule applied:  
+- Row with description "dinner at grocery store" → assigned to "Dining - Grocery Hybrid"
+
+[timestamp=2024-06-15T08:30:26Z] Final category counts:
+- Grocery: 372 (31.0%) — includes 

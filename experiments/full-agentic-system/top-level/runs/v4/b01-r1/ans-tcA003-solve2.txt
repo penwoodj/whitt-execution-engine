@@ -1,0 +1,74 @@
+### Phase 1: Rule Scan & State Triggers
+
+1. **Rule:** `CheckpointBanking` (Absolute Minute = Start/Resume + 2).
+   *Trigger:* Job starts or resumes execution.
+   *Effect:* Establishes a checkpoint boundary at absolute minute $T_{bank}$.
+
+2. **Rule:** `PeriodicCheckpointing` (Every 2 RUNNING Minutes).
+   *Trigger:* Execution continues past the initial bank point.
+   *Effect:* Updates checkpoint boundary to $T_{current\_minute} - T_{start/last\_resume} \equiv 0 \pmod 2$.
+
+3. **Rule:** `PreemptionWasteCalculation`.
+   *Trigger:* High priority job preempts Low priority job.
+   *Effect:* Calculates wasted minutes = Current Minute - Last Banked Minute. Sets `owed` = Total Duration - Banked Minutes.
+
+4. **Rule:** `CoreSchedulingPriority`.
+   *Trigger:* End of minute, core becomes free or new job arrives.
+   *Effect:* Assigns core to waiting Low job with smallest original start time (Resume > Fresh). If no Low jobs wait, assigns High job. Core never idles if a Low job is waiting.
+
+5. **Rule:** `JobCompletion`.
+   *Trigger:* Job finishes execution (`owed` minutes elapsed).
+   *Effect:* Updates makespan to current minute + 1. Frees core for next waiting job immediately in the same finish min.
+
+### Phase 2: Ledger Walk (Simulation of Single Night)
+
+**Fact Bullets:**
+* LOW1: Duration=5, Start=0
+* LOW2: Duration=5, Start=10
+* HIGH: Arrival=15, Duration=10
+
+**Minute-by-Minute Table:**
+
+| minute | core | event |
+| :--- | :--- | :--- |
+| 0 | LOW1 | Start LOW1 (owed=5). Bank@2. |
+| 1 | LOW1 | Run LOW1. |
+| 2 | LOW1 | Run LOW1. |
+| 3 | LOW1 | Run LOW1. |
+| 4 | LOW1 | Run LOW1. |
+| 5 | LOW1 | Finish LOW1 (owed=0). Core free. |
+| 6 | LOW2 | Start LOW2 (owed=5). Bank@8. |
+| 7 | LOW2 | Run LOW2. |
+| 8 | LOW2 | Run LOW2. |
+| 9 | LOW2 | Run LOW2. |
+| 10 | LOW2 | Run LOW2. |
+| 11 | HIGH | Preempt LOW2 (past bank@8, wasted=3). Resume LOW2 (owed=5-3=2). Start HIGH (owed=10). Bank@17. |
+| 12 | HIGH | Run HIGH. |
+| 13 | HIGH | Run HIGH. |
+| 14 | HIGH | Run HIGH. |
+| 15 | HIGH | Run HIGH. |
+| 16 | HIGH | Run HIGH. |
+| 17 | HIGH | Run HIGH. |
+| 18 | HIGH | Run HIGH. |
+| 19 | HIGH | Run HIGH. |
+| 20 | HIGH | Finish HIGH (owed=0). Core free. |
+| 21 | LOW2 | Resume LOW2 (owed=2). Bank@23. |
+| 22 | LOW2 | Run LOW2. |
+| 23 | LOW2 | Run LOW2. |
+| 24 | LOW2 | Finish LOW2 (owed=0). Core free. |
+
+**Derived Metrics:**
+* Makespan: 24
+* Wasted Minutes: 3
+* Order Low Jobs: [LOW1, LOW2]
+
+```json
+{
+  "makespan": 24,
+  "wasted_minutes": 3,
+  "order_low_jobs": [
+    { "job_id": "LOW1", "finish_minute": 5 },
+    { "job_id": "LOW2", "finish_minute": 24 }
+  ]
+}
+```

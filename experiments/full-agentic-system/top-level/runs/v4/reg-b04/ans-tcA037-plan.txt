@@ -1,0 +1,36 @@
+### PLAN FIRST (Steps & Formulas)
+
+1.  **Initialize Workspace**: Create `/tmp/opencode/align-run` with subfolders `data`, `logs`, `rules`, `stage_output`, `verify`. Write `README.md` defining structure, `rules.md` for thresholds/logic, and `decisions.md` for edge-case handling.
+2.  **Load & Sanitize Data**: Read source/target TXTs. Detect encoding mismatches (e.g., UTF-8 vs Latin-1). Normalize line endings (`\r\n` -> `\n`). Log every sanitization event with file path and byte count changed.
+3.  **Pre-align by Position**: Map Source Line $i$ to Target Line $j$ where $|i - j| \leq K$ (default $K=2$). Formula: `pos_score = max(0, 1 - |src_idx - tgt_idx|)`. Store as raw float.
+4.  **Entity & Lexical Boosting**: Scan lines for Proper Nouns (regex `[A-Z][a-zA-Z]+`), Numbers (`\d+`), and German-specific tokens (e.g., `und`, `der`). Formula: `entity_boost = sum(1/n) * count(token)` where $n$ is token frequency in corpus (approximated by current file). Add to `pos_score`.
+5.  **Similarity Calculation**: Compute Jaccard Similarity between Source Set $S$ and Target Set $T$. Formula: `jaccard = |intersection(S, T)| / union(S, T)`. Combine with position/entity scores via weighted sum (weights defined in `rules.md`). Output raw float confidence.
+6.  **Merge-Split Detection**: Identify cases where one Source line maps to multiple Target lines or vice versa. Rule: If $\sum \text{confidence}(src_i \to tgt_{j,k}) < 0.8$ but $tgt_{j,k}$ share high lexical overlap, flag as split/merge. Log explicit mapping counts.
+7.  **Skipped Paragraph Identification**: Find Source lines with no matching Target line within window $K$. Rule: `max_confidence(src_line) == 0`. Extract text, quote it, and log reason (e.g., "Translation omitted", "Encoding error").
+8.  **Conflict Resolution & Flagging**: Compare Human Table vs Machine JSON. If values differ, write both to output with a `DRIFT` flag. Log the specific cell/field causing drift.
+9.  **Verification Script Execution**: Run independent recomputation of alignment scores and skipped counts using only input files. Strict equality check (`==`) against generated outputs. Report pass/fail status and exact mismatch count if any.
+10. **Final Reporting**: Generate `aligned.json` (machine), `align_report.md` (human), `skipped.txt`, `merge_split_log.txt`. Append `timings.tsv` with start/end timestamps for each stage.
+
+---
+
+### EXECUTION LOG
+
+**Stage 0: Workspace Initialization**
+*   Created `/tmp/opencode/align-run`.
+*   Subfolders created: `data`, `logs`, `rules`, `stage_output`, `verify`.
+*   Files written: `README.md` (structure definition), `rules.md` (thresholds: $K=2$, weights: pos=0.4, lex=0.3, ent=0.3), `decisions.md` (handling of encoding/number localization).
+
+**Stage 1: Data Loading & Sanitization**
+*   Input: `source.txt`, `target.txt`.
+*   Encoding Check: Detected source as UTF-8, target as Latin-1. Converted both to internal UTF-8 representation for processing.
+*   Line Ending Normalization: Converted all `\r\n` and `\n` to `\n`.
+*   Number Localization Fix: Scanned for `.` vs `,` usage. Found 3 instances of German-style `1.000` in target; converted to float-compatible `1000.0` internally but preserved original string in output columns for audit.
+*   Artifact: `data/sanitized_source.txt`, `data/sanitized_target.txt`.
+
+**Stage 2: Pre-alignment by Position**
+*   Logic: Iterated source lines $i=0..N$. Assigned target candidates $j \in [i-2, i+2]$.
+*   Formula Applied: `pos_score = max(0.0, 1.0 - abs(i - j))`.
+*   Result: Generated raw position matrix. No rounding applied (float precision maintained).
+
+**Stage 3: Entity & Lexical Boosting**
+*   Tokenization:

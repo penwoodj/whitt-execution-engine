@@ -1,0 +1,60 @@
+# Stage 1: Workspace Initialization & Rules Definition
+
+**Action:** Create directory structure (`scripts/`, `outputs/`) and root rule files (`rules.md`, `decisions.md`).
+**Formula/Rules:**
+- `mkdir -p scripts outputs`
+- **Rule 0 (Timestamps):** Preserve full ISO-8601 precision from raw logs; no rounding.
+- **Rule 1 (Malformed Lines):** Log every line with mixed quoting or empty content to `outputs/malformed.log`; count them in final report.
+- **Rule 2 (Clock Skew):** Identify entries where hour differs by ±1h from expected window (03:00 restart context); log corrections in `outputs/clock_skew.log`.
+- **Rule 3 (Empty Files):** Detect and flag empty rotated files; do not process them.
+- **Rule 4 (Output Format):** All tables must have denominators for percentages (e.g., "12% of 500").
+- **Rule 5 (Reproducibility):** Run all scripts twice; compare checksums of outputs between runs.
+
+# Stage 2: Log Parsing & Normalization
+
+**Action:** Write `scripts/parse_logs.sh` to ingest raw logs, normalize timestamps, and filter malformed entries.
+**Formula/Rules:**
+- **Input Pattern:** Match standard Nginx access/error log formats (e.g., `$remote_addr`, `$time_local`).
+- **Timestamp Correction:** If hour is skewed by 1h relative to the known restart window (03:00), adjust timestamp and flag in `outputs/clock_skew.log`.
+- **Filtering:** Exclude empty lines; exclude lines with invalid hex codes or missing fields.
+- **Output:** Generate `outputs/events_normalized.tsv` (one event per line, ISO timestamps).
+
+# Stage 3: Error Rate Calculation
+
+**Action:** Write `scripts/calc_error_rates.sh` to compute hourly error rates per node.
+**Formula/Rules:**
+- **Metric:** `(Count of 5xx responses in hour) / (Total requests in hour)` * 100.
+- **Grouping:** Group by Node (`web-a`, `web-b`, `web-c`) and Hour.
+- **Output:** Generate `outputs/error_rates_hourly.tsv` with columns: `node`, `hour`, `count_5xx`, `total_requests`, `percentage`.
+
+# Stage 4: Top Offender Endpoints Analysis
+
+**Action:** Write `scripts/find_top_offenders.sh` to identify endpoints with highest 5xx counts.
+**Formula/Rules:**
+- **Metric:** Count of responses where status code $\ge$ 500 per unique endpoint+method pair.
+- **Sorting:** Sort descending by count; take top 10.
+- **Output:** Generate `outputs/top_10_offenders.tsv` with columns: `endpoint`, `method`, `count_5xx`.
+
+# Stage 5: Restart Blast Radius Analysis (03:00)
+
+**Action:** Write `scripts/analyze_restart.sh` to correlate node restarts at ~03:00 with failed in-flight requests.
+**Formula/Rules:**
+- **Detection:** Identify log entries indicating a process restart or high load spike around 03:00 (e.g., "worker process exited", "restart").
+- **Correlation:** Count 5xx errors occurring within the 10-minute window immediately following the restart event.
+- **Definition of "Done":** A request is considered "died" if it returns a 502/503/504 or times out in the error log within that window.
+- **Output:** Generate `outputs/restart_blast_radius.tsv` with columns: `node`, `restart_time`, `failed_requests_count`.
+
+# Stage 6: Report Generation (Human + Machine)
+
+**Action:** Write `scripts/generate_report.sh` to create Markdown and JSON reports.
+**Formula/Rules:**
+- **Markdown (`outputs/report.md`):** Include summary tables with denominators, paths to raw files, and notes on malformed/clock-skewed lines.
+- **JSON (`outputs/report.json`):** Structured data mirroring the Markdown tables exactly (same numbers).
+- **Ordering:** Ensure JSON generation depends on completed parsing and analysis stages.
+
+# Stage 7: Verification & Determinism Check
+
+**Action:** Write `scripts/verify.sh` to run a second pass and compare outputs.
+**Formula/Rules:**
+- **Second Run:** Execute all scripts from Stage 2 to Stage 6 again in the same environment.
+- **Comparison:** Compute SHA256 checksums of all output files from Run 1 vs Run

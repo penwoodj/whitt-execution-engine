@@ -53,12 +53,34 @@ C = [
 ("banner-maker", "take any five-word phrase, write it to /tmp/opencode/c49, produce an ascii banner version in a second file using hash characters, show it in chat, that's the whole job."),
 ("final-audit", "run one script over /tmp/opencode/c1 through c49 if they exist, count files and folders total, tell me the count, and note any folder with zero files, that's it."),
 ]
+TAILS = [
+ "paste the result in chat, quick work, don't gold-plate it.",
+ "everything stays in that folder, no network, no installs, standard library only.",
+ "script does the counting, not your head, and exit nonzero if anything surprises you.",
+ "show me the actual output lines, not a summary of them, i'll be the judge.",
+ "rerun-safe by design, no prompts, nothing interactive anywhere.",
+ "small job, do it in one pass and paste the numbers when done.",
+ "if a file's missing or a count's off, say so plainly, don't paper over it.",
+]
 def wc(t):
     import re
     return len(re.findall(r"[A-Za-z0-9][A-Za-z0-9'\-.,;:()%]*", t))
-for i, (slug, body) in enumerate(C, 1):
-    text = f"# Tier-C Case {i:03d} — {slug.replace('-', ' ')}\n\n{body}\n"
-    w = wc(text)
-    assert 50 <= w <= 100, f"{slug}: {w} out of band"
-    open(os.path.join(BASE, f"case-C-{i:03d}-{slug}.md"), "w").write(text)
-print(f"tier-C: {len(C)} cases, all 50-100 words")
+
+def main():
+    for i, (slug, body) in enumerate(C, 1):
+        import random
+        rng = random.Random(31000 + i * 617)
+        text = f"# Tier-C Case {i:03d} — {slug.replace('-', ' ')}\n\n{body}\n"
+        w = wc(text)
+        tails = TAILS[:]
+        rng.shuffle(tails)
+        while w < 55 and tails:
+            body = body.rstrip() + " " + tails.pop()
+            text = f"# Tier-C Case {i:03d} — {slug.replace('-', ' ')}\n\n{body}\n"
+            w = wc(text)
+        assert 50 <= w <= 100, f"{slug}: {w} out of band"
+        open(os.path.join(BASE, f"case-C-{i:03d}-{slug}.md"), "w").write(text)
+    print(f"tier-C: {len(C)} cases, all 50-100 words")
+
+if __name__ == "__main__":
+    main()

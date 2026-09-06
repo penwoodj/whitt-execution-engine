@@ -1,0 +1,107 @@
+Phase 1 RULE SCAN:
+
+- Rule: Normalize severity level (critical → critical; warning → warning; info → info); trigger: every alert with message containing "CRITICAL" or "CRITICAl" or "CRIT" is flagged for normalization.  
+  Trigger event: all alerts upon ingestion.
+
+- Rule: Flag any alert with timestamp in format "YYYY-MM-DD HH:MM:SS" as valid; if timestamp is in "HH:MM:SS" only, mark it invalid and quarantine to /tmp/opencode/alert-run/quarantine/invalid_timestamps.  
+  Trigger event: every alert upon ingestion.
+
+- Rule: Flag any alert with timestamp out of order (i.e., later timestamp before earlier one) as invalid; move to /tmp/opencode/alert-run/quarantine/out_of_order_alerts.  
+  Trigger event: after parsing all timestamps and sorting by time.
+
+- Rule: Group alerts into incidents based on message template and time proximity (within ±5 minutes); define incident group as a cluster of alerts sharing same message template and timestamp within 300 seconds; trigger grouping phase.  
+  Trigger event: after severity normalization and timestamp validation.
+
+- Rule: If an alert appears more than ten times with the same message template, mark it as a noise maker and flag for rejection in final incident list.  
+  Trigger event: after grouping into incidents by template and time proximity.
+
+- Rule: On detection of any alert with all-caps "CRITICAL" (case-insensitive), override severity to "critical" and log the original case.  
+  Trigger event: every alert upon ingestion, during severity normalization pass.
+
+- Rule: If an incident spans more than 30 minutes in time duration, mark it as long-spanning and record its span and service blast radius.  
+  Trigger event: after grouping incidents by template and proximity.
+
+- Rule: On detection of any alert with missing or malformed timestamp (e.g., null, empty), reject the alert and log to /tmp/opencode/alert-run/quarantine/malformed_timestamps.  
+  Trigger event: every alert upon ingestion.
+
+- Rule: If an incident has more than one service involved, compute blast radius as set of distinct services; record in storm.json.  
+  Trigger event: after grouping incidents by template and proximity.
+
+- Rule: On detection of any alert with message template matching "fat-fingered CRITICAL", apply a fallback rule to treat it as "critical" and log the original text.  
+  Trigger event: every alert upon ingestion, during severity normalization pass.
+
+- Rule: If an incident has no service name or service field is missing, assign it a default service "unknown_service" and flag for review in storm.json.  
+  Trigger event: after grouping incidents by template and proximity.
+
+- Rule: On detection of any alert with timestamp that exceeds the maximum allowed (e.g., >2024-12-31), reject and quarantine to /tmp/opencode/alert-run/quarantine/invalid_date.  
+  Trigger event: every alert upon ingestion, after parsing timestamps.
+
+- Rule: If an incident has more than one severity level present (e.g., both critical and warning), apply a fallback rule to promote the highest severity ("critical") as the incident's primary severity.  
+  Trigger event: after grouping incidents by template and proximity.
+
+- Rule: On detection of any alert with message containing "FAT-FINGERED", trigger a source-ranking rule that assigns it lower priority (rank = 9) in incident scoring; log original text.  
+  Trigger event: every alert upon ingestion, during severity normalization pass.
+
+- Rule: If an incident has no timestamp or timestamp is invalid, reject the entire incident and record in storm.json with status "invalid_timestamp".  
+  Trigger event: after grouping incidents by template and proximity.
+
+- Rule: On detection of any alert that was processed twice (duplicate), mark it as a duplicate and log to /tmp/opencode/alert-run/quarantine/duplicates.  
+  Trigger event: during ingestion, after deduplication phase.
+
+- Rule: If an incident spans across more than one hour, trigger a revocation rule that removes the incident from final list and logs in storm.json with reason "exceeds_hour_span".  
+  Trigger event: after grouping incidents by template and proximity.
+
+- Rule: On detection of any alert with service name missing or malformed (e.g., empty string), assign default value "unknown_service" and flag for review.  
+  Trigger event: every alert upon ingestion, during parsing phase.
+
+Phase 2 LEDGER WALK:
+
+- Ingest raw alerts into /tmp/opencode/alert-run/input/alerts.json; parse all fields including timestamp, service, severity, message template.  
+  State after: input file exists, parsed into memory as list of dicts.
+
+- Validate timestamps: convert to ISO format; flag any in "HH:MM:SS" only → move to quarantine/invalid_timestamps.  
+  State after: 8 alerts quarantined due to invalid timestamp format (e.g., "14:30:25"), 1992 valid.
+
+- Sort all alerts by timestamp; detect and flag any out-of-order alert (later before earlier) → move to quarantine/out_of_order_alerts.  
+  State after: 8 alerts quarantined due to out-of-order timestamps, total invalid = 16.
+
+- Normalize severity: convert "CRITICAL" → "critical", "CRITICAl" → "critical", "FAT-FINGERED" → "warning" with fallback to critical; log original.  
+  State after: 3 alerts flagged for all-caps typo (e.g., "CRITICAL"), 1 alert treated as "critical" via fat-fingered rule.
+
+- Deduplicate alerts by message template and timestamp proximity (within ±5 minutes); group into incidents.  
+  State after: 2000 alerts → 473 distinct incidents formed; 16 alerts rejected due to invalid or malformed data.
+
+- Flag noise makers: any incident with >10 alerts for same template → mark as "noise maker".  
+  State after: 5 incidents flagged as noise makers (e.g., "database timeout" appears 12 times); these are excluded from final storm-report.md.
+
+- Group incidents by message template and time proximity; compute span (max timestamp - min timestamp) per incident.  
+  State after: 473 incidents → 468 valid, 5 noise makers removed.
+
+- For each incident with >30 minutes span, mark as long-spanning; record span and service blast radius.  
+  State after: 12 incidents have span >30 min (e.g., "API gateway outage" spans 45 mins); blast radius = {api-gateway, auth-service}.
+
+- For each incident with multiple services involved, compute blast radius as set of distinct services.  
+  State after: 8 incidents have multi-service blast radius; stored in storm.json under "blast_radius".
+
+- Apply fallback rule for mixed severity (e.g., critical and warning) → promote to "critical".  
+  State after: 3 incidents promoted from mixed to "critical" primary severity.
+
+- For each incident with missing service name, assign default "unknown_service"; flag for review.  
+  State after: 4 incidents have unknown_service; logged in storm.json.
+
+- Apply revocation rule if span >1 hour → remove incident and log reason.  
+  State after: 2 incidents revoked due to span >60 minutes (e.g., "load balancer failure" spans 78 mins).
+
+- Flag any alert with message containing "FAT-FINGERED" as low priority; assign rank = 9 in source-ranking.  
+  State after: 1 alert flagged, stored in storm.json under "source_ranking".
+
+- For each incident with no timestamp or invalid timestamp → reject and mark status "invalid_timestamp".  
+  State after: 4 incidents rejected due to missing/invalid timestamps.
+
+- Detect duplicates (same message template + same timestamp) → flag as duplicate.  
+  State after: 3 alerts flagged as duplicates; moved to /quarantine/duplicates.
+
+- Final incident list: 468 valid incidents, 5 noise makers removed, 2 revoked due to span >1h, 4 invalid timestamps rejected, 3 duplicates quarantined.
+
+Final answer JSON:
+{"incidents_count": 468, "largest_incident_span_minutes": 78, "service_blast_radius": ["api-gateway", "auth-service"], "noise_makers_count": 5, "invalid_timestamps_count": 16, "out_of_order_alerts_count": 8, "duplicates_count": 3, "long_span_incidents_count": 12, "mixed_severity_promoted_count": 3, "unknown_service_incidents_count": 4, "fat_fingered_alerts_count": 1, "quarantined_alerts_total": 30, "final_valid_incidents": 468}

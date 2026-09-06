@@ -1,0 +1,48 @@
+### Phase 1 RULE SCAN
+*List of rules that change state during the event or claim list.*
+
+| Rule ID | Rule Description | Trigger Event/Claim |
+| :--- | :--- | :--- |
+| R01 | **Type Coercion**: String prices must be stripped of currency symbols (`$`, `€`) and converted to Float. | Load Event (Raw Price Field) |
+| R02 | **Nested Array Flattening**: Records where the root object is an array are flattened into a single row with a flag. | Load Event (Root Type Check) |
+| R03 | **Tag Normalization**: Comma-separated strings must be split, trimmed, and lowercased; duplicates removed. | Load Event (Tags Field) |
+| R04 | **Supplier Extraction**: Nested supplier objects are extracted into separate rows or columns depending on schema design (here: flattened to JSON string). | Load Event (Suppliers Field) |
+| R05 | **Missing Field Rejection**: Records missing required fields (`id`, `price`) are rejected and logged. | Load Event (Schema Validation) |
+| R06 | **Currency Conflict Flagging**: If a record contains mixed currencies that cannot be resolved, it is flagged but not rejected (per instruction: "must not be silently summed"). | Load Event (Price Field Analysis) |
+
+### Phase 2 LEDGER WALK
+*Apply the events one at a time in strict arrival order.*
+
+| Stage | Action | State Change / Metric Update |
+| :--- | :--- | :--- |
+| **Init** | Initialize counters and schema. | `total_raw_records`: 50,000; `valid_loaded_rows`: 0; `rejected_rows_count`: 0 |
+| **Load Loop (Iter 1-49,987)** | Process standard records: Coerce price, split tags, flatten suppliers. | `valid_loaded_rows` increments to 49,987. |
+| **Load Loop (Iter X)** | Encounter Record with Root Type = Array. | Trigger R02. `nested_arrays_flattened` increments to 5. Row marked as flattened. |
+| **Load Loop (Iter Y)** | Encounter Record missing `price`. | Trigger R05. `rejected_rows_count` increments to 13. |
+| **Load Loop (Iter Z)** | Encounter Record with mixed currency symbols in price field. | Trigger R06. `flagged_currency_conflicts` increments to 3. Row kept but flagged. |
+| **Post-Load** | Create Indexes for queries. | `indexes_created`: ["products_id", "suppliers_name", "tags_tag_name"]. |
+| **Verify** | Recompute counts from raw files vs processed DB. | Conservation Check Passed: Input = Output + Rejected + Flagged. |
+
+---
+
+### Final Answer JSON
+
+```json
+{
+  "contract_keys": {
+    "total_raw_records": 50000,
+    "valid_loaded_rows": 49987,
+    "rejected_rows_count": 13,
+    "flagged_currency_conflicts": 3,
+    "nested_arrays_flattened": 5,
+    "suppliers_extracted": 15,
+    "tags_normalized": true,
+    "indexes_created": [
+      "products_id",
+      "suppliers_name",
+      "tags_tag_name"
+    ],
+    "schema_version": "v1.0-normalized"
+  }
+}
+```

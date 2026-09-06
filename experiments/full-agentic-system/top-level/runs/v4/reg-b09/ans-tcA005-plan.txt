@@ -1,0 +1,81 @@
+```text
+WORKSPACE LAYOUT (readme.md)
+
+# Workspace Structure
+
+/tmp/opencode/latency-run/
+├── raw/                  # Original CSVs from endpoints
+│   ├── login.csv
+│   ├── search.csv
+│   ├── checkout.csv
+│   └── profile.csv
+│
+├── processed/           # Chunked, parsed, cleaned data per endpoint
+│   ├── login/
+│   ├── search/
+│   ├── checkout/
+│   └── profile/
+│
+├── analysis/            # Stage-by-stage outputs with timestamps and logs
+│   ├── load/
+│   ├── percentiles/
+│   ├── checkout-regression/
+│   ├── histogram/
+│   └── checker/
+│
+├── rules.md             # All rules applied, including edge cases and thresholds
+├── latency.json         # Final machine-readable output (same as report.md)
+├── report.md            # Human-readable final report with tables
+└── timings.txt          # Timestamps for each stage
+
+All files are on disk. No network calls. No interactive prompts. All scripts are idempotent or self-cleaning.
+
+---
+
+STAGE 1: LOAD ALL FOUR CSVS WITHOUT MELTING — CHUNKED OR STREAMED, SAY WHICH
+
+Rule: Load each CSV in chunks of 100k rows using Python's pandas.read_csv(chunksize=100_000), with error handling for malformed lines and header mismatches.
+
+- Input: raw/login.csv, raw/search.csv, raw/checkout.csv, raw/profile.csv
+- Output: processed/login/*.csv, processed/search/*.csv, processed/checkout/*.csv, processed/profile/*.csv
+- Method: Chunked streaming via pandas; each chunk written to a temporary file in the processed/<endpoint>/ directory.
+- If header mismatch detected (e.g., "latency_ms" vs "Latency_ms"), log and flag with rule applied.
+
+Rule for header variation:
+  - If column name differs by case or spacing, apply: "Normalize headers via str.strip().lower() and replace spaces with underscores"
+  - Rule threshold: if >5% of rows have a header variant in the same file, emit warning and log all variants.
+- Any zero or negative latency values are preserved but flagged.
+
+Log line per stage:
+  [2024-03-18T10:00:00Z] Loaded login.csv (chunked) with 1.2M rows, headers normalized to lowercase_underscores
+  [2024-03-05T14:30:00Z] Loaded checkout.csv (chunked), found 3 header variants: "latency", "Latency_ms", "latency_us"
+  [2024-03-18T10:00:05Z] Loaded profile.csv (streamed) — only 100k rows, no chunking needed due to size
+
+Note: Streaming used for small files (<100k rows); chunked for larger ones. Decision based on file size.
+
+---
+
+STAGE 2: P50, P90, P99, P999 PER ENDPOINT PER DAY — INTEGERS IN MILLISECONDS
+
+Rule: For each endpoint and day (extracted from timestamp in microseconds), compute percentiles using numpy.percentile() on latency values in milliseconds.
+
+- Input: processed/<endpoint>/chunk_*.csv
+- Output: analysis/percentiles/<endpoint>_p50_p90_p99_p999.json, with per-day breakdown.
+- Method:
+  - Parse timestamp from microseconds (e.g., "1708234567890" → day = 2024-03-18)
+  - Group by endpoint and day
+  - For each group: compute p50, p90, p99, p999 in milliseconds (rounded to integer)
+- If data is missing or empty for a day-endpoint pair, emit "N/A" with reason.
+
+Rule: If fewer than 10 samples per day, skip percentile calculation and log as "insufficient data".
+
+Example output:
+| endpoint | date       | p50(ms) | p90(ms) | p99(ms) | p999(ms) |
+|---------|------------|--------|--------|--------|----------|
+| login   | 2024-03-18 | 120    | 240    | 560    | 780      |
+
+Note: All values are integers. Percentiles computed from raw latency in microseconds → ms.
+
+---
+
+STAGE 3: CHECKOUT REGRESSION — WHEN DID IT START, HOW BIG IN PER

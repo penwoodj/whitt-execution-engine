@@ -1,0 +1,65 @@
+### PLAN FIRST: Steps & Formulas/Rules
+
+1.  **Workspace Initialization**: Create `/tmp/opencode/timeline-run` with subdirectories `scripts`, `outputs`, and root files (`rules.md`, `decisions.md`).
+    *   *Rule*: All paths must be absolute or relative to the workspace root; no external dependencies allowed.
+2.  **Data Generation (Deterministic)**: Generate synthetic log data for 6 services with specific anomalies (UTC vs Local timestamps, missing rows) using Python's `random.seed(42)` and standard library only.
+    *   *Formula*: `timestamp = base_time + offset` where offset is either UTC or `(local_offset_minutes * 60 seconds)`.
+3.  **Log Parsing & Normalization**: Write a script to ingest all logs, parse timestamps, detect timezones (UTC vs Local), and normalize everything to UTC epoch seconds.
+    *   *Rule*: If a row has an unparseable timestamp or timezone mismatch not matching the header, flag it as `CORRECTED` in output but keep original text.
+4.  **Chronological Merge**: Combine normalized rows into a single stream sorted by `epoch_utc`.
+    *   *Formula*: `sorted_rows = sort(all_normalized_rows, key=lambda x: x['epoch_utc'])`.
+5.  **Incident Detection Logic**: Scan the merged stream for the specific sequence: `ERROR` (Detection) -> `WARN/FAIL` (Mitigation 1 Failed) -> `INFO/SUCCESS` (Mitigation 2 Worked).
+    *   *Rule*: Define "Resolution" strictly as the first log line containing a success state after the failed mitigation attempt.
+6.  **Bucketing & Activity Chart**: Divide the incident window into 5-minute buckets and count events per bucket.
+    *   *Formula*: `bucket_id = floor((epoch - start_epoch) / 300)`.
+7.  **Timeline Table Generation**: Create a Markdown table mapping Clock Time, Event Description, Evidence Line Reference (Source File + Line #).
+    *   *Rule*: Include columns for `Status` (e.g., `CORRECTED`, `NORMAL`) and `Service`.
+8.  **JSON Export**: Generate `timeline.json` with the same data structure as the Markdown table but in JSON format, preserving exact line numbers.
+9.  **Verification Script**: Create a standalone Python script that re-reads raw logs, applies normalization rules independently of the pipeline code, and compares counts/timestamps against generated outputs.
+    *   *Rule*: Exit code `0` only if all metrics match exactly; otherwise exit `1` with specific mismatch details.
+10. **Final Report Generation**: Assemble a text report summarizing paths, timings, key findings (including the 4 corrected entries), and one-line surprise.
+
+---
+
+### TASK EXECUTION: End-to-End Processing Exercise
+
+I will now execute this plan in `/tmp/opencode/timeline-run`. This includes generating the data, running the pipeline, verifying it, and producing all artifacts.
+
+#### Step 1: Workspace & Data Generation
+*Creating the environment and the "messy" log data.*
+
+```python
+import os
+import json
+import random
+from datetime import datetime, timedelta, timezone
+
+# Setup
+WORKSPACE = "/tmp/opencode/timeline-run"
+os.makedirs(f"{WORKSPACE}/scripts", exist_ok=True)
+os.makedirs(f"{WORKSPACE}/outputs", exist_ok=True)
+
+# Deterministic Seed for Reproducibility
+random.seed(42)
+
+# Configuration
+SERVICES = ["auth-gateway", "payment-core", "inventory-sync", "user-profile", "notification-hub", "audit-logger"]
+INCIDENT_START = datetime(2023, 10, 27, 10, 0, 0) # Oct 27, 10:00 UTC
+DURATION_MINUTES = 90
+
+# Helper to generate logs with specific anomalies
+def generate_logs():
+    all_logs = []
+    
+    for service in SERVICES:
+        log_file = f"{WORKSPACE}/inputs/{service}.log"
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        
+        # Generate 150 lines per service roughly
+        for i in range(140):
+            time_offset_min = random.randint(-2, DURATION_MINUTES + 2)
+            current_time = INCIDENT_START + timedelta(minutes=time_offset_min)
+            
+            # Anomaly: Some services write UTC, some Local (offset by -5 hours / -300 mins)
+            is_utc = service in ["auth-gateway", "payment-core"] 
+            tz_name =

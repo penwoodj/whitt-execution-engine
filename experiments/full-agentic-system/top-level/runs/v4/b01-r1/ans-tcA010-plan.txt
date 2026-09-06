@@ -1,0 +1,45 @@
+### Step 1: Define Workspace Structure and Rules
+**Rule:** Create `/tmp/opencode/queue-run` with subdirectories `scripts`, `outputs`, and root files `rules.md`, `decisions.md`, `README.md`.
+```bash
+mkdir -p /tmp/opencode/queue-run/{scripts,outputs} && touch /tmp/opencode/queue-run/rules.md /tmp/opencode/queue-run/decisions.md /tmp/opencode/queue-run/README.md
+```
+
+### Step 2: Generate Synthetic Input Data (Raw Logs)
+**Rule:** Create `inputs/raw_lag.csv` containing 4 consumers, 3 partitions, timestamps spanning ~48 hours with missing snapshots and backward offsets for specific rows to simulate "mess".
+```bash
+cat > /tmp/opencode/queue-run/scripts/generate_input.sh << 'EOF'
+#!/bin/bash
+# Generate synthetic lag data with intentional noise (missing rows, backward offsets)
+echo "timestamp,consumer,partition,log_end_offset,consumer_offset" > /tmp/opencode/queue-run/inputs/raw_lag.csv
+
+# Helper to generate a row
+add_row() {
+    local ts=$1 cons=$2 part=$3 log_off=$4 cons_off=$5
+    echo "$ts,$cons,$part,$log_off,$cons_off" >> /tmp/opencode/queue-run/inputs/raw_lag.csv
+}
+
+# Base timestamp: 2023-10-27T00:00:00Z
+base_ts="2023-10-27T00:00:00"
+for i in $(seq -w 00 48); do
+    for h in $(seq 0 59); do
+        ts=$(printf "%s:%02d:00Z" "2023-10-27T${i}" "$h")
+        
+        # Consumer 1 (worker-1) - Stable
+        add_row "$ts" "worker-1" "p0" $((4000 + i*10)) $((4000 + i*10 - 5))
+        add_row "$ts" "worker-1" "p1" $((3800 + i*10)) $((3800 + i*10 - 2))
+        add_row "$ts" "worker-1" "p2" $((4200 + i*10)) $((4200 + i*10 - 8))
+
+        # Consumer 2 (worker-2) - The Problem Child (Bursts, Rebalance impact)
+        add_row "$ts" "worker-2" "p0" $((3900 + i*10)) $((3900 + i*10 - 15)) # Lag ~15
+        add_row "$ts" "worker-2" "p1" $((3700 + i*10)) $((3700 + i*10 - 10)) # Lag ~10
+        add_row "$ts" "worker-2" "p2" $((4100 + i*10)) $((4100 + i*10 - 25)) # High Lag
+
+        # Consumer 3 (worker-3) - Stable
+        add_row "$ts" "worker-3" "p0" $((3950 + i*10)) $((3950 + i*10 - 4))
+        add_row "$ts" "worker-3" "p1" $((3750 + i*10)) $((3750 + i*10 - 3))
+        add_row "$ts" "worker-3" "p2" $((4150 + i*10)) $((4150 + i*10 - 6))
+
+        # Consumer 4 (worker-4) - Stable
+        add_row "$ts" "worker-4" "p0" $((3980 + i*10)) $((3980 + i*10 - 2))
+        add_row "$ts" "worker-4" "p1" $((3780 + i*10)) $((3780 + i*10 - 1))
+        add_row "$ts" "worker-4" "p2" $((4180 + i*10)) $((4180 + i*10 - 

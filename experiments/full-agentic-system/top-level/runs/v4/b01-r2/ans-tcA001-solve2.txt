@@ -1,0 +1,61 @@
+### Phase 1 RULE SCAN
+
+This phase identifies the logical rules governing state changes based on the `TASK REQUIREMENTS` provided for the inventory pipeline. Since this is a file-system processing task rather than a database ledger, "state" refers to the lifecycle of an input record (File -> Manifest/Reject) and the aggregation logic (Deduplication, Reporting).
+
+**Rule List:**
+1.  **Malformed File Rule**: If a JSON file fails parsing or validation (missing comma, trailing brace), state changes from `Pending` to `Rejected`; triggers: Stage 1 Scan; output: `rejects/<filename>.<reason>`.
+2.  **Exact Part ID Dedup Rule**: If two valid records share the exact same `part_id`, state changes for the older file (by modification time) from `Valid` to `Duplicate_Loser`; triggers: Stage 2 Dedupe; output: Log entry identifying loser.
+3.  **Semantic Duplicate Flag Rule**: If two valid records share the same `part_name` AND `category` but have different `quantity_on_hand`, state changes for both from `Valid` to `Review_Candidate`; triggers: Stage 2 Dedupe; output: File moved/copied to `review/`.
+4.  **Aggregation Rule**: State of all valid records transitions from `Individual` to `Aggregated` in the final report; triggers: Stage 3 Report; logic: Sum quantities, sum values (`qty * cost`).
+5.  **Defective Rate Calculation Rule**: State of `status == 'defective'` records is isolated for percentage calculation; triggers: Stage 3 Report; output: Metric field.
+
+---
+
+### Phase 2 LEDGER WALK (Pipeline Execution Simulation)
+
+This phase simulates the execution of the pipeline against the generated fixtures, showing the state progression through the four stages.
+
+**Stage 1: Scan & Quarantine**
+*   **Input**: 200 raw JSON files across `inbound`, `outbound`, `quarantined`, `archived`.
+*   **Action**: Iterate all files. Attempt JSON decode and schema validation (`part_id` format, required fields).
+*   **State Change**: Valid records -> Added to `merged_manifest.json`. Malformed records -> Written to `rejects/` with error string.
+*   **Result**: Manifest contains ~195 valid records (simulating 5 malformed files: 2 syntax errors, 3 schema violations). Reject folder contains 5 entries.
+
+**Stage 2: Deduplication & Review**
+*   **Input**: `merged_manifest.json` (195 records).
+*   **Action A (Exact ID)**: Group by `part_id`. Sort group by file modification time. Keep latest, mark others as `duplicate_losers`.
+    *   *Simulated Event*: Record `PTM-00042` found in `inbound/01.json` and `archived/99.json`. `archived/99.json` is older.
+    *   *State Change*: `PTM-00042` (old) -> Status `Duplicate_Loser`. Log generated: "Dropped PTM-00042 from archived/99.json due to newer inbound/01.json".
+*   **Action B (Semantic)**: Group by (`part_name`, `category`). Check if `quantity_on_hand` differs. If yes, flag both as `needs_review`.
+    *   *Simulated Event*: "Bolt 500" in `fastener` category found with qty 20 and qty 45.
+    *   *State Change*: Both records -> Status `Review_Candidate`. Files copied to `review/`.
+
+**Stage 3: Report Computation**
+*   **Input**: Deduplicated dataset (Valid + Review Candidates).
+*   **Action A (Totals)**: Sum distinct parts, sum inventory value.
+    *   *State Change*: Calculation of `total_value` = $\sum(qty \times unit\_cost)$.
+*   **Action B (Metrics)**: Calculate defective rate ($\frac{count(defective)}{total} \times 100$). Count review candidates. Identify top 5 expensive items by unit cost. Group values by `warehouse_location` zone.
+*   **State Change**: Generation of raw data structures for JSON and Markdown templates.
+
+**Stage 4: Output & Verification**
+*   **Action A (Write)**: Write `warehouse-report.md` (Human readable) and `warehouse-report.json` (Machine readable).
+    *   *Constraint Check*: Ensure numeric values in JSON match counts in MD exactly (e.g., if MD says "14 defective", JSON must have `"defective_count": 14`).
+*   **Action B (Verify)**: Run independent script reading raw fixtures and re-calculating totals. Compare against generated files.
+    *   *State Change*: If mismatch -> Exit Code 1 + Error Message. If match -> Exit Code 0.
+
+---
+
+### Final Answer
+
+```json
+{
+"part_id": "PTM-10200",
+"part_name": "Bolt 500",
+"category": "fastener",
+"quantity_on_hand": 20,
+"unit_cost": 1.50,
+"warehouse_location": "C17",
+"last_inspected": null,
+"status": null
+}
+```

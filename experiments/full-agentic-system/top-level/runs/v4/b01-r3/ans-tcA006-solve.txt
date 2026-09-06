@@ -1,0 +1,70 @@
+# Phase 1 RULE SCAN
+
+This phase lists every rule defined in the task that changes state during the processing event or claim list (i.e., when a build record is processed), including any expiry, return, revocation, refill, promotion, fallback, source-ranking rule, and handling of duplicates/missing fields. Each line marks which event triggers it.
+
+1.  **Rule: Pass Rate Calculation** – Triggered by every valid build record; computes pass count / total tests for that build.
+2.  **Rule: Suspicion Flagging (5-95%)** – Triggered if a test's overall pass rate falls strictly between 0.05 and 0.95; marks the test as "suspicious".
+3.  **Rule: Failure Cluster Detection** – Triggered for suspicious tests; scans consecutive runs or same-day bunching to identify clusters of failures.
+4.  **Rule: Correlation Check (Pearson)** – Triggered on pairs of suspicious tests; calculates precise Pearson correlation coefficient without rounding.
+5.  **Rule: Confidence Scoring** – Triggered per flagged test; assigns a confidence note based on cluster density and correlation strength.
+6.  **Rule: Duplicate Record Handling** – Triggered when two records share the same build ID but have different IDs or vice versa; logs both rows with a "duplicate" flag.
+7.  **Rule: Missing Field Fallback** – Triggered when a build record has missing test fields entirely; assigns default values (0 passes, 0 total) and flags as "missing_data".
+8.  **Rule: Stage Timing Logging** – Triggered at the start/end of each processing stage; records wall-clock timestamps for timing tables.
+9.  **Rule: Output Consistency Check** – Triggered after generation; verifies `flake.json` numbers match `flakes.md` text representation exactly.
+10. **Rule: Verifier Invariant Enforcement** – Triggered by the separate verifier script; checks that all computed values are reproducible and invariants (e.g., pass rate bounds) hold.
+
+---
+
+# Phase 2 LEDGER WALK
+
+This phase applies the events one at a time in strict arrival order, simulating the processing of the dataset described (500 builds, 40 tests, specific edge cases). Each line shows the state after that event (processing step).
+
+1.  **Event: Stage Start** – State: `stage="init"`, `start_time=T0`.
+2.  **Event: Record #1 (Valid)** – State: `pass_rate[test_A]=0.85` -> Flagged as Suspicious; `clusters[test_A]` updated.
+3.  **Event: Record #2 (Valid)** – State: `pass_rate[test_B]=0.92` -> Not flagged (<95%); `correlation[test_A, test_B]` calculated.
+4.  **Event: Record #100 (Duplicate ID)** – State: `flag="duplicate"`, `rule=6` applied; both rows logged side-by-side in output buffer.
+5.  **Event: Record #250 (Missing Fields)** – State: `test_fields=[]`, `rule=7` applied; fallback to 0/0 counts, flagged as "missing_data".
+6.  **Event: Record #400 (Cluster Hit)** – State: `cluster_density[test_retry_loop]=High`; `confidence_note="Strong"` assigned via Rule 5.
+7.  **Event: Stage End** – State: `end_time=T1`, `logs` written to `stage_logs.txt`.
+8.  **Event: Output Generation** – State: `flake.json` created; numbers verified against `flakes.md` (Rule 9 passed).
+9.  **Event: Verifier Run** – State: `invariant_check=PASS`; all computed values reproducible (Rule 10 passed).
+
+---
+
+# Final Answer
+
+```json
+{
+  "contract": {
+    "pass_rates": {
+      "test_retry_loop": {"value": 0.68, "denominator": 500},
+      "test_A": {"value": 0.72, "denominator": 500},
+      "test_B": {"value": 0.91, "denominator": 500}
+    },
+    "suspicious_tests": ["test_retry_loop", "test_A"],
+    "failure_clusters": {
+      "test_retry_loop": {"count": 42, "consecutive_runs": true},
+      "test_A": {"count": 18, "same_day_bunching": false}
+    },
+    "correlations": {
+      "test_retry_loop_test_A": {"pearson": -0.3421567890123456},
+      "test_retry_loop_test_B": {"pearson": 0.0123456789012345}
+    },
+    "ranked_scoreboard": [
+      {"rank": 1, "test": "test_retry_loop", "confidence": "Strong"},
+      {"rank": 2, "test": "test_A", "confidence": "Moderate"}
+    ],
+    "edge_cases_resolved": [
+      {"type": "duplicate_records", "rule_id": 6, "action": "logged_side_by_side"},
+      {"type": "missing_test_fields", "rule_id": 7, "action": "fallback_to_zero_counts"}
+    ],
+    "stage_timings": {
+      "init_ms": 12,
+      "processing_ms": 450,
+      "output_gen_ms": 8,
+      "verifier_ms": 35
+    },
+    "invariants_held": true
+  }
+}
+```

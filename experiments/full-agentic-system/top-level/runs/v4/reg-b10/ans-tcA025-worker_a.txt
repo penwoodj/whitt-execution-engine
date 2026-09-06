@@ -1,0 +1,65 @@
+Phase 1 RULE SCAN:
+
+- Rule: Timeout value override by site-specific block triggers when a site has a server block with `proxy_timeout` directive.  
+  Trigger: Site A's server block contains `proxy_timeout 30s;`.
+
+- Rule: Inheritance depth two resolves via nested includes — the inner file overrides outer values if present and not commented out.  
+  Trigger: site2.conf includes site1.conf, which is included by site3.conf.
+
+- Rule: Commented-out blocks are silently ignored during parsing; no directive from such a block is applied.  
+  Trigger: A server block in site4.conf is commented out with `# server { ... }`.
+
+- Rule: Dead directives (unused in any active block) are removed from effective config; no value is inherited or propagated if not consumed by an active block.  
+  Trigger: A directive in a non-included include file has no usage in any active site block.
+
+- Rule: If a timeout directive appears in both main config and a site-specific block, the site-specific one wins due to inheritance hierarchy (more specific overrides more general).  
+  Trigger: Any site with both `server { ... }` and `location { proxy_timeout X; }` where X differs from main config.
+
+- Rule: A typo in an include file (e.g., missing semicolon or malformed directive) is silently parsed as invalid, but does not cause error — the parser skips it.  
+  Trigger: The line "proxy_timeout 10s" in site2.conf lacks a semicolon.
+
+- Rule: Source-ranking rule: directives from earlier files are ranked by file path order; if multiple sources exist, the one with earliest path wins.  
+  Trigger: When two files define the same directive and no override occurs (e.g., main.conf vs. site1.conf), the one with lexicographically earlier path takes precedence.
+
+- Rule: Fallback rule: if a directive is missing in all blocks, use default value from main config.  
+  Trigger: A directive not defined in any site-specific block or include.
+
+- Rule: Refill rule: if a directive is redefined after being set, the new value replaces the old one only if it appears in an active block.  
+  Trigger: A directive is set in a parent block and then overridden in a child block with same name.
+
+- Rule: Expiry rule: any directive that is defined but not used in any active server or location block is removed from effective config.  
+  Trigger: A directive exists in a file but no active block consumes it.
+
+- Rule: Revocation rule: if a directive is explicitly unset (e.g., `# proxy_timeout;`), it is revoked and does not propagate downward.  
+  Trigger: A commented-out or empty directive in an include file that would have otherwise set a timeout.
+
+Phase 2 LEDGER WALK:
+
+- Initial state: main.conf sets default proxy_timeout = 60s, includes site1.conf, site2.conf, site3.conf; no active server blocks yet.  
+- Event: Parse main.conf → applies default proxy_timeout=60s; records inheritance chain.  
+- Event: Include site1.conf → inherits main config; adds `proxy_timeout 45s` in a location block; effective value becomes 45s for that location.  
+- Event: Include site2.conf → contains malformed line "proxy_timeout 10s" without semicolon → parser skips it silently; no change to state.  
+- Event: Include site3.conf → includes site1.conf again (depth two); inherits proxy_timeout=45s from site1.conf; no override due to lack of specific block.  
+- Event: Site4.conf contains commented-out server block `# server { ... }` → parser ignores it entirely; no directive applied.  
+- Event: Resolve inheritance depth: site3.conf includes site1.conf, which is already included by main.conf → value remains 45s at location level.  
+- Event: Apply effective config per site: Site A has explicit `proxy_timeout 30s` in server block → overrides inherited 45s; final value = 30s.  
+- Event: Site B has no timeout directive → fallback to main.conf default of 60s.  
+- Event: Site C includes site2.conf (which has typo) → parser skips malformed line; no effect on config.  
+- Event: Dead directives check: any directive not used in active block is removed from effective config list.  
+- Final state:  
+  - Site A: proxy_timeout = 30s (site-specific override wins).  
+  - Site B: proxy_timeout = 60s (fallback to main).  
+  - Site C: proxy_timeout = 45s (inherited via site1.conf, not overridden).  
+  - All dead directives removed; no values from commented-out blocks applied.
+
+{
+  "site_a": {
+    "proxy_timeout": 30
+  },
+  "site_b": {
+    "proxy_timeout": 60
+  },
+  "site_c": {
+    "proxy_timeout": 45
+  }
+}

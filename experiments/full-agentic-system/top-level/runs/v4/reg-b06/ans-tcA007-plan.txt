@@ -1,0 +1,79 @@
+```plaintext
+1. Create workspace at /tmp/opencode/alert-run and initialize directory structure:
+   mkdir -p /tmp/opencode/alert-run/{data,outputs,logs,rules,scripts}
+   touch /tmp/opencode/alert-run/README.md
+
+2. Read raw alerts file (assumed to be 'alerts.csv' in data/) into memory using standard CSV parsing; validate schema: timestamp, service, severity, message_template.
+   Input: raw_alerts.csv
+   Output: parsed_alerts.jsonl (one JSON object per alert)
+
+3. Parse timestamps from two formats: "YYYY-MM-DD HH:MM:SS" and "HH:MM:SS", convert to Unix epoch seconds; handle out-of-order alerts by flagging them with a 'timestamp_order_issue' field.
+   Rule: If timestamp is missing or malformed, mark as invalid; if two timestamps are in reverse order (e.g., 10:00 then 9:30), record the pair and flag it.
+
+4. Group alerts into incidents based on message_template and time proximity:
+   - Define incident group rule: same template AND within ±5 minutes of each other.
+   - Use sliding window over sorted timestamps to form clusters; output cluster list with (template, start_time, end_time, alert_count).
+   - Write rule in rules.md: "Incident grouping by message_template and time proximity ≤ 5 minutes."
+
+5. Count total incidents, identify the largest incident by size (alert count), compute its span (end_time - start_time), and determine service blast radius (set of unique services involved).
+   Output: incident_summary.json with fields:
+     - total_incidents
+     - max_incident_alert_count
+     - max_incident_span_seconds
+     - max_incident_service_blast_radius
+
+6. Identify alerts that fired more than 10 times for the same message_template (noise makers):
+   - Filter alerts by template and count frequency; any template with >10 occurrences is a noise maker.
+   - Output: noise_makers.json with {template, alert_count, list_of_alert_ids}
+
+7. Normalize severity values:
+   - Map "CRITICAL" → "critical"
+   - Map "WARNING" → "warning"
+   - Map "INFO" → "info"
+   - Flag any alert where severity is all caps and not in the standard set (e.g., "CRITICAL" when it should be "critical") as a typo.
+   - Rule: If severity is uppercase and not one of {critical, warning, info}, treat as typo; output flagged row with original and normalized values.
+
+8. For each alert with timestamp issues or out-of-order pairs:
+   - Flag the alert and record its issue type (e.g., "timestamp_format_mismatch", "out_of_order_pair")
+   - Store in a file: invalid_alerts.json with {alert_id, original_timestamp, issue_type, rule_cited}
+   - Rule cited: "Timestamp parsing rule for mixed formats; out-of-order detection via time comparison"
+
+9. Generate storm-report.md:
+   - Table of incidents by size
+   - Summary of noise makers
+   - List of severity normalizations with flagged cases
+   - List of timestamp issues and their resolutions
+   - Edge case descriptions (e.g., 8 alerts in reverse order)
+
+10. Generate storm.json:
+    - Root object: {
+        "total_alerts": total_count,
+        "incidents": [incident_summary],
+        "noise_makers": noise_makers_list,
+        "severity_normalizations": normalized_severity_list,
+        "invalid_timestamps": invalid_alerts_list
+      }
+
+11. Write rules.md with full method descriptions:
+    - Incident grouping rule: message_template + time proximity ≤ 5 minutes
+    - Noise maker threshold: >10 occurrences per template
+    - Severity normalization: all caps → lowercase, only valid values allowed
+    - Timestamp parsing: two formats; out-of-order pairs detected via sorting
+
+12. Write logs for each stage in /tmp/opencode/alert-run/logs/stage_*.log:
+    - One line per stage with timestamp and action (e.g., "Stage 3: Grouped 47 alerts into 8 incidents")
+
+13. Run full pipeline twice:
+    - First run: validate logic, produce outputs
+    - Second run: verify consistency; if any output differs, report discrepancy
+
+14. Perform independent re-computation from raw data to verify integrity:
+    - Create a separate script (verify.sh) that reads raw_alerts.csv and reproduces all outputs in the same order.
+    - Run verify.sh and assert:
+        - All incident groups match
+        - Noise maker counts match
+        - Severity normalizations match
+        - Invalid alerts are correctly flagged
+    - Exit code: 0 if consistent, non-zero otherwise
+
+15

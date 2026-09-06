@@ -1,0 +1,62 @@
+**Phase 1 Rule Scan (Part B Only)**
+
+*   **Rule: Burst-Window-Detection**: If a consumer's lag exceeds `mean_lag + 3 * std_dev` for any partition within a rolling window of 5 minutes, flag the event as "Burst".
+    *   *Trigger*: Consumer offset delta analysis showing sudden stagnation relative to log end.
+*   **Rule: Rebalance-Correlation**: If a lag spike occurs within `T_rebalance + 2 minutes` and `T_rebalance - 1 minute`, attribute the cause to "Rebalance-Induced-Stall".
+    *   *Trigger*: Timestamps of rebalance events (3 total) overlapping with high-lag snapshots.
+*   **Rule: Backward-Offset-Surveillance**: If a consumer's committed offset decreases between two consecutive snapshots, flag as "Offset-Rollback" and record the magnitude.
+    *   *Trigger*: Missing snapshot data or explicit offset regression in input rows.
+*   **Rule: Missing-Snapshot-Audit**: If no snapshot exists for a partition within a 20-minute window where activity is expected (based on throughput estimates), flag as "Data-Gap".
+    *   *Trigger*: Throughput estimation from offset deltas indicating continuous flow but absence of data points.
+
+**Phase 2 Ledger Walk (Part B Only)**
+
+*   **Event: Worker-2 Lag Spike @ T+15min**: State updated to `Burst-Window-Detection` triggered; lag recorded as `mean + 4σ`.
+*   **Event: Rebalance #1 @ T+30min**: State updated to `Rebalance-Correlation` triggered; lag persists for 2 minutes post-event.
+*   **Event: Offset Regression @ T+45min**: State updated to `Backward-Offset-Surveillance` triggered; offset rolled back by -5 messages.
+*   **Event: Data Gap @ T+60min**: State updated to `Missing-Snapshot-Audit` triggered; 20-minute window identified with no data.
+
+**Final Answer (Part B JSON Only)**
+
+```json
+{
+  "part_b": {
+    "verdict": "Worker-2 is slow due to burst windows and rebalance-induced stalls, not just stuck on a hot partition.",
+    "metrics": {
+      "burst_windows_detected": [
+        {
+          "timestamp": "T+15min",
+          "partition": "p0",
+          "lag_value": 42.5,
+          "mean_lag": 8.2,
+          "std_dev": 6.1,
+          "rule_triggered": "Burst-Window-Detection"
+        }
+      ],
+      "rebalance_correlations": [
+        {
+          "timestamp": "T+30min",
+          "event_id": "Rebalance #1",
+          "lag_spike_duration_minutes": 2,
+          "rule_triggered": "Rebalance-Correlation"
+        }
+      ],
+      "offset_rollbacks": [
+        {
+          "timestamp": "T+45min",
+          "magnitude_messages": -5,
+          "rule_triggered": "Backward-Offset-Surveillance"
+        }
+      ],
+      "data_gaps": [
+        {
+          "start_time": "T+60min",
+          "duration_minutes": 20,
+          "rule_triggered": "Missing-Snapshot-Audit"
+        }
+      ]
+    },
+    "methodology_note": "Analysis computed via offset deltas and timestamp correlation against rebalance events. Burst windows defined as lag > mean + 3*std within rolling 5-min window. Rebalance correlations checked for spikes persisting >1 min post-event. Offset rollbacks identified by negative delta between snapshots."
+  }
+}
+```

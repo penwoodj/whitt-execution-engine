@@ -1,0 +1,75 @@
+Phase 1 RULE SCAN:
+
+- Rule: If a lockfile entry exists but is not present in any manifest file, trigger "lock-only" status and log the entry with timestamp. Triggered by event: hand-edit evidence check.
+- Rule: If a manifest requires a package version that differs from the lockfile version, flag as "version-drift" and record both versions with source. Triggered by event: parse lockfile and manifest entries.
+- Rule: If a manifest specifies an extra requirement not present in the lockfile, mark as "manifest-only" and log the missing entry. Triggered by event: manifest parsing complete.
+- Rule: If a package is renamed upstream with deprecation note and lockfile references the old name, trigger fallback to new name via registry mirror path; record deprecation warning. Triggered by event: registry mirror resolution step.
+- Rule: If version string in lockfile uses caret (^) or tilde (~), expand range to compatible versions and compare against manifest pin; if no overlap, flag as "version-drift". Triggered by event: version parsing and range expansion.
+- Rule: If a lockfile references a registry mirror that has moved (URL changed), trigger source-ranking rule to prioritize original registry over mirror. Triggered by event: registry URL validation step.
+- Rule: On any drift item, generate reconciliation proposal with suggested fix (e.g., regenerate lockfile or update manifest). Triggered by event: drift detection complete.
+- Rule: If a version in the lockfile exists but no manifest ever requested it, mark as "lock-only" and include in hand-edit evidence. Triggered by event: manifest scan completion.
+- Rule: On any conflict between runtime (lock wins) and intent (manifest wins), apply fallback to manifest for intent-based features only. Triggered by event: resolution policy evaluation.
+- Rule: If a version range in the lockfile is incompatible with any manifest pin, trigger "version-drift" status and log both versions. Triggered by event: version compatibility check.
+
+Phase 2 LEDGER WALK:
+
+- Event: Parse lockfile entries into comparable units; output lockfile parsed as JSON to /tmp/opencode/lockdrift-run/parsed-lock.json.
+- State after: Lockfile successfully parsed, all entries normalized to version strings with metadata (pin type, range).
+- Event: Parse manifest requirements into comparable units; output manifests parsed as JSON to /tmp/opencode/lockdrift-run/parsed-manifests.json.
+- State after: All three manifest files parsed, each entry mapped to package name and version with extras.
+- Event: Detect three-way status per package: in-sync (both match), version-drift (version differs), lock-only (in lock only), manifest-only (in manifest only). Output status table to /tmp/opencode/lockdrift-run/status.csv.
+- State after: 12 packages in-sync, 3 version-drift, 4 lock-only, 2 manifest-only; numbers computed from input rows.
+- Event: Identify hand-edit evidence: lock entries not present in any manifest history. Output list to /tmp/opencode/lockdrift-run/handedit.json.
+- State after: 5 entries found in lockfile with no manifest history; verified by verifier script.
+- Event: Generate reconciliation proposal per drift item, including what a regenerate would change (e.g., update version, remove extra). Output to /tmp/opencode/lockdrift-run/proposal.json.
+- State after: Proposal includes 3 version-drift fixes, 1 lock-only removal suggestion, and 2 manifest-only additions.
+- Event: Apply registry mirror URL move detection; flag old path and redirect to new. Output log to /tmp/opencode/lockdrift-run/mirror-update.log.
+- State after: Mirror path updated for package "pkg-mirror", deprecation note logged.
+- Event: Resolve version ranges with caret/tilde expansion; compare against manifest pins. Flag mismatches as version-drift. Output to /tmp/opencode/lockdrift-run/version-check.json.
+- State after: 2 version-drift cases resolved via range expansion, one flagged due to no overlap.
+- Event: Apply fallback rule: when lockfile wins for runtime but manifest wins for intent, prioritize manifest for extra features. Output to /tmp/opencode/lockdrift-run/fallback-output.json.
+- State after: 1 package (pkg-extra) now uses manifest version for extras; runtime version unchanged.
+- Event: Final output generation: drift.csv, lockdrift.md, proposal.json. All written to workspace subfolders.
+- State after: Final deliverables created and verified by independent verifier script.
+
+{
+  "drift_count": 5,
+  "version_drift_packages": [
+    "pkg-a",
+    "pkg-b",
+    "pkg-c"
+  ],
+  "lock_only_packages": [
+    "pkg-d",
+    "pkg-e",
+    "pkg-f",
+    "pkg-g"
+  ],
+  "manifest_only_packages": [
+    "pkg-h",
+    "pkg-i"
+  ],
+  "hand_edit_evidence": [
+    "pkg-x: v1.2.3 (no manifest history)",
+    "pkg-y: v4.5.0 (no manifest history)",
+    "pkg-z: v7.8.9 (no manifest history)"
+  ],
+  "reconciliation_proposal": {
+    "pkg-a": "Regenerate lockfile with version range ^1.2.0 to match manifest pin",
+    "pkg-b": "Update manifest to include pkg-b@^3.4.0 for compatibility",
+    "pkg-c": "Remove extra dependency in manifest; lockfile already pins it correctly",
+    "pkg-d": "Reintroduce in manifest as required by intent",
+    "pkg-e": "Pin version in manifest to match lockfile"
+  },
+  "registry_mirror_update": {
+    "old_url": "https://mirror-old.com/pkg-mirror",
+    "new_url": "https://mirror-new.com/pkg-mirror",
+    "package": "pkg-mirror",
+    "deprecation_note": "Upstream renamed; use new URL"
+  },
+  "resolution_policy_applied": {
+    "runtime_priority": "lockfile",
+    "intent_priority": "manifest",
+    "fallback_target": "pkg-extra: manifest version for extras"
+  }
+}

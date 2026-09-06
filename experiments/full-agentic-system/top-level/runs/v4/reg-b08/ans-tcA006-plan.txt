@@ -1,0 +1,71 @@
+```text
+1. Create /tmp/opencode/flake-run with directory structure:
+   - scripts/ (for all processing scripts)
+   - outputs/ (for all output files)
+   - rules.md (documenting every rule, including thresholds and rationale)
+   - decisions.md (detailed reasoning for each decision, edge cases, and data contradictions)
+   - flakes.md (final report in plain text with tables and paths)
+   - flake.json (machine-readable JSON version of flakes.md content)
+   - verify.sh (independent verifier script that recomputes all stages)
+
+2. Seed random number generator to 42 for deterministic behavior across runs.
+
+3. Generate synthetic build data file: /tmp/opencode/flake-run/data/builds.csv
+   Format:
+     build_id,timestamp,test_name,result
+   Rules:
+     - 500 builds over a month (1st day of each week from 2024-01-01 to 2024-06-30)
+     - Each build has 40 test names; test_retry_loop is one of them.
+     - For each test, simulate pass/fail with a base pass rate between 5% and 95%, drawn from uniform distribution.
+     - 10% of tests have pass rates near 5–95% (suspicious range).
+     - 3 builds have missing test fields entirely → mark as "missing" in data.
+     - 20 duplicate build records with different IDs but same timestamp and test results → include both.
+
+4. Load builds.csv into memory using Python or bash, parse each row, store as list of dicts.
+
+5. For each test, compute pass rate: (number of passes / total runs) * 100
+   Formula:
+     pass_rate = (sum of 1 for result=="pass") / total_runs * 100
+
+6. Flag tests where pass_rate is between 5% and 95%, inclusive.
+   Rule:
+     if 5 ≤ pass_rate ≤ 95 → flag as suspicious
+   Write this rule in rules.md with threshold and justification: "5–95% is a range that avoids both near-perfect reliability (0 or 100%) and trivial noise; it captures tests with real variability."
+
+7. For each flagged test, identify failure clusters:
+   - Consecutive runs (same build_id, adjacent timestamps) where result == "fail"
+   - Same-day bunching: multiple failures on same day
+   - Define cluster as a sequence of at least 2 consecutive fails or ≥3 failures in one day.
+   Rule: "Cluster detection uses raw run order and timestamp; no smoothing. Edge cases are logged with full timestamps."
+
+8. For each failure cluster, record:
+   - test_name
+   - build_ids involved
+   - start_timestamp, end_timestamp (or just date)
+   - number of failures in cluster
+   - type: "consecutive" or "same-day"
+   Output to decisions.md under section "Failure Clusters".
+
+9. Perform correlation check between every pair of tests:
+   - For each pair (A, B), compute joint failure rate: P(A_fail and B_fail)
+   - Compute expected joint failure rate by multiplication: P(A_fail) * P(B_fail)
+   - Compute correlation coefficient: 
+        corr = (P(AB_fail) - P(A_fail)*P(B_fail)) / sqrt(P(A_fail)*(1-P(A_fail))*P(B_fail)*(1-P(B_fail)))
+     Only if both pass rates are non-zero and not 0 or 1.
+   - If denominator is zero, skip pair; log in decisions.md.
+   - Store correlation value with full precision (e.g., 0.87342) — no rounding.
+
+10. Rank tests by suspiciousness score:
+    Score = (pass_rate deviation from 50%) + (cluster severity) + (correlation strength)
+    Deviation: |pass_rate - 50| / 50 → scaled to [0,1]
+    Cluster severity: number of clusters * 2 (for consecutive) or 3 (for same-day)
+    Correlation strength: abs(corr), capped at 1.0
+    Total score = deviation + cluster_severity + correlation_strength
+    Rank from highest to lowest.
+
+11. Assign confidence note per test:
+    - If pass_rate in [5,95] → "Suspicious"
+    - If has ≥2 failure clusters → "High risk"
+    - If correlation > 0.8 with another flaky test → "Strong co-occurrence"
+    - Confidence = "Low" if only one cluster and no correlation; "Medium" if one or two clusters; "High" if multiple clusters or strong correlation.
+   

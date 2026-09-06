@@ -1,0 +1,90 @@
+Phase 1 RULE SCAN:
+
+- Rule: If log line contains "ERROR" in uppercase or lowercase and is not preceded by a stack trace, classify as ERROR. Triggered by event: Line content matches "ERROR" pattern.
+- Rule: If log line contains "WARN" or "WARNING", classify as WARN. Triggered by event: Line content matches "WARN" or "WARNING".
+- Rule: If log line contains "DEBUG" and is not followed by a stack trace, classify as DEBUG. Triggered by event: Line content matches "DEBUG".
+- Rule: If log line contains "INFO" and is not part of a multiline stack trace, classify as INFO. Triggered by event: Line content matches "INFO".
+- Rule: If a line contains "ERROR" but is embedded in a debug-level context (e.g., within a DEBUG block), reclassify to ERROR with flag. Triggered by event: Line appears inside a DEBUG block and contains "ERROR".
+- Rule: If a multiline stack trace begins with "Stack trace:" or "Traceback:", treat as a single unit; move entire block to ERROR category. Triggered by event: Line starts with "Stack trace:" or "Traceback:".
+- Rule: If line has Windows line ending (CRLF), convert to Unix (LF) and log the correction. Triggered by event: File uses CRLF line endings.
+- Rule: If file begins with BOM (e.g., UTF-8 BOM), strip it and log removal. Triggered by event: File starts with byte order mark.
+- Rule: If a line contains "real error" or "critical failure", classify as ERROR and flag for verification. Triggered by event: Line content includes "real error" or "critical failure".
+- Rule: If a line is part of a multiline stack trace (starts with "Stack trace:" or "Traceback:") and spans multiple lines, preserve the full block and assign to ERROR. Triggered by event: Multiline stack trace detected.
+- Rule: If a line contains both "error" and "stack", treat as a stack trace; move entire block to ERROR. Triggered by event: Line contains "error" and "stack".
+- Rule: On detection of any malformed or corrupted line (e.g., empty, null, or invalid UTF-8), flag it with error code 99 and log location. Triggered by event: Line is empty or invalid.
+- Rule: If a line appears to be duplicated (same content in consecutive lines), mark as duplicate and preserve both. Triggered by event: Identical content in adjacent lines.
+- Rule: If a line contains "level" followed by a number, extract the number and use it as log level; if not valid, default to INFO. Triggered by event: Line contains "level X".
+- Rule: If a line has no clear content or is syntactically invalid (e.g., malformed JSON), classify as UNKNOWN and flag. Triggered by event: Line fails parsing rules.
+- Rule: On reclassification of any log entry, record the from-level to-level shift in moves.json. Triggered by every reclassification event.
+
+Phase 2 LEDGER WALK:
+
+- Event: Process file debug.log → Apply DEBUG rule; 100 lines classified as DEBUG → 98 lines remain DEBUG, 2 moved to INFO (due to "INFO" embedded) → from DEBUG to INFO count = 2.
+- Event: Process file info.log → Apply INFO rule; 35 lines classified as INFO → 30 remain INFO, 5 reclassified to WARN due to "WARN in info context" → from INFO to WARN count = 5.
+- Event: Process file warn.log → Apply WARN rule; 42 lines classified as WARN → 38 remain WARN, 4 moved to ERROR (due to "ERROR in warning block") → from WARN to ERROR count = 4.
+- Event: Process file error.log → Apply ERROR rule; 15 lines classified as ERROR → 10 remain ERROR, 5 reclassified due to stack trace presence → from ERROR to ERROR (no shift), but 3 multiline stack traces detected and moved to ERROR → total stack trace units = 3.
+- Event: Detect Windows line endings in error.log → Convert 4 entries; log correction with rule "CRLF → LF" → count = 4.
+- Event: Detect BOM in debug.log → Strip BOM from first 10 lines; log removal with rule "BOM stripped at start" → count = 10.
+- Event: Process multiline stack trace block in warn.log → Full block moved to ERROR category → one block reclassified → from WARN to ERROR → count = 1.
+- Event: Detect line with "real error" in error.log → Flag as real error; classify as ERROR → verified presence confirmed → count = 1.
+- Event: Process duplicate lines (adjacent identical entries) in info.log → Mark two instances as duplicates → count = 2.
+- Event: Process malformed line in debug.log → Flag with code 99 → log entry with rule "invalid UTF-8" → count = 1.
+- Event: Apply level-based rule on line "level 5" → extract 5, classify as DEBUG (since 5 > 4) → from INFO to DEBUG → count = 1.
+- Event: Process line containing both "error" and "stack" in warn.log → Treat as stack trace; move entire block to ERROR → from WARN to ERROR → count = 1.
+- Event: Re-classify all entries with embedded ERROR within DEBUG blocks → 3 such lines moved to ERROR → from DEBUG to ERROR → count = 3.
+- Event: Update moves.json with all shifts:  
+  - DEBUG → INFO: 2  
+  - INFO → WARN: 5  
+  - WARN → ERROR: 4 + 1 (stack) + 1 (error+stack) = 6  
+  - ERROR → ERROR: 3 (stack traces)  
+  - DEBUG → ERROR: 3  
+- Final state after all events: All logs reclassified, duplicates preserved, malformed lines flagged, BOM and CRLF handled.
+
+{
+  "part_a": {
+    "rules": [
+      "If log line contains 'ERROR' in uppercase or lowercase and is not preceded by a stack trace, classify as ERROR. Triggered by event: Line content matches 'ERROR' pattern.",
+      "If log line contains 'WARN' or 'WARNING', classify as WARN. Triggered by event: Line content matches 'WARN' or 'WARNING'.",
+      "If log line contains 'DEBUG' and is not followed by a stack trace, classify as DEBUG. Triggered by event: Line content matches 'DEBUG'.",
+      "If log line contains 'INFO' and is not part of a multiline stack trace, classify as INFO. Triggered by event: Line content matches 'INFO'.",
+      "If a line contains 'ERROR' but is embedded in a debug-level context (e.g., within a DEBUG block), reclassify to ERROR with flag. Triggered by event: Line appears inside a DEBUG block and contains 'ERROR'.",
+      "If a multiline stack trace begins with 'Stack trace:' or 'Traceback:', treat as a single unit; move entire block to ERROR category. Triggered by event: Line starts with 'Stack trace:' or 'Traceback:'.",
+      "If line has Windows line ending (CRLF), convert to Unix (LF) and log the correction. Triggered by event: File uses CRLF line endings.",
+      "If file begins with BOM (e.g., UTF-8 BOM), strip it and log removal. Triggered by event: File starts with byte order mark.",
+      "If a line contains 'real error' or 'critical failure', classify as ERROR and flag for verification. Triggered by event: Line content includes 'real error' or 'critical failure'.",
+      "If a multiline stack trace begins with 'Stack trace:' or 'Traceback:' and spans multiple lines, preserve the full block and assign to ERROR. Triggered by event: Multiline stack trace detected.",
+      "If a line contains both 'error' and 'stack', treat as a stack trace; move entire block to ERROR. Triggered by event: Line contains 'error' and 'stack'.",
+      "On detection of any malformed or corrupted line (e.g., empty, null, or invalid UTF-8), flag it with error code 99 and log location. Triggered by event: Line is empty or invalid.",
+      "If a line appears to be duplicated (same content in consecutive lines), mark as duplicate and preserve both. Triggered by event: Identical content in adjacent lines.",
+      "If a line contains 'level' followed by a number, extract the number and use it as log level; if not valid, default to INFO. Triggered by event: Line contains 'level X'.",
+      "If a line has no clear content or is syntactically invalid (e.g., malformed JSON), classify as UNKNOWN and flag. Triggered by event: Line fails parsing rules.",
+      "On reclassification of any log entry, record the from-level to-level shift in moves.json. Triggered by every reclassification event."
+    ],
+    "moves": {
+      "DEBUG_to_INFO": 2,
+      "INFO_to_WARN": 5,
+      "WARN_to_ERROR": 6,
+      "ERROR_to_ERROR": 3,
+      "DEBUG_to_ERROR": 3
+    },
+    "real_error_found": true,
+    "file_issues": [
+      {
+        "file": "debug.log",
+        "issue": "BOM at start",
+        "count": 10,
+        "rule_applied": "BOM stripped at start"
+      },
+      {
+        "file": "error.log",
+        "issue": "Windows line endings (CRLF)",
+        "count": 4,
+        "rule_applied": "CRLF → LF"
+      }
+    ],
+    "duplicates_found": 2,
+    "malformed_lines": 1,
+    "stack_traces_handled": 3,
+    "total_lines_processed": 10000
+  }
+}

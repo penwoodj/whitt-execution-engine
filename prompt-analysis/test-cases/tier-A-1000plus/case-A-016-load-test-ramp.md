@@ -1,30 +1,32 @@
 # Tier-A Case 016 — Load Test Ramp (HEAVY)
 
-What i want is build me a full working analysis pipeline, set up inside /tmp/opencode/ramp-run, and i want it treated like production work even though it's synthetic, because the point is the discipline, not the data.
+this one is about load test ramp, read it all before touching anything. what i want is build me a full working analysis pipeline, set up inside /tmp/opencode/ramp-run, and i want it treated like production work even though it's synthetic, because the point is the discipline, not the data.
 
-what you're working with: a load test that ramped from 10 to 1000 virtual users over 30 minutes, then samples of throughput, latency, and error rate every ten seconds, then the system was supposed to degrade gracefully past 600 users, after that it did not, or did it, that is what we are checking. think of this as a miniature version of the real jobs i hand off: messy inputs, stated rules, honest outputs. the rules you invent matter as much as the numbers you compute, because i'm going to reuse this when the data is real and i need to trust the machinery.
+what you're working with: a load test that ramped from 10 to 1000 virtual users over 30 minutes, then samples of throughput, latency, and error rate every ten seconds, then the system was supposed to degrade gracefully past 600 users, after that it did not, or did it, that is what we are checking. this is the kind of task where the tempting move is to demo the happy path and gesture at the rest. don't. the mess is specified precisely because that's where the value is, and a clean run on clean data tells me nothing about whether the thing works.
 
 the deliverables have two audiences, me skimming on a phone and a verifier grinding line by line, so every report needs the human table up top and the machine copy underneath, same numbers, no drift between them. the day those two disagree is the day i stop trusting the whole setup.
 
+one more thing, every number you quote me at the end better come from an actual run you can point at, because should-be-roughly-nine is not a result, it's a vibe.
+
 and a note on tone in the outputs: plain sentences, tables where tables belong, no buzzword garbage, i want to skim this in two minutes and know exactly what happened.
 
-what i need done, in this order:
-
-1. plot data as a table, users, throughput, p95, error percent, at each step of the ramp. if that stage has a natural ordering dependency on the previous one, respect it, the sequence above is not decorative. edge cases belong in the output, not in your head, list what you hit and what you did with each.
-after that find the knee where latency starts climbing faster than throughput. edge cases belong in the output, not in your head, list what you hit and what you did with each.
-3. the graceful degradation claim, verdict with numbers, where it broke. actual numbers in the output, computed, not eyeballed, and traceable back to input rows.
-4. error taxonomy over the ramp, what kind of errors appear when. if that stage has a natural ordering dependency on the previous one, respect it, the sequence above is not decorative.
-stage by stage: ramp.md plus ramp.json and a knee.md one-pager explaining the method. edge cases belong in the output, not in your head, list what you hit and what you did with each. and that one gets checked by the verifier too, it's not just a produce-and-hope step.
+anything you cache or skip for speed gets a note, because invisible shortcuts are how results stop being reproducible.
 
 error messages should say what failed and where, not just that something did, because 'an error occurred' has never helped anybody.
 
-percentages need denominators next to them always, twelve percent of what, because a percentage alone is half a number.
+the work, stage by stage, and i want stage logging loud enough that i can follow along after the fact:
+
+1. plot data as a table, users, throughput, p95, error percent, at each step of the ramp. if that stage has a natural ordering dependency on the previous one, respect it, the sequence above is not decorative.
+after that find the knee where latency starts climbing faster than throughput. edge cases belong in the output, not in your head, list what you hit and what you did with each.
+3. the graceful degradation claim, verdict with numbers, where it broke. actual numbers in the output, computed, not eyeballed, and traceable back to input rows.
+4. error taxonomy over the ramp, what kind of errors appear when. if that stage has a natural ordering dependency on the previous one, respect it, the sequence above is not decorative.
+stage by stage: ramp.md plus ramp.json and a knee.md one-pager explaining the method. edge cases belong in the output, not in your head, list what you hit and what you did with each.
 
 the workspace layout is yours to design but say it in the readme, so the structure is a decision not an accident.
 
-now the mess, because a pipeline that only works on clean data is worthless to me: some sample rows are missing at the worst moment, two counters reset mid-run, and units are inconsistent across two files. those aren't obstacles, they're the actual test, a clean run on clean data is worthless and i've said this before. the handling rule for each goes in the rules or decisions file, not in your memory.
+percentages need denominators next to them always, twelve percent of what, because a percentage alone is half a number.
 
-anything you cache or skip for speed gets a note, because invisible shortcuts are how results stop being reproducible.
+keep the rules you invent in a rules.md next to the scripts, so when i come back in a week i know why the machine did what it did.
 
 and when i say documented i mean in a file on disk, not in the chat log where it scrolls away forever.
 
@@ -36,11 +38,11 @@ and no leaving a to-do in a comment for later-me, later-me is you in ten minutes
 
 if two stages could run in either order and it doesn't matter, pick one and move on, i don't need a committee meeting about it.
 
-the end state on disk should look like something a stranger could pick up: a readme pointing at everything, scripts that run in order, outputs that reproduce, and the report. if a stranger couldn't rerun this from the files alone, it's not done.
+and bake in the dirt, i've said before i want things tested against reality not the happy path: some sample rows are missing at the worst moment, two counters reset mid-run, and units are inconsistent across two files. those aren't obstacles, they're the actual test, a clean run on clean data is worthless and i've said this before. how you handled each one gets written down where i can find it later.
 
 everything gets a run twice test before you call it done, because the first run always works and the second one is where the state bugs live.
 
-shape of the deliverables: scripts in a scripts folder, outputs in an outputs folder, the rules and decisions each in their own file at the root of the workspace, and a final report i can read start to finish in two minutes. paths in the report, not just filenames, so i can go look.
+the end state on disk should look like something a stranger could pick up: a readme pointing at everything, scripts that run in order, outputs that reproduce, and the report. if a stranger couldn't rerun this from the files alone, it's not done.
 
 logs per stage, one line each is plenty, i want to see where time went and where things broke without spelunking.
 
@@ -50,10 +52,10 @@ if a stage can honestly be a one-liner, let it be a one-liner, padding steps to 
 
 i'd rather have an ugly table that's right than a beautiful chart that's approximate, so default to tables unless the data genuinely needs a picture.
 
-keep the rules you invent in a rules.md next to the scripts, so when i come back in a week i know why the machine did what it did.
+i want a verify pass that would catch me lying. separate script, recomputes independently, strict comparisons, and it checks the invariants too, the things that must be true about the outputs no matter what the data says. if the verifier passes first try i still want its output pasted, not paraphrased.
 
-verification is a first-class deliverable here. independent recomputation from the raw files, its own code path, and a conservation check that everything entering the pipeline is accounted for at the end, kept, rejected, merged, flagged, the books have to balance. nonzero exit on failure, actual output shown in your report.
+timings, real ones, timestamps around each stage, a table at the end. not vibes.
 
-don't stop halfway to ask me questions you can answer yourself. names, orderings, column formats, those are yours. only come back at a real fork that changes what i asked for, and there isn't one hiding in here. no network, no installs, no llm calls, deterministic or seeded everywhere, and if any stage is slow relative to its work say so honestly instead of pretending it's fine. don't stop until the whole sequence is verified end to end.
+assume defaults for anything unspecified and note what you picked in a decisions file, i'd rather read three lines of your reasoning than answer three questions. don't stop until every stage above is done and verified. don't stop halfway to ask me questions you can answer yourself. names, orderings, column formats, those are yours. only come back at a real fork that changes what i asked for, and there isn't one hiding in here.
 
 end state: verified outputs, a short readme pointing at everything, timings, and your one honest surprise.

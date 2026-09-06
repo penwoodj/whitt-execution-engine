@@ -1,0 +1,46 @@
+1. Load warehouse snapshot (system stock) into memory as a dictionary of `zone → {sku → quantity}`; ensure all keys are normalized by stripping leading zeros and standardizing SKU format to uppercase with fixed width (e.g., "000123" → "000123") using regex.
+
+2. Load each of the four cycle-count sheets (zone-specific) into memory as a list of rows, where each row has: sku, counted_qty, counter_initials, discrepancy (system - counted), and error_pattern (e.g., "always +1").
+
+3. For each count sheet, normalize SKU format to match system stock using same rule as step 1; if mismatched, log the original and normalized form with a flag for format inconsistency.
+
+4. Join each count sheet row with system stock per zone per sku: compute absolute variance = |system_qty - counted_qty|, signed variance = system_qty - counted_qty; output this joined data to `variances.csv` with columns: zone, sku, system_qty, counted_qty, abs_variance, signed_variance.
+
+5. For each zone, group by counter_initials and compute discrepancy rate (total discrepancies / total count entries) per counter; if a counter has >10% of all discrepancies in that zone, flag it as high-risk.
+
+6. Identify the suspect counter: among all counters, find one with consistent +1 error pattern across at least 3 distinct skus in multiple zones — verify by checking whether every such entry shows discrepancy = +1 and counted_qty = system_qty - 1; if found, record this as "consistent miscount by +1 carton".
+
+7. For each zone, compute shrinkage estimate (in units) using the price file: for each sku with variance >0 and system_qty >0, add (system_qty - counted_qty) * unit_price from price file; sum over all such skus per zone to get total shrinkage in units.
+
+8. Convert shrinkage in units to value by multiplying by average unit price from price file; output total shrinkage in units and value per zone.
+
+9. Generate a recount list: rank skus by absolute variance (descending), then by frequency of high-discrepancy events (e.g., >5% discrepancy or >10 cartons off); include only those with abs_variance ≥ 2 cartons or appearing in more than one zone; limit to top 30 skus.
+
+10. For each row in the recount list, if the sku does not exist in system stock, log it as "sku missing from system" and count it explicitly — record original sheet name, zone, sku, and reason.
+
+11. For any entry where two counts exist for same sku in different days (same zone), detect drift: compute absolute difference between counted quantities; if >5 cartons or >10% of expected, flag as "drifted count" with timestamps from sheets.
+
+12. For each sheet, check that all skus are present in system stock — if not, log the missing sku and source sheet; total such cases must be reported with breakdown by sheet.
+
+13. Output final deliverables:
+    - `cycle.md`: plain text report with stage-by-stage summary, including timestamps, key findings (e.g., "Counter X consistently miscounts +1"), flagged rows with rule that triggered it.
+    - `variances.csv`: joined data from step -4, with all variance metrics.
+    - `counters.json`: per-zone counter stats: {zone: {counter: {discrepancy_rate_pct: float, total_discrepancies: int, error_pattern: string}}}
+    - `recount_list.csv`: top 30 skus by absolute variance and frequency, with abs_variance, zone, sku, system_qty, counted_qty.
+
+14. Run each stage twice in sequence:
+    - First run: produce outputs.
+    - Second run: recompute from raw inputs; compare outputs exactly (element-wise) to first run; if any row differs, log the difference and fail with nonzero exit code.
+
+15. Verify pass script:
+    - Recompute all stages independently using same input files.
+    - Validate invariants:
+        - Total variance per zone matches sum of individual variances.
+        - Shrinkage units = sum over skus of (system_qty - counted_qty) * unit_price.
+        - All missing skus are logged and count is correct.
+        - No row with zero variance is flagged as high-variance in recount list.
+    - If any invariant fails, output error message with line number and value.
+
+16. Log timing per stage: record start/end timestamps for each step using `time` command; store in a table at end of report.
+
+17. Cache only if explicitly needed (e.g., price file loaded

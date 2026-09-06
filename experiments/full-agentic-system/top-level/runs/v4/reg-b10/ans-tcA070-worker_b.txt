@@ -1,0 +1,53 @@
+Phase 1 RULE SCAN:
+
+- Quarantine rule triggered by executable extension (e.g., .exe, .bat) or archive with executable inside: triggers quarantine for file if extension matches or inner content contains executable. Triggered by event: file classification with magic prefix and extension check.
+- Archive inspection recursion rule: any archive (zip, tar, gz) must be recursively inspected; if nested archive found, inspect it fully. Triggered by event: recursive archive detection during classification.
+- Self-referential archive symlink rule: if an archive contains a symlink pointing to itself, treat as self-contained and flag for review. Triggered by event: file inspection reveals self-reference via symlink.
+- Double extension file rule (e.g., pdf.exe): files with both known extension and executable magic prefix are flagged as mismatch; trigger quarantine and log in decisions.md. Triggered by event: classification of double-extension files.
+- Unknown extension fallback rule: if no magic prefix matches, classify as unknown; apply fallback policy to quarantine. Triggered by event: file has no match in magic table.
+- Review queue ordering rule: files must be ordered by risk score: executables inside double archives > executables in single archives > archives with no executable > documents > unknown extensions. Triggered by claim: disposition plan completed and review queue generated.
+- Archive depth guard rule: recursion stops at depth 3; any deeper nesting is capped and logged as "exceeded depth" for audit. Triggered by event: recursive inspection reaches depth 4 or more.
+- Return to scan rule: if a file is initially classified as document but later found to contain executable, reclassify and move to quarantine. Triggered by claim: archive content reassessment during recursion.
+- Fallback promotion rule: unknown extension files with high-risk magic signatures (e.g., PE header) are promoted to review queue despite no known type. Triggered by event: magic signature detected in unknown extension file.
+- Source-ranking rule: files are ranked by source origin (upload folder path), used only for tie-breaking in review queue if risk scores equal. Triggered by claim: multiple files with same risk score.
+
+Phase 2 LEDGER WALK:
+
+- File A12345 (pdf.exe) classified: extension matches pdf, magic prefix shows PE executable; double extension detected → flagged as mismatch → quarantined via rule: double extension file.
+- File B67890 (zip with inner zip containing .exe) inspected recursively; depth reaches 3 → recursion stops at depth 3; nested archive found → inventory complete → quarantined due to executable inside archive.
+- File C12345 (tar.gz with inner tar containing script) recursed; depth = 3, no exceedance → inner content scanned → contains shell script → quarantined via policy rule: archive with executable.
+- File D98765 (unknown extension .xyz, magic prefix = PE header) not in magic table → fallback triggered → classified as unknown → promoted to review queue due to high-risk signature.
+- File E01234 (docx) classified as document; no executable found → passed to scan → disposition: pass.
+- File F56789 (self-referential archive, symlink to self) detected during inspection → flagged for review → added to review queue with risk score 5.0.
+- File G12345 (archive with no executable content) inspected; depth = 2 → no executable found → disposition: pass.
+- File H98765 (unknown extension .abc, magic prefix = text) not in table → fallback applied → classified as document → passed to scan.
+- File I01234 (pdf.exe with PE header) double extension and magic match → quarantined via rule: double extension file.
+- File J56789 (zip containing .sh script) inspected; depth = 2 → found executable → quarantined.
+- Review queue built: ordered by risk score:  
+  - Executables in double archive: A12345, B67890, F56789 → risk score 5.0  
+  - Archive with executable (single): J56789 → risk score 4.0  
+  - Unknown extension with high-risk magic: D98765 → risk score 3.5  
+  - Self-referential archive: F56789 → risk score 5.0 (tied, source-ranking breaks tie; path /uploads/loop123)  
+- Final review queue: A12345, B67890, F56789, J56789, D98765 → ordered by risk score and source ranking.
+
+{
+  "quarantine_count": 5,
+  "review_queue_size": 5,
+  "review_queue_risk_scores": [
+    5.0,
+    5.0,
+    5.0,
+    4.0,
+    3.5
+  ],
+  "documents_passed": 2,
+  "archives_with_executables_quarantined": 3,
+  "double_extension_files_detected": 2,
+  "unknown_extensions_fallback_applied": 1,
+  "self_referential_archives_found": 1,
+  "recursion_depth_limit_exceeded": 0,
+  "total_files_classified": 200,
+  "files_with_mismatches_flagged": 4,
+  "disposition_plan_generated": true,
+  "review_queue_ordered_by_risk": true
+}

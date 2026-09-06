@@ -1,59 +1,61 @@
 # Tier-A Case 081 — Layer Bloat Report (HEAVY)
 
-I've got run a proper multi-stage data job to do and i want it done properly, which means /tmp/opencode/layers-run for everything, real scripts i can rerun, real files on disk, not a description of what would happen.
+the task is layer bloat report, and the details are below, all of them. i've got run a proper multi-stage data job to do and i want it done properly, which means /tmp/opencode/layers-run for everything, real scripts i can rerun, real files on disk, not a description of what would happen.
 
-what you're working with: a docker image history dump, 40 layers, each with command and size, after that the bloat question: which layers add weight that later layers remove, plus apt-get installs without cleanup are the classic sin, present here three times and a rebuilt-slim estimate must be honest about what it cannot know. i'm deliberately not specifying every little thing, because half the value here is seeing what gets decided when nobody's looking. the decisions file is where you show your work on those, and a wrong call documented beats a right call nobody can find.
+so the scenario: a docker image history dump, 40 layers, each with command and size, plus the bloat question: which layers add weight that later layers remove and apt-get installs without cleanup are the classic sin, present here three times. a rebuilt-slim estimate must be honest about what it cannot know. the whole point of this exercise is that the working files and the checkable outputs exist on disk where i can poke at them, so every stage leaves real artifacts, and the artifacts are the deliverable, not the chat narration around them. if a step produces nothing i can open, it didn't happen.
 
-error messages should say what failed and where, not just that something did, because 'an error occurred' has never helped anybody.
-
-the whole point of this exercise is that the working files and the checkable outputs exist on disk where i can poke at them, so every stage leaves real artifacts, and the artifacts are the deliverable, not the chat narration around them. if a step produces nothing i can open, it didn't happen.
-
-the asks, in order, and each one writes its own output so i can see where things broke when they break:
-
-after that layer table, index, command, size, cumulative size. actual numbers in the output, computed, not eyeballed, and traceable back to input rows. and don't round anything into meaninglessness, i'd rather see the ugly precise number than a tidy lie.
-2. wasteful-pattern detection, install-without-clean, duplicated data adds, secrets-in-layer flagged separately. and be precise about what counts as done for that one, because vague is where shortcuts hide.
-then the add-then-remove pairs, weight added and later deleted, net-zero but history-heavy. if that stage has a natural ordering dependency on the previous one, respect it, the sequence above is not decorative.
-then slim rebuild estimate, which patterns fixed, projected saving, uncertainty stated. and be precise about what counts as done for that one, because vague is where shortcuts hide.
-after that layers.md plus layers.json plus the fix list. with the method visible, not just the result, the how is the deliverable here as much as the what. and that one gets checked by the verifier too, it's not just a produce-and-hope step.
-
-and no leaving a to-do in a comment for later-me, later-me is you in ten minutes, finish the job.
-
-and if you find something in the data that contradicts what i said above, the data wins, report the contradiction, don't quietly bend either one.
+the deliverables have two audiences, me skimming on a phone and a verifier grinding line by line, so every report needs the human table up top and the machine copy underneath, same numbers, no drift between them. the day those two disagree is the day i stop trusting the whole setup.
 
 if any rule you write down feels arbitrary, good, that means you noticed, write the threshold and the reason next to it so future-me can argue with it.
 
-if a stage can honestly be a one-liner, let it be a one-liner, padding steps to look thorough is its own kind of lie.
+logs per stage, one line each is plenty, i want to see where time went and where things broke without spelunking.
 
 percentages need denominators next to them always, twelve percent of what, because a percentage alone is half a number.
+
+and if you find something in the data that contradicts what i said above, the data wins, report the contradiction, don't quietly bend either one.
+
+here's the task list, in sequence:
+
+1. layer table, index, command, size, cumulative size. and that one gets checked by the verifier too, it's not just a produce-and-hope step.
+2. wasteful-pattern detection, install-without-clean, duplicated data adds, secrets-in-layer flagged separately. and that one gets checked by the verifier too, it's not just a produce-and-hope step.
+3. the add-then-remove pairs, weight added and later deleted, net-zero but history-heavy. if that stage has a natural ordering dependency on the previous one, respect it, the sequence above is not decorative.
+4. slim rebuild estimate, which patterns fixed, projected saving, uncertainty stated. and don't round anything into meaninglessness, i'd rather see the ugly precise number than a tidy lie.
+then layers.md plus layers.json plus the fix list. and be precise about what counts as done for that one, because vague is where shortcuts hide.
+
+anything you cache or skip for speed gets a note, because invisible shortcuts are how results stop being reproducible.
+
+and a note on tone in the outputs: plain sentences, tables where tables belong, no buzzword garbage, i want to skim this in two minutes and know exactly what happened.
 
 i'd rather have an ugly table that's right than a beautiful chart that's approximate, so default to tables unless the data genuinely needs a picture.
 
 timings, real ones, timestamps around each stage, a table at the end. not vibes.
 
-and bake in the dirt, i've said before i want things tested against reality not the happy path: layer sizes are cumulative in the raw dump in two spots requiring differentiation, one layer command is truncated with an ellipsis, and a zero-size layer does metadata-only work that matters. handle each one explicitly, log it, and count them, because 'some rows had issues' is not a finding, 'fourteen clock-skewed entries corrected, listed in the log' is. the handling rule for each goes in the rules or decisions file, not in your memory.
-
-one more thing, every number you quote me at the end better come from an actual run you can point at, because should-be-roughly-nine is not a result, it's a vibe.
-
-anything you cache or skip for speed gets a note, because invisible shortcuts are how results stop being reproducible.
-
-logs per stage, one line each is plenty, i want to see where time went and where things broke without spelunking.
-
 the workspace layout is yours to design but say it in the readme, so the structure is a decision not an accident.
 
-when a rule and a row disagree, both go in the output, the flagged row and the rule that flagged it, side by side.
-
-the end state on disk should look like something a stranger could pick up: a readme pointing at everything, scripts that run in order, outputs that reproduce, and the report. if a stranger couldn't rerun this from the files alone, it's not done.
-
-on outputs: every stage writes to its own subfolder under the workspace, naming is yours but be consistent, and the final report goes both human, markdown with actual tables, and machine, json with the same numbers. i'll be checking that the two agree, and i'll be unhappy if they don't.
-
-i want a verify pass that would catch me lying. separate script, recomputes independently, strict comparisons, and it checks the invariants too, the things that must be true about the outputs no matter what the data says. if the verifier passes first try i still want its output pasted, not paraphrased.
-
-if two stages could run in either order and it doesn't matter, pick one and move on, i don't need a committee meeting about it.
-
-and a note on tone in the outputs: plain sentences, tables where tables belong, no buzzword garbage, i want to skim this in two minutes and know exactly what happened.
-
-no network, no installs, no llm calls, deterministic or seeded everywhere, and if any stage is slow relative to its work say so honestly instead of pretending it's fine. don't stop until the whole sequence is verified end to end. style rules since they keep coming up: nothing interactive anywhere, no prompts, nothing that hangs a non-interactive shell, loud failures with nonzero exits, and everything runnable twice without exploding. pick idempotent or self-cleaning, say which, document it.
+keep the rules you invent in a rules.md next to the scripts, so when i come back in a week i know why the machine did what it did.
 
 everything gets a run twice test before you call it done, because the first run always works and the second one is where the state bugs live.
 
-finish with the report pasted in chat so i can skim without opening files, plus paths and timings. one line on what surprised you.
+the data has problems, deliberately, and handling them is part of the job not an error condition: layer sizes are cumulative in the raw dump in two spots requiring differentiation, one layer command is truncated with an ellipsis, and a zero-size layer does metadata-only work that matters. handle each one explicitly, log it, and count them, because 'some rows had issues' is not a finding, 'fourteen clock-skewed entries corrected, listed in the log' is. the rule you applied to each wart belongs in the rules file, next to the wart itself.
+
+shape of the deliverables: scripts in a scripts folder, outputs in an outputs folder, the rules and decisions each in their own file at the root of the workspace, and a final report i can read start to finish in two minutes. paths in the report, not just filenames, so i can go look.
+
+if two stages could run in either order and it doesn't matter, pick one and move on, i don't need a committee meeting about it.
+
+and when i say documented i mean in a file on disk, not in the chat log where it scrolls away forever.
+
+error messages should say what failed and where, not just that something did, because 'an error occurred' has never helped anybody.
+
+one more thing, every number you quote me at the end better come from an actual run you can point at, because should-be-roughly-nine is not a result, it's a vibe.
+
+if a stage can honestly be a one-liner, let it be a one-liner, padding steps to look thorough is its own kind of lie.
+
+when a rule and a row disagree, both go in the output, the flagged row and the rule that flagged it, side by side.
+
+and the verification part is not optional, i've been burned by tools grading their own homework. write a separate verifier that recomputes the key numbers from the raw inputs with its own logic, not by importing the pipeline's code, and it exits nonzero with a clear message on any mismatch. run it against the outputs and show me the exit codes. a claim without a number i can check is a vibe and i've had enough vibes.
+
+don't skip steps and don't tell me it's done until the verifier has passed and you've actually looked at the outputs yourself. and keep it dependency free, standard library only, this machine gets cranky. assume defaults for anything unspecified and note what you picked in a decisions file, i'd rather read three lines of your reasoning than answer three questions. don't stop until every stage above is done and verified.
+
+and no leaving a to-do in a comment for later-me, later-me is you in ten minutes, finish the job.
+
+at the end i want the inventory: what lives where, the numbers, and one honest paragraph on where this would break first if i stressed it harder.

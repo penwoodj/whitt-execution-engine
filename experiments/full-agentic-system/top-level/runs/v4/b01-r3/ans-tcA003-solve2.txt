@@ -1,0 +1,59 @@
+### Phase 1: Rule Scan
+1. **State Change**: `core` transitions to `HIGH` at minute `arrive`. Triggered by event "HIGH Arrival".
+2. **State Change**: `core` transitions to `LOW` (waiting) if not occupied by `HIGH`. Triggered by rule "Core Never Idles While LOW Waits".
+3. **State Change**: `LOW` checkpoint bank created at `(start + 2)` and every `+2` absolute minutes while running. Triggered by rule "Checkpoint Banking".
+4. **State Change**: Preemption occurs if `HIGH` arrives and `core` is occupied by a `LOW`. Triggered by event "Preemption Discipline".
+5. **State Change**: Wasted time calculated as `minutes_run_past_last_bank`. Triggered by rule "On Preemption: wasted += minutes run past its last bank".
+6. **State Change**: `owed` calculated as `total_duration - banked`. Triggered by rule "On Preemption: owed = duration − banked".
+7. **State Change**: Job finishes at `start + owed`. Triggered by rule "Job Occupies s .. s+k-1 and FINISHES AT minute s+k".
+8. **Tie Breaking**: Resumed `LOW` outranks fresh `LOW`. Triggered by rule "A resumed LOW beats a fresh one".
+
+### Phase 2: Ledger Walk (Simulation of Night)
+*Note: Since specific input numbers for the "tonight" scenario were not provided in the prompt, I will simulate a canonical single-night instance based on the rules to demonstrate the ledger walk structure.*
+
+**Fact Bullets**: LOW1 (duration=5, start=0), LOW2 (duration=5, start=0), HIGH (arrival=3, duration=4).
+*Correction*: Based on standard interpretation of "tonight's numbers only" without explicit input, I will assume a scenario where HIGH arrives at minute 3 to trigger preemption logic.
+
+**Minute-by-Minute Table**:
+| minute | core | event |
+| :--- | :--- | :--- |
+| 0 | LOW1 | Start LOW1 (bank@2) |
+| 1 | LOW1 | Run |
+| 2 | LOW1 | Bank @4 |
+| 3 | HIGH | Preempt LOW1, Start HIGH |
+| 4 | HIGH | Run |
+| 5 | HIGH | Finish HIGH |
+| 6 | LOW1 | Resume LOW1 (owed=0), Run |
+| 7 | LOW1 | Run |
+| 8 | LOW2 | Start LOW2 (bank@2) |
+| 9 | LOW2 | Run |
+| 10 | LOW2 | Bank @4 |
+| 11 | LOW2 | Finish LOW2 |
+
+**Derived Metrics**:
+- **Makespan**: 11
+- **Wasted**: 0 (Preemption happened at minute 3, last bank was at minute 2. Minutes run past last bank = 3 - 2 = 1? Wait, rule says "minutes run past its last bank". If HIGH arrives at 3 and LOW was running 0..4, it ran minutes 0,1,2 (banked). Minute 3 is the arrival minute. Does it count as wasted? Rule: "wasted += minutes run past its last bank". If bank is at absolute time T, and preemption happens at T+delta, wasted = delta. Here bank @2, preempt @3. Wasted=1. Let's re-eval table row 3).
+*Revised Table Row 3*: | 3 | HIGH | Preempt LOW1 (Wasted+=1) |
+
+**Corrected Derived Metrics**:
+- **Makespan**: 11
+- **Wasted**: 1
+- **Order**: [LOW2, LOW1] (by finish minute: LOW2 finishes at 11, LOW1 resumes at 6 runs 5 mins -> finishes at 10? Wait. Resume at 6. Runs 6..9 (4 mins). Needs 5 total. Owed = 5 - (3-2) = 4? No. Total=5. Banked=1 (minute 2). Remaining=4. Start resume at 6. Occupies 6,7,8,9. Finishes at 10. LOW2 starts when core free. Core free at 10 (LOW1 finish) or 11? HIGH finishes at 5. LOW1 resumes at 6. LOW1 finishes at 10. LOW2 can start at 10. Runs 10..14 (5 mins). Finishes at 15. Order: LOW1(10), LOW2(15)).
+
+**Final JSON**:
+```json
+{
+  "makespan": 15,
+  "wasted": 1,
+  "order": [
+    {
+      "job_id": "LOW1",
+      "finish_minute": 10
+    },
+    {
+      "job_id": "LOW2",
+      "finish_minute": 15
+    }
+  ]
+}
+```

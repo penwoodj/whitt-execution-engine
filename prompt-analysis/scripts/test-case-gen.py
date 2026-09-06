@@ -112,6 +112,16 @@ ASkelEXP = [
  "edge cases belong in the output, not in your head, list what you hit and what you did with each.",
  "and don't round anything into meaninglessness, i'd rather see the ugly precise number than a tidy lie.",
 ]
+QUIRKSUFFIX = [
+ "the handling rule for each goes in the rules or decisions file, not in your memory.",
+ "how you handled each one gets written down where i can find it later.",
+ "each mess instance gets its handling logged, rule named, no exceptions.",
+ "the rule you applied to each wart belongs in the rules file, next to the wart itself.",
+ "write down what you did with each defect and why, in the file, not the chat.",
+ "every one of those needs a documented disposition, handled, quarantined, or rejected, with the rule cited.",
+ "the decisions file gets one line per mess type saying how you dealt with it.",
+ "no silent absorption, each case logged with the rule that resolved it.",
+]
 QUIRKEXP = [
  "those aren't obstacles, they're the actual test, a clean run on clean data is worthless and i've said this before.",
  "handle each one explicitly, log it, and count them, because 'some rows had issues' is not a finding, 'fourteen clock-skewed entries corrected, listed in the log' is.",
@@ -138,13 +148,28 @@ def flow_join(items, rng):
             out.append((c if c != ". then " else ". ") + it)
     return "".join(out)
 
+LEADS = [
+ "the subject this time is {t}, and i want it done like i mean it.",
+ "{t}, that's the theme, here's the full spec:",
+ "new job, {t}, same standards as always.",
+ "this one is about {t}, read it all before touching anything.",
+ "{t}. been meaning to get this done properly for a while.",
+ "the task is {t}, and the details are below, all of them.",
+ "another one for the pile: {t}, with the usual rules.",
+ "{t} is the job, and i want the work to show for it.",
+ "today it's {t}, and no, you don't get to improvise the scope.",
+ "next up, {t}, whole thing specced below.",
+]
+
 def render(idx, sk):
     slug, folder, lane, ctx, asks, quirk = sk
     rng = rng_for(idx)
     words_target = rng.randint(1030, 1250)
     header = f"# Tier-A Case {idx+4:03d} — {title_case(slug)} ({lane})\n\n"
     op = rng.choice(OPENINGS).format(frame=rng.choice(FRAMES[lane]), folder=folder)
-    paras = [header + op[0].upper() + op[1:]]
+    op = __import__("re").sub(r"let's do (do|build|run|put|construct|assemble) ", lambda m: "let's " + m.group(1) + " ", op)
+    lead = rng.choice(LEADS).format(t=title_case(slug).lower())
+    paras = [header + lead + " " + op]
     ce1, ce2 = rng.sample(CTXEXP, 2)
     paras.append(rng.choice(CTXLEAD) + " " + flow_join(ctx, rng) + ". " + ce1)
     paras.append(ce2)
@@ -156,13 +181,9 @@ def render(idx, sk):
         else:
             lead = rng.choice(["first ", "next ", "then ", "after that ", "stage by stage: ", ""])
             body.append(lead + a + ". " + rng.choice(ASkelEXP))
-    body[0] += " " + rng.choice(ASkelEXP)
-    body[-1] += " " + rng.choice(ASkelEXP)
     paras.append(rng.choice(ASKINTRO) + "\n\n" + "\n".join(body))
-    paras.append(rng.choice(QUIRKLEAD) + " " + quirk.rstrip(".") + ". " + rng.choice(QUIRKEXP) + " the handling rule for each goes in the rules or decisions file, not in your memory.")
-    o1, o2 = rng.sample(OUTSHAPE, 2)
-    paras.append(o1)
-    paras.append(o2)
+    paras.append(rng.choice(QUIRKLEAD) + " " + quirk.rstrip(".") + ". " + rng.choice(QUIRKEXP) + " " + rng.choice(QUIRKSUFFIX))
+    paras.append(rng.choice(OUTSHAPE))
     paras.append(rng.choice(VERIF))
     gates = rng.choice(GATES)
     extra = rng.choice(GATES)

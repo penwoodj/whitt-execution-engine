@@ -1,0 +1,43 @@
+FACT BULLETS: LOW1 (dur=12, start=0), LOW2 (dur=8, start=5), HIGH (arrive=10, dur=20).
+
+PHASE 1 RULE SCAN:
+- Rule: Checkpoint Bank. Trigger: Job Start/Resume. Effect: Banks at (current_minute + 2) and every 2 RUNNING minutes after. Absolute time.
+- Rule: Preemption Cost. Trigger: HIGH Arrival & Core Occupied by LOW. Effect: Wasted = minutes run past last bank. Owed = duration - banked.
+- Rule: Job Execution Window. Trigger: Start/Resume. Effect: Job occupies [start, start + owed). Finishes at start + owed.
+- Rule: Tie-Breaking. Trigger: Core Free Event. Effect: Resumed LOW > Fresh LOW.
+
+PHASE 2 LEDGER WALK:
+Minute 0 | core=LOW1 | event=start(LOW1,dur=12,bank@2)
+Minute 1 | core=LOW1 | event=run(LOW1)
+Minute 2 | core=LOW1 | event=bank(LOW1,abs=4)
+Minute 3 | core=LOW1 | event=run(LOW1)
+Minute 4 | core=LOW1 | event=run(LOW1)
+Minute 5 | core=LOW1 | event=start(LOW2,dur=8,bank@7) [Note: LOW2 starts, but LOW1 is running. Core busy.] -> Correction: Core busy until finish. Re-evaluating timeline based on "Core never idles while a LOW waits" implies FIFO or specific scheduling logic. Let's assume strict FIFO for simplicity unless preemption hits.
+Minute 6 | core=LOW1 | event=run(LOW1)
+Minute 7 | core=LOW1 | event=run(LOW1)
+Minute 8 | core=LOW1 | event=run(LOW1)
+Minute 9 | core=LOW1 | event=run(LOW1)
+Minute 10 | core=HIGH | event=preempt(LOW1,finish@12,wasted=4,banked=6),start(HIGH,dur=20,bank@12) [Note: LOW1 finishes at 12. HIGH arrives at 10 but must wait for LOW1 to finish? No, preemption happens immediately if core occupied. Wait, rule says "Core never idles while a LOW waits". If HIGH arrives and core is busy with LOW, does it preempt? Yes. But when? At minute 10, LOW1 is running (occupies 0..11). So at minute 10, LOW1 is still running. Preemption happens. LOW1 resumes later.]
+Minute 11 | core=HIGH | event=run(HIGH)
+Minute 12 | core=HIGH | event=bank(HIGH,abs=14),finish(LOW1,resume@12,dur=8,bank@14) [Note: LOW1 resumes at 12. It has banked 6 (at 2 and 4). Owed = 12-6=6? No, rule says "wasted += minutes run past its last bank". Last bank was at 4. Minutes run past 4 are 5,6,7,8,9,10,11 (7 mins)? Or does it count from arrival of HIGH? Let's re-read: "On preemption: wasted += minutes run past its last bank". If LOW1 started at 0, banks at 2, 4. At minute 10, HIGH arrives. Core occupied by LOW1. Preempt. Wasted = minutes since last bank (minute 4) until preemption? Or until finish of previous segment? Let's assume wasted = current_minute - last_bank_minute = 10 - 4 = 6. Owed = total_duration - banked = 12 - 2 = 10? No, rule says "owed = duration − banked". Banked is count of banks or minutes? "A LOW banks a checkpoint...". Usually checkpoints are events. Let's assume banked = number of checkpoints passed. Start at 0. Bank at 2 (count=1). Bank at 4 (count=2). Preempt at 10. Wasted = minutes run past last bank = 10 - 4 = 6? Or is it time elapsed since last checkpoint? Let's assume wasted = 6. Owed = 12 - 2 = 10? No, that doesn't make sense if duration is 12. Maybe owed = remaining work. If checkpoints save work, then work done = sum of intervals between checkpoints. Interval 0-2 (2 mins), 2-4 (2 mins). Total saved = 4. Remaining = 8. Wasted = time spent on remaining? No. Let's stick to the text: "wasted += minutes run past its last bank". Last bank at 4. Current minute 10. Wasted = 6. "owed = duration − banked". Banked likely means number of checkpoints passed (2). Duration 12. Owed = 10? That implies job takes 10 more mins. Total time = 10 + 6 (wasted) = 16? Or does it restart from beginning? "no partial state saved" in scenario description, but checkpointing rule says "from its last checkpoint boundary". So it resumes. Work done before preemption: 2 intervals of 2 mins each = 4 mins worth of work saved. Remaining work = 8 mins. Wasted time = 6 mins (minutes 5-10). Total resume duration = 8 mins. Start at 12. Finish at 20.]
+Minute 13 | core=HIGH | event=run(HIGH)
+Minute 14 | core=HIGH | event=bank(HIGH,abs=16),resume(LOW1,dur=8,bank@16) [Note: LOW1 resumes at 12. Runs 12..19. Banks at 12+2=14? No, rule says "every 2 RUNNING minutes after". Start/Resume +2 is first bank. So resume at 12 -> bank at 14. Then every 2 mins: 16, 18.]
+Minute 15 | core=HIGH | event=run(HIGH)
+Minute 16 | core=HIGH | event=bank(HIGH,abs=18),resume(LOW1,dur=8,bank@16) [Note: LOW1 bank at 14. Next bank at 16.]
+Minute 17 | core=HIGH | event=run(HIGH)
+Minute 18 | core=HIGH | event=bank(HIGH,abs=20),resume(LOW1,dur=8,bank@18) [Note: LOW1 bank at 16. Next bank at 18.]
+Minute 19 | core=HIGH | event=run(HIGH)
+Minute 20 | core=LOW1 | event=finish(LOW1),start(LOW2,dur=8,bank@22) [Note: HIGH finishes at 20. LOW2 starts at 5 but was waiting? Rule says "ties: a resumed LOW beats a fresh one". LOW2 is fresh (started at 5, never ran). LOW1 is resumed. So LOW1 gets core first? But LOW1 finished at 20. So at minute 20, core free. Who waits? LOW2 waited since minute 5. Is there another job? No. So LOW2 starts at 20.]
+Minute 21 | core=LOW2 | event=run(LOW2)
+Minute 22 | core=LOW2 | event=bank(LOW2,abs=24),finish(HIGH,resume@22,dur=8,bank@24) [Note: LOW2 starts at 20. Runs 20..27? No, duration 8. Finish at 28. Banks at 20+2=22.]
+Minute 23 | core=LOW2 | event=run(LOW2)
+Minute 24 | core=LOW2 | event=bank(LOW2,abs=26),finish(HIGH,resume@24,dur=8,bank@26) [Note: LOW2 bank at 22. Next bank at 24.]
+Minute 25 | core=LOW2 | event=run(LOW2)
+Minute 26 | core=LOW2 | event=bank(LOW2,abs=28),finish(HIGH,resume@26,dur=8,bank@28) [Note: LOW2 bank at 24. Next bank at 26.]
+Minute 27 | core=LOW2 | event=run(LOW2)
+Minute 28 | core=LOW2 | event=finish(LOW2),start(HIGH,resume@28,dur=12,bank@30) [Note: LOW2 finishes at 28. HIGH resumes? No, HIGH finished at 20. Wait, timeline error. Let's re-calculate.]
+
+Recalculation with strict logic:
+LOW1 (dur=12, start=0). Banks at 2, 4. Finishes at 12.
+HIGH (arrive=10, dur=20). Arrives at 10. LOW1 is running (occupies 0..11). Preemption happens at 10? Or does it wait until 11? "Core never idles while a LOW waits". If HIGH arrives and core busy, preempt immediately. So at minute 10, LOW1 preempts.
+LOW1 resumes later. When? At minute 12 (when LOW1 would have finished). But HIGH is running. Does HIGH finish before LOW1 resumes? No, HIGH runs continuously. So LOW1 waits until HIGH finishes? Or does it resume immediately when core free? Core free at 12 (end

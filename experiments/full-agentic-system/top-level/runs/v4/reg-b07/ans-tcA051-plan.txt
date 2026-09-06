@@ -1,0 +1,31 @@
+1. Create workspace directory structure:  
+   `mkdir -p /tmp/opencode/fuel-run/{raw,processed,outputs,logs,rules}`  
+
+2. Copy raw input files into `/tmp/opencode/fuel-run/raw/` with original filenames preserved; verify presence of fleet fuel card transactions and odometer readings.  
+
+3. Parse transaction data:  
+   `awk -F',' '{split($4, a, " "); if (a[1] ~ /liters|l/) { liters[$2] = $4 } else { print "ERROR: invalid liters field in", $0 }}' raw/transactions.csv > processed/transactions_parsed.txt`  
+
+4. Parse odometer data:  
+   `awk -F',' '{split($3, o, " "); if (o[1] ~ /km|k/) { km[$2] = $3 } else { print "ERROR: invalid km field in", $0 }}' raw/odometer.csv > processed/odometer_parsed.txt`  
+
+5. For each van, compute monthly liters and kilometers per month using transaction dates and odometer readings; apply monotonicity check on odometer values (each reading must be ≥ previous).  
+   `python3 -c "import pandas as pd; df = pd.read_csv('processed/odometer_parsed.txt', sep=' ', header=None); df.columns = ['van', 'date', 'km']; df['date'] = pd.to_datetime(df['date']); df.sort_values(['van','date'], inplace=True); df['delta_km'] = df.groupby('van')['km'].diff(); print(df[df['delta_km'] < 0])"`  
+
+6. Compute monthly fuel efficiency (km per liter) for each van:  
+   `python3 -c "import pandas as pd; df_t = pd.read_csv('processed/transactions_parsed.txt', sep=' ', header=None); df_t.columns = ['van','date','liters','cost']; df_o = pd.read_csv('processed/odometer_parsed.txt', sep=' ', header=None); df_o.columns = ['van','date','km']; merged = pd.merge(df_t, df_o, on=['van','date'], how='inner'); merged['efficiency'] = (merged['km'].diff() / merged['liters'].shift(1)).fillna(method='ffill'); print(merged[['van','date','liters','km','efficiency']])"`  
+
+7. Compute fleet-wide monthly average efficiency and standard deviation:  
+   `python3 -c "import pandas as pd; df = pd.read_csv('processed/transactions_parsed.txt', sep=' ', header=None); df.columns = ['van','date','liters','cost']; df['month'] = pd.to_datetime(df['date']).dt.to_period('M'); df_agg = df.groupby(['month'])[['liters']].mean(); df_std = df_agg.std(); print(f'Fleet mean: {df_agg.mean()}, std: {df_std}')"`  
+
+8. Flag outliers beyond 2 sigma from fleet norm per van per month using z-score method:  
+   `python3 -c "import pandas as pd; df_eff = pd.read_csv('processed/efficiency.csv'); df_eff['z_score'] = (df_eff['efficiency'] - df_eff['efficiency'].mean()) / df_eff['efficiency'].std(); outliers = df_eff[df_eff['z_score'] > 2]; print(outliers[['van','date','efficiency','z_score']])"`  
+
+9. Identify fuel-type mismatches:  
+   `python3 -c "import pandas as pd; df_t = pd.read_csv('processed/transactions_parsed.txt', sep=' ', header=None); df_t.columns = ['van','date','liters','cost']; df_t['fuel_type'] = 'petrol'; # Assume default; actual fuel type from input if available; if missing, flag as unknown. print(df_t[df_t['fuel_type'].str.contains('diesel') == False and df_t['fuel_type'].str.contains('petrol') == True])"`  
+
+10. Flag transactions with no liters but cost:  
+   `python3 -c "import pandas as pd; df = pd.read_csv('processed/transactions_parsed.txt', sep=' ', header=None); df.columns = ['van','date','liters','cost']; missing_liters = df[df['liters'].isna()]; print(missing_liters[['van','date','cost']])"`  
+
+11. Flag odometer backwards readings:  
+   `python3 -c "import pandas as pd; df_o = pd.read_csv('processed/odometer_parsed.txt', sep=' ', header=None); df_o.columns = ['van','date','km']; df_o['delta_km'] = df_o.groupby('van')['km'].diff

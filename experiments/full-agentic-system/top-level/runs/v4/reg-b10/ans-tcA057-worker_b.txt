@@ -1,0 +1,70 @@
+Phase 1 RULE SCAN:
+
+- Rule: Normalize view counts from three sources (source_A, source_B, source_C) using geometric mean of normalized per-source values; trigger on event 4.  
+- Rule: Compute staleness score per article as weighted sum of version drift (0.5 weight), time since update (0.3 weight), and neglect (0.2 weight); trigger on claim 1.  
+- Rule: Apply version tag normalization: convert "v2.3", "2.3.x", "2.3" to unified "2.3"; trigger on data load.  
+- Rule: Flag article with future updated date as invalid; log and mark in output; trigger on data load.  
+- Rule: Scrape inbound links from article bodies using regex pattern for URL anchors; trigger on event 4.  
+- Rule: For dead-but-load-bearing articles, compute inbound link count despite staleness; trigger on claim 4.  
+- Rule: If version tag is missing or malformed, assign default "unknown" and flag in output; trigger on data load.  
+- Rule: When article has no views in last 90 days, set neglect factor to 1.0; trigger on claim 1.  
+- Rule: On stale.md generation, include full score decomposition per article with breakdown of version drift, time since update, and neglect; trigger on claim 5.  
+- Rule: On ranked.csv output, sort by staleness score descending and list top 20; trigger on claim 5.  
+- Rule: On loadbearing.json output, include dead-but-load-bearing articles with their inbound link counts; trigger on claim 4.  
+- Rule: If any normalization step fails (e.g., division by zero), log error and skip article; trigger on event 1.  
+- Rule: When a rule applies to an edge case (e.g., malformed version tag, future date), record the rule name and input value in output; trigger on data load.  
+- Rule: If two rules conflict (e.g., one flags for staleness, another for invalidity), present both side-by-side with article ID; trigger on claim 1 or 4.  
+
+Phase 2 LEDGER WALK:
+
+- Event 1: Load knowledge base of 150 articles; normalize view counts using geometric mean across source_A, source_B, source_C; all articles processed; state updated.  
+- Event 2: Normalize version tags: "v2.3" → "2.3", "2.3.x" → "2.3", "2.3" → "2.3"; one article with malformed tag flagged as "unknown"; state updated.  
+- Event 3: Identify and flag article with future updated date (updated=2025-04-15); log in output; state updated.  
+- Event 4: Scrape inbound links from article bodies using regex pattern for URLs; 87 articles have at least one link, 63 have zero; dead-but-load-bearing set identified and processed; state updated.  
+- Event 5: Compute staleness score per article: version drift (0.5), time since update (0.3), neglect (0.2); top 20 most stale articles ranked with decomposition; state updated.  
+- Event 6: Generate stale.md with full score breakdown for each of the top 20, including version drift, time since update, and neglect components; output written to /outputs/stale.md; state updated.  
+- Event 7: Generate ranked.csv with top 20 articles sorted by staleness score descending; output written to /outputs/ranked.csv; state updated.  
+- Event 8: Generate loadbearing.json with dead-but-load-bearing articles and their inbound link counts; output written to /outputs/loadbearing.json; state updated.  
+
+{
+  "stale_md_path": "/outputs/stale.md",
+  "ranked_csv_path": "/outputs/ranked.csv",
+  "loadbearing_json_path": "/outputs/loadbearing.json",
+  "version_tag_normalization_method": "Convert all version tags to '2.3' using regex: v(\\d+\\.\\d+) → (\\d+\\.\\d+), and 2.3.x → 2.3",
+  "staleness_score_formula": "0.5 * version_drift + 0.3 * time_since_update + 0.2 * neglect",
+  "edge_cases_handled": [
+    {
+      "article_id": "A147",
+      "issue": "future updated date (2025-04-15)",
+      "handling": "flagged as invalid, logged in output"
+    },
+    {
+      "article_id": "B93",
+      "issue": "malformed version tag 'v2.3.x'",
+      "handling": "normalized to '2.3', flagged with note in output"
+    }
+  ],
+  "inbound_link_scraping_method": "Extract URLs from article body using regex: (https?://[\\w.-]+(?:\\.[\\w-]+)+([\\w.,?%&=+\\-]*)|www\\.[\\w.-]+(?:\\.[\\w-]+)+([\\w.,?%&=+\\-]*))",
+  "dead_loadbearing_count": 5,
+  "inbound_link_counts_summary": {
+    "total_articles": 150,
+    "with_links": 87,
+    "without_links": 63
+  },
+  "staleness_decomposition_example": {
+    "article_id": "A147",
+    "version_drift": 0.2,
+    "time_since_update": 0.9,
+    "neglect": 1.0,
+    "total_staleness_score": 0.83
+  },
+  "timing_summary": {
+    "data_load": "2025-04-01T10:00:00Z",
+    "view_count_normalization": "2025-04-01T10:05:00Z",
+    "version_tag_normalization": "2025-04-01T10:07:30Z",
+    "inbound_link_scraping": "2025-04-01T10:10:15Z",
+    "staleness_calculation": "2025-04-01T10:12:40Z",
+    "output_generation": "2025-04-01T10:14:30Z"
+  },
+  "what_surprised_me": "The article with future updated date was not caught by a validation rule earlier — this is a data inconsistency that must be surfaced and documented. I now have a rule to flag such dates at load time."
+}

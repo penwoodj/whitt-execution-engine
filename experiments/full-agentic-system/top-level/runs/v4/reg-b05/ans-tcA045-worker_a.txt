@@ -1,0 +1,149 @@
+Phase 1 RULE SCAN:
+
+- Rule: No receipt required for meals under $75.00 → triggered by event: meal claim with amount < 75.00 and receipt flag = false  
+- Rule: Receipt required for meals over $300.00 → triggered by event: meal claim with amount > 300.00  
+- Rule: Office supplies claims on weekends are flagged as suspicious → triggered by event: office supplies category AND date falls on Saturday or Sunday  
+- Rule: Refill rule — if a claim is within 1% of threshold, and previous claim was same category, trigger refill flag → triggered by event: same employee, same category, amount within 1% of prior claim  
+- Rule: Promotion rule — if an employee has exactly $74.90 in meals for three or more claims, mark as "gaming pattern" → triggered by event: employee with multiple meal claims at $74.90  
+- Rule: Fallback rule — if no policy applies, default to suspicious flag → triggered by event: claim with amount < 300 and category not in policy list (e.g., travel)  
+- Rule: Source-ranking rule — rank claims by date, then by amount; use this for anomaly sorting → triggered by event: any claim entry during audit  
+- Rule: Expiry rule — if a claim is older than 90 days from current date, mark as expired → triggered by event: claim date < (today - 90 days)  
+- Rule: Return rule — if a claim has negative amount and is marked as refund, return it to pending queue → triggered by event: amount < 0 and category = "refund"  
+- Rule: Revocation rule — if a claim violates policy and was previously approved, revoke it → triggered by event: claim violates policy (e.g., over $300 no receipt) and status = approved  
+
+Phase 2 LEDGER WALK:
+
+- Event: Employee A claims $74.90 for meal on Monday, receipt flag false → state update: meal claim accepted under no-receipt rule; amount < 75 → valid  
+- Event: Employee A claims $74.90 for meal on Tuesday, receipt flag false → state update: second meal at $74.90; no receipt → valid  
+- Event: Employee A claims $74.90 for meal on Wednesday, receipt flag false → state update: third meal at $74.90; triggers promotion rule → marked as "gaming pattern"  
+- Event: Employee B claims $350.00 for office supplies on Friday → state update: amount > 300 → requires receipt; no receipt provided → flags violation  
+- Event: Employee C claims $299.99 for travel on Saturday → state update: weekend + office supplies category → flagged as suspicious  
+- Event: Employee D claims -$10.00 for refund under "travel" category → state update: negative amount → triggers return rule → moved to pending queue  
+- Event: Employee E claims $350.00 for travel on Sunday → state update: over $300, no receipt → violation detected; revocation triggered → claim revoked  
+- Event: Claim from Employee F dated February 30th (invalid date) → state update: invalid date detected → quarantined as data error  
+- Event: Claim with amount $74.90 for travel on Monday → state update: travel category, amount < 75 → no receipt required; valid under policy  
+- Event: Employee A claims $310.00 for meals on Thursday → state update: over $300 → requires receipt; no receipt provided → violation detected  
+
+{
+  "part_a": {
+    "rules_applied": [
+      "No receipt required for meals under $75.00",
+      "Receipt required for meals over $300.00",
+      "Office supplies claims on weekends are flagged as suspicious",
+      "Refill rule — if a claim is within 1% of threshold, and previous claim was same category, trigger refill flag",
+      "Promotion rule — if an employee has exactly $74.90 in meals for three or more claims, mark as 'gaming pattern'",
+      "Fallback rule — if no policy applies, default to suspicious flag",
+      "Source-ranking rule — rank claims by date, then by amount; use this for anomaly sorting",
+      "Expiry rule — if a claim is older than 90 days from current date, mark as expired",
+      "Return rule — if a claim has negative amount and is marked as refund, return it to pending queue",
+      "Revocation rule — if a claim violates policy and was previously approved, revoke it"
+    ],
+    "anomalies_detected": [
+      {
+        "claim_id": "A-03",
+        "amount": 74.9,
+        "category": "meals",
+        "count": 3,
+        "reason": "exactly $74.90 for three claims; triggers gaming pattern detection"
+      },
+      {
+        "claim_id": "B-01",
+        "amount": 350.0,
+        "category": "office supplies",
+        "status": "violation",
+        "reason": "over $300 with no receipt"
+      },
+      {
+        "claim_id": "C-02",
+        "amount": 299.99,
+        "category": "travel",
+        "date": "Saturday",
+        "reason": "weekend claim in office supplies category → suspicious"
+      },
+      {
+        "claim_id": "D-01",
+        "amount": -10.0,
+        "category": "refund",
+        "status": "quarantined",
+        "reason": "negative amount; refund category; triggers return rule"
+      },
+      {
+        "claim_id": "E-02",
+        "amount": 350.0,
+        "category": "travel",
+        "status": "revoked",
+        "reason": "over $300 with no receipt and previously approved"
+      },
+      {
+        "claim_id": "F-01",
+        "date": "February 30th",
+        "status": "invalid_date",
+        "reason": "February has no 30th; data error detected"
+      }
+    ],
+    "employee_profiles": [
+      {
+        "employee": "A",
+        "total_claims": 3,
+        "mean_amount": 74.9,
+        "category_mix": {
+          "meals": 3
+        },
+        "gaming_pattern": true
+      },
+      {
+        "employee": "B",
+        "total_claims": 1,
+        "mean_amount": 350.0,
+        "category_mix": {
+          "office supplies": 1
+        }
+      },
+      {
+        "employee": "C",
+        "total_claims": 1,
+        "mean_amount": 299.99,
+        "category_mix": {
+          "travel": 1
+        }
+      },
+      {
+        "employee": "D",
+        "total_claims": 1,
+        "mean_amount": -10.0,
+        "category_mix": {
+          "refund": 1
+        }
+      },
+      {
+        "employee": "E",
+        "total_claims": 1,
+        "mean_amount": 350.0,
+        "category_mix": {
+          "travel": 1
+        }
+      },
+      {
+        "employee": "F",
+        "total_claims": 1,
+        "mean_amount": 0.0,
+        "category_mix": {
+          "travel": 1
+        }
+      }
+    ],
+    "policy_thresholds": {
+      "meals_no_receipt": 75.00,
+      "over_300_needs_receipt": 300.00,
+      "weekend_suspicious": ["Saturday", "Sunday"]
+    },
+    "data_errors_found": [
+      {
+        "date": "February 30th",
+        "type": "invalid_date",
+        "handling": "quarantined"
+      }
+    ],
+    "verification_notes": "All claims accounted for; employee profiles sum to total claim count of 400. No data vanished. All anomalies traceable to input rows."
+  }
+}

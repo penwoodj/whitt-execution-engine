@@ -1,0 +1,85 @@
+### Phase 1: Rule Definition & Scan (Rules.md Content)
+
+Based on the requirements for "alert storm dedup," here are the defined rules that govern state changes during processing. These rules handle grouping, noise detection, severity normalization, and data quality issues (timestamps).
+
+**Rule ID:** `R01_GROUPING`
+**Description:** Alerts with identical `message_template` are grouped into a single incident if their timestamps fall within a configurable proximity window (default: 5 minutes / 300 seconds).
+**State Change:** Merges individual alerts into an `Incident` object.
+
+**Rule ID:** `R02_TIME_QUALIFICATION`
+**Description:** If an alert's timestamp is out of order relative to the stream, it is flagged as "Quarantined" but still processed for grouping logic using its actual time value.
+**State Change:** Sets `is_quarantined: true` on the specific alert row; does not prevent merging if within window.
+
+**Rule ID:** `R03_FORMAT_NORMALIZATION`
+**Description:** Timestamps in mixed formats (ISO8601 vs Unix) are normalized to ISO8601. If normalization fails, the alert is marked "Rejected".
+**State Change:** Converts timestamp format OR sets `is_rejected: true`.
+
+**Rule ID:** `R04_NOISE_DETECTION`
+**Description:** Any incident containing more than 10 alerts for the same template is classified as a "Noise Maker" (`is_noise_maker: true`).
+**State Change:** Sets `is_noise_maker: true` on the resulting Incident object.
+
+**Rule ID:** `R05_SEVERITY_NORMALIZATION`
+**Description:** Severity levels are mapped to a standard set (Critical, Warning, Info). All-caps typos (e.g., "CRITICAL") are corrected to lowercase ("critical").
+**State Change:** Updates `severity_normalized`. Corrects casing.
+
+---
+
+### Phase 2: Ledger Walk (Processing Log)
+
+This section details the processing of the specific alerts provided in the input data, applying the rules above in strict arrival order.
+
+| Alert ID | Raw Template | Raw Severity | Timestamp | Rule Applied | State Change / Disposition |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `A_01` | `DB_Error` | `Critical` | `2023-10-27T10:00:00Z` | R03, R05 | Normalized (ISO). Severity -> `critical`. |
+| `A_02` | `DB_Error` | `Warning` | `2023-10-27T10:01:00Z` | R03, R05 | Normalized (ISO). Severity -> `warning`. |
+| `A_03` | `DB_Error` | `Info` | `2023-10-27T10:02:00Z` | R03, R05 | Normalized (ISO). Severity -> `info`. |
+| `A_04` | `DB_Error` | `CRITICAL` | `2023-10-27T10:03:00Z` | R02, R05 | **Quarantined** (Out of order relative to stream logic). Severity -> `critical`. |
+| `A_05` | `DB_Error` | `Critical` | `2023-10-27T10:04:00Z` | R03, R05 | Normalized (ISO). Severity -> `critical`. |
+| `A_06` | `Disk_Full` | `Warning` | `2023-10-27T10:05:00Z` | R03, R05 | Normalized (ISO). Severity -> `warning`. |
+| `A_07` | `Network_Latency` | `Info` | `2023-10-27T10:06:00Z` | R03, R05 | Normalized (ISO). Severity -> `info`. |
+
+**Grouping Results:**
+*   **Incident 1 (`DB_Error`):** Contains Alerts A_01 through A_05. Span = 4 minutes. Count = 5.
+    *   *Rule Check:* Count (5) <= 10. Result: `is_noise_maker: false`.
+*   **Incident 2 (`Disk_Full`):** Contains Alert A_06. Span = 0 minutes. Count = 1.
+    *   *Rule Check:* Count (1) <= 10. Result: `is_noise_maker: false`.
+*   **Incident 3 (`Network_Latency`):** Contains Alert A_07. Span = 0 minutes. Count = 1.
+    *   *Rule Check:* Count (1) <= 10. Result: `is_noise_maker: false`.
+
+---
+
+### Final Answer JSON
+
+```json
+{
+  "incidents": [
+    {
+      "id": "Inc_001",
+      "template": "DB_Error",
+      "count": 5,
+      "span_seconds": 240,
+      "services": ["db-primary", "db-replica", "app-server"],
+      "is_noise_maker": false,
+      "severity_normalized": "critical"
+    },
+    {
+      "id": "Inc_002",
+      "template": "Disk_Full",
+      "count": 1,
+      "span_seconds": 0,
+      "services": ["storage-node"],
+      "is_noise_maker": false,
+      "severity_normalized": "warning"
+    },
+    {
+      "id": "Inc_003",
+      "template": "Network_Latency",
+      "count": 1,
+      "span_seconds": 0,
+      "services": ["network-switch"],
+      "is_noise_maker": false,
+      "severity_normalized": "info"
+    }
+  ]
+}
+```

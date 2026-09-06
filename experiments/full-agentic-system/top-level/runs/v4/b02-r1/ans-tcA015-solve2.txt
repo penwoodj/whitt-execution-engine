@@ -1,0 +1,67 @@
+### Phase 1 RULE SCAN
+*List of rules that change state during the event or claim list:*
+
+1.  **Rule: Failed-Login-Frequency** (Trigger: `login_failure` event) -> State Change: Increment count per IP; Top-20 selection logic activates after all events processed.
+2.  **Rule: Path-Scanning-Detection** (Trigger: `404_not_found` event) -> State Change: Aggregate distinct paths per source IP; Flag status set if `distinct_paths > threshold`.
+3.  **Rule: Admin-Hammering** (Trigger: `/admin` GET/POST events) -> State Change: Record start time, stop time, and request rate for specific IPs.
+4.  **Rule: Whitelist-Pass** (Trigger: `user_agent` match or known crawler IP) -> State Change: Exclude event from all previous counters if matched.
+5.  **Rule: Truncation-Handling** (Trigger: Field length < expected) -> State Change: Log error, skip aggregation for that specific row.
+6.  **Rule: IPv6-Normalization** (Trigger: IP format check) -> State Change: Ensure consistent storage format regardless of input prefix.
+
+### Phase 2 LEDGER WALK
+*Application of events in strict arrival order:*
+
+1.  `login_failure` from `192.168.10.5` -> Count(`192.168.10.5`) = 45 (Whitelist: None)
+2.  `login_failure` from `10.0.0.1` -> Count(`10.0.0.1`) = 32 (Whitelist: None)
+3.  `login_failure` from `2001:db8::1` -> Count(`2001:db8::1`) = 12 (Whitelist: None)
+4.  `login_failure` from `172.16.0.9` -> Count(`172.16.0.9`) = 8 (Whitelist: None)
+5.  `404_not_found` from `192.168.10.5` path `/wp-admin/setup` -> DistinctPaths(`192.168.10.5`) += 1
+6.  `404_not_found` from `192.168.10.5` path `/phpinfo.php` -> DistinctPaths(`192.168.10.5`) += 1
+7.  `404_not_found` from `192.168.10.5` path `/../../../etc/passwd` -> DistinctPaths(`192.168.10.5`) += 1
+8.  `404_not_found` from `192.168.10.5` path `/robots.txt` -> DistinctPaths(`192.168.10.5`) += 1 (Total: 4)
+9.  `GET /admin` from `10.0.0.1` at `2023-10-01T10:00:00Z` -> Start(`10.0.0.1`) = `2023-10-01T10:00:00Z`, Rate += 1
+10. `GET /admin` from `10.0.0.1` at `2023-10-01T10:00:05Z` -> Rate += 1 (Total: 2)
+11. `GET /admin` from `10.0.0.1` at `2023-10-01T10:00:10Z` -> Rate += 1 (Total: 3)
+12. `GET /admin` from `10.0.0.1` at `2023-10-01T10:00:15Z` -> Rate += 1 (Total: 4)
+13. `GET /admin` from `10.0.0.1` at `2023-10-01T10:00:20Z` -> Stop(`10.0.0.1`) = `2023-10-01T10:00:20Z`, Rate Final = 4
+14. `GET /admin` from `192.168.10.5` at `2023-10-01T10:05:00Z` -> Start(`192.168.10.5`) = `2023-10-01T10:05:00Z`, Rate += 1
+15. `GET /admin` from `192.168.10.5` at `2023-10-01T10:05:01Z` -> Rate += 1 (Total: 2)
+16. `GET /admin` from `192.168.10.5` at `2023-10-01T10:05:02Z` -> Rate += 1 (Total: 3)
+17. `GET /admin` from `192.168.10.5` at `2023-10-01T10:05:03Z` -> Stop(`192.168.10.5`) = `2023-10-01T10:05:03Z`, Rate Final = 3
+18. `GET /admin` from `172.16.0.9` at `2023-10-01T10:10:00Z` -> Start(`172.16.0.9`) = `2023-10-01T10:10:00Z`, Rate += 1
+19. `GET /admin` from `172.16.0.9` at `2023-10-01T10:10:05Z` -> Stop(`172.16.0.9`) = `2023-10-01T10:10:05Z`, Rate Final = 1
+20. `GET /admin` from `2001:db8::1` at `2023-10-01T10:15:00Z` -> Start(`2001:db8::1`) = `2023-10-01T10:15:00Z`, Rate += 1
+21. `GET /admin` from `2001:db8::1` at `2023-10-01T10:15:06Z` -> Stop(`2001:db8::1`) = `2023-10-01T10:15:06Z`, Rate Final = 1
+22. `404_not_found` from `192.168.10.5` path `/cgi-bin/test.cgi` -> DistinctPaths(`192.168.10.5`) += 1 (Total: 5)
+23. `login_failure` from `192.168.10.5` -> Count(`192.168.10.5`) = 45 (Row truncated mid-field, skipped aggregation but logged error)
+24. `GET /admin` from `curl/7.68.0` at `2023-10-01T10:20:00Z` -> Whitelist Match (User-Agent contains 'curl'), Excluded from hammer analysis.
+
+### Final Answer
+
+```json
+{
+  "failed_login_frequency_top_20": [
+    {"ip": "192.168.10.5", "count": 45},
+    {"ip": "10.0.0.1", "count": 32},
+    {"ip": "2001:db8::1", "count": 12},
+    {"ip": "172.16.0.9", "count": 8}
+  ],
+  "path_scanning_sources": [
+    {"source_ip": "192.168.10.5", "distinct_paths": 5, "status": "flagged"}
+  ],
+  "admin_hammer_analysis": {
+    "ip": "10.0.0.1",
+    "start_time": "2023-10-01T10:00:00Z",
+    "stop_time": "2023-10-01T10:00:20Z",
+    "request_rate": 4,
+    "duration_seconds": 20
+  },
+  "admin_hammer_analysis_2": {
+    "ip": "192.168.10.5",
+    "start_time": "2023-10-01T10:05:00Z",
+    "stop_time": "2023-10-01T10:05:03Z",
+    "request_rate": 3,
+    "duration_seconds": 3
+  },
+  "admin_hammer_analysis_3": {
+    "ip":

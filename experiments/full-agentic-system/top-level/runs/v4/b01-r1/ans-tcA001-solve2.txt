@@ -1,0 +1,197 @@
+Here is the complete solution for the fake parts warehouse inventory pipeline, adhering strictly to your requirements: local execution under `/tmp/opencode/warehouse-test`, no external dependencies, standard library only, and a robust verification step.
+
+### Phase 1: Setup & Fixture Generation
+First, we create the directory structure and generate the "messy" fixture data (200 records + malformed files) directly in the target folder.
+
+```bash
+#!/bin/bash
+# setup_fixtures.sh - Generates messy test data under /tmp/opencode/warehouse-test
+
+TARGET_DIR="/tmp/opencode/warehouse-test"
+mkdir -p "$TARGET_DIR/{inbound,outbound,quarantined,archived}"
+mkdir -p "$TARGET_DIR/scripts"
+mkdir -p "$TARGET_DIR/rules"
+
+# Python script to generate fixtures (embedded below)
+cat > "$TARGET_DIR/scripts/generate_fixtures.py" << 'PYEOF'
+import json
+import random
+import os
+from datetime import datetime, timedelta
+
+random.seed(42) # Reproducibility
+
+CATEGORIES = ["fastener", "electrical", "housing", "consumable", "sensor"]
+STATUSES = ["ok", "needs_review", "defective"]
+ZONES = [f"{chr(65+i)}{j}" for i in range(5) for j in range(1, 20)] # A1-E19
+
+# Generate unique Part IDs (PTM-XXXXX)
+part_ids = [f"PTM-{str(i).zfill(5)}" for i in range(1, 201)]
+
+records = []
+for pid in part_ids:
+    name = f"{random.choice(['Gear', 'Bolt', 'Capacitor', 'Housing', 'Sensor'])}_{random.randint(1,999)}"
+    cat = random.choice(CATEGORIES)
+    qty = random.randint(0, 500)
+    cost = round(random.uniform(1.50, 450.00), 2)
+    loc = random.choice(ZONES)
+    insp_date = (datetime.now() - timedelta(days=random.randint(0, 365))).strftime("%Y-%m-%d")
+    status = random.choices(STATUSES, weights=[80, 15, 5])[0]
+    
+    records.append({
+        "part_id": pid,
+        "part_name": name,
+        "category": cat,
+        "quantity_on_hand": qty,
+        "unit_cost": cost,
+        "warehouse_location": loc,
+        "last_inspected": insp_date,
+        "status": status
+    })
+
+# Introduce specific messiness:
+# 1. Duplicate Part IDs (Data Entry Error) - Pick 3 random records to duplicate with slightly different metadata
+dup_indices = [random.randint(0, len(records)-1), random.randint(0, len(records)-1), random.randint(0, len(records)-1)]
+for idx in dup_indices:
+    orig = records[idx]
+    new_id = f"PTM-{str(int(orig['part_id'].split('-')[1])+random.randint(1,9)).zfill(5)}" # Fake unique ID for the duplicate entry but same logic
+    # Actually, let's make it a true duplicate ID to test dedup logic as requested: "same part_id accidentally appears twice"
+    # We will modify one record to have the SAME ID as another.
+    
+# Let's do explicit duplicates for clarity in testing
+dup_targets = [records[10], records[50], records[120]]
+for target in dup_targets:
+    clone = target.copy()
+    clone["part_id"] = target["part_id"] # Exact duplicate ID
+    clone["quantity_on_hand"] += random.randint(1, 10) # Different quantity to trigger semantic dedup or exact logic depending on implementation
+    records.append(clone)
+
+# Introduce Malformed JSON files (Syntax errors)
+malformed_data = [
+    '{"part_id": "PTM-999", "quantity_on_hand": 5}', # Missing comma
+    '{"part_id": "PTM-888", "category": "sensor"}',   # Missing fields
+    '{"part_id": "PTM-777", "status": "ok"}}'         # Trailing brace
+]
+
+# Write files to folders
+file_count = 0
+for i, rec in enumerate(records):
+    folder = ["inbound", "outbound", "quarantined", "archived"][i % 4]
+    filename = f"{folder}/part_{rec['part_id']}.json"
+    
+    # Inject malformed data for specific indices (e.g., every 50th record is malformed)
+    if i % 50 == 0 and i < len(malformed_data):
+        filepath = os.path.join(os.getcwd(), filename.replace("/tmp/opencode/warehouse-test/", "")) 
+        # We need to write relative to the target dir. Let's rewrite logic for writing.
+        pass
+
+# Rewrite file writing logic cleanly
+target_path = "/tmp/opencode/warehouse-test"
+for i, rec in enumerate(records):
+    folder = ["inbound", "outbound", "quarantined", "archived"][i % 4]
+    filename = f"{folder}/part_{rec['part_id']}.json"
+    
+    # Inject malformed data for specific indices (e.g., every 50th record is malformed)
+    if i % 50 == 0:
+        content = malformed_data[i // 50]
+    else:
+        content = json.dumps(rec, indent=2)
+        
+    filepath = os.path.join(target_path, filename)
+    with open(filepath, 'w') as f:
+        f.write(content)
+
+# Write Malformed files specifically to ensure they are caught
+malformed_files = [
+    ("inbound", "part_MAL01.json", '{"part_id": "PTM-999", "quantity_on_hand": 5}'), # Missing comma
+    ("outbound", "part_MAL02.json", '{"part_id": "PTM-888", "category": "sensor"}'),   # Missing fields
+    ("quarantined", "part_MAL03.json", '{"part_id": "PTM-777", "status": "ok"}}'),     # Trailing brace
+]
+
+for folder, fname, content in malformed_files:
+    filepath = os.path.join(target_path, folder, fname)
+    with open(filepath, 'w') as f:
+        f.write(content)
+
+print(f"Generated {len(records)} records + 3 malformed files.")
+PYEOF
+
+python3 "$TARGET_DIR/scripts/generate_fixtures.py"
+
+# Create Rules.md
+cat > "$TARGET_DIR/rules/rules.md" << 'RULESEOF'
+# Inventory Pipeline Rules
+
+## Stage 1: Scan & Quarantine
+- **Malformed File Quarantine**: Any JSON file with syntax errors (missing comma, trailing brace) or missing required fields (`part_id`, `category`) is moved to `quarantined/rejects/`. A reason log entry is created. Valid files are merged into the active manifest.
+
+## Stage 2: Deduplication
+- **Exact Part ID Deduplication**: If two files have identical `part_id`:
+    - The file with the OLDER modification time is marked as "loser" and moved to `duplicate-losers/`.
+    - The newer file remains in the active ledger.
+    - A log entry records the loser's filename and reason.
+- **Semantic Part Name Deduplication**: If two files have identical `part_name` AND `category` but different quantities/IDs (implied duplicate data):
+    - Both entries are flagged into a "review" file (`needs_review`) rather than being silently merged or discarded.
+
+## Stage 3: Reporting
+- Calculates total distinct parts, total inventory value, defective rate %, needs review count, top 5 expensive items, and zone breakdown.
+
+## Stage 4: Verification
+- Recomputes all metrics independently from raw fixture files using separate logic (no imports of pipeline functions).
+- Checks report files field-by-field against computed values.
+- Exits with non-zero code on any mismatch.
+- Ensures `distinct_parts + rejects + duplicate_losers` equals total input files.
+
+## Execution Policy
+- **Non-Interactive**: No prompts (`read -p`).
+- **Loud Failures**: Non-zero exit codes on errors.
+- **Idempotent**: Safe to run multiple times; overwrites outputs cleanly.
+RULESEOF
+
+echo "Setup complete."
+```
+
+### Phase 2: Pipeline Scripts
+Now we create the actual pipeline scripts in `/tmp/opencode/warehouse-test/scripts`.
+
+```bash
+cat > "$TARGET_DIR/scripts/pipeline.py" << 'PIPEEOF'
+#!/usr/bin/env python3
+"""
+Inventory Pipeline: Scans, Deduplicates, Reports.
+"""
+import os
+import sys
+import json
+from datetime import datetime
+
+BASE_DIR = "/tmp/opencode/warehouse-test"
+INBOUND = f"{BASE_DIR}/inbound"
+OUTBOUND = f"{BASE_DIR}/outbound"
+QUARANTINED = f"{BASE_DIR}/quarantined"
+ARCHIVED = f"{BASE_DIR}/archived"
+
+def scan_files(folder):
+    """Scans a folder and returns list of (filepath, content_dict) or error."""
+    records = []
+    rejects = []
+    
+    if not os.path.exists(folder):
+        return records, rejects
+    
+    for filename in sorted(os.listdir(folder)):
+        filepath = os.path.join(folder, filename)
+        try:
+            with open(filepath, 'r') as f:
+                content = f.read()
+            
+            # Check for basic syntax errors before json.loads
+            if "}" not in content or "{" not in content:
+                rejects.append({"filename": filename, "reason": "Empty/Invalid structure"})
+                continue
+            
+            try:
+                data = json.loads(content)
+                
+                # Validate required fields
+                required = ["part_id", "category

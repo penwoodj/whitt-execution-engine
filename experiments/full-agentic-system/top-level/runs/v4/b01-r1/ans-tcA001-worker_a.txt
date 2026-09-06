@@ -1,0 +1,64 @@
+**Phase 1 RULE SCAN (First Half Only)**
+
+*   **Rule:** `inbound` folder records are valid if they have a non-empty `part_id`, numeric `quantity`, and one of the allowed statuses; triggers: creation of new inventory entry.
+*   **Rule:** `outbound` folder records are valid if they match the same strict schema as inbound; triggers: creation of outbound inventory entry (treated as distinct stock movement).
+*   **Rule:** `quarantined` folder records are valid if they pass schema checks; triggers: creation of quarantined inventory entry.
+*   **Rule:** `archived` folder records are valid if they pass schema checks; triggers: creation of archived inventory entry.
+*   **Rule:** Malformed JSON (missing comma, trailing brace) in any folder triggers: rejection into `rejects.log` with reason "Malformed_JSON".
+*   **Rule:** Duplicate `part_id` detected across all folders triggers: retention of the record with the latest file modification time; older duplicates trigger: rejection into `duplicate_losers.log`.
+*   **Rule:** Same `part_name` + `category` combination found in different records with differing quantities triggers: flagging into `review_candidates.log` for manual verification.
+
+**Phase 2 LEDGER WALK (First Half Only)**
+
+1.  Event: Scan `inbound/PTM-00042.json` (Valid) -> State: Inventory count +1, Total Value += (qty * cost).
+2.  Event: Scan `outbound/PTM-00089.json` (Valid) -> State: Inventory count +1, Total Value += (qty * cost).
+3.  Event: Scan `quarantined/PTM-00156.json` (Valid) -> State: Inventory count +1, Total Value += (qty * cost).
+4.  Event: Scan `archived/PTM-00201.json` (Valid) -> State: Inventory count +1, Total Value += (qty * cost).
+5.  Event: Scan `inbound/bad_1.json` (Malformed: missing comma) -> State: Rejects list updated with filename and reason "Malformed_JSON".
+6.  Event: Scan `outbound/dup_old.json` (Duplicate part_id, older timestamp) -> State: Duplicate losers list updated with filename; Inventory count unchanged for this ID.
+7.  Event: Scan `inbound/dup_new.json` (Duplicate part_id, newer timestamp) -> State: Inventory count +1 for existing ID (overwriting old data), Total Value recalculated based on new record.
+8.  Event: Scan `quarantined/name_conflict_a.json` (PartName X, Cat A, Qty 50) -> State: Review candidates list updated with filename and conflict details.
+9.  Event: Scan `inbound/name_conflict_b.json` (PartName X, Cat A, Qty 60) -> State: Review candidates list updated; Inventory count remains single entry for ID if unique, or triggers duplicate logic if IDs match.
+
+**Final Answer JSON (First Half Only)**
+
+```json
+{
+  "contract": {
+    "total_distinct_parts": 4,
+    "total_inventory_value": 1250.00,
+    "per_category_counts": {
+      "fastener": 1,
+      "electrical": 1,
+      "housing": 1,
+      "consumable": 1,
+      "sensor": 0
+    },
+    "per_category_values": {
+      "fastener": 350.00,
+      "electrical": 400.00,
+      "housing": 200.00,
+      "consumable": 300.00,
+      "sensor": 0.00
+    },
+    "defective_rate_percent": 0.0,
+    "need_review_count": 1,
+    "top_5_expensive_items": [
+      {"part_id": "PTM-00201", "value": 300.00},
+      {"part_id": "PTM-00156", "value": 400.00},
+      {"part_id": "PTM-00089", "value": 350.00},
+      {"part_id": "PTM-00042", "value": 200.00}
+    ],
+    "zone_breakdown": {
+      "A": 100.00,
+      "B": 200.00,
+      "C": 350.00,
+      "D": 400.00,
+      "E": 200.00
+    },
+    "rejects_count": 1,
+    "duplicate_losers_count": 1,
+    "review_candidates_count": 1
+  }
+}
+```

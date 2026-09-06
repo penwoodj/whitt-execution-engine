@@ -1,0 +1,63 @@
+### PLAN FIRST (Steps & Formulas)
+
+1.  **Setup Workspace**: Create `/tmp/opencode/subs-run` with subfolders `raw`, `parsed`, `repaired`, `reports`, `logs`, `rules`.
+2.  **Generate Test Data**: Write a Python script to create `input.srt` containing: 800 cues, overlaps, >5s gaps, <0.5s durations, numbering gaps, out-of-order timestamps (2 instances), comma/period timestamp mix (1 instance), and embedded two-line speaker labels (1 instance).
+3.  **Strict Parser (`parse_srt.py`)**: Read `input.srt`. Flag malformed cues without dying. Output `parsed.json` (machine) and `parsed_report.md` (human table). Log specific contradiction rules vs data rows side-by-side.
+4.  **Defect Analysis**: Calculate overlaps, gaps, short durations, reading speed (words/sec), and numbering errors from parsed data.
+5.  **Overlap Repair (`fix_overlaps.py`)**: Trim overlapping cues to the earlier end time. Extend duration if needed. Renumber sequentially. Preserve exact float precision (no rounding). Output `temp_repaired.srt`.
+6.  **Gap Handling**: Report gaps >5s in log; do not fill them per scope constraints.
+7.  **Duration Extension (`fix_short.py`)**: Extend cues <0.5s to minimum threshold (e.g., 1.0s) by adding time to end, preserving text.
+8.  **Reading Speed Pass (`speed_fix.py`)**: Identify cues >21 chars/sec. Split long lines or extend duration until <=21 chars/sec. Verify split logic against original text integrity.
+9.  **Final Assembly**: Merge repaired segments into `repaired.srt`. Ensure all spoken lines exist (no drops).
+10. **Defect Counting (`count_defects.py`)**: Generate table of Before/After defect counts for overlaps, gaps, short durations, speed errors, numbering.
+11. **Report Generation**: Create `repair-report.md` (Human Table + Machine JSON block) and `defects.json`. Ensure numbers match exactly between formats.
+12. **Rules Documentation**: Write `rules.md` explaining thresholds (e.g., 21 chars/sec, 0.5s min) and logic for each step.
+13. **Verification Script (`verify.py`)**: Independently re-parse `repaired.srt`, re-calculate metrics, compare against `defects.json`. Check invariants (no line drops, numbering sequential). Exit non-zero on mismatch.
+14. **Double-Run Test**: Execute full pipeline twice. Compare outputs for idempotency/state bugs.
+15. **Timing & Logging**: Record timestamps per stage. Output final timing table.
+
+---
+
+### TASK EXECUTION
+
+#### 0. Workspace Initialization
+
+```bash
+mkdir -p /tmp/opencode/subs-run/{raw,parsed,repaired,reports,logs,rules}
+cd /tmp/opencode/subs-run
+```
+
+#### 1. Data Generation Script (`generate_data.py`)
+
+This script creates the deliberately broken `input.srt` with all specified edge cases.
+
+```python
+#!/usr/bin/env python3
+import random
+from datetime import timedelta
+
+def generate_srt():
+    lines = []
+    cues = []
+    
+    # Base start time: 00:00:01,000
+    current_time = timedelta(seconds=1)
+    cue_id = 1
+    
+    # We need ~800 cues. Let's generate a mix of normal and broken ones.
+    # Strategy: Generate mostly normal, then inject specific bugs at random indices or logic-based triggers.
+    
+    total_cues_target = 800
+    
+    for i in range(total_cues_target):
+        # Determine if this cue is "broken" based on a schedule to ensure we hit all constraints
+        is_overlap = (i % 13 == 0) # Every ~13th cue overlaps previous
+        is_gap_large = (i % 57 == 0) # Every ~57th cue has >5s gap before next
+        is_short_duration = (i % 29 == 0) # Every ~29th cue is <0.5s
+        is_speed_high = (i % 11 == 0) # High word count per second
+        
+        # Text generation
+        if i == 42: 
+            text = "Speaker A says hello\nSpeaker B replies back" # Two-line speaker label baked in
+        elif i == 85:
+            text = "This is a

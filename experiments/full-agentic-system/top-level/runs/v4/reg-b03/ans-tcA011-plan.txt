@@ -1,0 +1,62 @@
+### PLAN FIRST (Steps & Formulas)
+
+1.  **Initialize Workspace**: Create `/tmp/opencode/retry-run` with subdirectories `raw`, `processed`, `reports`, `scripts`, `logs`.
+2.  **Generate Synthetic Data**: Write a Python script to generate `raw/log.csv` containing 50,000 records (RequestID, Timestamp, Attempt, Outcome) including edge cases: reused RequestIDs for different logical requests and Attempt=0 entries.
+3.  **Define Rules**: Create `rules.md` specifying thresholds (Storm-Adjacent > 3 attempts, Storm-Core > 10 attempts), outcome categorization logic, and handling instructions for data warts.
+4.  **Stage 1: Grouping & Counting**: Write a Python script to group records by RequestID, count total attempts per ID, identify logical request boundaries (handling reused IDs), and flag storm-adjacent/storm-core instances. Output `processed/stage_1_counts.csv`.
+5.  **Stage 2: Temporal Analysis**: Calculate start time, peak time, and drain time for each flagged storm window based on timestamps of the grouped records. Output `processed/stage_2_windows.csv`.
+6.  **Stage 3: Outcome Distribution**: Count occurrences of Timeout, 5xx, Refused within the retry sequences of flagged storms. Output `processed/stage_3_outcomes.csv`.
+7.  **Stage 4: Report Generation**: Create a Python script to generate human-readable Markdown tables (`reports/storm.md`) and machine-readable JSON (`reports/storm.json`), ensuring identical numbers in both formats.
+8.  **Stage 5: Verification Script**: Write an independent Python script that re-reads `raw/log.csv`, recomputes all metrics using the same rules, compares results against `reports/storm.json`, and outputs a strict pass/fail report to `logs/verify.log`.
+9.  **Stage 6: Timing & Logging**: Instrument scripts to log start/end timestamps for each stage to `logs/timing.log` in a table format.
+10. **Final Execution Loop**: Run the full pipeline twice (Run 1 + Verify, Run 2 + Verify) to ensure state consistency and determinism before declaring completion.
+
+---
+
+### TASK EXECUTION
+
+I will now execute the entire end-to-end processing exercise within `/tmp/opencode/retry-run`. This includes generating the synthetic data with specified warts, defining rules, running the analysis stages, creating reports (human + machine), performing verification, logging timings, and ensuring reproducibility.
+
+```python
+import os
+import csv
+import json
+import time
+from datetime import datetime
+import random
+
+# --- CONFIGURATION & WORKSPACE SETUP ---
+BASE_DIR = "/tmp/opencode/retry-run"
+RAW_DIR = f"{BASE_DIR}/raw"
+PROC_DIR = f"{BASE_DIR}/processed"
+REP_DIR = f"{BASE_DIR}/reports"
+LOGS_DIR = f"{BASE_DIR}/logs"
+SCRIPTS_DIR = f"{BASE_DIR}/scripts"
+
+# Ensure directories exist
+for d in [RAW_DIR, PROC_DIR, REP_DIR, LOGS_DIR, SCRIPTS_DIR]:
+    os.makedirs(d, exist_ok=True)
+
+# --- RULES DEFINITION (rules.md content logic) ---
+RULES = {
+    "storm_adjacent_threshold": 3,
+    "storm_core_threshold": 10,
+    "attempt_zero_handling": "flag_as_wart",
+    "reused_id_handling": "treat_as_separate_logical_request_if_timestamp_gap_detected_or_flagged",
+    "outcome_categories": ["timeout", "5xx", "refused"],
+    "report_format_requirement": "human_table_and_machine_json_must_match_exactly"
+}
+
+# --- STAGE 0: GENERATE SYNTHETIC DATA (raw/log.csv) ---
+def generate_data():
+    records = []
+    # Generate 50,000 records
+    for i in range(50000):
+        req_id = f"REQ-{random.randint(1000, 9999)}"
+        
+        # Simulate logical request flow with retries
+        # Normal: 3 attempts max. Storm: >3 attempts fast.
+        num_attempts = random.choices([2, 3, 4, 5, 6, 7, 8, 10, 12], weights=[40, 30, 10, 5, 5, 3, 3, 2, 2])[0]
+        
+        # Base timestamp for this logical request (seconds since epoch)
+        base_ts = datetime(2023, 

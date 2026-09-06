@@ -1,0 +1,42 @@
+### Step 1: Workspace Initialization & Data Generation
+**Rule:** Create `/tmp/opencode/queue-run` with subfolders `scripts`, `outputs`, `rules.md`, `decisions.md`. Generate synthetic raw data in `inputs/raw_lag.csv` (2 days, 4 consumers, partitions, missing snapshots, backward offsets) and `inputs/rebalance_events.json`.
+**Formula:** `mkdir -p /tmp/opencode/queue-run/{scripts,outputs}`; `echo "timestamp,consumer,partition,log_end_offset,consumer_offset" > inputs/raw_lag.csv` (populate with Python script logic).
+
+### Step 2: Rule Definition (`rules.md`)
+**Rule:** Define thresholds for lag bursts (>50% increase from previous minute), rebalance correlation window (±1 min), and backward offset handling (flag as anomaly, do not average).
+**Formula:** `cat > rules.md << 'EOF'` (content includes: "Lag Burst Threshold = 1.5x prev", "Rebalance Window = 60s", "Backward Offset Action = FLAG").
+
+### Step 3: Data Loading & Preprocessing Script (`scripts/load_data.py`)
+**Rule:** Load CSV and JSON into memory, validate row counts match expected synthetic volume, flag missing timestamps and backward offsets immediately.
+**Formula:** `import pandas as pd; df = pd.read_csv('inputs/raw_lag.csv'); anomalies = df[df['consumer_offset'] > df['log_end_offset']]`.
+
+### Step 4: Lag Calculation & Burst Detection Script (`scripts/calc_lag.py`)
+**Rule:** Calculate per-consumer/per-partition lag (`lag = log_end - consumer`), compute rolling mean/max, identify burst windows where `current_lag > max(rolling_mean * 1.5)`.
+**Formula:** `df['lag'] = df['log_end_offset'] - df['consumer_offset']; burst_mask = (df['lag'] > df.groupby(['consumer','partition'])['lag'].rolling(window=60).max() * 1.5)`.
+
+### Step 5: Rebalance Correlation Script (`scripts/correlate_rebalances.py`)
+**Rule:** Parse `rebalance_events.json`, align with lag timestamps, compute throughput estimate via offset deltas (`throughput = (offset_t2 - offset_t1) / time_delta`), flag worker-2 periods overlapping rebalance windows.
+**Formula:** `rebalance_times = [e['timestamp'] for e in events]; overlap_mask = ((df['timestamp'] >= min(rebalance_times)) & (df['timestamp'] <= max(rebalance_times)))`.
+
+### Step 6: Verdict Logic Script (`scripts/verdict.py`)
+**Rule:** Determine if worker-2 is "Slow" (high lag even outside rebalance windows) or "Stuck" (lag spikes only during hot partitions/rebalances). Output computed numbers, not estimates.
+**Formula:** `is_slow = mean_lag_outside_rebalance > threshold; verdict = 'SLOW' if is_slow else 'STUCK'`.
+
+### Step 7: Artifact Generation (`scripts/generate_report.py`)
+**Rule:** Create `outputs/lag-report.md` with methodology, tables for lag stats, burst windows, and rebalance correlation. Create `outputs/lag.json` with structured data. Write one-paragraph honest note to file.
+**Formula:** `with open('outputs/lag-report.md', 'w') as f: f.write(f"# Lag Report\n## Methodology\n{methodology_text}")`.
+
+### Step 8: Decisions Logging Script (`scripts/log_decisions.py`)
+**Rule:** Write each handling decision (missing data, backward offsets) to `decisions.md` with one line per mess type.
+**Formula:** `with open('decisions.md', 'a') as f: f.write(f"Handled {mess_type}: {action_taken}\n")`.
+
+### Step 9: Verification Script (`scripts/verify.py`)
+**Rule:** Independent recomputation from raw CSV, field-by-field comparison with generated JSON/MDF, exit nonzero on any drift. Ensure counts add up (no silent drops).
+**Formula:** `computed = calc_from_raw(); stored = load_generated(); assert computed == stored`.
+
+### Step 10: Final Summary & Timing Table Generation (`scripts/summarize.py`)
+**Rule:** Generate final summary with file paths, run times, and one line on surprises. Output timing table at end of report.
+**Formula:** `print(f"Run Time: {end_time - start_time}"); print("Surprise: Missing 20-min window handled via interpolation flag")`.
+
+### Step 11: Idempotency & Double-Run Test
+**Rule:**

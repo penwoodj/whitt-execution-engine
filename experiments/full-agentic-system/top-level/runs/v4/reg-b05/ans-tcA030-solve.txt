@@ -1,0 +1,48 @@
+Phase 1 RULE SCAN:
+
+- Rule: If a product record has missing `name` field, reject it with error "missing name" and log in load-report.md under "field_missing_name". Triggered by: any row without 'name' in the JSON array.  
+- Rule: If a product record has missing `price`, reject it with error "missing price" and log in load-report.md under "field_missing_price". Triggered by: any row without 'price'.  
+- Rule: If a product record contains a price string with currency symbol (e.g., "$10.99"), strip the symbol and convert to number; if invalid, reject with error "invalid price format" and log in load-report.md under "invalid_price_format". Triggered by: any row where price is a string containing a currency symbol.  
+- Rule: If a product record contains a price string without a valid numeric value (e.g., "abc"), reject it with error "non-numeric price" and log in load-report.md under "non_numeric_price". Triggered by: any row where price is non-numeric after stripping.  
+- Rule: If a product record has a price in USD and another in EUR, flag the row with error "mixed currencies", add to quarantine list labeled "mixed_currencies", and log in load-report.md under "mixed_currencies". Triggered by: presence of both USD and EUR price strings in same record.  
+- Rule: If a product record has `tags` as a comma-separated string, split into array; if empty or malformed (e.g., missing commas), reject with error "malformed tags" and log in load-report.md under "malformed_tags". Triggered by: any row where tags is a string but not properly formatted.  
+- Rule: If a product record has `suppliers` as an object, flatten into a list of supplier names; if missing or malformed (e.g., null), reject with error "invalid suppliers" and log in load-report.md under "invalid_suppliers". Triggered by: any row where suppliers is not a valid object.  
+- Rule: If a product record has `suppliers` as an array, extract supplier names; if any entry is missing or invalid (e.g., empty string), reject with error "supplier name missing" and log in load-report.md under "supplier_name_missing". Triggered by: any row where suppliers array contains null or empty entries.  
+- Rule: If a product record has `target` field, validate it as a valid SQLite DB path; if invalid, reject with error "invalid target db path" and log in load-report.md under "invalid_target_db_path". Triggered by: any row where target is not a string or points to an inaccessible file.  
+- Rule: If a product record has `target` field and the database already exists, overwrite it unless explicitly blocked; if blocked, reject with error "db overwrite denied" and log in load-report.md under "db_overwrite_denied". Triggered by: any row where target DB exists and overwrite is disabled.  
+- Rule: If a product record has `target` field and the database fails to write due to disk full or permission, reject with error "database write failure" and log in load-report.md under "db_write_failure". Triggered by: any row where SQLite write operation fails.  
+- Rule: After all records are loaded, if more than 10% of rows were rejected during loading (by field or format), trigger a fallback rule to reprocess with stricter validation; this is a fallback rule and applies only when rejection rate > 10%. Triggered by: total rejection count > 10% of input.  
+- Rule: After all records are loaded, if any row has been flagged for mixed currencies, apply a promotion rule: assign a default price of 95% of the USD value (if USD exists) and tag it as "promoted" with reason "mixed_currency_promotion". Triggered by: presence of mixed-currency rows.  
+- Rule: After all records are loaded, if any row has been flagged for malformed tags or suppliers, apply a fallback rule to return the original raw JSON entry to a quarantine folder labeled "fallback_recovered", and log in load-report.md under "fallback_recovered". Triggered by: any row with malformed tag or supplier fields.  
+- Rule: After all records are loaded, if no valid product entries remain after filtering, trigger a revocation rule that removes the entire catalog entry from the final output and logs "catalog_revoked" in load-report.md. Triggered by: zero valid products post-validation.  
+- Rule: If any row has both `name` and `price`, but price is greater than 100% of the base price (defined as 50,000), trigger a refund rule: set price to 0 and flag with "refund triggered due to overpricing". Triggered by: price > 50,000.  
+- Rule: If any row has `tags` containing "premium" or "exclusive", apply a source-ranking rule: assign rank 1 to that product in the final catalog; this is used only during query execution and does not change state during load. Triggered by: presence of "premium" or "exclusive" in tags.  
+- Rule: If any row has `suppliers` with more than two entries, apply a refill rule: add a new supplier entry named "default_supplier" to the list; this is only applied if no other supplier exists and count > 2. Triggered by: suppliers array length > 2.  
+
+Phase 2 LEDGER WALK:
+
+- Load begins at timestamp 1734567890.123, processing first record in JSON array.  
+- Row 1: name="Laptop", price="$1000.00", tags="premium,tech", suppliers=["Apple"] → valid; inserted into products table.  
+- Row 2: name="", price="abc", tags="gadget" → missing name and non-numeric price → rejected with "missing name", "non_numeric_price"; logged in load-report.md under "field_missing_name", "non_numeric_price".  
+- Row 3: name="Mouse", price="$15.99", tags="tech,small", suppliers=["Logitech"] → valid; inserted into products table.  
+- Row 4: name="Keyboard", price="€20.00", tags="office", suppliers=["KeyCorp"] → valid; inserted into products table.  
+- Row 5: name="Monitor", price="$199.99", tags="premium,large", suppliers=["Dell","Samsung"] → valid; inserted into products table.  
+- Row 6: name="Headphones", price="$200.00", tags="audio,premium", suppliers=["Sony","Bose"] → valid; inserted into products table.  
+- Row 7: name="", price="€15.99", tags="small" → missing name → rejected with "missing name"; logged in load-report.md under "field_missing_name".  
+- Row 8: name="Tablet", price="$300.00", tags="premium,tech", suppliers=["Samsung"] → valid; inserted into products table.  
+- Row 9: name="Phone", price="$1200.00", tags="mobile,premium", suppliers=["Apple","Google"] → valid; inserted into products table.  
+- Row 10: name="", price="€50.00", tags="gadget" → missing name → rejected with "missing name"; logged in load-report.md under "field_missing_name".  
+- Row 11: name="Smartwatch", price="$299.99", tags="premium,wearable", suppliers=["Apple"] → valid; inserted into products table.  
+- Row 12: name="Laptop", price="$50000.00", tags="premium,high-end", suppliers=["Dell"] → price > 50,000 → refund triggered; set price to 0 and flagged with "refund triggered due to overpricing"; logged in load-report.md under "overpriced_refund".  
+- Row 13: name="", price="$20.00", tags="small" → missing name → rejected with "missing name"; logged in load-report.md under "field_missing_name".  
+- Row 14: name="Pen", price="$5.99", tags="office,small", suppliers=["Pilot"] → valid; inserted into products table.  
+- Row 15: name="Notebook", price="$20.00", tags="office", suppliers=[] → invalid suppliers (empty) → rejected with "invalid suppliers"; logged in load-report.md under "invalid_suppliers".  
+- Row 16: name="Pen", price="$10.99", tags="office,premium", suppliers=["Pilot","Uni"] → valid; inserted into products table.  
+- Row 17: name="", price="€25.00", tags="gadget" → missing name → rejected with "missing name"; logged in load-report.md under "field_missing_name".  
+- Row 18: name="Desk", price="$300.00", tags="furniture,large", suppliers=["OfficePro"] → valid; inserted into products table.  
+- Row 19: name="", price="€50.00", tags="gadget" → missing name → rejected with "missing name"; logged in load-report.md under "field_missing_name".  
+- Row 20: name="Chair", price="$400.00", tags="furniture,office", suppliers=["Herman Miller"] → valid; inserted into products table.  
+- Row 21: name="", price="€100.00", tags="premium" → missing name → rejected with "missing name"; logged in load-report.md under "field_missing_name".  
+- Row 22: name="Laptop", price="$999.99", tags="premium,tech", suppliers=["Dell"] → valid; inserted into products table.  
+- Row 23: name="", price="€100.00", tags="gadget" → missing name → rejected with "missing name"; logged in load-report.md under "field_missing_name".  
+-

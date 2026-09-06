@@ -1,63 +1,61 @@
 # Tier-A Case 026 — Cron Collision Audit (SYNTH)
 
-I want you to construct a self-contained reporting exercise for me, the whole thing lives under /tmp/opencode/cron-run and nothing outside that folder gets touched, i mean it, no repo files, no home directory surprises, i've cleaned up after tools that did that before and i'm not doing it again.
+the task is cron collision audit, and the details are below, all of them. i want you to construct a self-contained reporting exercise for me, the whole thing lives under /tmp/opencode/cron-run and nothing outside that folder gets touched, i mean it, no repo files, no home directory surprises, i've cleaned up after tools that did that before and i'm not doing it again.
 
-the shape of the data: a crontab dump, 60 jobs across five machines, then some jobs must never overlap, backups and the thing they back up, and daylight saving shifts timestamps twice a year, plus one job runs every 11 minutes and fights a hourly job forever. i'm deliberately not specifying every little thing, because half the value here is seeing what gets decided when nobody's looking. the decisions file is where you show your work on those, and a wrong call documented beats a right call nobody can find.
-
-if a stage can honestly be a one-liner, let it be a one-liner, padding steps to look thorough is its own kind of lie.
-
-and a note on tone in the outputs: plain sentences, tables where tables belong, no buzzword garbage, i want to skim this in two minutes and know exactly what happened.
-
-and no leaving a to-do in a comment for later-me, later-me is you in ten minutes, finish the job.
-
-percentages need denominators next to them always, twelve percent of what, because a percentage alone is half a number.
-
-everything gets a run twice test before you call it done, because the first run always works and the second one is where the state bugs live.
-
-and if you find something in the data that contradicts what i said above, the data wins, report the contradiction, don't quietly bend either one.
-
-one more thing, every number you quote me at the end better come from an actual run you can point at, because should-be-roughly-nine is not a result, it's a vibe.
-
-the deliverables have two audiences, me skimming on a phone and a verifier grinding line by line, so every report needs the human table up top and the machine copy underneath, same numbers, no drift between them. the day those two disagree is the day i stop trusting the whole setup.
-
-the workspace layout is yours to design but say it in the readme, so the structure is a decision not an accident.
-
-logs per stage, one line each is plenty, i want to see where time went and where things broke without spelunking.
-
-anything you cache or skip for speed gets a note, because invisible shortcuts are how results stop being reproducible.
-
-and when i say documented i mean in a file on disk, not in the chat log where it scrolls away forever.
-
-the work, stage by stage, and i want stage logging loud enough that i can follow along after the fact:
-
-then parse all 60 entries into a normalized schedule table, machine, user, spec, command. if that stage has a natural ordering dependency on the previous one, respect it, the sequence above is not decorative. edge cases belong in the output, not in your head, list what you hit and what you did with each.
-2. next-24-hours firing timeline, who runs when, mark overlaps. if that stage has a natural ordering dependency on the previous one, respect it, the sequence above is not decorative.
-3. the forbidden overlaps, backup pairs that collide, with the minutes they clash. with the method visible, not just the result, the how is the deliverable here as much as the what.
-the 11-minute vs hourly fight, every time they collide in a week. and don't round anything into meaninglessness, i'd rather see the ugly precise number than a tidy lie.
-stage by stage: cron.md plus cron.json, and the overlap rule written down. and don't round anything into meaninglessness, i'd rather see the ugly precise number than a tidy lie. if that stage has a natural ordering dependency on the previous one, respect it, the sequence above is not decorative.
-
-if any rule you write down feels arbitrary, good, that means you noticed, write the threshold and the reason next to it so future-me can argue with it.
-
-keep the rules you invent in a rules.md next to the scripts, so when i come back in a week i know why the machine did what it did.
-
-when a rule and a row disagree, both go in the output, the flagged row and the rule that flagged it, side by side.
-
-and bake in the dirt, i've said before i want things tested against reality not the happy path: three entries use nonstandard shortcuts, @daily and friends, two have comments that lie about what they do, and one spec has an out-of-range day. those aren't obstacles, they're the actual test, a clean run on clean data is worthless and i've said this before. the handling rule for each goes in the rules or decisions file, not in your memory.
-
-on outputs: every stage writes to its own subfolder under the workspace, naming is yours but be consistent, and the final report goes both human, markdown with actual tables, and machine, json with the same numbers. i'll be checking that the two agree, and i'll be unhappy if they don't.
+context so you're not guessing: a crontab dump, 60 jobs across five machines, and some jobs must never overlap, backups and the thing they back up, plus daylight saving shifts timestamps twice a year; also one job runs every 11 minutes and fights a hourly job forever. the deliverables have two audiences, me skimming on a phone and a verifier grinding line by line, so every report needs the human table up top and the machine copy underneath, same numbers, no drift between them. the day those two disagree is the day i stop trusting the whole setup.
 
 if two stages could run in either order and it doesn't matter, pick one and move on, i don't need a committee meeting about it.
 
-error messages should say what failed and where, not just that something did, because 'an error occurred' has never helped anybody.
+the workspace layout is yours to design but say it in the readme, so the structure is a decision not an accident.
 
-the end state on disk should look like something a stranger could pick up: a readme pointing at everything, scripts that run in order, outputs that reproduce, and the report. if a stranger couldn't rerun this from the files alone, it's not done.
-
-and the verification part is not optional, i've been burned by tools grading their own homework. write a separate verifier that recomputes the key numbers from the raw inputs with its own logic, not by importing the pipeline's code, and it exits nonzero with a clear message on any mismatch. run it against the outputs and show me the exit codes. a claim without a number i can check is a vibe and i've had enough vibes.
+keep the rules you invent in a rules.md next to the scripts, so when i come back in a week i know why the machine did what it did.
 
 timings, real ones, timestamps around each stage, a table at the end. not vibes.
 
+one more thing, every number you quote me at the end better come from an actual run you can point at, because should-be-roughly-nine is not a result, it's a vibe.
+
+and no leaving a to-do in a comment for later-me, later-me is you in ten minutes, finish the job.
+
+if any rule you write down feels arbitrary, good, that means you noticed, write the threshold and the reason next to it so future-me can argue with it.
+
+think of this as a miniature version of the real jobs i hand off: messy inputs, stated rules, honest outputs. the rules you invent matter as much as the numbers you compute, because i'm going to reuse this when the data is real and i need to trust the machinery.
+
+if a stage can honestly be a one-liner, let it be a one-liner, padding steps to look thorough is its own kind of lie.
+
+and if you find something in the data that contradicts what i said above, the data wins, report the contradiction, don't quietly bend either one.
+
+error messages should say what failed and where, not just that something did, because 'an error occurred' has never helped anybody.
+
+percentages need denominators next to them always, twelve percent of what, because a percentage alone is half a number.
+
+here's the task list, in sequence:
+
+1. parse all 60 entries into a normalized schedule table, machine, user, spec, command. if that stage has a natural ordering dependency on the previous one, respect it, the sequence above is not decorative.
+2. next-24-hours firing timeline, who runs when, mark overlaps. if that stage has a natural ordering dependency on the previous one, respect it, the sequence above is not decorative.
+3. the forbidden overlaps, backup pairs that collide, with the minutes they clash. with the method visible, not just the result, the how is the deliverable here as much as the what.
+the 11-minute vs hourly fight, every time they collide in a week. and don't round anything into meaninglessness, i'd rather see the ugly precise number than a tidy lie.
+stage by stage: cron.md plus cron.json, and the overlap rule written down. and don't round anything into meaninglessness, i'd rather see the ugly precise number than a tidy lie.
+
 i'd rather have an ugly table that's right than a beautiful chart that's approximate, so default to tables unless the data genuinely needs a picture.
 
+logs per stage, one line each is plenty, i want to see where time went and where things broke without spelunking.
+
+the realistic part, the warts: three entries use nonstandard shortcuts, @daily and friends, two have comments that lie about what they do, and one spec has an out-of-range day. handle each one explicitly, log it, and count them, because 'some rows had issues' is not a finding, 'fourteen clock-skewed entries corrected, listed in the log' is. the rule you applied to each wart belongs in the rules file, next to the wart itself.
+
+on outputs: every stage writes to its own subfolder under the workspace, naming is yours but be consistent, and the final report goes both human, markdown with actual tables, and machine, json with the same numbers. i'll be checking that the two agree, and i'll be unhappy if they don't.
+
+everything gets a run twice test before you call it done, because the first run always works and the second one is where the state bugs live.
+
+and when i say documented i mean in a file on disk, not in the chat log where it scrolls away forever.
+
+and the verification part is not optional, i've been burned by tools grading their own homework. write a separate verifier that recomputes the key numbers from the raw inputs with its own logic, not by importing the pipeline's code, and it exits nonzero with a clear message on any mismatch. run it against the outputs and show me the exit codes. a claim without a number i can check is a vibe and i've had enough vibes.
+
 don't stop halfway to ask me questions you can answer yourself. names, orderings, column formats, those are yours. only come back at a real fork that changes what i asked for, and there isn't one hiding in here. style rules since they keep coming up: nothing interactive anywhere, no prompts, nothing that hangs a non-interactive shell, loud failures with nonzero exits, and everything runnable twice without exploding. pick idempotent or self-cleaning, say which, document it.
+
+when a rule and a row disagree, both go in the output, the flagged row and the rule that flagged it, side by side.
+
+anything you cache or skip for speed gets a note, because invisible shortcuts are how results stop being reproducible.
+
+and a note on tone in the outputs: plain sentences, tables where tables belong, no buzzword garbage, i want to skim this in two minutes and know exactly what happened.
 
 finish with the report pasted in chat so i can skim without opening files, plus paths and timings. one line on what surprised you.

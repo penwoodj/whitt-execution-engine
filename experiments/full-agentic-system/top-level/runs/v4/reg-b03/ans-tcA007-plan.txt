@@ -1,0 +1,61 @@
+### PLAN FIRST: Steps & Formulas/Rules
+
+1.  **Initialize Workspace**: Create directory structure `/tmp/opencode/alert-run` with subdirectories `raw/`, `processed/`, `logs/`, `rules/`, `scripts/`. Write `README.md` documenting layout and execution order.
+2.  **Generate Synthetic Data**: Create `alerts.csv` containing 2000 rows with mixed timestamp formats (`%Y-%m-%dT%H:%M:%S` and `%d/%m/%Y %H:%M:%S`), 8 out-of-order timestamps, duplicate templates fanned across services/severities (including one "CRITICAL" typo), and noise makers (>10 occurrences).
+3.  **Stage 1: Grouping Rule Definition**: Define grouping logic: `incident_id = hash(template + normalized_severity + floor(timestamp/5min))`. Write rule to `rules/grouping.md`.
+4.  **Stage 2: Noise Maker Identification**: Filter alerts where count(`template`) > 10. Output list with counts and sample messages to `processed/noise_makers.csv` and log to `logs/stage_noise.log`.
+5.  **Stage 3: Timestamp Normalization & Sorting**: Parse mixed formats, flag out-of-order rows, sort by epoch time. Handle errors via quarantine logic. Write disposition rules to `rules/timestamps.md`. Output sorted data to `processed/sorted_alerts.csv` with a `disposition` column (`valid`, `quarantined`, `rejected`).
+6.  **Stage 4: Severity Normalization**: Map all severities (Critical, critical, CRITICAL, Warning, warning, Info, info) to canonical values. Flag the "fat-fingered" typo specifically. Write rule to `rules/severity.md`. Output normalized data to `processed/normalized_alerts.csv` with a `canonical_severity` column and `flag_reason` if changed.
+7.  **Stage 5: Incident Aggregation**: Join sorted alerts by `incident_id`. Calculate span (max_ts - min_ts), service blast radius (unique services), and alert count per incident. Output to `processed/incidents.csv`.
+8.  **Stage 6: Top Incident Analysis**: Identify the largest incident by span or count. Extract details for the "biggest one" (span, services affected). Write analysis to `processed/top_incident.md`.
+9.  **Stage 7: Verification & Conservation Check**: Implement independent recomputation script (`scripts/verify.py`) that reads raw data, re-applies rules, and checks conservation (Input Rows = Processed Valid + Quarantined + Rejected + Errors). Output verification report to `logs/verification.log`.
+10. **Stage 8: Report Generation**: Compile findings into `storm-report.md` including tables for incidents, noise makers, severity stats, and timing breakdowns. Include paths and timings.
+11. **Final Review**: Ensure all artifacts exist, run verification one last time, and output summary to chat.
+
+---
+
+### EXECUTION START
+
+I will now execute the pipeline in `/tmp/opencode/alert-run`. All steps are deterministic, use only Python standard library, and produce tangible files on disk.
+
+#### Step 1: Initialize Workspace & Generate Data
+
+```python
+import os
+import csv
+import random
+from datetime import datetime, timedelta
+import hashlib
+
+# Paths
+BASE_DIR = "/tmp/opencode/alert-run"
+RAW_DIR = f"{BASE_DIR}/raw"
+PROC_DIR = f"{BASE_DIR}/processed"
+LOGS_DIR = f"{BASE_DIR}/logs"
+RULES_DIR = f"{BASE_DIR}/rules"
+SCRIPTS_DIR = f"{BASE_DIR}/scripts"
+
+os.makedirs(RAW_DIR, exist_ok=True)
+os.makedirs(PROC_DIR, exist_ok=True)
+os.makedirs(LOGS_DIR, exist_ok=True)
+os.makedirs(RULES_DIR, exist_ok=True)
+os.makedirs(SCRIPTS_DIR, exist_ok=True)
+
+# Generate Synthetic Data (2000 alerts)
+templates = [
+    "DatabaseConnectionFailed", 
+    "HighCPUUsage", 
+    "MemoryExhaustion", 
+    "DiskSpaceLow", 
+    "NetworkLatencyHigh",
+    "ServiceRestartRequired"
+]
+
+services = ["auth-service", "billing-api", "user-gateway", "inventory-db", "payment-processor"]
+
+# Create a scenario: One massive incident (DatabaseConnectionFailed) fanned out, plus noise makers
+noise_makers_template = "HighCPUUsage" # Will appear >10 times for same thing
+noise_makers_count = 25 # More than 10
+
+# Base time
+base_time = datetime(2023, 10

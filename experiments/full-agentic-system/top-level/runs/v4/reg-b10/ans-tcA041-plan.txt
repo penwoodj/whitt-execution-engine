@@ -1,0 +1,83 @@
+```markdown
+# directory-snapshot-delta-pipeline
+
+## Workspace Layout (in /tmp/opencode/dirsnap-run)
+
+```
+/tmp/opencode/dirsnap-run/
+├── README.md
+├── rules.md
+├── decisions.md
+├── snapshot-a.json      # first snapshot (e.g., 2024-03-01)
+├── snapshot-b.json      # second snapshot (e.g., 2024-04-01)
+├── delta.md             # human-readable report
+├── delta.json           # machine-readable output
+├── logs/
+│   ├── stage-1.log
+│   ├── stage-2.log
+│   ├── stage-3.log
+│-   └── stage-4.log
+└── checker.sh           # independent verification script
+```
+
+---
+
+## Step-by-step Pipeline (Rules First)
+
+**Step 1: Five-way delta — added, removed, grown, shrunk, same-size-rewritten**
+
+- For each file in snapshot-b:
+  - If path not in snapshot-a → `added`
+  - Else if size or mtime differs and hash is available → check hash equality
+    - If hash differs → `rewritten` (same size, different content)
+    - If size differs and hash same → `grown` if size ↑, `shrunk` if size ↓
+    - If size same but hash differs → `rewritten`
+  - Else if path in snapshot-a and size/mtime/hashes match → `same-size-rewritten` (only if hash exists)
+- For each file in snapshot-a not in snapshot-b → `removed`
+
+> **Rule**: Use hash as truth when available. If hash missing, use size and mtime only for size-based comparisons.
+
+> **Threshold**: Size change threshold = 1 byte. Any size difference ≥1 byte triggers grown/shrunk classification.  
+> *Reason: A single-byte change is not negligible in file systems; it's a real change even if content differs slightly.*
+
+> **Note**: If hash missing, we cannot verify content identity — so no `rewritten` or `grown/shrunk` can be trusted.
+
+---
+
+**Step 2: mtime-liar list**
+
+- For each file in the union of both snapshots:
+  - If hash exists and is identical between snapshot-a and b → check if mtime differs
+    - If yes → record as "mtime-liar"
+- Output only files where hash matches but mtime changed.
+
+> **Rule**: Hash is truth. Mtime can lie independently — this is a known file system behavior (e.g., metadata updates without content change).
+
+> **Threshold**: Any mtime difference with identical hash → flagged  
+> *Reason: File systems may update timestamps due to access, indexing, or background processes.*
+
+---
+
+**Step 3: Handle four hashless files using size-and-mtime heuristic**
+
+- For each file in either snapshot that lacks a hash:
+  - If it exists in both snapshots and has same size and mtime → treat as "same"
+  - Else if size differs → classify as `grown` or `shrunk`
+  - Else if size same but mtime differs → flag as `mtime-liar` (if not already)
+- Flag each such file with a confidence level:  
+  - **Low-confidence** = hash missing and size/mtime used for inference
+- List all four files, their paths, and the decision made.
+
+> **Rule**: Size and mtime are only valid when both exist and match. If they differ → treat as changed.
+
+> **Edge case handling**:  
+> - File A: /tmp/data/old.log — size 1024, mtime 2024-03-05 (a), 2024-04-01 (b) → same size → `same`? No. Mtime changed → flag as low-confidence  
+> - File B: /tmp/data/backup.txt — size 512, mtime both 2024-03-06 → same → `same`  
+> - File C: /tmp/config/sync.conf — size 8192, mtime a=2024-03-07, b=2024-04-02 → size unchanged → flag as low-confidence  
+> - File D: /tmp/logs/app.log — size 65536, mtime a=2024-03-10, b=2024-04-03 → size unchanged → flag as low-confidence  
+
+> **Note**: All four files are explicitly listed in output with their path and confidence label.
+
+---
+
+**Step 4: Totals that add up — every file lands exactly once

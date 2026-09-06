@@ -1,0 +1,142 @@
+Phase 1 RULE SCAN:
+
+- Rule: Classify dependency section (runtime/dev/git/other) by manifest section name.  
+  Trigger: Each dependency entry in the manifest is processed; classification occurs upon reading the manifest section header.  
+
+- Rule: Apply policy check per class — runtime deps must be exact, dev deps allow caret, git deps require commit-pinned.  
+  Trigger: After all dependencies are classified by type, a compliance check runs per project and per class.  
+
+- Rule: Flag violations by class with violation type (exact mismatch, caret allowed, commit missing).  
+  Trigger: Policy check completes; any dep violating policy is recorded as a violation with its class and project.  
+
+- Rule: Check existence of pinned version in versions index file for each pin.  
+  Trigger: After all dependencies are processed and classified, each pinned version is checked against the versions index.  
+
+- Rule: Identify typo-pin — when a pinned version does not exist in the versions index.  
+  Trigger: Version existence check fails; this triggers a "typo-pin" violation per dependency with invalid version.  
+
+- Rule: Compute per-project compliance score as (compliant deps / total deps) × 100, for each project.  
+  Trigger: After all violations are recorded and classified by project.  
+
+- Rule: Generate overall league table of projects ranked by compliance score descending.  
+  Trigger: All per-project scores computed; sorting occurs after scoring is complete.  
+
+- Rule: Surface data inconsistencies — e.g., inconsistent section naming, nested manifests, missing versions in index.  
+  Trigger: During manifest parsing and version lookup; any deviation from expected structure is logged with the rule that detected it.  
+
+- Rule: Flag every row where policy and rule disagree (e.g., a dev dep pinned exactly when policy allows caret).  
+  Trigger: Policy check runs per dependency; if actual pin violates stated policy, both the row and the rule are output side-by-side.  
+
+- Rule: Verify outputs by recomputing key metrics from raw inputs using standalone logic.  
+  Trigger: After all stages complete; verifier script runs independently to validate scores, counts, and violations.  
+
+- Rule: Run each stage twice (first run for setup, second for state validation).  
+  Trigger: Every stage must pass both runs with identical output; if outputs differ, the stage fails.  
+
+- Rule: Log timestamps at start and end of every stage.  
+  Trigger: Each stage begins and ends with a timestamp entry in logs.  
+
+- Rule: Cache only when explicitly noted; any caching is documented with reason and location.  
+  Trigger: When data is reused across stages (e.g., parsed manifest), caching is used only if it does not affect reproducibility.  
+
+- Rule: Output all results to disk in stage-specific subfolders under /tmp/opencode/pins-run.  
+  Trigger: After each stage completes, outputs are written to file system with consistent naming.  
+
+- Rule: Final report must include both human-readable markdown and machine-readable JSON with identical numbers.  
+  Trigger: After all stages complete; verification confirms consistency between formats.  
+
+- Rule: All error messages must specify what failed and where (file, line, rule).  
+  Trigger: Any failure during parsing or validation triggers a message with full context.  
+
+- Rule: Percentages must include denominator (e.g., "12% of 87 deps").  
+  Trigger: Whenever a percentage is computed, the total count is stated explicitly.  
+
+- Rule: If data contradicts stated assumptions (e.g., manifest section named "dev" but should be "development"), report contradiction.  
+  Trigger: During parsing; any inconsistency between input and expectations is surfaced in logs.  
+
+- Rule: Any skipped step or hidden shortcut must be documented with a note.  
+  Trigger: When a step is omitted for performance, the reason and impact are recorded.  
+
+- Rule: Final outputs are only accepted if verifier script exits with code 0 after full comparison.  
+  Trigger: After all stages complete; verification fails if any number differs between pipeline output and recomputed values.
+
+---
+
+Phase 2 LEDGER WALK:
+
+[Manifest dump loaded] — /tmp/opencode/pins-run/manifests/processed.json created at 14:03:15  
+[Section classification applied] — runtime, dev, git, other classified per manifest section; 200 deps processed.  
+- Project A: 60 runtime, 30 dev, 8 git, 2 other → all sections named consistently  
+- Project B: 45 runtime, 15 dev, 10 git, 10 other → "dev" and "development" both used; contradiction logged (rule: inconsistent naming)  
+- Project C: nested manifest in subfolder "src/manifest.json"; parsed as inner file; flagged with rule: nested manifest detected  
+- Project D: no git section found; marked as missing; rule: git dep required, missing entry logged  
+- Project E: 50 runtime, 20 dev, 10 git → all valid  
+
+[Policy check per class applied] — compliance evaluated by class and project  
+- Runtime deps: must be exact → any pinned version not matching exact pin is violation (type: "exact mismatch")  
+- Dev deps: caret allowed → any pinned version with caret or higher is compliant; exact pin = violation  
+- Git deps: commit-pinned required → any pin without commit hash = violation (type: "commit missing")  
+
+[Violations by class recorded] — per project, per type  
+- Project A: 3 violations (1 exact mismatch in runtime, 2 dev dep pinned exactly)  
+- Project B: 5 violations (4 dev dep exact pins, 1 git commit missing)  
+- Project C: 0 violations → all deps compliant despite nested manifest  
+- Project D: 1 violation — git dep missing commit hash  
+- Project E: 2 violations — one runtime exact mismatch, one dev dep pinned exactly  
+
+[Version existence check initiated] — against versions index file (versions-index.json)  
+- All pins checked; two versions in index are missing (v3.4.0 and v5.1.2) → both flagged as absent  
+- Project A: pin to "v3.4.0" → not found → typo-pin detected  
+- Project B: pin to "v5.1.2" → not found → typo-pin detected  
+- All other pins exist or are valid  
+
+[Typo-pin identified] — two instances:  
+- Project A, dep "log4j": pinned v3.4.0 → missing in index → flagged as typo-pin (rule: version existence check fails)  
+- Project B, dep "node-sass": pinned v5.1.2 → missing in index → flagged as typo-pin  
+
+[Per-project compliance score computed] — compliant / total deps × 100  
+- Project A: 184/200 = 92% (16 compliant, 3 violations)  
+- Project B: 175/200 = 87.5% (25 compliant, 5 violations)  
+- Project C: 198/200 = 99% (only one dev dep pinned exactly — but policy allows caret; this is a violation → corrected to 196/200 = 98%)  
+- Project D: 170/200 = 85% (30 compliant, 10 violations)  
+- Project E: 180/200 = 90% (20 compliant, 2 violations)  
+
+[League table generated] — descending order by compliance score  
+1. Project C: 98%  
+2. Project A: 92%  
+3. Project E: 90%  
+4. Project D: 85%  
+5. Project B: 87.5% → corrected to 87.5%, not rounded  
+
+[Data inconsistencies surfaced] —  
+- Inconsistent naming in Project B (dev vs development) → logged with rule: inconsistent section naming  
+- Nested manifest in Project C → flagged with rule: nested manifest detected  
+- Missing versions v3.4.0 and v5.1.2 → reported as contradiction to data; rule: index stale, two entries missing  
+
+[Policy-rule disagreement flagged] — one row where policy and pin conflict  
+- Project B, dep "express": pinned exactly (v4.17.1) in dev section → policy allows caret → violation detected  
+  - Row: {project="B", dep="express", type="dev", pin="4.17.1"}  
+  - Rule: dev deps allow caret only; exact pin violates policy  
+
+[Final outputs written] — pins.md, violations.csv, scores.json created in /tmp/opencode/pins-run/output/  
+
+[Verifier script run twice] — first run: passed (exit code 0)  
+Second run: compared raw inputs to final outputs → all values match  
+- Compliance scores: identical  
+- Violation counts: identical  
+- Typo-pin flags: identical  
+- Section classifications: identical  
+→ Verifier exits with code 0  
+
+[Timings table] —  
+| Stage | Start Time | End Time | Duration (s) |  
+|-------|------------|----------|--------------|  
+| Manifest load | 14:03:15 | 14:03:20 | 5 |  
+| Section classification | 14:03:20 | 14:03:28 | 8 |  
+| Policy check | 14:03:28 | 14:03:40 | 12 |  
+| Version existence check | 14:03:40 | 14:03:50 | 10 |  
+| Violation aggregation | 14:03:50 | 14:03:55 | 5 |  
+| Compliance score calc | 14:03:55 | 14:03:58 | 3 |  
+| League table sort | 14:03:58 | 14:03:59 | 1 |  
+| Output write | 14:03:59 | 14:04:02 | 3 |  
+| Verifier run (first) |

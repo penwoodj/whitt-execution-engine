@@ -1,0 +1,68 @@
+```markdown
+# Workspace Layout (readme.md)
+
+## Directory Structure
+
+```
+workspace/
+├── scripts/                  # All real scripts that run in sequence, each executable
+│   ├── layer_table.py        # Step 1: Build layer table with index, command, size, cumulative
+│   ├── detect_wasteful.py    # Step 2: Detect wasteful patterns (install-without-clean, duplicated data, secrets)
+│   ├── add_then_remove.py    # Step 3: Find add-then-remove pairs with net-zero weight but history bloat
+│   ├── slim_estimate.py      # Step 4: Project slim rebuild savings and uncertainty
+│   └── verifier.py           # Standalone script to recompute key metrics from raw input
+│
+├── inputs/                   # Raw data files (e.g., image_history.json)
+│   └── image_history.json    # Input: 40 layers with command, size, cumulative_size (raw dump)
+│
+├── outputs/                 # All real artifacts on disk
+│   ├── layers.md            # Human-readable table of layers (index, command, size, cum_size)
+│   ├── layers.json          # Machine-readable JSON version of layer table
+│   ├── wasteful_patterns.md # Wasteful pattern flags with details per layer
+│   ├── add_then_remove.md   # Add-then-remove pairs with weight added and deleted
+│   ├── slim_estimate.md     # Slim rebuild estimate: fixed patterns, projected saving, uncertainty
+│   └── timings.txt          # Timestamps for each stage (real, not estimated)
+│
+├── rules.md                 # All rules applied to data, including thresholds and justifications
+│   ├── install_without_clean_threshold  # e.g., "apt-get install without rm -rf /var/lib/apt/lists"
+│   ├── duplicated_data_threshold       # e.g., "same file appears in two layers with no removal"
+│   ├── secret_in_layer_rule           # e.g., "layer contains 'password' or 'secret' in text"
+│   ├── cumulative_size_correction     # e.g., "two spots where raw size is cumulative; fix by diffing"
+│   └── zero_size_layer_handling       # e.g., "zero-size layer with metadata-only work counts as present"
+│
+├── decisions.txt            # Assumptions made (e.g., "defaulted to 10s for timeout", "assumed no network")
+│
+└── run_log.txt              # Full log of all stages, one line per stage, including errors and timestamps
+```
+
+---
+
+## Rules Applied (rules.md)
+
+### Install-without-clean detection rule  
+**Threshold**: Any layer with command containing `apt-get install` or `yum install` **and no subsequent command** that removes the package or its cache.  
+**Reason**: These installs add large files to the filesystem without cleanup, and are a classic source of bloat. If a layer has such an install but no removal (e.g., `rm -rf /var/lib/apt/lists`) in any later layer, it is flagged.
+
+### Duplicated data adds rule  
+**Threshold**: A layer with command that copies or installs a file **that appears identically** in another layer earlier than it.  
+**Reason**: If the same file is added twice (e.g., via `COPY`), and no prior layer removed it, this wastes space. We flag such cases even if not explicitly named.
+
+### Secrets-in-layer rule  
+**Threshold**: Any command or file content that contains a string like "password", "secret", "key", "token" in any text.  
+**Reason**: These are red flags for security and may indicate accidental inclusion of sensitive data, which is both wasteful (if stored) and dangerous.
+
+### Cumulative size correction rule  
+**Threshold**: Two entries where `size` field is cumulative (i.e., layer N's size = sum of all prior layers).  
+**Reason**: The raw dump incorrectly treats sizes as cumulative. We must correct this by computing actual layer-by-layer size from the raw data, using a rolling sum.  
+- **Correction method**: For each layer, `layer_size = cumulative_size - previous_cumulative_size` (with first layer being `cumulative_size`).  
+- **Log entry**: "Corrected 2 entries where cumulative size was misreported."
+
+### Zero-size layer handling rule  
+**Threshold**: A layer with `size == 0`, but command contains metadata-only actions like `RUN echo 'metadata' > /etc/metadata`.  
+**Reason**: These layers do not add files, but they are still part of the image history and must be counted in bloat analysis. We include them as "present" and flag their purpose.
+
+---
+
+## Step-by-Step Execution Plan (with rules and outputs)
+
+1. **Layer table construction**

@@ -1,0 +1,65 @@
+PLAN FIRST:
+1. Create directory structure under /tmp/opencode/warehouse-test with subfolders: inbound, outbound, quarantined, archived, scripts, rejects, review, output.
+2. Generate 200 fixture JSON files across the four input folders (inbound, outbound, quarantined, archived) with realistic messy data including duplicates, malformed JSONs, and edge cases as specified.
+3. Write rules.md documenting deduplication logic, field definitions, and overwrite/cleanup policies.
+4. Create stage1_scan.py to scan all input files, validate JSON, merge valid records into a manifest, and write invalid/malformed records to rejects/manifest.json with reasons.
+5. Create stage2_dedupe.py to handle exact part_id duplicates (keep newest by mtime), flag same_name+category+qty mismatches for review, output deduped_manifest.json, duplicate_losers.log, and review_candidates.json.
+6. Create stage3_report.py to compute metrics: total distinct parts, inventory value, category breakdowns, defective rate, top 5 expensive items, zone breakdown, write warehouse-report.md and warehouse-report.json ensuring byte-level consistency between them.
+7. Create verify.py that independently recomputes all metrics from raw fixture files (not importing pipeline functions), compares against report outputs field-by-field, checks count conservation (distinct + rejects + losers == total input), exits nonzero on any mismatch.
+8. Run full pipeline: python3 scripts/stage1_scan.py && python3 scripts/stage2_dedupe.py && python3 scripts/stage3_report.py.
+9. Run verifier: python3 verify.py and capture exit code.
+10. Perform timing pass: run pipeline 3 times, measure wall clock per stage using /usr/bin/time -v or Python's time.perf_counter(), output table with averages.
+11. Create efficiency version (scripts/efficiency_stage*.py) optimizing I/O and computation without changing logic, ensuring identical outputs via verify.py.
+12. Final summary: list all file paths, run times, exit codes, and note any surprises.
+
+TASK EXECUTION STARTS:
+
+```bash
+#!/bin/bash
+set -e
+
+BASE_DIR="/tmp/opencode/warehouse-test"
+mkdir -p "$BASE_DIR/{inbound,outbound,quarantined,archived}"
+mkdir -p "$BASE_DIR/{scripts,rejects,review,output}"
+
+# --- STEP 2: Generate Fixture Data with Messiness ---
+python3 << 'GENERATE_FIXTURES'
+import json
+import random
+from datetime import datetime, timedelta
+import os
+
+random.seed(42)  # Reproducibility
+
+part_ids = set()
+categories = ["fastener", "electrical", "housing", "consumable", "sensor"]
+statuses = ["ok", "needs_review", "defective"]
+zones = [chr(ord('A')+i) for i in range(5)]
+racks = [f"{i:02d}" for i in range(1, 30)]
+
+# Pre-generate some base parts to allow duplicates and name collisions
+base_parts = []
+for _ in range(80):
+    pid = f"PTM-{random.randint(10000, 99999)}"
+    while pid in part_ids:
+        pid = f"PTM-{random.randint(10000, 99999)}"
+    part_ids.add(pid)
+    base_parts.append({
+        "part_id": pid,
+        "part_name": random.choice(["Bracket", "Cable", "Mount", "Switch", "Filter", "Cover", "Relay", "Diode"]) + f" {random.randint(1,99)}",
+        "category": random.choice(categories),
+        "quantity_on_hand": random.randint(0, 500),
+        "unit_cost": round(random.uniform(0.5, 250.0), 2),
+        "warehouse_location": f"{random.choice(zones)}{random.choice(racks)}",
+        "last_inspected": (datetime.now() - timedelta(days=random.randint(1, 365))).strftime("%Y-%m-%d"),
+        "status": random.choice(statuses)
+    })
+
+# Create 200 records with intentional messiness
+records = []
+for i in range(200):
+    # Decide if this is a duplicate or malformed (approx 15% duplicates, 8% malformed)
+    is_dup = random.random() < 0.15
+    is_malformed = random.random() < 0.08
+    
+    if is_dup

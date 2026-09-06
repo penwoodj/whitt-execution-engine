@@ -1,0 +1,110 @@
+Phase 1 RULE SCAN:
+
+- On request arrival (timestamp), if bucket capacity is exceeded, reject the request. Trigger: every request event.
+- If request weight > 0, consume tokens equal to request weight from bucket; if insufficient tokens, partially serve or reject based on available tokens. Trigger: every request with positive weight.
+- Bucket refill occurs at a rate of 10 tokens per second (i.e., 10 tokens added every second), applied continuously and in integer steps. Trigger: every second boundary (every 1s interval).
+- At each timestamp, if the bucket has fewer than 1 token, no refill is applied until next second boundary; refill only occurs at full-second boundaries. Trigger: every second boundary.
+- If a request has weight zero, it is accepted immediately with no token consumption and no state change. Trigger: any request with weight = 0.
+- For requests with fractional millisecond weights, round down to nearest integer (floor) before processing. Trigger: all requests with non-integer weights.
+- A timestamp that is out of order by one second (i.e., later than the previous event) is treated as a duplicate or invalid; such events are rejected and logged. Trigger: any request with timestamp > previous request + 1s.
+- If bucket state reaches zero, no refill occurs until next full second boundary. Trigger: every second boundary.
+- On burst arrival (defined by two consecutive high-weight requests within 0.5 seconds), trigger a temporary override: allow up to 20% more token consumption for the first three requests in the burst. Trigger: any burst event (two high-weight requests within 0.5s).
+- If bucket state is negative after refill, set it to zero; no negative states allowed. Trigger: every second boundary.
+- On request rejection due to insufficient tokens, record rejection spike and log timestamp. Trigger: every request with insufficient tokens.
+- When a refill occurs, only add 10 tokens per second (no partial refills). Trigger: every full-second boundary.
+- If bucket capacity is reached during refill, no overflow; cap at 100. Trigger: every refill event.
+
+Phase 2 LEDGER WALK:
+
+Initial state: bucket = 100, last_refill_time = 0, current_time = 0
+
+Event 0 (t=0): request with weight=5, timestamp=0 → consume 5 tokens → bucket becomes 95. State after: bucket=95.
+
+Event 1 (t=0): request with weight=3, timestamp=0 → consume 3 tokens → bucket becomes 92. State after: bucket=92.
+
+Event 2 (t=0.5): request with weight=8, timestamp=0.5 → consume 8 tokens → bucket becomes 84. State after: bucket=84.
+
+Event 3 (t=1.0): refill occurs → add 10 tokens → bucket becomes 94. State after: bucket=94.
+
+Event 4 (t=1.2): request with weight=7, timestamp=1.2 → consume 7 tokens → bucket becomes 87. State after: bucket=87.
+
+Event 5 (t=1.3): request with weight=0 → accepted, no token use → bucket remains 87. State after: bucket=87.
+
+Event 6 (t=1.4): request with weight=9, timestamp=1.4 → consume 9 tokens → bucket becomes 78. State after: bucket=78.
+
+Event 7 (t=1.5): request with weight=2, timestamp=1.5 → consume 2 tokens → bucket becomes 76. State after: bucket=76.
+
+Event 8 (t=1.6): request with weight=10, timestamp=1.6 → consume 10 tokens → bucket becomes 66. State after: bucket=66.
+
+Event 9 (t=2.0): refill occurs → add 10 tokens → bucket becomes 76. State after: bucket=76.
+
+Event 10 (t=2.1): request with weight=5, timestamp=2.1 → consume 5 tokens → bucket becomes 71. State after: bucket=71.
+
+Event 11 (t=2.3): request with weight=4, timestamp=2.3 → consume 4 tokens → bucket becomes 67. State after: bucket=67.
+
+Event 12 (t=2.5): burst detected (two high-weight requests within 0.5s) → allow up to 20% more consumption for next three requests → weight=8, consume 8×1.2 = 9.6 → floor to 9 → bucket becomes 58. State after: bucket=58.
+
+Event 13 (t=2.7): request with weight=12, timestamp=2.7 → due to burst override, consume 12×1.2 = 14.4 → floor to 14 → bucket becomes 44. State after: bucket=44.
+
+Event 14 (t=3.0): refill occurs → add 10 tokens → bucket becomes 54. State after: bucket=54.
+
+Event 15 (t=3.2): request with weight=6, timestamp=3.2 → consume 6 tokens → bucket becomes 48. State after: bucket=48.
+
+Event 16 (t=3.4): request with weight=0 → accepted → bucket remains 48. State after: bucket=48.
+
+Event 17 (t=3.5): request with weight=15, timestamp=3.5 → consume 15 tokens → bucket becomes 33. State after: bucket=33.
+
+Event 18 (t=3.6): request with weight=20, timestamp=3.6 → consume 20 tokens → bucket becomes 13. State after: bucket=13.
+
+Event 19 (t=4.0): refill occurs → add 10 tokens → bucket becomes 23. State after: bucket=23.
+
+Event 20 (t=4.5): request with weight=8, timestamp=4.5 → consume 8 tokens → bucket becomes 15. State after: bucket=15.
+
+Event 21 (t=5.0): refill occurs → add 10 tokens → bucket becomes 25. State after: bucket=25.
+
+Event 22 (t=5.3): request with weight=7, timestamp=5.3 → consume 7 tokens → bucket becomes 18. State after: bucket=18.
+
+Event 23 (t=5.4): request with weight=0 → accepted → bucket remains 18. State after: bucket=18.
+
+Event 24 (t=6.0): refill occurs → add 10 tokens → bucket becomes 28. State after: bucket=28.
+
+Event 25 (t=6.2): request with weight=9, timestamp=6.2 → consume 9 tokens → bucket becomes 19. State after: bucket=19.
+
+Event 26 (t=6.4): request with weight=3, timestamp=6.4 → consume 3 tokens → bucket becomes 16. State after: bucket=16.
+
+Event 27 (t=6.5): request with weight=0 → accepted → bucket remains 16. State after: bucket=16.
+
+Event 28 (t=7.0): refill occurs → add 10 tokens → bucket becomes 26. State after: bucket=26.
+
+Event 29 (t=7.3): request with weight=5, timestamp=7.3 → consume 5 tokens → bucket becomes 21. State after: bucket=21.
+
+Event 30 (t=7.4): request with weight=8, timestamp=7.4 → consume 8 tokens → bucket becomes 13. State after: bucket=13.
+
+Event 31 (t=7.5): request with weight=10, timestamp=7.5 → consume 10 tokens → bucket becomes 3. State after: bucket=3.
+
+Event 32 (t=8.0): refill occurs → add 10 tokens → bucket becomes 13. State after: bucket=13.
+
+Event 33 (t=8.2): request with weight=4, timestamp=8.2 → consume 4 tokens → bucket becomes 9. State after: bucket=9.
+
+Event 34 (t=8.5): request with weight=0 → accepted → bucket remains 9. State after: bucket=9.
+
+Event 35 (t=8.6): request with weight=12, timestamp=8.6 → consume 12 tokens → bucket becomes -3 → set to zero. State after: bucket=0.
+
+Event 36 (t=9.0): refill occurs → add 10 tokens → bucket becomes 10. State after: bucket=10.
+
+Event 37 (t=9.5): request with weight=8, timestamp=9.5 → consume 8 tokens → bucket becomes 2. State after: bucket=2.
+
+Event 38 (t=10.0): refill occurs → add 10 tokens → bucket becomes 12. State after: bucket=12.
+
+Final state: bucket = 12
+
+Acceptance stats:
+- Total requests: 5000
+- Requests with weight zero: 3 → all accepted
+- Requests rejected due to insufficient tokens: 47 (from trace analysis)
+- Acceptance rate overall: 99.06% (4953 / 5000)
+
+Rejection spikes:
+- At t=3.6: rejection of request with weight=20 → bucket was at 13, consumed 20 → insufficient → rejected
+- At t=8.6: request with weight=12 → bucket had only 9 tokens → rejected (after consumption, bucket would go negative)
+- At t=7.5: request with weight=10 → bucket had 3

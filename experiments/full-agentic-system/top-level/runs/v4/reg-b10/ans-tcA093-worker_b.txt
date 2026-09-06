@@ -1,0 +1,32 @@
+Phase 1 RULE SCAN:
+
+- Rule: "Permissive license strings are classified as 'permissive ok' if they contain 'MIT', 'BSD', 'Apache', or 'ISC' in any form (case-insensitive), including URL forms like 'https://...' or abbreviations like 'bsd-3-clause'." → Triggered by event: package classification  
+- Rule: "Weak-copyleft licenses are identified when the string contains 'GPLv2', 'LGPLv2', 'AGPLv3', or variants with 'or later' clauses, including typos such as 'Gplv2' or 'Lgpl-v2'." → Triggered by event: package classification  
+- Rule: "Strong-copyleft licenses are flagged when the string contains 'GPLv3', 'GNU GPL v3', or any version of GPL with a 'strong' modifier, including variants like 'GPL-3.0-only' or 'GPLv3+'." → Triggered by event: package classification  
+- Rule: "Unknown license strings (no known pattern match) are classified as 'unknown' and added to the investigate list; if the string contains a URL pointing to a license file, that is treated as evidence of unknown status." → Triggered by event: package classification  
+- Rule: "If a package has a dual-license with a choice clause (e.g., 'MIT or GPL-3.0'), and one of the licenses is strong-copyleft, then the choice clause must be evaluated using the policy rule that permits only permissive or weak-copyleft under explicit choice." → Triggered by event: dual-license resolution  
+- Rule: "Transitive dependency violation occurs when a package with a permissive license has any child dependency that carries a strong-copyleft license; this triggers a violation flag and is propagated up the dependency tree to all ancestors of that child." → Triggered by event: transitive propagation  
+- Rule: "If two license strings are declared for one package (e.g., in different files), both must be processed, and if one is strong-copyleft or unknown, it triggers a 'dual-license conflict' flag with the rule applied to both instances." → Triggered by event: duplicate license detection  
+- Rule: "A package with an unknown license that appears in a transitive path where a permissive parent exists must be investigated and logged as a potential violation; this is not resolved until human review or further evidence." → Triggered by event: transitive propagation  
+- Rule: "If a strong-copyleft license is found in any direct or indirect dependency of a package, that package is marked as violating policy and added to the violations list regardless of its own license type." → Triggered by event: transitive propagation  
+- Rule: "Packages with weak-copyleft licenses are only allowed if explicitly listed; otherwise, they trigger an 'investigate' flag for human review." → Triggered by event: package classification  
+
+Phase 2 LEDGER WALK:
+
+- Event: Classify license string "MIT" in package A → State: A → permissive ok  
+- Event: Classify license string "GPLv3" in package B → State: B → strong-copyleft, added to violations list  
+- Event: Classify license string "LGPLv2.1" in package C → State: C → weak-copyleft, added to policy bucket 'weak-copyleft'  
+- Event: Classify license string "BSD-3-Clause" in package D → State: D → permissive ok  
+- Event: Classify license string "Gplv2-or-later" in package E → State: E → weak-copyleft, added to policy bucket 'weak-copyleft'  
+- Event: Classify license string "unknown-license-url.com" in package F → State: F → unknown, added to investigate list  
+- Event: Classify license string "MIT or GPL-3.0" in package G → State: G → dual-license with choice clause; rule applied: strong-copyleft component triggers violation flag; G marked as violating due to presence of GPL-3.0  
+- Event: Detect duplicate licenses in package H (declared as 'Apache-2.0' and 'Apache-2.0-only') → State: H → both strings match, no conflict; H remains permissive ok  
+- Event: Detect duplicate licenses in package I (declared as 'GPLv3' and 'GPLv3+') → State: I → both are strong-copyleft; I marked as violating due to strong-copyleft presence  
+- Event: Transitive propagation: A depends on B, which has GPLv3 → State: A → now flagged with violation due to transitive path from B  
+- Event: Transitive propagation: C depends on D, which is permissive ok → State: C remains weak-copyleft; no change  
+- Event: Transitive propagation: E depends on F (unknown) → State: E → unknown; added to investigate list; no violation yet  
+- Event: Final verification of violations list: A and G and I are in violation list; C is weak-copyleft, allowed; D permissive ok; B strong-copyleft, forbidden  
+- Event: Final investigation list: F (unknown), E (unknown via transitive) → both remain in investigate list  
+
+Final answer JSON:
+{"violations": ["A", "G", "I"], "investigate": ["F", "E"], "dual_license_resolution": {"package": "G", "reason": "choice clause contains GPL-3.0, which is strong-copyleft; policy forbids strong-copyleft in choice clauses"}, "transitive_violations": ["A"], "policy_buckets": {"permissive_ok": ["D"], "weak_copyleft": ["C", "E"], "strong_copyleft": ["B", "I"]}, "duplicate_license_packages": ["H", "I"], "unknown_cases": ["F", "E"]}

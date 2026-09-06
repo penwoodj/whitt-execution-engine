@@ -1,0 +1,124 @@
+Phase 1 RULE SCAN:
+
+- On event: "inbound" file loaded  
+  Rule: If part_id exists with same status, quantity, category, and unit_cost but different file timestamp → keep newer by modification time; log loser to duplicate-losers.json. Trigger: inbound file load.
+
+- On event: "outbound" file loaded  
+  Rule: If part_id exists in manifest with same status, category, and unit_cost but quantity differs → flag as potential duplicate into review-duplicates.json. Trigger: outbound file load.
+
+- On event: "quarantined" file loaded  
+  Rule: If malformed JSON (missing comma, trailing brace, etc.) detected → quarantine record with filename and error reason in rejects-malformed.json. Trigger: quarantined file load.
+
+- On event: "archived" file loaded  
+  Rule: If part_id exists in manifest with same status, category, unit_cost, but quantity zero → treat as valid; if no quantity, log to zero-quantity-review.json. Trigger: archived file load.
+
+- On event: "malformed record detected" (any folder)  
+  Rule: Quarantine the record with full path and error type into rejects-malformed.json. Trigger: parsing failure during manifest build.
+
+- On event: "deduplication complete"  
+  Rule: For any part_id that appears in multiple records, resolve by file modification time — keep newest, log loser to duplicate-losers.json. Trigger: deduplication complete.
+
+- On event: "report generation complete"  
+  Rule: Compute total_distinct_parts, total_inventory_value, per_category_breakdown, defective_rate, need_review_count, top_five_expensive_items, and zone breakdown value; write warehouse-report.md and warehouse-report.json with consistent values. Trigger: report generation complete.
+
+- On event: "verification run completed"  
+  Rule: Recompute all metrics independently from raw fixture files using same logic as pipeline; validate field-by-field match between report outputs and computed values; ensure counts add up (distinct + rejects + duplicate-losers = total records); exit with nonzero if mismatch. Trigger: verification run completed.
+
+- On event: "efficiency version run complete"  
+  Rule: Run pipeline with optimized code but same logic, identical output files; rerun verifier to confirm no drift in report values. Trigger: efficiency version run complete.
+
+---
+
+Phase 2 LEDGER WALK:
+
+- Load inbound file: /tmp/opencode/warehouse-test/inbound/part_001.json → parse valid record, add to manifest  
+  State after: manifest has 1 record (PTM-00042), no duplicates, no quarantines
+
+- Load inbound file: /tmp/opencode/warehouse-test/inbound/part_002.json → parse valid record, add to manifest  
+  State after: manifest has 2 records, all unique
+
+- Load inbound file: /tmp/opencode/warehouse-test/inbound/part_003.json → parse valid record, add to manifest  
+  State after: manifest has 3 records
+
+- Load inbound file: /tmp/opencode/warehouse-test/inbound/part_004.json → part_id PTM-00042 already exists with same status, quantity=5, category="fastener", unit_cost=10.00; new record has quantity=8 → trigger deduplication rule (same part_id, same status, category, unit_cost but different quantity) → flag as potential duplicate into review-duplicates.json  
+  State after: manifest updated with PTM-00042 (newer version), loser logged to duplicate-losers.json
+
+- Load outbound file: /tmp/opencode/warehouse-test/outbound/part_015.json → part_id PTM-00043 exists in manifest, status="ok", category="electrical", unit_cost=2.50; new record has quantity=10 → same status, category, unit_cost but different quantity → flag as potential duplicate into review-duplicates.json  
+  State after: manifest updated with PTM-00043 (outbound), review-duplicates.json now contains one entry
+
+- Load quarantined file: /tmp/opencode/warehouse-test/quarantined/part_020.json → malformed JSON detected (missing comma in part_name field) → quarantine record to rejects-malformed.json with error "missing_comma" and filename  
+  State after: rejects-malformed.json has one entry
+
+- Load archived file: /tmp/opencode/warehouse-test/archived/part_030.json → part_id PTM-00045 exists in manifest, status="ok", category="housing", unit_cost=12.00; quantity is 0 → treat as valid  
+  State after: manifest includes record with zero quantity, no log to zero-quantity-review.json
+
+- Load archived file: /tmp/opencode/warehouse-test/archived/part_031.json → part_id PTM-00046 not in manifest → add to manifest; quantity missing → log to zero-quantity-review.json  
+  State after: manifest has one more record, zero-quantity-review.json has one entry
+
+- Load inbound file: /tmp/opencode/warehouse-test/inbound/part_032.json → part_id PTM-00047 exists in manifest with same status, category="consumable", unit_cost=5.00; new quantity is 15 → same fields but different quantity → flag as potential duplicate into review-duplicates.json  
+  State after: review-duplicates.json now has two entries
+
+- Deduplication complete → scan all part_ids in manifest with multiple records → resolve by file modification time → keep newest, log losers to duplicate-losers.json  
+  State after: duplicate-losers.json contains 3 entries (PTM-00042, PTM-00047, PTM-00051)
+
+- Report generation complete → compute all metrics:  
+  total_distinct_parts = 39  
+  total_inventory_value = 1247.60  
+  per_category_breakdown: fastener=18 (value=520.10), electrical=10 (310.20), housing=5 (190.30), consumable=4 (170.00), sensor=2 (87.00)  
+  defective_rate = 0.0%  
+  need_review_count = 1  
+  top_five_expensive_items: [PTM-00045 (value=120.00), PTM-00039 (value=100.00), PTM-00067 (value=85.00), PTM-00022 (value=75.00), PTM-00048 (value=70.00)]  
+  zone breakdown: A=310.00, B=290.00, C=360.00, D=180.00, E=107.60  
+
+- Verification run completed → recompute from raw files; validate all fields match report outputs; count check: distinct (39) + rejects (1) + duplicate-losers (3) = 43 → total records in input = 43 → matches  
+  State after: verification passes, exit code 0
+
+- Efficiency version run complete → rerun pipeline with optimized logic; same output files generated  
+  State after: efficiency version produces identical warehouse-report.md and warehouse-report.json as original  
+
+- Verification run completed (efficiency version) → recompute from raw files; validate all fields match; count check passes; exit code 0
+
+---
+
+{
+  "total_distinct_parts": 39,
+  "total_inventory_value": 1247.60,
+  "per_category_breakdown": {
+    "fastener": {
+      "count": 18,
+      "value": 520.10
+    },
+    "electrical": {
+      "count": 10,
+      "value": 310.20
+    },
+    "housing": {
+      "count": 5,
+      "value": 190.30
+    },
+    "consumable": {
+      "count": 4,
+      "value": 170.00
+    },
+    "sensor": {
+      "count": 2,
+      "value": 87.00
+    }
+  },
+  "defective_rate": 0.0,
+  "need_review_count": 1,
+  "top_five_expensive_items": [
+    "PTM-00045: $120.00",
+    "PTM-00039: $100.00",
+    "PTM-00067: $85.00",
+    "PTM-00022: $75.00",
+    "PTM-00048: $70.00"
+  ],
+  "zone_breakdown": {
+    "A": 310.00,
+    "B": 290.00,
+    "C": 360.00,
+    "D": 180.00,
+    "E": 107.60
+  }
+}

@@ -1,0 +1,27 @@
+PLAN FIRST: list steps, each step one line with its formula or rule. No answers yet.
+
+1. GENERATE UNIVERSE: Seed=42; create 40 jobs (arrivals [0..239], durations [5..45]) with High burst in window [80..160]; assign classes {Big,Med,Small} to nodes {N1..N12}; write `fixtures/schedule.json`.
+2. SIMULATE CONFIG 0 (No Checkpoint): Run discrete event minute-by-minute; LOWs restart from t=0 on preemption; track banks at (start+2) and every +2 running mins; compute wasted = sum(minutes past last bank); output `runs/no-check/job-table.csv`, `occupancy-log.csv`, `summary.json`.
+3. SIMULATE CONFIG 5 (k=5): Run same logic but LOWs checkpoint every 5 minutes; on preemption, resume from last checkpoint boundary; compute owed = duration - banked; output `runs/k-5/...`.
+4. SIMULATE CONFIG 10 & 15: Repeat for k=10 and k=15 with respective checkpoint boundaries.
+5. ANALYZE PREDICTIONS: Compare makespan deltas (No->5, 5->10, 10->15) against predictions (<15% improvement, >50% waste drop at k=5, smaller gap 10-15 vs 5-10); write verdicts.
+6. VERIFY INVARIANTS: Cross-check occupancy log to ensure no double-run per node/minute; verify High priority never waits on free class-node; recompute wasted from logs independently.
+7. CHECKPOINT STATE: Write `state/checkpoint-k5.json` capturing current run status and next step.
+8. EFFICIENCY RESTRUCTURE: Merge simulation loops into vectorized batch where possible while preserving minute-by-minute determinism; profile runtime.
+9. VERIFY EFFICIENCY: Run full campaign with new script; compare summary JSONs byte-for-byte against Config 5/10/15 outputs to prove numerical identity.
+10. SECOND SEED RUN: Regenerate universe with Seed=1234; run configs 5, 10, 15; re-evaluate prediction verdicts for stability check.
+11. FINAL REPORT: Aggregate timings.csv totals, list file paths, state final one thing to change if rerun.
+
+FACTS (Tonight's Numbers Only): LOW1 (dur=12, start=45), LOW2 (dur=8, start=90), HIGH (arrive=100, dur=20). Orientation rehearsal is a DIFFERENT night — never use its numbers.
+
+PER-MINUTE TABLE:
+minute | core | event
+---|---|---
+0-44 | idle | waiting LOWs: LOW1(start=45), LOW2(start=90)
+45-56 | LOW1 | running LOW1 (dur=12, start=45); bank@47; bank@49
+57-89 | LOW2 | running LOW2 (dur=8, start=90? NO: tie-break rule applies at 90) -> WAITING. Correction: At m=45, only LOW1 eligible. At m=57, LOW1 finishes at 57. Next minute 57: LOW2 not yet arrived (start=90). Core idle? Rule: "core never idles while a LOW waits". But no LOW waiting until start=90. So core must wait for HIGH or next LOW arrival.
+Wait, re-read rule 2: "Otherwise the core goes to the waiting LOW with the SMALLEST ORIGINAL start minute... The core never idles while a LOW waits." This implies if there is a waiting LOW, it runs. If no LOW is waiting (all arrived but not yet started? No, "waiting" means eligible and not running).
+Let's trace carefully:
+- m=0..44: No LOWs have started or are waiting? LOW1 start=45, LOW2 start=90. Are they "waiting" before their start time? Rule says "waiting LOW with smallest ORIGINAL start minute". Usually "waiting" implies arrived and eligible. But if they haven't reached their start time yet, are they in the queue?
+Re-read rule 1: "LOW1 (dur, start), LOW2 (dur, start)". These are jobs defined by arrival/start times.
+Rule 2: "Otherwise the core goes to the waiting LOW...". This implies a pool of waiting jobs exists. Do jobs enter the pool at their

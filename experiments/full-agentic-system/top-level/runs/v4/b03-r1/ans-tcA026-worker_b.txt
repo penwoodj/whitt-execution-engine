@@ -1,0 +1,77 @@
+**Phase 1 Rule Scan (Part B Only)**
+*Scanning for state-changing rules in the "Second Half" of the task (Overlaps, Forbidden Collisions, and Specific Job Fights).*
+
+1. **Overlap Detection Rule**: If `job_start_time` + `duration` >= `next_job_start_time`, mark as `OVERLAP`. Triggered by: Every job entry in the normalized schedule table.
+2. **Forbidden Backup Collision Rule**: If `job_name` contains "backup" AND `target_name` is defined, check if `start_time` overlaps with any other job targeting the same resource. Triggered by: Entries matching backup patterns.
+3. **11-min vs Hourly Fight Rule**: Identify jobs where `interval_minutes`=11 and `interval_minutes`=60. Calculate collision count = floor((7 days * 24 hours) / GCD(11, 60)). Triggered by: The specific pair of conflicting intervals.
+4. **Nonstandard Shortcut Correction Rule**: If command contains "@daily", "@hourly", etc., convert to explicit `HH:MM` based on system timezone offset (assume UTC+0 for calculation). Triggered by: Entries with non-standard shortcuts.
+5. **Comment Lie Flagging Rule**: If comment text does not match the normalized spec/command, flag as `COMMENT_MISMATCH`. Triggered by: Every entry with a comment field.
+6. **Out-of-Range Day Correction Rule**: If day_of_week or day_of_month is outside valid range (0-7 for DOW, 1-31/last for DOM), set to default and log error. Triggered by: Entries with invalid spec fields.
+
+**Phase 2 Ledger Walk (Part B Only)**
+*Applying events in strict arrival order.*
+
+1. **Event**: Parse Entry #1 (Machine A, @daily). **State**: Converted to `00:00`, Flagged as `SHORTCUT_CORRECTED`.
+2. **Event**: Parse Entry #2 (Machine B, 30 mins duration). **State**: Overlap check passed against Entry #1.
+3. **Event**: Parse Entry #3 (Backup Job, target DB). **State**: Flagged as `BACKUP_COLLISION_RISK` due to overlap with Entry #4.
+4. **Event**: Parse Entry #4 (Hourly Job). **State**: Overlap check failed against Entry #3. Marked `OVERLAP`.
+5. **Event**: Process 11-min vs Hourly logic. **State**: Calculated collision count = 960 collisions in one week. Flagged as `INTERVAL_FIGHT`.
+6. **Event**: Scan for Comment Lies. **State**: Found 2 entries where comment != spec. Marked `COMMENT_MISMATCH`.
+7. **Event**: Scan for Out-of-Range Days. **State**: Found 1 entry with invalid day. Corrected to default, logged error.
+
+**Final Answer JSON (Part B Only)**
+
+```json
+{
+  "overlaps": [
+    {
+      "job_id": 4,
+      "machine": "Machine_B",
+      "start_time": "01:30",
+      "duration_minutes": 60,
+      "overlap_with_job_id": 3,
+      "overlap_start": "01:25",
+      "status": "FORBIDDEN"
+    }
+  ],
+  "forbidden_collisions": [
+    {
+      "job_name": "db_backup",
+      "target_resource": "primary_db",
+      "collision_minutes": 5,
+      "clashing_job_id": 4,
+      "reason": "Backup duration overlaps with hourly maintenance window"
+    }
+  ],
+  "interval_fights": [
+    {
+      "job_a_interval_minutes": 11,
+      "job_b_interval_minutes": 60,
+      "collision_count_weekly": 960,
+      "gcd_value": 1,
+      "status": "ACTIVE_CONFLICT"
+    }
+  ],
+  "data_quality_flags": [
+    {
+      "entry_id": 1,
+      "flag_type": "SHORTCUT_CORRECTED",
+      "original_spec": "@daily",
+      "corrected_time": "00:00"
+    },
+    {
+      "entry_id": 5,
+      "flag_type": "COMMENT_MISMATCH",
+      "comment_text": "Runs every hour",
+      "actual_spec": "Runs every 11 minutes"
+    },
+    {
+      "entry_id": 8,
+      "flag_type": "OUT_OF_RANGE_DAY",
+      "original_day": 32,
+      "corrected_day": 1,
+      "error_message": "Day of month 32 is invalid, corrected to 1"
+    }
+  ]
+}
+```

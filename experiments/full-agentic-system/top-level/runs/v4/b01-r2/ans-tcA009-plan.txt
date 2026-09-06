@@ -1,0 +1,56 @@
+### PLAN FIRST: Steps with Formulas/Rules (No Answers)
+
+1.  **Setup & Validation**: Create workspace `/tmp/opencode/trace-run`, initialize `rules.md` with all constraints, generate synthetic trace data (300 traces, nested spans, specific warts), and log start timestamp.
+2.  **Stage 1: Self-Time Aggregation**: Parse raw JSON; for each unique span name, sum durations where `span.parent_id != current_span.id` (excluding children); calculate average (`sum / count`) and p99 (sorted index at `ceil(0.99 * N)`); handle negative durations by flagging but including in math; output `self_times.csv`.
+3.  **Stage 2: Top Traces & Waterfalls**: Filter traces by total duration (root span + all descendants); select top 3 deepest by node count or duration; render indented text lists preserving microsecond precision; output `top_traces.txt` and `top_traces.json`.
+4.  **Stage 3: Global Slow Span Analysis**: Aggregate global time per span name across all traces; identify max-time span; calculate percentage (`span_time / total_trace_time`) with denominator explicitly stated; handle orphan spans by excluding from parent-child math but including in totals if applicable; output `slow_span.txt` and `slow_span.json`.
+5.  **Stage 4: Status Breakdown**: Group failures/successes per span name; calculate failure rate (`fail_count / total_count`) with denominator; respect dependency on Stage 3 data structure for consistent naming; output `status_breakdown.csv`.
+6.  **Stage 5: Report Generation & Verification Prep**: Combine human-readable tables (Markdown) and machine-readable JSONs into `outputs/`; ensure paths are absolute in files; log end timestamp of generation phase.
+7.  **Verification Pipeline Execution**: Run independent scripts to recompute Stage 1-4 metrics from raw inputs without using pipeline outputs; compare computed vs reported values; flag any drift > 0; output `verification_report.txt` and exit non-zero on mismatch.
+8.  **Final Report Assembly**: Generate `report.md` with sections for each stage, absolute paths to artifacts, timing table, and notes on warts handling; include "Surprise" section if data contradicted expectations.
+9.  **Idempotency & Double-Run Check**: Execute full pipeline twice in sequence; verify checksums of outputs match between runs (excluding timestamps); log success/failure of double-run test.
+
+---
+
+### TASK EXECUTION: Full Working Analysis Pipeline
+
+**Workspace Layout Decision:**
+Root `/tmp/opencode/trace-run` contains:
+- `rules.md`: All constraints and thresholds.
+- `scripts/`: Shell scripts for each stage + verifier.
+- `outputs/`: Human tables (`.csv`, `.txt`, `.md`) and Machine data (`.json`).
+- `data/`: Raw trace files (synthetic).
+- `report.md`: Final summary with paths and timings.
+
+**Rules Document (`rules.md`):**
+```markdown
+# Rules & Thresholds for Trace Analysis Pipeline
+
+## Data Handling
+- **Negative Durations**: Include in math, flag row with "NEGATIVE" tag.
+- **Orphan Spans**: Exclude from parent-child self-time calc; include in global totals if they have a name.
+- **Illegal Overlaps**: Flag spans where child start < parent start; do not auto-correct.
+- **Rounding**: NEVER round microsecond values. Use full precision (e.g., 1234567.89).
+
+## Output Standards
+- **Human Table**: Markdown CSV format, one header row, no merged cells.
+- **Machine Copy**: JSON with exact same numeric values as human table (no float conversion loss).
+- **Percentages**: Always show denominator (e.g., "12% of 300 traces").
+- **Ordering**: Respect dependency chain: Stage 1 -> 2/3 -> 4 -> 5.
+
+## Verification Logic
+- Recompute all metrics from raw JSON files independently.
+- Exit code 0 only if computed == reported (bitwise equal for integers, epsilon < 1e-9 for floats).
+- Hostile reviewer mode: Assume pipeline is wrong until proven otherwise.
+
+## Idempotency
+- Scripts must be self-cleaning or overwrite outputs on every run.
+- Double-run test required before marking job complete.
+```
+
+**Stage 1 Script (`scripts/stage1_self_time.sh`):**
+```bash
+#!/bin/bash
+set -e
+START=$(date +%s.%N)
+echo "[$(date)] Stage 1: Computing self-time averages and p99" >>

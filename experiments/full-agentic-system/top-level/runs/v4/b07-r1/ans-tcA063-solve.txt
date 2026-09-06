@@ -1,0 +1,52 @@
+Phase 1 RULE SCAN:
+
+- Daily backup rule: A new daily backup is created every day at midnight, with a size drawn from [100MB, 250MB] uniformly, corruption chance set to 1% per snapshot. Triggered by: daily event (every day).
+- Weekly promotion rule: On the first day of each week, all daily backups from the prior week are promoted to weekly tier if they are at least 7 days old and have not been corrupted. Triggered by: weekly day (day 0 of week).
+- Monthly promotion rule: On the first day of each month, all weekly backups from the prior month are promoted to monthly tier if they are at least 4 weeks old and have not been corrupted. Triggered by: monthly day (day -1 of month).
+- Grandfather-father-son rotation rule: A snapshot is retained only if it satisfies the grandfather-father-son hierarchy: daily backups are kept for 7 days, weekly backups for 4 weeks, monthly backups for 12 months. If a backup fails to meet tier retention, it is removed from that tier and falls back to the previous tier (e.g., a corrupted daily backup is dropped; if no prior tier exists, it is discarded). Triggered by: every day during rotation check.
+- Corrupted snapshot fallback rule: When a retained snapshot corrupts (1% chance per snapshot), the policy falls back to the most recent valid snapshot in the previous tier (e.g., a corrupted weekly backup falls back to the last valid daily backup from the same week). If no such snapshot exists, the system logs an error and marks the retention as failed. Triggered by: corruption event (1% per snapshot).
+- Restore-drill eligibility rule: A restore drill is triggered randomly every 30 days; it requires a snapshot that was eligible for retention at the time of the drill request. If no such snapshot exists, the drill fails and is logged with the reason "no eligible snapshot". Triggered by: random drill event (every 30 days).
+- Deletion rule: At the end of each month, all monthly backups older than 12 months are deleted. Triggered by: end-of-month day.
+- Promotion ambiguity resolution rule: When a weekly and monthly backup fall on the same day (e.g., day 1 of January), the weekly backup is promoted first, then the monthly backup. This ensures no overlap in promotion timing. Triggered by: overlapping day event (same day for both week and month).
+- Backup size override rule: If a daily backup is scheduled during a holiday (defined as Jan 1, July 4, Nov 11), its size is set to 500MB instead of the default. Triggered by: holiday day.
+- Restore-drill pass rate rule: A restore drill passes only if the requested snapshot exists and has not been corrupted. If it fails due to non-existence or corruption, the event is logged with details. Triggered by: each restore drill request.
+
+Phase 2 LEDGER WALK:
+
+2024-01-01: Daily backup created (size=150MB), corruption chance = 1%. State: daily[day0] exists.
+2024-01-02: Daily backup created (size=200MB). State: daily[day1] exists, daily[day0] retained.
+2024-01-03: Daily backup created (size=180MB). State: daily[day2] exists, daily[day0], [day1] retained.
+2024-01-04: Daily backup created (size=250MB). State: daily[day3] exists, daily[day0]-[day2] retained.
+2024-01-05: Daily backup created (size=170MB). State: daily[day4] exists, daily[day0]-[day3] retained.
+2024-01-06: Daily backup created (size=190MB). State: daily[day5] exists, daily[day0]-[day4] retained.
+2024-01-07: Daily backup created (size=160MB). State: daily[day6] exists, daily[day0]-[day5] retained. Weekly promotion triggered: daily backups from Jan 0–6 promoted to weekly tier. State: weekly[week0] = [d0-d6], daily[day0]-[day5] retained.
+2024-01-08: Daily backup created (size=230MB). State: daily[day7] exists, daily[day0]-[day6] retained. Grandfather-father-son check: daily backups kept for 7 days → all valid until day7.
+2024-01-09: Daily backup created (size=185MB). State: daily[day8] exists, daily[day0]-[day7] retained.
+2024-01-10: Daily backup created (size=210MB). State: daily[day9] exists, daily[day0]-[day8] retained.
+2024-01-11: Daily backup created (size=165MB). State: daily[day10] exists, daily[day0]-[day9] retained.
+2024-01-12: Daily backup created (size=240MB). State: daily[day11] exists, daily[day0]-[day10] retained.
+2024-01-13: Daily backup created (size=175MB). State: daily[day12] exists, daily[day0]-[day11] retained.
+2024-01-14: Daily backup created (size=195MB). State: daily[day13] exists, daily[day0]-[day12] retained.
+2024-01-15: Daily backup created (size=180MB). State: daily[day14] exists, daily[day0]-[day13] retained.
+2024-01-16: Daily backup created (size=220MB). State: daily[day15] exists, daily[day0]-[day14] retained.
+2024-01-17: Daily backup created (size=190MB). State: daily[day16] exists, daily[day0]-[day15] retained.
+2024-01-18: Daily backup created (size=170MB). State: daily[day17] exists, daily[day0]-[day16] retained.
+2024-01-19: Daily backup created (size=205MB). State: daily[day18] exists, daily[day0]-[day17] retained.
+2024-01-20: Daily backup created (size=160MB). State: daily[day19] exists, daily[0]-[day18] retained.
+2024-01-21: Daily backup created (size=235MB). State: daily[day20] exists, daily[0]-[day19] retained.
+2024-01-22: Daily backup created (size=180MB). State: daily[day21] exists, daily[0]-[day20] retained.
+2024-01-23: Daily backup created (size=195MB). State: daily[day22] exists, daily[0]-[day21] retained.
+2024-01-24: Daily backup created (size=210MB). State: daily[day23] exists, daily[0]-[day22] retained.
+2024-01-25: Daily backup created (size=170MB). State: daily[day24] exists, daily[0]-[day23] retained.
+2024-01-26: Daily backup created (size=240MB). State: daily[day25] exists, daily[0]-[day24] retained.
+2024-01-27: Daily backup created (size=185MB). State: daily[day26] exists, daily[0]-[day25] retained.
+2024-01-28: Daily backup created (size=225MB). State: daily[day27] exists, daily[0]-[day26] retained.
+2024-01-29: Daily backup created (size=190MB). State: daily[day28] exists, daily[0]-[day27] retained.
+2024-01-30: Daily backup created (size=200MB). State: daily[day29] exists, daily[0]-[day28] retained.
+2024-01-31: Daily backup created (size=165MB). State: daily[day30] exists, daily[0]-[day29] retained. Deletion rule triggered: no monthly backups yet → no deletion.
+
+2024-02-01: Daily backup created (size=170MB). State: daily[day31] exists, daily[0]-[day30] retained. Weekly promotion triggered: daily backups from Jan 0–31 promoted to weekly tier. State: weekly[week1] = [d0-d31], daily[0]-[day30] retained.
+
+2024-02-07: Daily backup created (size=250MB). State: daily[day32] exists, daily[0]-[day31] retained. Grandfather-father-son check: daily backups kept for 7 days → valid until day32.
+
+2024-02-14: Daily backup created (

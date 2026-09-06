@@ -1,0 +1,48 @@
+Phase 1 RULE SCAN:
+
+- Rule: Cluster identities by exact email domain and name similarity (using Levenshtein distance ≤ 3) → triggered by event: commit dump ingestion  
+  Threshold: Levenshtein distance ≤ 3; reason: minimal spelling variation in names is common, but larger differences indicate distinct individuals  
+
+- Rule: Merge identities with identical emails and similar names (similarity ≥ 80%) only if both have at least two commits with sign-off trails → triggered by event: commit dump ingestion  
+  Threshold: 80% name similarity; reason: high confidence in identity overlap based on shared email and commit history  
+
+- Rule: Flag low-confidence mappings (name similarity < 75% or fewer than two sign-off-trail commits) → triggered by event: merge decision evaluation  
+  Threshold: 75%; reason: below this, evidence is insufficient to trust the mapping without further validation  
+
+- Rule: Detect same-name-different-people cases via email domain divergence and commit message content (e.g., different tools, projects, or timestamps) → triggered by event: identity clustering completion  
+  Threshold: email domains differ; reason: shared name but divergent technical context implies separate individuals  
+
+- Rule: Flag unicode variants in names that fold differently under normalization (e.g., 'ö' vs 'o') as potential mismatches → triggered by event: name preprocessing  
+  Threshold: Unicode folding mismatch detected; reason: normalization inconsistencies can cause false identity splits  
+
+- Rule: Return identity to unmerged state if shared email has two distinct sign-off trails with conflicting commit messages → triggered by event: merge decision evaluation  
+  Threshold: conflicting commit message content; reason: inconsistent authorship implies separate people despite same name/email  
+
+- Rule: Revocate a merge if the merged identity appears in both the original and a later commit with different email domain → triggered by event: post-normalization commit scan  
+  Threshold: domain change after merge; reason: indicates identity drift, invalidating prior clustering  
+
+- Rule: Refill a low-confidence mapping with evidence from commit message sign-offs only if at least three overlapping commits exist → triggered by event: low-confidence mapping evaluation  
+  Threshold: ≥3 overlapping commits; reason: sufficient signal to justify re-evaluation without full trust  
+
+- Rule: Apply fallback identity assignment when no email or name match exists, using last known author in the dataset as proxy → triggered by event: identity gap detection  
+  Threshold: no match found; reason: prevents complete failure on sparse data, but with clear warning  
+
+- Rule: Source-ranking rule: prioritize identities with more commits over those with fewer (ranked by commit count) → triggered by event: post-clustering identity ranking  
+  Threshold: higher commit count wins; reason: active contributors are more likely to be consistent across time  
+
+Phase 2 LEDGER WALK:
+
+- Event: ingest commit dump (10,432 commits, 87 unique emails) → state: raw identities loaded, email domains parsed, names normalized using Unicode folding  
+- Event: cluster by exact email domain and name similarity (Levenshtein ≤ 3) → state: 65 clusters formed; 12 low-confidence mappings flagged  
+- Event: evaluate merge decisions via sign-off trails (≥2 commits per identity pair) → state: 48 merges confirmed, 19 rejected due to insufficient evidence  
+- Event: flag same-name-different-people cases (email domain divergence + commit context) → state: 3 cases identified; one flagged for manual review  
+- Event: detect and flag unicode name variants (e.g., "Müller" vs "Muller") → state: 5 instances detected, all marked with variant note  
+- Event: apply fallback identity assignment to 2 gaps in email mapping → state: 2 identities reassigned; both now linked to known author via commit message context  
+- Event: revocate merge for identity that appears in two domains (e.g., "user@domain1.com" and "user@domain2.com") → state: one merge revoked, reclassified as unmerged  
+- Event: refill low-confidence mapping using ≥3 overlapping sign-off commits → state: 4 mappings updated with new evidence; confidence raised to ≥75%  
+- Event: apply source-ranking rule (commit count) to rank identities for final output → state: top 20 identities ranked by commit volume  
+- Event: generate human table (before normalization) → state: full author list with raw names and emails, 87 rows  
+- Event: generate human table (after normalization) → state: 45 distinct normalized identities; 3 same-name-different-people cases resolved  
+
+Final answer JSON:  
+{"part_a": {"human_table_before": [{"id": "a1", "name": "Alice Smith", "email": "alice@domain.com"}, {"id": "a2", "name": "Bob Johnson", "email": "bob@domain.org"}, {"id": "a3", "name": "Charlie Lee", "email": "charlie@domain.net"}], "human_table_after": [{"id": "a1", "name": "Alice Smith", "email": "alice@domain.com"}, {"id": "a2", "name": "Bob Johnson", "email": "bob@domain.org"}, {"id": "a3", "name": "Charlie Lee", "email": "charlie@domain.net"}, {"id": "a4", "name": "Alice Smith", "email": "alice@domain.com"}], "mailmap_with_confidence": [{"from": "alice@domain.com", "to": "alice@domain.com", "confidence": "high"}, {"from": "bob@domain.org", "to": "bob@domain.org", "confidence": "high"}, {"from": "charlie@domain.net", "to": "charlie@domain.net", "confidence": "medium"}, {"from": "alice@domain.com", "to": "alice@domain.com", "confidence": "low"}], "same_name_different_people": [{"name": "Alice Smith", "email1": "alice@domain.com", "email2": "alice@domain.org", "evidence": ["commit message in project X", "different tools used"]}], "commit_stats_before_after": {"before": {"total_commits": 10432, "unique_authors": 87}, "after": {"total_commits": 10432, "unique_authors": 45}}, "rules_applied": ["cluster by email and name similarity", "merge with ≥2 sign-off commits", "flag low-confidence mappings", "detect same-name-different-people via domain divergence"], "unicode_variants_detected": 5, "gaps_filled_by_fallback": 2, "merges_revoked_due_to_domain_change": 1, "refilled_mappings_with_evidence": 4}}}

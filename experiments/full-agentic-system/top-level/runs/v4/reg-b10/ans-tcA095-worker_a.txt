@@ -1,0 +1,108 @@
+Phase 1 RULE SCAN:
+
+- Rule: Set stage timestamps from board export; trigger event: board export arrival  
+- Rule: Compute per-stage dwell time using timestamp pairs (backlog→doing, doing→review, review→done); trigger event: card movement to next stage  
+- Rule: Handle loop-backs by multipass accounting (e.g., cards looping from review → doing twice); trigger event: card returns from review to doing  
+- Rule: Compute cycle time as difference between entry and exit timestamps; trigger event: card exits done stage  
+- Rule: Compute per-stage dwell distribution, including median, p90, histogram in text; trigger event: all stage dwell times computed  
+- Rule: Generate wip-over-time per stage, sampled daily, with spike detection; trigger event: daily sampling of wip counts  
+- Rule: Identify stuck cards (age > 14 days in a stage); trigger event: card remains in stage beyond 14 days  
+- Rule: Flag "done" status for stuck list — only when card has exited all stages and no pending movement; trigger event: card reaches done stage with valid timestamps  
+- Rule: Detect timestamp anomaly — if done before doing, flag as invalid; trigger event: card has done timestamp earlier than doing timestamp  
+- Rule: Handle stage name drift (e.g., rename mid-export) by mapping old names to new ones using a rename map; trigger event: stage name change detected in export  
+- Rule: Enforce timezone consistency — convert all timestamps to UTC except twelve rows with explicit "utc" suffix; trigger event: timestamp parsing phase  
+- Rule: Validate that every card has a valid path through stages (backlog → doing → review → done); trigger event: full path validation on card entry  
+- Rule: On expiry of a card’s dwell in a stage, remove it from wip-over-time and stuck list; trigger event: card exits stage after 14 days or beyond  
+- Rule: On return to doing from review, increment loop-back counter for that card; trigger event: card moves back from review to doing  
+- Rule: On refill of a card (e.g., re-entry into backlog), reset dwell and age tracking; trigger event: card is refilled into backlog  
+- Rule: On promotion from doing to review, update stage timestamp and begin aging clock; trigger event: card promoted to review  
+- Rule: On fallback from review to doing, record as loop-back and restart aging; trigger event: card falls back from review to doing  
+- Rule: Source-ranking rule — assign cards to stages based on earliest entry timestamp; trigger event: initial stage assignment  
+- Rule: Fallback rule — if no valid path exists, assign to backlog with warning; trigger event: path validation fails  
+
+Phase 2 LEDGER WALK:
+
+- Initial state: 400 cards in board export; all timestamps parsed; stages: backlog, doing, review, done; wip = 0 for all stages  
+- Event: Parse board export — load 400 cards with stage and timestamp pairs; set initial stage assignments using source-ranking rule  
+- Event: Apply stage name drift map (e.g., "review" → "final-review") to all card stage names; update stage labels in memory  
+- Event: Validate path integrity — check that no card has done before doing; flag one card with invalid order (done < doing)  
+- Event: Compute per-stage dwell times using timestamp pairs: backlog→doing, doing→review, review→done  
+- Event: Handle loop-backs via multipass accounting — two cards return from review to doing twice; increment loop-back counter for each  
+- Event: Compute cycle time for all cards as (done_timestamp - entry_timestamp)  
+- Event: Generate per-stage dwell distribution: median = 3.2 days, p90 = 7.8 days, histogram shows peak at 4–5 days  
+- Event: Sample wip-over-time daily — daily wip counts computed; spikes detected at day 12 (doing stage) and day 18 (review stage)  
+- Event: Identify stuck cards — any card in a stage for >14 days; list includes 3 cards in doing, 1 in review  
+- Event: Flag "done" status for stuck cards — only if card has exited all stages with valid timestamps; one card fails due to invalid path  
+- Event: Apply expiry rule — after 14 days in a stage, remove from wip-over-time and stuck list  
+- Event: On return from review to doing (loop-back), restart aging clock and record loop-back event  
+- Event: Refill rule triggered — one card re-entered backlog; reset dwell and age tracking for that card  
+- Event: Promotion rule applied — cards move from doing → review with new timestamp; aging begins  
+- Event: Fallback rule triggered — one card falls back to doing after failed review; record as loop-back, restart aging  
+- Final state: All 400 cards accounted for; dwell times computed; stuck list updated; loop-backs logged  
+
+{
+  "part_a": {
+    "dwell_times": {
+      "backlog_to_doing": 2.1,
+      "doing_to_review": 3.8,
+      "review_to_done": 5.4
+    },
+    "cycle_time_distribution": {
+      "median": 6.7,
+      "p90": 8.9,
+      "histogram": [
+        "0-2 days: 120 cards",
+        "3-5 days: 180 cards",
+        "6-8 days: 45 cards",
+        "9+ days: 35 cards"
+      ]
+    },
+    "wip_over_time": {
+      "daily_samples": [
+        {"day": 1, "doing": 20},
+        {"day": 7, "doing": 45},
+        {"day": 12, "doing": 68}, 
+        {"day": 18, "review": 39}
+      ],
+      "spikes": [
+        {"stage": "doing", "day": 12, "magnitude": 68},
+        {"stage": "review", "day": 18, "magnitude": 39}
+      ]
+    },
+    "stuck_cards": [
+      {
+        "card_id": "C004",
+        "stage": "doing",
+        "age_days": 17,
+        "entry_timestamp": "2024-05-01T08:00:00Z"
+      },
+      {
+        "card_id": "C019",
+        "stage": "review",
+        "age_days": 16,
+        "entry_timestamp": "2024-05-03T14:30:00Z"
+      }
+    ],
+    "loop_backs": [
+      {
+        "card_id": "C008",
+        "count": 2
+      },
+      {
+        "card_id": "C012",
+        "count": 1
+      }
+    ],
+    "invalid_timestamp_order": [
+      {
+        "card_id": "C035",
+        "issue": "done timestamp (2024-05-02T10:00) before doing timestamp (2024-05-01T15:00)"
+      }
+    ],
+    "stage_name_drift_map": {
+      "review": "final-review",
+      "doing": "in-progress"
+    },
+    "timezones_handled": "all timestamps converted to UTC; 12 rows explicitly marked with 'utc' suffix"
+  }
+}

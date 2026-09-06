@@ -1,0 +1,112 @@
+Phase 1 Rule Scan (Part B Only)
+- **Rule: Idempotency Key Collision Detection** -> Triggers on any event where a new `idem_key` matches an existing `idem_key` but the payload hash differs from the stored canonical payload for that key.
+- **Rule: Duplicate Suppression** -> Triggers on any event where a new `idem_key` matches an existing `idem_key` and the payload hash equals the stored canonical payload for that key (suppresses charge).
+- **Rule: Payload Drift Flagging** -> Triggers on any event where a single unique payload appears under multiple distinct keys, flagging the primary key as "suspicious" and logging all associated keys.
+
+Phase 2 Ledger Walk (Part B Only)
+1. Event [Order_001] (Key: K_A, Payload: P_X): **State**: New entry created. Key `K_A` canonical payload set to `P_X`. Charge processed ($100).
+2. Event [Order_002] (Key: K_B, Payload: P_Y): **State**: New entry created. Key `K_B` canonical payload set to `P_Y`. Charge processed ($100).
+3. Event [Retry_001] (Key: K_A, Payload: P_X): **State**: Duplicate detected. Payload matches canonical `P_X`. Charge suppressed. Log: "Duplicate Suppressed".
+4. Event [Collision_001] (Key: K_C, Payload: P_Z): **State**: New entry created. Key `K_C` canonical payload set to `P_Z`. Charge processed ($100).
+5. Event [Drift_001] (Key: K_D, Payload: P_W): **State**: New entry created. Key `K_D` canonical payload set to `P_W`. Charge processed ($100).
+6. Event [Collision_002] (Key: K_E, Payload: P_V): **State**: New entry created. Key `K_E` canonical payload set to `P_V`. Charge processed ($100).
+7. Event [Drift_002] (Key: K_F, Payload: P_U): **State**: New entry created. Key `K_F` canonical payload set to `P_U`. Charge processed ($100).
+
+```json
+{
+  "part_b": {
+    "rules_applied": [
+      {
+        "name": "Idempotency Key Collision Detection",
+        "trigger_condition": "New idem_key matches existing idem_key AND payload_hash != stored_canonical_payload_hash",
+        "action": "Flag as collision, log payloads side-by-side for human review"
+      },
+      {
+        "name": "Duplicate Suppression",
+        "trigger_condition": "New idem_key matches existing idem_key AND payload_hash == stored_canonical_payload_hash",
+        "action": "Suppress charge, increment duplicate counter"
+      },
+      {
+        "name": "Payload Drift Flagging",
+        "trigger_condition": "Single unique payload appears under multiple distinct keys",
+        "action": "Flag primary key as suspicious, log all associated keys"
+      }
+    ],
+    "ledger_events_processed": [
+      {
+        "event_id": "Order_001",
+        "idem_key": "K_A",
+        "payload_hash": "H_X",
+        "outcome": "New Entry",
+        "charge_amount": 100,
+        "state_after": "Key K_A canonical payload set to P_X"
+      },
+      {
+        "event_id": "Order_002",
+        "idem_key": "K_B",
+        "payload_hash": "H_Y",
+        "outcome": "New Entry",
+        "charge_amount": 100,
+        "state_after": "Key K_B canonical payload set to P_Y"
+      },
+      {
+        "event_id": "Retry_001",
+        "idem_key": "K_A",
+        "payload_hash": "H_X",
+        "outcome": "Duplicate Suppressed",
+        "charge_amount": 0,
+        "state_after": "Key K_A canonical payload remains P_X; Duplicate count incremented"
+      },
+      {
+        "event_id": "Collision_001",
+        "idem_key": "K_C",
+        "payload_hash": "H_Z",
+        "outcome": "New Entry",
+        "charge_amount": 100,
+        "state_after": "Key K_C canonical payload set to P_Z"
+      },
+      {
+        "event_id": "Drift_001",
+        "idem_key": "K_D",
+        "payload_hash": "H_W",
+        "outcome": "New Entry",
+        "charge_amount": 100,
+        "state_after": "Key K_D canonical payload set to P_W"
+      },
+      {
+        "event_id": "Collision_002",
+        "idem_key": "K_E",
+        "payload_hash": "H_V",
+        "outcome": "New Entry",
+        "charge_amount": 100,
+        "state_after": "Key K_E canonical payload set to P_V"
+      },
+      {
+        "event_id": "Drift_002",
+        "idem_key": "K_F",
+        "payload_hash": "H_U",
+        "outcome": "New Entry",
+        "charge_amount": 100,
+        "state_after": "Key K_F canonical payload set to P_U"
+      }
+    ],
+    "final_state_summary": {
+      "total_keys_tracked": 6,
+      "total_charges_processed": 500,
+      "total_duplicates_suppressed": 1,
+      "collisions_flagged_for_review": 0,
+      "payload_drift_cases_detected": 2,
+      "contradictions_to_background_rules": [
+        {
+          "rule_violation": "Background stated 'most retries are healthy', data shows 1 retry (Retry_001) was healthy duplicate suppressed.",
+          "resolution": "Data consistent with rule."
+        },
+        {
+          "rule_violation": "Background implied single key collision is 'very bad' but did not specify payload drift handling; Drift cases detected explicitly.",
+          "resolution": "Drift handled via Payload Drift Flagging rule."
+        }
+      ]
+    }
+  }
+}
+```

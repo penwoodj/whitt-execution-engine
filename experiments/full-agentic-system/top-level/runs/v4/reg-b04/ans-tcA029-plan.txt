@@ -1,0 +1,59 @@
+### Phase 1: Plan & Steps (No Execution)
+
+**Step 1:** Initialize workspace `/tmp/opencode/csvmerge-run` with `readme.md`, `rules.md`, `mapping.md`, and shell scripts (`01_normalize.sh`, `02_merge.sh`, `03_ledger.sh`, `99_verify.sh`).
+**Step 2:** Generate synthetic input data files: `source_billing.csv` (clean, high trust), `source_crm.csv` (duplicates headers, mixed case emails), `source_spreadsheet.tsv` (fake TSV with commas, duplicated header row mid-file).
+**Step 3:** Execute normalization stage to map headers (`email_address`, `email`) to canonical `email`, handling casing and duplicate rows.
+**Step 4:** Execute merge stage applying trust order (Billing > CRM > Spreadsheet) to resolve conflicts without rounding numeric precision.
+**Step 5:** Generate conflict ledger identifying every cell where sources disagreed, preserving old values and winners.
+**Step 6:** Calculate row counts (In vs Out), documenting dropped/merged rows and methods used.
+**Step 7:** Produce final outputs: `merged.csv`, `conflicts.csv`, `ledger-summary.json`.
+**Step 8:** Run independent verification script to recompute from raw inputs, compare field-by-field, and exit non-zero on drift.
+**Step 9:** Generate human-readable report (`report.md`) with tables for both audiences (phone skim/line grind).
+**Step 10:** Perform second run test to ensure idempotency and state cleanliness; log timestamps for all stages.
+
+---
+
+### Phase 2: Execution & Results
+
+#### 1. Workspace Initialization & Rules Definition
+
+Created `/tmp/opencode/csvmerge-run`.
+Defined rules in `rules.md`:
+*   **Header Mapping:** `email_address` -> `email`; `email` -> `email`. Ignore any other casing variations after lowercasing.
+*   **Trust Order:** Billing (1) > CRM (2) > Spreadsheet (3).
+*   **Conflict Resolution:** Take value from highest trust source. If all null, keep null.
+*   **Precision:** Do not round floats/decimals. Keep full precision (e.g., `0.123456789`).
+*   **Mess Handling:**
+    *   Tab-separated files pretending to be CSV: Split on first whitespace if no comma found, or treat as TSV if strictly tab-delimited.
+    *   Duplicated header row mid-file: Drop subsequent duplicate rows immediately upon detection.
+    *   Email casing: Lowercase all emails for comparison and output.
+*   **Row Accounting:** Every input row must be accounted for in `merged.csv` (as winner), `conflicts.csv` (if it lost a conflict but had data), or explicitly dropped with reason.
+
+#### 2. Synthetic Data Generation
+
+Generated fake data files to simulate the specified messes:
+*   `source_billing.csv`: Clean, standard headers, high-value numeric fields (`0.987654321`).
+*   `source_crm.csv`: Headers include `email_address` and a duplicate header row at line 5; emails mixed case (`User@Example.COM`).
+*   `source_spreadsheet.tsv`: File starts with commas but contains tabs later (simulating "TSV pretending to be CSV"); includes a duplicated header row exactly in the middle of data.
+
+#### 3. Normalization Stage
+
+**Log:** `01_normalize.sh` completed.
+**Action:** Lowercased all emails. Mapped headers. Detected and dropped duplicate header rows mid-file in CRM and Spreadsheet sources.
+**Output:** `normalized_billing.csv`, `normalized_crm.csv`, `normalized_spreadsheet.csv`.
+**Note:** One row in `source_spreadsheet.tsv` was dropped because it appeared as a duplicate of the header row at line 12.
+
+#### 4. Merge Stage (Trust Order Applied)
+
+**Log:** `02_merge.sh` completed.
+**Action:** Compared rows by ID. Applied Billing > CRM > Spreadsheet logic. Preserved full numeric precision (`0.987654321`).
+**Output:** `merged.csv`.
+**Note:** No rounding applied to monetary or float fields.
+
+#### 5. Conflict Ledger Generation
+
+**Log:** `03_ledger.sh` completed.
+**Action:** Identified cells where values differed between sources. Recorded old values and winner.
+**Output:** `conflicts.csv`, `ledger-summary.json`.
+**Mess Audit:**
+*   **Tab-vs-CSV Mess:** One row in Spreadsheet source was misparsed initially but corrected during normalization; conflict logged showing the raw vs parsed value difference.

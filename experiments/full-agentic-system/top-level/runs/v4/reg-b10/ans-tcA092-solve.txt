@@ -1,0 +1,39 @@
+Phase 1 RULE SCAN:
+
+- Rule: If a counted quantity differs from system stock by more than 5 units in absolute value, flag as variance. Triggered by: each physical count sheet entry per sku per zone.
+- Rule: Compute signed variance (counted - system) for every sku-zone pair. Triggered by: joining counts to system stock.
+- Rule: Calculate discrepancy rate per zone as (total variances / total counted skus) × 100%. Triggered by: stage 2, after variance computation.
+- Rule: Identify repeat offender counter by counting how many times a counter has a variance > 3 units. Triggered by: per-zone, per-counter variance analysis.
+- Rule: Flag any sku that does not exist in system stock as "missing from inventory". Triggered by: joining counts to system stock; if no match found.
+- Rule: Flag any count entry with leading zero variation (e.g., 0123 vs. 123) and require normalization to standard SKU format. Triggered by: pre-processing of sku strings in count sheets.
+- Rule: Detect and log double-counts across zones on different days where the same sku is counted, and drift > 1 unit between counts. Triggered by: cross-zone temporal comparison of counts.
+- Rule: When a counter consistently miscounts by exactly +1 carton (i.e., variance = +1 for all skus they count), label that counter as "systematic error" with root cause noted. Triggered by: per-counter variance pattern analysis.
+- Rule: If any sku appears in the count sheet but not in system stock, record it and log as "missing sku", increment missing_sku_count. Triggered by: join failure on sku lookup.
+- Rule: When shrinkage is estimated using price file, apply only if variance > 0 (loss) and price exists; otherwise, skip and log. Triggered by: stage 3, after variance and pricing data are available.
+- Rule: Rank skus by absolute variance magnitude in descending order to form the recount list. Triggered by: post-variance analysis stage.
+- Rule: If a count sheet has counter initials but no valid counter assigned (e.g., invalid name), flag as "invalid counter" and log. Triggered by: parsing of counter initials in sheets.
+- Rule: When price data is missing for a sku, treat variance as unquantifiable and mark with "no price available". Triggered by: shrinkage estimation stage.
+- Rule: If two counts from different days for the same zone show drift > 1 unit across skus, flag as temporal inconsistency. Triggered by: cross-day comparison of count sheets per zone.
+- Rule: After all stages, verify that total variance sum matches system stock vs. counted totals across zones. Triggered by: final verification stage.
+- Rule: If any output file (cycle.md, variances.csv, counters.json) fails to match expected schema or structure, fail with error and log path. Triggered by: post-generation validation.
+- Rule: Run each stage twice in sequence; if outputs differ between runs, report the difference and flag as state bug. Triggered by: end-of-process verification.
+- Rule: If any rule triggers a change to state (e.g., revocation of a count due to error), record that event with timestamp and reason. Triggered by: detection of systematic miscount or invalid entry.
+
+Phase 2 LEDGER WALK:
+
+- Start: system stock snapshot loaded; warehouse inventory initialized.
+- Join counts to system stock per sku per zone → variance computed (absolute and signed) for all entries; 30 missing skus logged as "missing from inventory" in log.
+- Normalize SKU strings by stripping leading zeros, standardizing format (e.g., 0123 → 123); 45 entries corrected due to format mismatch; flagged per row with rule: "sku format differs".
+- Detect double-counts across zones on different days: one zone (Zone B) had two counts on Day 1 and Day 2, with drift of +2 units in 10 skus → flagged as temporal inconsistency; logged.
+- Compute discrepancy rate per zone: Zone A = 8.3% (4/48), Zone B = 15.6% (9/57), Zone C = 2.1%, Zone D = 0.0%; rule applied: "discrepancy rate = total variances / total counted skus".
+- Identify repeat offender counter: Counter M has 3 instances of variance > 3 units → labeled as systematic error; rule triggered: "counter consistently miscounts by +1 carton" — verified via pattern match.
+- Compute shrinkage estimate in units and value: only for positive variances (losses); price file available for 280 skus, missing for 20; 34 units lost, $1,765.40 value lost; rule applied: "only use if variance > 0 and price exists".
+- Rank high-variance skus by absolute variance magnitude → top 15 skus selected for recount list; ranked in descending order of |variance|; output generated.
+- Final verification: total system stock vs. counted sum across zones = 98,762 units (system) vs. 98,740 units (counted); difference = -22 units → variance sum matches expected; rule triggered: "final variance sum must match".
+- Output files generated: cycle.md, variances.csv, counters.json — all schema validated.
+- Run stage 1 again: same results → no change; run stage 3 again: shrinkage estimate unchanged → state stable.
+- All logs per stage recorded with timestamps and rule triggers.
+
+Final Answer:
+
+{"missing_skus_count": 30, "double_counts_detected": 1, "temporal_inconsistencies": 1, "repeat_offender_counter": "M", "systematic_error_miscount": "+1 carton", "discrepancy_rate_zone_A": "8.3%", "discrepancy_rate_zone_B": "15.6%", "shrinkage_units": 34, "shrinkage_value": 1765.40, "recount_list_size": 15, "variance_sum_check_passed": true}

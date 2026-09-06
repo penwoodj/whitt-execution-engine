@@ -4,7 +4,7 @@ set -u
 cd /home/jon/.local/share/opencode/worktree/b3a0edc5d199ed0b05278bdc34894bc7a8b0e833/nimble-harbor
 W=target/release/whitt
 LOGD=experiments/self-healing/results/whitt-logs
-CASES="flg-02-rs-ana-a-f1 flg-03-da-ana-a-f2 flg-04-da-ana-b-f3 flg-05-oi-trb-b-f4 flg-06-se-gen-b-f1p flg-07-sc-trf-a-f2 flg-08-lc-pld-b-f3 flg-09-mc-gen-b-f4 flg-10-sc-trb-a-f4p"
+CASES='oi-pld-a-clean oi-pld-b-f3 oi-trb-a-f4 oi-trf-a-f1p oi-trf-b-f2 px-ana-a-f2 px-ana-a-f4 px-ana-b-f3 px-gen-a-clean px-gen-b-f1'
 for cid in $CASES; do
   avail=$(free -m | awk '/^Mem:/{print $7}')
   if [ "$avail" -lt 3000 ]; then

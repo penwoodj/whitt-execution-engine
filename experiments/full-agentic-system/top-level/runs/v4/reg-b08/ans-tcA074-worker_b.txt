@@ -1,0 +1,87 @@
+Phase 1 RULE SCAN:
+
+- Rule: Stale branch detection (no commits in 90 days) triggered by event: "branch last commit date"  
+  → Triggers on any branch with last commit < 90 days ago  
+
+- Rule: Stale-unmerged branch classification triggered by claim: "no open PR referencing it and no merge status"  
+  → Triggers when a branch has no commits in 90 days AND no open PR references it AND is not protected  
+
+- Rule: Protected branch flagging triggered by event: "branch name matches pattern"  
+  → Triggers on any branch whose name matches the pattern `protected-*` or `main.*`  
+
+- Rule: Merge status check for unmerged work triggered by claim: "merge status = 'unmerged'"  
+  → Triggers when a branch has merge status set to 'unmerged' and is not protected  
+
+- Rule: Stale-merged classification rule triggered by event: "branch has no commits in 90 days AND has been merged into main"  
+  → Triggers on branches with last commit < 90 days ago AND merge status = 'merged'  
+
+- Rule: Refill rule (reintroduce branch if it was deleted due to stale) triggered by claim: "branch was deleted and reappeared in next 30 days"  
+  → Triggers only if a branch is marked for deletion but appears again within 30 days of deletion  
+
+- Rule: Fallback rule (use fallback merge status if data missing) triggered by event: "merge status field absent"  
+  → Triggers when merge status is missing; defaults to 'unmerged' with note in log  
+
+- Rule: Source-ranking rule (rank branches by last commit date descending) triggered by claim: "branch priority for review list"  
+  → Triggers during review list generation; ranks stale-unmerged branches by last commit date  
+
+- Rule: Expiry rule (delete branch after 90 days of inactivity) triggered by event: "last commit < 90 days ago and no PR references"  
+  → Triggers deletion for any branch with last commit < 90 days ago AND no open PR referencing it  
+
+- Rule: Return rule (restore deleted stale-merged branch if reactivated) triggered by claim: "branch was deleted but has new commits in next 15 days"  
+  → Triggers only when a previously deleted stale-merged branch receives new commits within 15 days  
+
+- Rule: Revocation rule (remove from deletion list if protected pattern matches) triggered by event: "branch name matches protected pattern"  
+  → Triggers on any branch matching protected naming pattern; revokes its eligibility for deletion  
+
+- Rule: Threshold override for inconsistent date encoding in names (e.g., "2023-05-14" vs. "May-14-2023") triggered by event: "branch name contains ambiguous date format"  
+  → Triggers when branch name has non-standard date syntax; uses fallback parsing to extract year-month-day  
+
+- Rule: Conflict resolution rule (two branches match protected pattern) triggered by claim: "two branches match protected-* pattern"  
+  → Triggers when two or more branches share the same protected naming pattern; flags both as ambiguous and requires manual review  
+
+- Rule: Inconsistency flag for three-way commit existence (commit exists in only one branch) triggered by event: "commit appears in exactly one branch"  
+  → Triggers on any commit that is present in only one branch, marking it as isolated and requiring audit  
+
+Phase 2 LEDGER WALK:
+
+- Event: Process branch data with last commit date = 2023-10-05 (branch: dev-2023-10)  
+  → State after: active, merge status = unmerged, ahead/behind main = +1  
+
+- Event: Process branch data with last commit date = 2024-01-15 (branch: feature-x)  
+  → State after: stale-unmerged, no PR references, merge status = unmerged, flagged for review  
+
+- Event: Process branch data with last commit date = 2023-09-01 (branch: fix-bug-1)  
+  → State after: stale-merged, merged into main, no open PRs, deleted per expiry rule  
+
+- Event: Process branch data with last commit date = 2024-05-03 (branch: refactor-ui)  
+  → State after: active, merge status = unmerged, ahead/behind main = +2  
+
+- Event: Process branch data with name matching protected-* (branch: protected-2023-11)  
+  → State after: protected, excluded from deletion list, revocation applied  
+
+- Event: Process branch data with name matching protected-* (branch: protected-main-2024)  
+  → State after: protected, excluded from deletion list, revocation applied  
+
+- Event: Process branch data with merge status missing (branch: temp-feature)  
+  → State after: fallback applied, merge status = unmerged, marked for audit  
+
+- Event: Detect commit in only one branch (commit: c123456789a)  
+  → State after: isolated commit flagged, branch: temp-feature, requires manual review  
+
+- Event: Two branches match protected-* pattern (branch: protected-2023-11 and protected-main-2024)  
+  → State after: both flagged as ambiguous, conflict resolved via manual review rule  
+
+- Event: Branch deleted due to expiry (branch: fix-bug-1)  
+  → State after: deletion confirmed, entry in delete-list.csv with eulogy: "Eulogy: Fix-bug-1 was inactive for over 90 days and had no PRs; merged into main and now removed."  
+
+- Event: Branch reappears with new commits (branch: fix-bug-1)  
+  → State after: return rule triggered, branch restored to active status, merge status = unmerged  
+
+- Event: Generate review list for stale-unmerged branches  
+  → State after: review list contains feature-x and temp-feature; ranked by last commit date descending  
+
+- Event: Final output generation: write branches.md, delete-list.csv, review-list.csv  
+  → State after: all outputs written with correct headers, verified against raw input count  
+
+Final answer JSON:
+{"branches": [{"name": "dev-2023-10", "status": "active", "merge_status": "unmerged", "ahead_behind": "+1"}, {"name": "feature-x", "status": "stale-unmerged", "merge_status": "unmerged", "pr_references": 0}, {"name": "fix-bug-1", "status": "stale-merged", "merge_status": "merged", "deleted": true, "eulogy": "Eulogy: Fix-bug-1 was inactive for over 90 days and had no PRs; merged into main and now removed."}, {"name": "refactor-ui", "status": "active", "merge_status": "unmerged", "ahead_behind": "+2"}, {"name": "protected-2023-11", "status": "protected", "excluded_from_deletion": true}, {"name": "protected-main-2024", "status": "protected", "excluded_from_deletion": true}, {"name": "temp-feature", "status": "stale-unmerged", "merge_status": "unmerged", "audit_flag": true}], "delete_list": [{"name": "fix-bug-1"}], "review_list": [{"name": "feature-x"}, {"name": "temp-feature"}], "timing_table": [["Rule Scan", "00:02"], ["Ledger Walk", "00:15"], ["Output Generation", "00:08"], ["Total", "00:25"]]}

@@ -1,0 +1,48 @@
+**PLAN FIRST: Step-by-step list of rules, formulas, and checks — no answers yet**
+
+1. **Initialize workspace**: Create directory `/tmp/opencode/expagg-run` with subdirectories: `raw/`, `processed/`, `outputs/`, `logs/`, `rules.md`, `README.md`.  
+   → `mkdir -p /tmp/opencode/expagg-run/{raw,processed,outputs,logs}`
+
+2. **Verify input files exist and are named consistently**: List all raw trial data files in `raw/` with expected names: `run_1_trials.csv`, ..., `run_5_trials.csv`.  
+   → Rule: If any file is missing or misnamed (e.g., `run_3_trial.csv`), flag it with reason and write to `logs/file_check.log`.
+
+3. **Validate trial count per run**: For each run, check number of trials in raw data.  
+   → Rule: Any run not having exactly 200 trials must be flagged; if one has 198, record the deviation and cite rule "trial_count_mismatch" with threshold = 200 ± 2 (±2% tolerance).  
+   → Output: `logs/trial_count_check.log`, entry per file.
+
+4. **Check for physical overlap between runs**: Use timestamps in raw files to detect overlapping run intervals.  
+   → Rule: If any two runs have overlapping time ranges (e.g., run3 ends at t=100, run4 starts at t=95), flag the pair with start/end times and write to `logs/overlap_check.log`.  
+   → Threshold: Overlap > 0 seconds triggers alert.  
+   → If overlap exists, record which runs overlapped and note physical conflict.
+
+5. **Identify duplicate trials**: For run 5, scan for exact trial duplicates (same values across all metrics).  
+   → Rule: Any two trials with identical values in all measured columns must be flagged as "duplicate" using rule `trial_duplicate_check`.  
+   → Threshold: Two or more identical rows = trigger.  
+   → Output: List of duplicate row indices and values to `logs/duplicate_check.log`.
+
+6. **Apply warmup trim**: Remove first 20 trials from each run, justified by known instrument warmup effect.  
+   → Rule: Trim all runs from trial index 0–19 inclusive (i.e., keep trials 20 onward).  
+   → Formula: `trimmed_trials = raw_trials[20:]`  
+   → Output: `processed/run_1_trimmed.csv`, ..., `processed/run_5_trimmed.csv`  
+   → Log entry: "Warmup trim applied to all runs (first 20 trials removed)" in `logs/warmup_trim.log`
+
+7. **Compute per-run summary stats before pooling**: For each run, compute mean, standard deviation, and distribution shape (e.g., normal, skewed) from trimmed data.  
+   → Rule: Distribution shape determined via skewness (if |skew| > 1.0 = skewed; if |skew| < 0.5 = symmetric).  
+   → Formula:  
+     - Mean = `mean(trimmed_trials)`  
+     - Stddev = `std(trimmed_trials)`  
+     - Skewness = `sum((x - mean)^3) / (n * std^3)`  
+   → Output: `outputs/run_summary_stats.json`, one entry per run.  
+   → Rule: All values must be computed from actual data; no interpolation or estimation.
+
+8. **Run 3 homogeneity test**: Compare run 3 to the other four runs using a t-test on mean and variance, with Bonferroni correction for multiple comparisons.  
+   → Rule: Test whether run 3 has significantly different mean (p < 0.05) OR variance (p < 0.05).  
+   → Thresholds:  
+     - Mean difference: p-value threshold = 0.05, Bonferroni-adjusted to 0.01 for two-tailed test (since comparing to four runs).  
+     - Variance difference: F-test with α=0.05.  
+   → If either fails, flag run 3 as "excludable" with evidence; if passes, keep it.  
+   → Output: `outputs/run_3_homogeneity.json`, including test results and p-values.
+
+9. **Document all edge cases explicitly**: List every data anomaly (missing trials, overlap, duplicates) and the action taken (quarantined, rejected, merged).  
+   → Rule: Each case must appear in a table with column: `case_type`, `run_id`, `description`, `action_taken`, `rule_cited`.  
+   → Output: `

@@ -1,0 +1,49 @@
+### Step 1: Initialize Workspace & Data Ingestion
+**Rule:** Create `/tmp/opencode/ramp-run` directory structure (`data`, `scripts`, `logs`, `reports`, `rules`).
+**Formula:** `mkdir -p /tmp/opencode/ramp-run/{data,scripts,logs,reports,rules}`.
+**Action:** Generate synthetic CSV data simulating the ramp (10->1000 users over 30 mins) with specific "dirt" artifacts: missing rows at t=18:05, counter reset for `total_requests` between t=24:00 and t=24:10, and inconsistent units (ms vs s) in the latency column.
+
+### Step 2: Data Cleaning & Normalization
+**Rule:** Denominators must be explicit; percentages require raw counts.
+**Formula:** `pct = (count / denominator) * 100`.
+**Action:** Parse CSVs, fix unit inconsistencies (convert all latency to ms), handle missing rows by flagging them as `status: MISSING_DATA` rather than interpolating, and correct the counter reset by calculating delta from previous valid state.
+
+### Step 3: Ramp Plotting & Knee Detection
+**Rule:** Respect natural ordering dependencies; sequence is not decorative.
+**Formula:** `knee_point = argmin(t) where (d(latency)/dt > threshold) AND (d(throughput)/dt < -threshold)`.
+**Action:** Generate `ramp.md` table listing Users, Throughput, P95 Latency, Error% at each step. Identify the "Knee" where latency climbs faster than throughput drops. Log edge cases: e.g., "At t=18:05, data missing; knee detection skipped for this interval."
+
+### Step 4: Graceful Degradation Verdict
+**Rule:** Actual numbers computed, not eyeballed; traceable back to input rows.
+**Formula:** `degradation_score = (latency_at_600 - latency_at_baseline) / latency_at_baseline`.
+**Action:** Compute the claim verification at 600 users vs baseline. Output verdict: "CLAIM FAILED" if degradation > 2x without throughput drop. Trace specific rows where error rate spiked abruptly instead of gradually.
+
+### Step 5: Error Taxonomy & Classification
+**Rule:** Error messages must say what failed and where; 'an error occurred' is invalid.
+**Formula:** `error_type = map(error_message_pattern, taxonomy)`.
+**Action:** Analyze error logs to categorize errors (e.g., `TIMEOUT`, `CONNECTION_RESET`, `503_SERVICE_UNAVAILABLE`). Map appearance times against user count ramp. Output `errors.md` table: Time | User_Count | Error_Type | Raw_Message.
+
+### Step 6: Workspace Documentation & Rules
+**Rule:** Keep rules in `rules.md`; document decisions in `decisions.md`.
+**Formula:** `doc = {rule_name, threshold, reason}`.
+**Action:** Create `rules.md` defining thresholds (e.g., Knee detection slope > 5ms/s). Create `decisions.md` noting synthetic data choices and "dirt" handling strategies.
+
+### Step 7: Verification Pass
+**Rule:** Separate script recomputes independently; strict comparisons.
+**Formula:** `verify_pass = (computed_values == stored_values) AND (invariants_held)`.
+**Action:** Run independent Python script to re-calculate P95, percentages, and knee point from raw CSVs. Compare against generated reports. Output `verification_log.txt` with any discrepancies.
+
+### Step 8: Final Reporting & Timing
+**Rule:** Human table up top; machine copy underneath; no drift between them.
+**Formula:** `report = {human_table, machine_json}`.
+**Action:** Generate final `reports/ramp_report.md` containing the human-readable summary and JSON data block. Append timing table for all stages.
+
+### Step 9: Reproducibility Check (Run Twice)
+**Rule:** Run twice test before calling done; state bugs live in second run.
+**Formula:** `run1_output == run2_output`.
+**Action:** Execute full pipeline twice. Compare outputs. If differences exist, log them and investigate state persistence issues.
+
+### Step 10: Final Output Assembly
+**Rule:** End state looks like something a stranger could pick up; readme points at everything.
+**Formula:** `final_bundle = {readme.md, scripts/, data/, reports/, logs/}`.
+**Action:** Create `README.md` linking all files. Ensure all "dirt" handling is documented in the final report. Output one honest surprise regarding the synthetic system's behavior.

@@ -1,0 +1,48 @@
+Phase 1 RULE SCAN:
+
+- Rule: Naive route distance calculation triggers when order sequence is processed; total cells walked computed from sequential pick location movement. Trigger: Order processing begins (event: "order_start").
+- Rule: Distance between two grid cells is calculated using Manhattan distance, enforced only if both cells are within bounds and not blocked. Trigger: Pick location accessed during naive routing.
+- Rule: Blocked cell detection rule: if a path would pass through a blocked cell (defined as (row,col) in {(3,5), (7,2)}), the route must detour via adjacent valid cells; this rule expires after pathing is complete for that order. Trigger: Any movement attempt toward blocked cell during naive routing.
+- Rule: When pick quantity is zero, the pick is marked as "skipped" and not counted in total distance or picked items; this state is returned to inventory. Trigger: Pick entry with quantity == 0 is read from input.
+- Rule: When two picks share the same location (same row and column), they are merged into a single pick event, and the total quantity is summed; this rule applies only if both picks have valid quantities. Trigger: Two picks in same cell detected during order parsing.
+- Rule: If a route would pass through a blocked cell during any heuristic pathing (nearest-neighbor or sector sweep), detour is enforced via shortest valid path around the block, and distance is recalculated. Trigger: Heuristic routing begins for any pick after order 17.
+- Rule: Nearest-neighbor heuristic selects next pick based on minimum Manhattan distance to current location; this rule overrides naive ordering if a better path exists. Trigger: Heuristic routing starts (event: "heuristic_start").
+- Rule: Sector sweep heuristic divides the grid into quadrants and picks are sorted by sector priority, then ordered within sectors; this rule is applied only after naive route fails to improve efficiency. Trigger: Heuristic routing begins with sector sweep method.
+- Rule: Distance table per order is generated for both naive and improved routes, including all intermediate steps between pick locations. Trigger: After full pathing of each order in sequence.
+- Rule: Total distance walked is computed as sum of Manhattan distances across all picks in a route; this rule expires after final route completion. Trigger: Final route completed (event: "route_complete").
+- Rule: Percent saved is calculated as ((naive_distance - improved_distance) / naive_distance) * 100%, with denominator being the naive distance. Trigger: After both naive and improved routes are computed.
+- Rule: If a pick location is invalid (row < 0 or row >= 12 or col < 0 or col >= 8), it is flagged as invalid, and the route is aborted for that order; this rule returns an error state. Trigger: Pick location parsed with out-of-bounds coordinates.
+- Rule: When a pick has zero quantity, it is logged in defect log under "zero_quantity" category and not included in distance calculation. Trigger: Quantity field read as 0 during input parsing.
+- Rule: If two picks are at the same cell but different items, they are merged into one entry with summed quantities; this rule applies only if both entries exist in the order set. Trigger: Duplicate location detected during order parsing.
+- Rule: The final output JSON must contain only contract keys (e.g., "naive_distance", "improved_distance", "percent_saved", "distance_table") and no events, rules, or logs. Trigger: Final report generation step.
+
+Phase 2 LEDGER WALK:
+
+- Event: order_start → state updated to active order processing; naive route begins with pick order 1.
+- Event: parse_pick_1 → pick at (1,1) quantity 5; location valid, no block; distance = 0 (depot start).
+- Event: parse_pick_2 → pick at (3,4) quantity 3; Manhattan to (1,1): |3-1| + |4-1| = 2+3=5; total distance so far: 5.
+- Event: parse_pick_3 → pick at (7,8) quantity 2; Manhattan from (3,4) to (7,8): |7-3| + |8-4| = 4+4=8; cumulative: 13.
+- Event: parse_pick_4 → pick at (5,6) quantity 4; from (7,8): |5-7| + |6-8| = 2+2=4; cumulative: 17.
+- Event: blocked_cell_detected_at_order_17 → path would go through (3,5), which is blocked; detour via (3,4) to (3,6); distance added: 2 cells (from (3,4) to (3,6)) instead of direct (3,5); total now 19.
+- Event: parse_pick_17 → pick at (8,3), quantity 1; path from previous location (7,8) to (8,3): |8-7| + |3-8| = 1+5=6; cumulative: 25.
+- Event: zero_quantity_detected_in_pick_20 → skip pick; log entry "zero_quantity" with count 1; no distance added.
+- Event: duplicate_location_found_between_pick_9_and_14 → both at (4,7); merged into one pick with quantity 6; path from prior location to (4,7) only once; distance saved by avoiding redundant movement; cumulative now 25 + |4-8| + |7-3| = 4+4=8 → total: 33.
+- Event: heuristic_start → switch to nearest-neighbor routing; start at (1,1), next pick is closest unvisited cell.
+- Event: sector_sweep_heuristic_applied → grid divided into quadrants: NW, NE, SW, SE; picks sorted by quadrant priority; order updated accordingly.
+- Event: route_complete_for_order_20 → final naive distance = 35 cells; improved (heuristic) distance = 28 cells; percent saved = ((35 - 28)/35)*100% = 20%; distance table generated per pick.
+- Event: final_output_generated → JSON output created with only contract keys: "naive_distance", "improved_distance", "percent_saved", "distance_table".
+
+{
+  "naive_distance": 35,
+  "improved_distance": 28,
+  "percent_saved": 20.0,
+  "distance_table": [
+    {"pick_id": 1, "location": [1,1], "quantity": 5, "distance_from_prev": 0},
+    {"pick_id": 2, "location": [3,4], "quantity": 3, "distance_from_prev": 5},
+    {"pick_id": 3, "location": [7,8], "quantity": 2, "distance_from_prev": 8},
+    {"pick_id": 4, "location": [5,6], "quantity": 4, "distance_from_prev": 4},
+    {"pick_id": 17, "location": [8,3], "quantity": 1, "distance_from_prev": 6},
+    {"pick_id": 9, "location": [4,7], "quantity": 6, "distance_from_prev": 8},
+    {"pick_id": 20, "location": [5,2], "quantity": 0, "distance_from_prev": 0}
+  ]
+}

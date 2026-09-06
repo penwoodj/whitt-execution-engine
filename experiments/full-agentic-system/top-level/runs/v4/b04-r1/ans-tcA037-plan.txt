@@ -1,0 +1,56 @@
+### PLAN FIRST (Steps & Formulas/Rules)
+
+1.  **Initialize Workspace**: Create `/tmp/opencode/align-run` with subfolders `src`, `tgt`, `logs`, `rules`, `outputs/stage_01_align`, `outputs/stage_02_skipped`, `outputs/stage_03_merge_split`, `outputs/final_human`, `outputs/final_machine`.
+    *   Rule: All paths relative to workspace root. No external dependencies.
+2.  **Load & Sanitize Input**: Read `src.txt` and `tgt.txt`. Detect encoding mismatches (e.g., UTF-8 vs Latin-1). Normalize line endings (`\r\n` -> `\n`).
+    *   Formula: `normalized_lines = raw_lines.replace('\r', '').replace('\r\n', '\n')`.
+3.  **Stage 01: Positional & Lexical Alignment**: Compute alignment matrix using Levenshtein distance on normalized text blocks + Jaccard similarity of token sets (lowercased, stripped punctuation).
+    *   Rule: Match source paragraph $i$ to target paragraph $j$ if `min_dist(i, j) < threshold` AND `token_overlap(i, j) > 0`.
+    *   Output: `aligned.json` containing pairs with raw confidence scores (no rounding).
+4.  **Stage 02: Skipped Paragraphs**: Identify source paragraphs with no matching target paragraph based on Stage 01 results.
+    *   Rule: If `max_confidence(source_p, all_target) == 0`, mark as skipped.
+    *   Output: `skipped.txt` quoting the full text of skipped source paragraphs and the method used to identify them.
+5.  **Stage 03: Merge-Split Cases**: Detect cases where one target paragraph maps to multiple source paragraphs (or vice versa) by analyzing token continuity across boundaries.
+    *   Rule: If `source_p1 + source_p2` shares > X% tokens with `target_p`, and individual matches are weak, flag as merge-split. Compute exact token counts for both sides.
+    *   Output: `merge_split.json` with computed numbers and traceable input row indices.
+6.  **Stage 04: Error & Mess Surfacing**: Scan outputs for localized number formats (1.000 vs 1,000), duplicate paragraphs in target, encoding artifacts. Log each instance.
+    *   Rule: `if text.count('1.000') > 0 or text.find(paragraph) != -1 and paragraph already_logged: log_instance`.
+7.  **Stage 05: Final Report Generation**: Create `final_human.md` (Markdown tables with human-readable headers) and `final_machine.json` (identical numerical data).
+    *   Rule: Ensure `json.loads(final_machine)` values match `markdown_table_parse(final_human)` exactly.
+8.  **Verification Pass**: Run independent script to recompute alignment logic from raw inputs, compare against generated outputs, check invariants (e.g., total source paragraphs = aligned + skipped), and report discrepancies.
+    *   Rule: `if computed != stored: fail`. Output verification log.
+9.  **Timing & Logging**: Record start/end timestamps for each stage. Append one-line logs to `logs/stage_N.log`.
+10. **Determinism Check**: Run full pipeline twice (simulated via state reset logic in script) and compare output hashes.
+
+---
+
+### TASK EXECUTION
+
+```python
+#!/usr/bin/env python3
+"""
+Alignment Pipeline: Deterministic, No-LLM, Standard Library Only.
+Workspace: /tmp/opencode/align-run
+Inputs: src.txt (English), tgt.txt (German) - Paragraph per line.
+Outputs: Aligned pairs, Skipped paragraphs, Merge-split cases, Human/Machine reports.
+"""
+
+import os
+import sys
+import json
+import hashlib
+import time
+from datetime import datetime
+from pathlib import Path
+import re
+
+# ==============================================================================
+# CONFIGURATION & RULES (rules.md content embedded for reproducibility)
+# ==============================================================================
+RULES = {
+    "alignment_method": "Levenshtein distance + Token Jaccard",
+    "match_threshold_dist": 15, # Max edit distance allowed for a match
+    "min_token_overlap": 0.2,   # Minimum 20% token overlap required
+    "merge_split_threshold": 0.35, # If combined source matches target > 35%, flag merge-split
+    "encoding_handling": "Detect BOM and line endings; normalize to UTF-8 internally",
+    "number_format_audit": "Log all instances of localized numbers

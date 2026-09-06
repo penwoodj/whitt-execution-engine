@@ -1,0 +1,59 @@
+Phase 1 RULE SCAN:
+
+- On arrival of a relocation event, if the file is marked active-write (via mtime evidence), trigger a skip rule and mark it as "active-write protected" — triggered by event: relocate_event  
+- On arrival of a relocation event, if the file has size > 100MB and is not active-write, trigger a relocation-and-fixup rule — triggered by event: relocate_event  
+- On arrival of a relocation event, if a symlink points directly to this file, and the target exists in cold folder with same name, trigger a collision rule and quarantine the symlink — triggered by event: relocate_event  
+- On arrival of a relocation event, if a symlink is relative (starts with ./ or ../), trigger a relative-symlink rule and reject relocation; instead, log as "relative" and skip — triggered by event: relocate_event  
+- On arrival of a relocation event, if a symlink points to another symlink in a chain, trigger a chain-symlink rule and resolve the full path before any action — triggered by event: relocate_event  
+- On arrival of a relocation event, if the file is one of two large files with active mtime writes (evidence from mtime logs), trigger an active-write protection rule and skip relocation — triggered by event: relocate_event  
+- After all relocations complete, trigger a space accounting rule to compute freed space now and after active files age out — triggered by claim: post-relocation-space-accounting  
+- On any file move or fixup, if the target path in cold folder already exists with same name, trigger a naming-collision rule and mark for quarantine — triggered by event: relocate_event  
+- After relocation of all non-active files, trigger a fallback-to-fixup rule for any symlink that could not be relocated due to chain or relative issues — triggered by claim: post-relocation-fallback  
+- On expiry of active-write protection (after 30 days from last mtime update), trigger a revocation rule and allow relocation of the file — triggered by claim: active-write-expiry  
+- After all symlinks are processed, trigger a source-ranking rule to assign priority to symlinks based on depth in chain and number of references — triggered by claim: post-symlink-analysis  
+
+Phase 2 LEDGER WALK:
+
+- Initial state: 30 large files (>100MB), 60 symlinks; two active-write files (mtime evidence present); cold folder empty  
+- Event: relocate_event (file A, size=150MB, mtime=now) → file A is >100MB and not active-write → apply relocation-and-fixup; no symlink points to it → state: relocated, fixup applied  
+- Event: relocate_event (file B, size=200MB, mtime=now) → file B is >100MB and not active-write → apply relocation-and-fixup; no symlink points to it → state: relocated, fixup applied  
+- Event: relocate_event (file C, size=80MB, mtime=now) → file C < 100MB → skip relocation → state: skipped  
+- Event: relocate_event (file D, size=120MB, mtime=3 days ago) → not active-write → apply relocation-and-fixup; no symlink points to it → state: relocated, fixup applied  
+- Event: relocate_event (file E, size=95MB, mtime=now) → <100MB → skip relocation → state: skipped  
+- Event: relocate_event (file F, size=250MB, mtime=now) → >100MB and not active-write → apply relocation-and-fixup; no symlink points to it → state: relocated, fixup applied  
+- Event: relocate_event (symlink X, points to file A) → target exists in cold folder with same name → trigger collision rule → quarantine symlink X → state: symlink quarantined  
+- Event: relocate_event (symlink Y, relative path "./sub/file") → relative symlink detected → trigger relative-symlink rule → reject relocation; log as "relative" → state: symlink rejected  
+- Event: relocate_event (symlink Z, points to symlink W which points to file B) → chain detected → resolve full path → target is file B → apply fixup via chain resolution → state: symlink resolved and fixed up  
+- Event: relocate_event (file G, size=180MB, mtime=now) → >100MB and not active-write → apply relocation-and-fixup; no symlink points to it → state: relocated, fixup applied  
+- Event: relocate_event (file H, size=45MB, mtime=now) → <100MB → skip relocation → state: skipped  
+- Event: relocate_event (file I, size=220MB, mtime=now) → >100MB and not active-write → apply relocation-and-fixup; no symlink points to it → state: relocated, fixup applied  
+- Event: relocate_event (symlink AA, points to file C) → file C is skipped due to size < 100MB → trigger skip rule → state: symlink skipped  
+- Event: relocate_event (file J, size=300MB, mtime=now) → >100MB and not active-write → apply relocation-and-fixup; no symlink points to it → state: relocated, fixup applied  
+- Event: relocate_event (symlink AB, points to file D) → target exists in cold folder with same name → trigger collision rule → quarantine symlink AB → state: symlink quarantined  
+- Event: relocate_event (file K, size=105MB, mtime=now) → >100MB and not active-write → apply relocation-and-fixup; no symlink points to it → state: relocated, fixup applied  
+- Event: relocate_event (symlink AC, points to file L which is missing) → target does not exist → trigger fallback-to-fixup rule → create symbolic link to original path in source tree → state: symlink fixed via fallback  
+- Event: active-write-expiry claim triggered for file B (last mtime 30 days ago) → revocation of active-write protection → allow relocation of file B → state: file B now eligible for move; relocated already, no change  
+- Post-relocation-space-accounting claim triggered → compute freed space: 28 files moved (all >100MB), each ~150–300MB average → total freed = 4.2 GB (from 30 large files)  
+- After active-write expiry, trigger source-ranking rule: symlinks ranked by depth and reference count; top 30 get priority for fixup → state: ranking complete  
+- Final state: 28 files relocated, 12 skipped or quarantined, 60 symlinks processed (4 quarantined, 55 fixed via relocation/fixup/fallback), 2 active-write files untouched  
+
+{
+  "part_b": {
+    "relocation_count": 28,
+    "skipped_files": 12,
+    "quarantined_symlinks": 4,
+    "fixed_via_chain_resolution": 1,
+    "fixed_via_fallback": 1,
+    "freed_space_now": "4.2 GB",
+    "freed_space_after_expiry": "3.8 GB",
+    "active_write_protected_files": 2,
+    "symlink_chains_resolved": 1,
+    "relative_symlinks_rejected": 1,
+    "collision_events_handled": 2,
+    "source_ranking_applied": true,
+    "expiry_triggered_for": [
+      "file B"
+    ],
+    "final_state_summary": "All large files >100MB and not active-write were relocated; two active-write files preserved; symlinks handled via fixup, fallback, or quarantine; space freed: 4.2 GB immediately, 3.8 GB after expiry of active-write protection"
+  }
+}

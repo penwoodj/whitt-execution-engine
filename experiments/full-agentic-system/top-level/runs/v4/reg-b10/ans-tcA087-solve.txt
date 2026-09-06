@@ -1,0 +1,40 @@
+Phase 1 RULE SCAN:
+
+- Rule: Book with zero pages is invalid; trigger: book entry has page_count = 0  
+- Rule: Alternate fiction and nonfiction in queue; trigger: any book added to queue after start-up  
+- Rule: Max consecutive pages cap at 600; trigger: a book exceeds 600 pages  
+- Rule: Books with progress fraction > 0 are considered "started"; trigger: book has progress_fraction > 0  
+- Rule: Finish started books before moving to next-up plan; trigger: any book marked as started (progress_fraction > 0)  
+- Rule: After all started books are finished, initiate 12-book next-up plan; trigger: no more books with progress_fraction > 0 and all books in queue have been processed  
+- Rule: Topic diversity threshold: at least two distinct topics per three consecutive books; trigger: during next-up plan construction  
+- Rule: Mood tag overlap threshold: if two books share ≥3 mood tags, they are considered redundant; trigger: book pair comparison during topic diversity check  
+- Rule: Series must be read in order; trigger: a book belongs to a series with prior entries in queue  
+- Rule: Refill rule: if a book is dropped due to page limit or start-first constraint, it may be refilled into the next-up plan after 12 books are selected; trigger: after 12-book plan is formed and a drop occurs  
+- Rule: Fallback rule: if no valid book can be placed in the next-up plan under constraints, fallback to highest priority book with non-zero pages; trigger: all other placement rules fail  
+- Rule: Source-ranking rule: books are ranked by source credibility (predefined score) when topic diversity is insufficient; trigger: topic diversity fails and multiple books remain eligible  
+- Rule: Expiry rule: any book with a due_date < current timestamp is removed from queue; trigger: event includes a due_date field and it's past  
+- Rule: Revocation rule: if a book is marked as revoked in input, it is excluded from all processing; trigger: input row has "revoked" = true  
+- Rule: Return rule: if a book was previously in the next-up plan but is now marked as returned (status="returned"), remove it and re-evaluate queue; trigger: status update to "returned"  
+- Rule: Priority fallback: when multiple books have equal priority, assign to one with highest source credibility; trigger: tie-breaker during selection  
+
+Phase 2 LEDGER WALK:
+
+- Initial state: 40 books in queue. 2 books marked as started (progress_fraction = 0.5). All books have page_count ≥1 except book ID B37 (page_count = 0), which is invalid and removed.  
+- Event 1: Book B37 (page_count=0) is invalidated → state: 39 books remain, B37 excluded  
+- Event 2: Apply alternate fiction/nonfiction rule → queue alternates F/N/F/N/... starting with fiction  
+- Event 3: Check for consecutive page count >600 → book ID B15 has 650 pages → violates max 600 → B15 is removed from queue; state: 38 books  
+- Event 4: Identify started books (progress_fraction > 0) → books B2 and B9 are marked as "started" → must be finished first  
+- Event 5: Begin processing started books in order of priority → B2 (priority=7, topic="history", mood="calm") is processed first → state: B2 completed  
+- Event 6: B9 (priority=8, topic="science", mood="energetic") is next → processed → state: B9 completed  
+- Event 7: All started books are now finished → trigger rule: initiate 12-book next-up plan  
+- Event 8: Apply alternation constraint to next-up plan → must alternate fiction/nonfiction → start with fiction  
+- Event 9: Topic diversity check: ensure at least two distinct topics in every three consecutive books → if not, apply source-ranking rule  
+- Event 10: Mood tag overlap check → books B4 and B23 share 5 mood tags (out of max 6) → flagged as redundant; trigger: rule applies → B23 is excluded from next-up plan  
+- Event 11: Series constraint enforcement → book B8 belongs to "The Chronicles" series, which must be read in order → B7 (prior) must come before B8 → B8 is delayed until after B7  
+- Event 12: Apply fallback rule → no valid book found for slot 5 due to topic diversity failure → select highest source credibility book with non-zero pages → book ID B34 selected  
+- Event 13: Refill rule triggered → book B15 (removed earlier) is now refilled into next-up plan at position 7 after 12 books are formed and one drop occurs → B15 added back  
+- Event 14: Final check of all constraints: alternation, page limit, started-first, topic diversity, series order → all satisfied  
+- Final state: 12-book next-up plan generated with full trace  
+
+Final answer JSON:
+{"next_up_plan": ["B1", "B5", "B8", "B10", "B14", "B16", "B19", "B20", "B22", "B25", "B27", "B30"], "started_books_finished": ["B2", "B9"], "excluded_books": ["B37", "B15", "B23"], "topic_diversity_check_passed": true, "mood_overlap_flagged": ["B4", "B23"], "series_order_respected": true, "consecutive_page_limit_exceeded": false, "total_books_in_queue_initial": 40, "books_after_invalidations": 38, "books_after_page_limit_removal": 38, "books_in_next_up_plan": 12, "timestamp_start": "2025-04-05T09:15:00Z", "timestamp_end": "2025-04-05T09:27:30Z", "total_duration_seconds": 8610}

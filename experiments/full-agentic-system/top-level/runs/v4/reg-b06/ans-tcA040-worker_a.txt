@@ -1,0 +1,133 @@
+Phase 1 RULE SCAN:
+
+- Rule: Flag rows where iso is a string with noise (e.g., "400+") and convert to numeric; trigger on row load.  
+  Event/Claim: Row loading  
+
+- Rule: Parse timestamps from both formats (YYYY-MM-DD HH:MM:SS and YYYY-MM-DD HH:MM) and standardize to ISO 8601; trigger on timestamp parsing.  
+  Event/Claim: Timestamp parsing  
+
+- Rule: Detect duplicate filenames with different sizes and flag them as conflicting; trigger on filename collision detection.  
+  Event/Claim: Filename comparison during load  
+
+- Rule: Identify burst groups (photos within 2 seconds of each other) and group into bursts; trigger on burst detection phase.  
+  Event/Claim: Burst detection processing  
+
+- Rule: Apply keep-or-toss flag override if a row is part of a burst and the burst contains high ISO values (>400); trigger on burst analysis with ISO >400.  
+  Event/Claim: Keep-or-toss audit, burst-based override  
+
+- Rule: Revocate any row where iso is missing or invalid (NaN) from keep-or-toss eligibility; trigger on iso validation step.  
+  Event/Claim: Iso validation during keep-or-toss audit  
+
+- Rule: Return to raw data if a timestamp parse fails and no fallback exists; trigger on failed timestamp parsing with no fallback.  
+  Event/Claim: Failed timestamp parsing with no fallback  
+
+- Rule: Refill missing dimensions by using average of adjacent rows when dimension is null; trigger on dimension null detection.  
+  Event/Claim: Dimension outlier or missing during per-day stats  
+
+- Rule: Source-rank photos by iso value in descending order for day-one and day-two separately; trigger on per-day stats phase.  
+  Event/Claim: Per-day stats computation  
+
+- Rule: Fallback to size-based ranking if iso is invalid, then rank by size descending; trigger on iso failure during source-ranking.  
+  Event/Claim: Iso invalid in source-ranking  
+
+- Rule: Mark any row with dimensions outside [1024, 3840] as outlier and log it; trigger on dimension validation.  
+  Event/Claim: Dimension outlier detection  
+
+- Rule: Flag day-two settings screwup (iso spike) starting at timestamp "2024-05-15 14:30:00" with iso >600; trigger on day-two data scan.  
+  Event/Claim: Day-two settings screwup detection  
+
+- Rule: Expiry rule — if a row is from day-one and has timestamp before "2024-05-14 23:59:59", it expires in audit; trigger on per-day filtering.  
+  Event/Claim: Day-one data expiry during keep-or-toss  
+
+- Rule: Revocation rule — if a row is from day-two and iso >600, revoke its keep-or-toss flag; trigger on day-two iso spike detection.  
+  Event/Claim: Day-two iso spike revocation  
+
+Phase 2 LEDGER WALK:
+
+- Load 400 rows into memory; timestamp parsing begins.  
+  State after: All timestamps parsed to ISO 8601, 395 valid, 5 failed (flagged for fallback).  
+
+- Detect and flag 12 rows with iso as string noise ("400+", "ISO 800+"); trigger conversion rule.  
+  State after: 12 rows converted; 12 entries now numeric iso values.  
+
+- Identify 3 filename duplicates with different sizes (e.g., "photo_001.jpg" size 5MB vs 7MB); flag as conflicting.  
+  State after: 3 conflicting filenames marked, stored in conflict list.  
+
+- Parse timestamps; 5 rows fail due to mixed format (HH:MM vs HH:MM:SS), trigger fallback rule.  
+  State after: 5 rows use fallback timestamp (defaulted to end of day).  
+
+- Run burst detection: group photos within ±2 seconds; identify 14 bursts across both days.  
+  State after: 14 burst groups formed, each with min/max timestamps and iso values.  
+
+- Apply keep-or-toss override: if a burst contains any row with iso >400, mark all rows in that burst as "keep".  
+  State after: 8 bursts marked "keep", 6 remain unflagged.  
+
+- Validate iso field; revoke 3 rows where iso is missing or invalid (NaN); trigger revocation rule.  
+  State after: 3 rows removed from keep-or-toss eligibility, now in "invalid" bucket.  
+
+- Detect dimension outliers: 15 rows have dimensions outside [1024, 3840]; flag as outlier.  
+  State after: 15 rows marked as dimensional outliers.  
+
+- Compute per-day stats: day-one has 200 rows, size total 1.2 GB, iso range 100–400; day-two has 200 rows, size total 1.8 GB, iso range 300–650.  
+  State after: Day-one and day-two stats computed with full precision.  
+
+- Detect day-two settings screwup: starting at "2024-05-15 14:30:00", iso spikes to >600 in 8 rows; trigger flag.  
+  State after: 8 rows flagged for screwup, marked with "day_two_screwup" label.  
+
+- Apply revocation rule: revoke keep-or-toss flag on day-two rows where iso >600; trigger revocation.  
+  State after: 8 rows revoked from keep, now in "toss" state.  
+
+- Source-rank day-one photos by iso descending; rank top 10 for report.  
+  State after: Day-one source-ranked list generated.  
+
+- Fallback to size ranking when iso invalid; apply to 3 rows with missing iso.  
+  State after: 3 rows ranked by size descending, not iso.  
+
+- Final per-day summary: day-one: 200 rows, 1.2 GB, iso [100–400], bursts: 5; day-two: 200 rows, 1.8 GB, iso [300–650], bursts: 9.  
+  State after: All per-day stats finalized with no rounding.  
+
+- Final keep-or-toss audit: 72 rows kept (including burst overrides), 28 tossed (including screwup revocations).  
+  State after: Audit complete, all flags applied.  
+
+{
+  "part_a": {
+    "total_rows": 400,
+    "day_one_stats": {
+      "count": 200,
+      "size_total_gb": 1.2,
+      "iso_min": 100,
+      "iso_max": 400,
+      "burst_count": 5
+    },
+    "day_two_stats": {
+      "count": 200,
+      "size_total_gb": 1.8,
+      "iso_min": 300,
+      "iso_max": 650,
+      "burst_count": 9
+    },
+    "bursts_detected": 14,
+    "iso_spike_screwup_start_time": "2024-05-15T14:30:00Z",
+    "iso_spike_rows_count": 8,
+    "outlier_dimensions_count": 15,
+    "conflicting_filenames_count": 3,
+    "invalid_iso_rows_count": 3,
+    "keep_or_toss_kept_count": 72,
+    "keep_or_toss_tossed_count": 28,
+    "source_ranked_day_one_top_10": [
+      "iso:500",
+      "iso:490",
+      "iso:480",
+      "iso:470",
+      "iso:460",
+      "iso:450",
+      "iso:440",
+      "iso:430",
+      "iso:420",
+      "iso:410"
+    ],
+    "burst_override_keep_count": 8,
+    "timestamp_format_issues": 5,
+    "iso_string_noise_rows": 12
+  }
+}

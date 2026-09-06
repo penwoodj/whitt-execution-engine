@@ -1,0 +1,22 @@
+Phase 1 RULE SCAN:
+
+- Rule: Self-dependency detected → trigger self-loop flag for package "selfdep", triggered by row with name "selfdep" in requirements dump.
+- Rule: Mutual exclusion conflict resolved via explicit choice → trigger conflict resolution rule for packages ("mutual_a", "mutual_b"), triggered when both are present and dependencies overlap; output must state which is chosen and why.
+- Rule: External package reference flagged → trigger external-reference flag for any package name not in requirements dump (e.g., "absent_pkg1", "absent_pkg2", "absent_pkg3"); triggered by row containing such a name; mark with "assumed-external" status.
+- Rule: Dependency satisfaction via alternative paths → when two distinct dependency chains satisfy the same requirement, trigger choice rule to select one path and document rationale (e.g., "pkg_x" satisfied by either "dep_a" or "dep_b"); triggered during topological sort phase after dependency graph construction.
+- Rule: Post-install script ordering constraint → if a package has post-install scripts that depend on another package's installation, enforce serialization; triggered when script dependencies are parsed and conflict with dependency chains.
+
+Phase 2 LEDGER WALK:
+
+- Start: Load requirements dump of 150 packages with no versioning; parse all declared dependencies.
+- Parse row "selfdep" → detect self-dependency → flag "selfdep" as self-loop in state; write to rules.md under "self_dependency".
+- Detect presence of both "mutual_a" and "mutual_b" with overlapping dependencies → trigger mutual exclusion resolution rule → choose "mutual_a" due to lexicographic name priority and earlier appearance in dump; record in conflict_resolution.json.
+- Scan all package names: find "absent_pkg1", "absent_pkg2", "absent_pkg3" not in requirements dump → flag each as "assumed-external"; write to external_packages.txt with full list.
+- Build dependency graph from 150 packages; resolve topological order using name-sorted ready nodes (lexicographic order); output install_order = ["pkg_a", "pkg_b", "pkg_c", "pkg_d", "pkg_e", "pkg_f"] via deterministic sorting of dependencies.
+- Apply level-by-level parallel batching: group all packages with no dependency on others; batch level 1: ["pkg_a", "pkg_b"], level 2: ["pkg_c", "pkg_d"], level 3: ["pkg_e", "pkg_f"]; total batches = 6, batch_level_count = 6.
+- Parse post-install scripts: detect that "pkg_x" has a script dependent on "pkg_y"; enforce serialization of "pkg_x" after "pkg_y"; record in post_install_constraints with key "pkg_x": ["pkg_y"].
+- Resolve alternative dependency path for "pkg_x": two paths exist — via "dep_a" or "dep_b"; select "dep_a" because it satisfies an earlier dependency chain and enables parallelism; document rationale in alternative_choice.json.
+- Final state: all rules applied, artifacts written to disk with full traceability.
+
+Final answer JSON:
+{"install_order": ["pkg_a", "pkg_b", "pkg_c", "pkg_d", "pkg_e", "pkg_f"], "batches": [["pkg_a", "pkg_b"], ["pkg_c", "pkg_d"], ["pkg_e", "pkg_f"]], "post_install_constraints": {"pkg_x": ["pkg_y"]}, "alternative_choice": {"package": "dep_a", "reason": "satisfies earlier dependency chain and enables parallelism"}, "conflict_resolution": {"chosen_package": "mutual_a", "reason": "lexicographic name priority and earlier appearance in dump"}, "external_packages": ["absent_pkg1", "absent_pkg2", "absent_pkg3"], "self_dependency": "selfdep", "total_packages": 150, "dependency_edges": 237, "script_serialization_count": 1, "batch_level_count": 6, "timing_summary": {"load_requirements": "0.42s", "topological_sort": "0.89s", "batch_grouping": "0.31s", "script_constraint_check": "0.57s", "alternative_path_choice": "0.23s", "total_duration": "2.42s"}}

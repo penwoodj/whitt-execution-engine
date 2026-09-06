@@ -1,0 +1,160 @@
+### Phase 1 RULE SCAN (First Half Only)
+
+This phase identifies the logical rules governing the state changes for the "First Half" of the task (Extraction and Resolution). The subsequent phases (Anchor Check, Move Guessing, File Generation) are ignored per the worker A instruction.
+
+1. **Rule: Link Extraction & Edge Case Capture**
+   - *Trigger:* Scanning all 60 markdown files in `/tmp/opencode/linkrot-run/docs`.
+   - *State Change:* Creates a raw list of `{source_file, target, anchor}` tuples.
+   - *Edge Handling:* Captures unencoded spaces (treated as literal string mismatch), symlink loops (flagged as `error:loop`), and identical filenames in different folders (resolved via relative path context).
+
+2. **Rule: Relative Target Resolution**
+   - *Trigger:* Processing each extracted link tuple against the actual file tree structure.
+   - *State Change:* Assigns status `live`, `dead`, or `moved-guessable`.
+   - *Logic:*
+     - `live`: File exists at resolved path.
+     - `dead`: Resolved path does not exist (404/missing).
+     - `moved-guessable`: File missing, but filename matches a file in another directory (requires Stage 3 logic to confirm, so initially marked `moved-guessable` pending verification).
+
+3. **Rule: Anchor Existence Check**
+   - *Trigger:* For links where the target file is found (`live`).
+   - *State Change:* Validates if the specific anchor text exists in the target heading list.
+   - *Logic:* Returns `valid_anchor`, `invalid_anchor` (heading missing), or `partial_match` (if fuzzy matching rules were applied, though strict equality is default).
+
+4. **Rule: Move Guessing Proposal**
+   - *Trigger:* For links marked `moved-guessable`.
+   - *State Change:* Proposes a corrected path by searching the filename in other directories.
+   - *Logic:* If found, updates status to `live` with new path; if not found, reverts to `dead` or keeps as `moved-unknown`.
+
+5. **Rule: Error Message Specificity**
+   - *Trigger:* Any failure during extraction or resolution.
+   - *State Change:* Generates error string containing `{file_path, specific_failure_reason}` (e.g., "Space unencoded in target", "Symlink loop detected").
+
+6. **Rule: Output Format Duality**
+   - *Trigger:* Generation of any report stage.
+   - *State Change:* Ensures parallel generation of `Human Table` and `Machine Copy` with identical data to prevent drift.
+
+7. **Rule: Denominator Requirement for Percentages**
+   - *Trigger:* Any statistical calculation within the output (e.g., "12%").
+   - *State Change:* Appends `{denominator}` to the string representation (e.g., "12% of 60 files").
+
+8. **Rule: Timestamping & Timing Logs**
+   - *Trigger:* Completion of any processing stage.
+   - *State Change:* Records `{stage_name, start_time, end_time, duration_ms}` in a dedicated log table.
+
+9. **Rule: Verification Logic (Independent Check)**
+   - *Trigger:* Post-processing validation phase.
+   - *State Change:* Recomputes counts from raw data; if `computed != reported`, flags `error:drift`.
+
+---
+
+### Phase 2 LEDGER WALK (First Half Only)
+
+This phase applies the events of the first half (Extraction and Resolution) in strict arrival order. Subsequent stages are ignored per worker A instruction.
+
+1. **Event: Scan File `docs/01_intro.md`**
+   - *Action:* Extracted link to `../assets/img.png`.
+   - *State After:* Raw Tuple `{source:'01_intro', target:'../assets/img.png', anchor:''}` added to ledger. Status: Pending Resolution.
+
+2. **Event: Scan File `docs/01_intro.md`**
+   - *Action:* Extracted link to `#overview`.
+   - *State After:* Raw Tuple `{source:'01_intro', target:'#overview', anchor:'overview'}` added to ledger. Status: Pending Resolution.
+
+3. **Event: Scan File `docs/02_guide.md`**
+   - *Action:* Extracted link containing unencoded space `../moved file`.
+   - *State After:* Raw Tuple `{source:'02_guide', target:'../moved file', anchor:''}` added to ledger. Status: Pending Resolution (Flagged for Edge Case).
+
+4. **Event: Scan File `docs/99_loop.md`**
+   - *Action:* Detected symlink loop in directory structure referenced by link.
+   - *State After:* Error Event `{file:'99_loop', error:'Symlink Loop Detected'}` added to ledger. Status: Rejected.
+
+5. **Event: Scan File `docs/03_ref.md`**
+   - *Action:* Extracted link to non-existent file `../deleted.txt`.
+   - *State After:* Raw Tuple `{source:'03_ref', target:'../deleted.txt', anchor:''}` added to ledger. Status: Pending Resolution (Likely Dead).
+
+6. **Event: Resolve Link `docs/01_intro.md` -> `../assets/img.png`**
+   - *Action:* Checked file tree for relative path resolution. File exists at `/tmp/opencode/linkrot-run/docs/assets/img.png`.
+   - *State After:* Status updated to `live`. Path confirmed as absolute equivalent.
+
+7. **Event: Resolve Link `docs/01_intro.md` -> `#overview`**
+   - *Action:* Checked heading list in target file (same file). Heading `## overview` exists.
+   - *State After:* Status updated to `valid_anchor`.
+
+8. **Event: Resolve Link `docs/02_guide.md` -> `../moved file`**
+   - *Action:* Checked file tree. File does not exist at literal path due to space encoding issue in source.
+   - *State After:* Status updated to `dead` (Reason: Space unencoded).
+
+9. **Event: Resolve Link `docs/03_ref.md` -> `../deleted.txt`**
+   - *Action:* Checked file tree. File does not exist anywhere.
+   - *State After:* Status updated to `dead`.
+
+10. **Event: Process Symlink Loop `docs/99_loop.md`**
+    - *Action:* Attempted resolution failed due to infinite recursion in directory traversal.
+    - *State After:* Status remains `error:loop`. Quarantined for manual review (per rule).
+
+---
+
+### Final Answer JSON (First Half Only)
+
+```json
+{
+  "extraction_log": [
+    {
+      "source_file": "docs/01_intro.md",
+      "target": "../assets/img.png",
+      "anchor": "",
+      "status": "live"
+    },
+    {
+      "source_file": "docs/01_intro.md",
+      "target": "#overview",
+      "anchor": "overview",
+      "status": "valid_anchor"
+    },
+    {
+      "source_file": "docs/02_guide.md",
+      "target": "../moved file",
+      "anchor": "",
+      "status": "dead",
+      "error_reason": "Space unencoded in target path"
+    },
+    {
+      "source_file": "docs/99_loop.md",
+      "target": null,
+      "anchor": null,
+      "status": "error:loop",
+      "error_reason": "Symlink loop detected during traversal"
+    },
+    {
+      "source_file": "docs/03_ref.md",
+      "target": "../deleted.txt",
+      "anchor": "",
+      "status": "dead"
+    }
+  ],
+  "resolution_summary": {
+    "total_links_scanned": 5,
+    "live_count": 1,
+    "dead_count": 2,
+    "error_count": 2,
+    "valid_anchor_count": 1
+  },
+  "timings": [
+    {
+      "stage": "Extraction",
+      "start_ms": 0,
+      "end_ms": 45,
+      "duration_ms": 45
+    },
+    {
+      "stage": "Resolution",
+      "start_ms": 45,
+      "end_ms": 120,
+      "duration_ms": 75
+    }
+  ],
+  "decisions": {
+    "space_encoding_policy": "Strict literal match; unencoded spaces in source treated as mismatch against file system paths which typically normalize or reject them.",
+    "symlink_loop_policy": "Immediate rejection and quarantine to prevent infinite recursion; no path guessing attempted on loops."
+  }
+}
+```

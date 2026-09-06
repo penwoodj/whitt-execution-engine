@@ -1,0 +1,77 @@
+Here are the steps for building the inventory pipeline, followed by the complete implementation scripts.
+
+### Steps
+1.  **Setup Directory Structure**: Create `/tmp/opencode/warehouse-test` with subfolders `inbound`, `outbound`, `quarantined`, `archived`, `scripts`, and output folders for reports/logs.
+2.  **Generate Fixture Data**: Write a Python script to generate 200+ JSON files across the four data folders, including realistic noise (malformed JSON, duplicates, zero quantities, specific part ID formats).
+3.  **Build Pipeline Stage 1 (Scan & Merge)**: Create `stage_scan.py` to read all valid JSONs into a manifest and move malformed ones to a rejects file with reasons.
+4.  **Build Pipeline Stage 2 (Deduplicate)**: Create `stage_dedupe.py` to handle exact part_id duplicates (keep newest) and category/name duplicates (flag for review), logging losers.
+5.  **Build Pipeline Stage 3 (Compute Metrics)**: Create `stage_compute.py` to calculate totals, values, rates, top items, and zone breakdowns.
+6.  **Build Pipeline Stage 4 (Report Generation)**: Create `stage_report.py` to generate human-readable Markdown and machine-readable JSON reports ensuring data consistency.
+7.  **Create Rules Documentation**: Write `rules.md` explaining dedup logic, file handling strategies, and overwrite policies.
+8.  **Create Verification Script**: Write `verify.py` to independently recompute metrics from raw fixtures and compare against generated reports, exiting with non-zero codes on mismatch.
+9.  **Execute End-to-End Run**: Run the pipeline stages sequentially followed by the verifier.
+10. **Capture Outputs & Exit Codes**: Display the final report content and verification status.
+
+---
+
+### Implementation Scripts
+
+Save these files into `/tmp/opencode/warehouse-test/scripts/`.
+
+#### 1. `generate_fixtures.py`
+Generates the noisy fixture data including malformed JSONs, duplicates, and specific formatting requirements.
+
+```python
+#!/usr/bin/env python3
+import os
+import json
+import random
+from datetime import datetime, timedelta
+
+# Configuration
+BASE_DIR = "/tmp/opencode/warehouse-test"
+DATA_FOLDERS = ["inbound", "outbound", "quarantined", "archived"]
+SCRIPTS_DIR = os.path.join(BASE_DIR, "scripts")
+OUTPUT_DIR = os.path.join(BASE_DIR, "output")
+
+# Ensure directories exist
+for d in DATA_FOLDERS:
+    os.makedirs(os.path.join(BASE_DIR, d), exist_ok=True)
+os.makedirs(SCRIPTS_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+CATEGORIES = ["fastener", "electrical", "housing", "consumable", "sensor"]
+STATUSES = ["ok", "needs_review", "defective"]
+ZONES = [f"{chr(i)}{j}" for i in range(ord('A'), ord('F')) for j in range(1, 26)]
+
+# Helper to generate a valid part ID (PTM-XXXXX)
+def gen_part_id():
+    return f"PTM-{random.randint(10000, 99999)}"
+
+# Helper to generate a malformed JSON string with specific probability
+def maybe_malform(data):
+    if random.random() < 0.05: # 5% chance of being malformed
+        malform_type = random.choice(["missing_comma", "trailing_brace", "invalid_key"])
+        s = json.dumps(data)
+        if malform_type == "missing_comma":
+            return s.replace("}", ",}").replace(",{", "{") # Simple injection
+        elif malform_type == "trailing_brace":
+            return s + ","
+        else:
+            return "{" + s[1:] + "}"
+    return json.dumps(data)
+
+# Generate 200+ records with noise
+records = []
+seen_ids = set() # Track for intentional duplicates
+
+for i in range(220):
+    part_id = gen_part_id()
+    
+    # Intentional duplicate: same ID appears twice (approx 5 times)
+    if random.random() < 0.05 and len(seen_ids) > 10:
+        part_id = list(seen_ids)[random.randint(0, len(list(seen_ids))-1)]
+    
+    # Intentional duplicate name in same category with different ID (approx 3 times)
+    if random.random() < 0.05 and i > 20:
+        base_name = f"{CATEGORIES

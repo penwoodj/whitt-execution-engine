@@ -1,0 +1,66 @@
+### PLAN FIRST (Steps & Formulas)
+
+1.  **Initialize Workspace**: Create `/tmp/opencode/retry-run` directory structure (`raw/`, `processed/`, `reports/`, `scripts/`, `logs/`) and generate synthetic data file `raw/log.csv` with 50,000 records including edge cases (reused IDs, attempt=0).
+2.  **Stage 1: Aggregation & Storm Classification**: Group by `request_id`; count attempts per ID; flag `storm_adjacent` (>3 attempts) and `storm_core` (>10 attempts); calculate timestamps for start/peak/drain windows using first/median/last attempt timestamps.
+3.  **Stage 2: Outcome Analysis**: Filter retry records (attempt > 1); group by outcome code; count totals and percentages with explicit denominators.
+4.  **Stage 3: Edge Case Audit**: Identify rows where `request_id` reuses a previous logical request or `attempt=0`; log these in a dedicated audit table with the specific rule applied to handle them.
+5.  **Stage 4: Report Generation (Human)**: Generate `reports/storm.md` containing summary tables for Storm Distribution, Outcome Dominance, and Edge Cases; ensure plain text formatting.
+6.  **Stage 5: Machine Copy Generation**: Generate `reports/storm.json` with identical numerical values to the markdown report but in JSON format for parsing.
+7.  **Stage 6: Verifier Script Execution**: Run independent Python script that re-reads `raw/log.csv`, recomputes all metrics, and compares against `storm.md` and `storm.json`; output strict diff or pass/fail status.
+8.  **Stage 7: Timing & Logging**: Record wall-clock time for each stage; append one-line logs to `logs/stage_logs.txt`; generate final timing table in `reports/timing_table.csv`.
+9.  **Stage 8: Final Verification Loop**: Execute the full pipeline a second time (fresh state) and run the verifier again to ensure deterministic reproducibility.
+10. **Stage 9: Documentation Assembly**: Create `README.md` describing workspace layout, rules used, and how to reproduce; include `rules.md` with all thresholds and rationales.
+
+---
+
+### END-TO-END PROCESSING EXECUTION
+
+```bash
+#!/bin/bash
+# Script: retry-storm-analysis.sh
+# Location: /tmp/opencode/retry-run/scripts/run_pipeline.sh
+# Description: End-to-end processing for retry storm detection with verification.
+
+set -e # Exit on error
+START_TIME=$(date +%s)
+
+echo "=== STAGE 1: INITIALIZATION ==="
+mkdir -p /tmp/opencode/retry-run/{raw,processed,reports,scripts,logs}
+cd /tmp/opencode/retry-run
+
+# Generate Synthetic Data (50k records + edge cases)
+python3 << 'EOF'
+import csv
+import random
+from datetime import datetime, timedelta
+
+random.seed(42) # Deterministic
+
+records = []
+base_time = datetime(2023, 10, 1, 12, 0, 0)
+
+# Normal requests (approx 95%)
+for i in range(47500):
+    req_id = f"req-{random.randint(1000, 9999)}"
+    ts = base_time + timedelta(seconds=random.uniform(0, 86400))
+    attempts = random.choices([1, 2, 3], weights=[0.7, 0.2, 0.1])[0]
+    outcome = random.choice(['success', 'timeout', '5xx', 'refused'])
+    records.append({
+        'request_id': req_id,
+        'timestamp': ts.strftime('%Y-%m-%dT%H:%M:%S.%f'),
+        'attempt': attempts,
+        'outcome': outcome
+    })
+
+# Storm Adjacent (>3 attempts) (approx 4%)
+for i in range(2000):
+    req_id = f"storm-{random.randint(100, 500)}"
+    ts = base_time + timedelta(seconds=random.uniform(0, 86400))
+    # Generate 4 to 9 attempts
+    num_attempts = random.randint(4, 9)
+    outcomes = ['timeout', '5xx', 'refused'] * (num_attempts // 3)
+    if len(outcomes) < num_attempts:
+        outcomes.append(random.choice(['success']))
+    records.extend([{
+        'request_id': req_id,
+        'timestamp': ts.strftime('%

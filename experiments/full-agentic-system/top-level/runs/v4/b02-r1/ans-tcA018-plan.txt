@@ -1,0 +1,55 @@
+# Step-by-Step Plan for Perf Regression Tracker Job
+
+1. **Initialize Workspace & Decisions**
+   - Create `/tmp/opencode/perf-reg-run` directory structure: `raw/`, `processed/`, `reports/human/`, `reports/machine/`, `logs/`, `rules.md`, `decisions.md`.
+   - Write `decisions.md` documenting assumptions for unspecified gaps (e.g., timestamp tie-breaking rule, single-repeat handling, outlier rejection threshold).
+
+2. **Data Ingestion & Normalization**
+   - Script: `normalize.py`. Reads raw timing files (assumed CSV with columns: `commit_id`, `scenario`, `repeat`, `timestamp_ns`).
+   - Logic: Group by `(commit_id, scenario)`. Calculate `best_time` (min of repeats) and `median_time`. Handle single-repeat cases by setting best=median. Log outliers (>2 std dev from median) to a quarantine list in `logs/normalize.log`.
+
+3. **Delta Calculation**
+   - Script: `delta.py`. Reads normalized data. Sorts commits by timestamp (using tie-breaker rule defined in decisions.md). Calculates `percent_change = ((current_best - prev_best) / prev_best) * 100`. Preserves full precision (no rounding). Outputs to `processed/delta.csv`.
+
+4. **Regression Flagging & Audit**
+   - Script: `audit.py`. Reads delta data. Flags rows where `abs(percent_change) > 10` as regressions/improvements. Specifically checks the "pure refactor" commit against its baseline; if deviation > 10%, marks it as a false refactor claim in `reports/human/audit_report.md`.
+
+5. **Verdict Generation**
+   - Script: `verdict.py`. Reads audit data. Assigns scenario-level verdicts (e.g., "REGRESSION", "STABLE", "IMPROVEMENT"). Aggregates to per-commit overall verdict based on majority or worst-case scenario. Outputs method logic and results to `processed/verdicts.csv`.
+
+6. **Report Generation (Human & Machine)**
+   - Script: `report_gen.py`. Reads processed data. Generates `reports/human/perf.md` with Markdown tables (human-readable, precise numbers). Generates `reports/machine/perf.json` with identical numerical values in JSON format. Ensures no drift between files.
+
+7. **Verification Suite**
+   - Script: `verify.sh`. Independent shell script. Recomputes key metrics from raw data using separate logic (e.g., recalculating deltas and flags). Compares results against generated reports field-by-field. Exits with non-zero status if any discrepancy found. Outputs verification log to `logs/verify.log`.
+
+8. **Execution & Idempotency Check**
+   - Run the full pipeline twice: `./run_pipeline.sh` then `./run_pipeline.sh` again.
+   - Compare outputs of both runs (using checksums or diff) to ensure idempotency and state cleanliness. Log results to `logs/idempotency.log`.
+
+9. **Final Output Assembly**
+   - Compile all reports, logs, rules, decisions, and timing tables into the final workspace structure. Ensure `README.md` points to all artifacts.
+
+---
+
+# Implementation of Perf Regression Tracker Job
+
+## 1. Workspace Initialization & Decisions
+
+```bash
+mkdir -p /tmp/opencode/perf-reg-run/{raw,processed,reports/human,reports/machine,logs}
+touch /tmp/opencode/perf-reg-run/rules.md
+touch /tmp/opencode/perf-reg-run/decisions.md
+```
+
+**Content of `/tmp/opencode/perf-reg-run/decisions.md`:**
+- **Timestamp Tie-Breaker:** If two commits share a timestamp, order by `commit_id` lexicographically ascending.
+- **Single Repeat Handling:** If a scenario has only one repeat, `best_time` = `median_time`. No outlier calculation possible; such rows are flagged in logs but not rejected unless explicitly configured (default: keep).
+- **Outlier Rejection Threshold:** A repeat is considered an outlier if its value deviates from the median by > 2 standard deviations. Outliers are excluded from best/median calc and logged to `logs/normalize.log`.
+- **Refactor Audit Rule:** The "pure refactor" commit is audited against its immediate predecessor. If timing change > 10%, it is flagged as a performance regression/improvement, contradicting the "refactor" claim.
+- **Precision Policy:** All percentage changes stored with full floating-point precision (no rounding) to avoid cumulative drift errors.
+
+## 2. Data Normalization Script (`normalize.py`)
+
+```python
+#!/usr/bin/env

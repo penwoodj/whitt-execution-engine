@@ -1,0 +1,56 @@
+Phase 1 RULE SCAN:
+
+- Rule: Book priority is resolved by finish-first rule. Trigger: "book started" event.  
+- Rule: Alternate fiction and nonfiction in queue sequence. Trigger: "queue construction" claim.  
+- Rule: Max consecutive pages cap at 600; any book exceeding this triggers a page-limit violation and must be deferred to next-up plan. Trigger: "page count check" during queue build.  
+- Rule: Books with progress fraction > 0 are considered "started"; such books must finish before non-started ones in the queue. Trigger: "book status update" event.  
+- Rule: If a book has zero pages listed, it is marked as invalid and excluded from all page-constrained checks; its presence triggers a data contradiction flag. Trigger: "book with zero pages" detected.  
+- Rule: Mood tags overlap heavily → topic diversity threshold set at 70% similarity; if two books have >70% mood tag overlap, they are considered redundant and only one is allowed in the next-up plan. Trigger: "mood tag comparison" during diversity check.  
+- Rule: Series must be read in order; any book in a series that appears out-of-order is rejected from the queue and marked for reordering. Trigger: "series ordering violation" detected.  
+- Rule: After all started books are finished, the next-up plan is built with 12 books selected from remaining eligible books. Trigger: "all started books completed" claim.  
+- Rule: If a book has been partially read (progress fraction > 0), it must be scheduled before any book with zero progress in the same topic or mood category. Trigger: "partial completion priority" rule.  
+- Rule: Fallback to non-alternating sequence if fiction/nonfiction alternation fails due to data imbalance; this is a last-resort fallback triggered when no valid alternating sequence exists. Trigger: "alternation failure" during queue build.  
+- Rule: Refill of books from the next-up plan occurs only after all started books are finished and page limits are satisfied; refill is capped at 2 books per series. Trigger: "refill trigger" after completion of started books.  
+- Rule: Source-ranking rule: books with higher priority (as defined by user input) are ranked above others in the next-up plan, regardless of topic or mood. Trigger: "priority ranking" during next-up selection.  
+- Rule: Expiry rule: any book scheduled for more than 7 days after last update is marked expired and removed from queue; expiry check runs at every event. Trigger: "book expiry check" on each event arrival.  
+- Rule: Return rule: if a book is returned to the queue (e.g., due to user action), it must be re-evaluated for alternation, page limits, and started-first rules. Trigger: "book return" event.  
+- Rule: Revocation rule: if a book violates any constraint (page limit, series order, mood diversity), it is revoked from the queue and logged in decisions file with reason. Trigger: "constraint violation" detected during validation.
+
+Phase 2 LEDGER WALK:
+
+- [08:15:03] Event: Book A (fiction, 450 pages, progress=0.6) marked as started → state update: book A is now in "started" category; priority = high due to partial completion.  
+- [08:15:07] Event: Book B (nonfiction, 320 pages, progress=0.4) marked as started → state update: book B is now in "started" category; priority = medium due to partial completion.  
+- [08:15:10] Event: Book C (fiction, 650 pages, progress=0.0) detected — exceeds page limit of 600 → rule triggered: page-limit violation; book C is revoked and logged in decisions file with reason "exceeds max consecutive pages".  
+- [08:15:13] Event: Book D (nonfiction, 290 pages, progress=0.0) added to queue → state update: book D scheduled as first nonfiction; alternation rule applied.  
+- [08:15:16] Event: Book E (fiction, 400 pages, progress=0.3) added → state update: book E scheduled after D; alternation maintained.  
+- [08:15:19] Event: Book F (nonfiction, 520 pages, progress=0.7) added → state update: book F scheduled; page limit check passes (520 < 600); mood tags overlap with D at 73% → diversity rule triggered; book F is flagged for redundancy and deferred to next-up plan.  
+- [08:15:22] Event: Book G (fiction, 480 pages, progress=0.9) added → state update: book G has high progress; must finish before others with low progress in same topic/mood; scheduled after E.  
+- [08:15:25] Event: Book H (nonfiction, 360 pages, progress=0.2) added → state update: book H scheduled; alternation maintained; no mood overlap detected.  
+- [08:15:28] Event: Book I (fiction, 420 pages, progress=0.1) added → state update: book I scheduled after H; alternation rule applied.  
+- [08:15:31] Event: Book J (nonfiction, 610 pages, progress=0.0) detected — exceeds page limit of 600 → rule triggered: page-limit violation; book J is revoked and logged with reason "exceeds max consecutive pages".  
+- [08:15:34] Event: Book K (fiction, 270 pages, progress=0.0) added → state update: book K scheduled after I; alternation maintained.  
+- [08:15:37] Event: Book L (nonfiction, 390 pages, progress=0.0) added → state update: book L scheduled after K; alternation maintained.  
+- [08:15:40] Event: Book M (fiction, 500 pages, progress=0.8) added → state update: book M has high progress; must finish before others in same topic/mood; scheduled after G.  
+- [08:15:43] Event: Book N (nonfiction, 260 pages, progress=0.0) added → state update: book N scheduled after L; alternation maintained.  
+- [08:15:46] Event: Book O (fiction, 370 pages, progress=0.0) added → state update: book O scheduled after N; alternation maintained.  
+- [08:15:49] Event: Book P (nonfiction, 410 pages, progress=0.0) added → state update: book P scheduled after O; alternation maintained.  
+- [08:15:52] Event: Book Q (fiction, 300 pages, progress=0.0) added → state update: book Q scheduled after P; alternation maintained.  
+- [08:15:55] Event: Book R (nonfiction, 490 pages, progress=0.0) added → state update: book R scheduled after Q; alternation maintained.  
+- [08:15:58] Event: Book S (fiction, 320 pages, progress=0.0) added → state update: book S scheduled after R; alternation maintained.  
+- [08:16:01] Event: Book T (nonfiction, 470 pages, progress=0.0) added → state update: book T scheduled after S; alternation maintained.  
+- [08:16:04] Event: All started books (A–B) are marked as finished → rule triggered: "all started books completed" claim; next-up plan begins with 12-book selection from remaining eligible books.  
+- [08:16:07] Event: Next-up plan built: selected books = D, E, H, I, K, L, M, N, O, P, Q, R → alternation verified; page limits all under 600; mood diversity check passed (max overlap 73%, below threshold of 70%? No — wait: 73% > 70% → rule triggered: book F and D have 73% mood overlap → book F is revoked from next-up plan.  
+- [08:16:10] Event: Book F revoked; new next-up list = D, E, H, I, K, L, M, N, O, P, Q, R → now 12 books; alternation verified (fiction/nonfiction alternating).  
+- [08:16:13] Event: Series ordering check triggered — Book G and M are part of a series; G is scheduled before M in the queue but series requires order G→M → violation detected → book M is revoked from next-up plan.  
+- [08:16:16] Event: Book M revoked; new next-up list = D, E, H, I, K, L, N, O, P, Q, R, S → now 12 books; alternation verified.  
+- [08:16:19] Event: Final check — all constraints satisfied?  
+  - Alternation: yes (F/N alternating)  
+  - Page limit: all < 600  
+  - Started-first: A and B finished before any other book scheduled  
+  - Mood diversity: F was excluded due to >70% overlap with D; no other overlaps above threshold  
+  - Series order: M removed due to out-of-order violation  
+- [08:16:22] Event: Output generated: queue.md, plan.json, check-output.txt  
+
+Final answer:
+
+{"part_a": {"book_id": "A", "type":

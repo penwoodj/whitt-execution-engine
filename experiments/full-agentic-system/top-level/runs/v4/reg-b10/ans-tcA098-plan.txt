@@ -1,0 +1,69 @@
+```
+1. Create directory structure at /tmp/opencode/recall-run with subdirectories:
+   - raw/ for input CSVs (batches.csv, cases.csv, lots.csv)
+   - processed/ for intermediate outputs
+   - logs/ for stage-specific logs
+   - outputs/ for final deliverables
+   - rules.md for rule definitions and thresholds
+
+2. Download or generate synthetic data files with exact specifications:
+   - batches.csv: 30 rows, columns (batch_id, lot_id, quantity, date, case_id)
+   - cases.csv: 50 rows, columns (case_id, batch_ids, weight_pounds, reworked_flag)
+   - lots.csv: 12 rows, columns (lot_id, contamination_status, variant)
+
+3. Validate input schema using standard library CSV parsing with strict field matching; fail if any row has missing or malformed fields.
+
+4. Parse lots.csv to extract all lot IDs and variants; record each occurrence of a hyphenated variant as a distinct entry with flag "variant_detected".
+
+5. Build initial genealogy graph: create adjacency list from batches.csv where edges are (lot_id → batch_id) with quantity as edge weight, using standard CSV parsing and dictionary mapping.
+
+6. Apply quantity propagation rule: for each lot-to-batch edge, store the quantity in a directed graph structure; use nested dictionaries to represent multigraph with quantities.
+
+7. Identify contaminated lot by filtering lots.csv where contamination_status == "contaminated"; record its ID as CONTAMINATED_LOT_ID.
+
+8. Perform downstream closure from CONTAMINATED_LOT_ID: traverse all batches that consume it, then all cases that use those batches; propagate quantity along edges using weighted sum of batch quantities.
+
+9. For each case in the closure path, compute total consumed quantity from contaminated lot via batch paths; store as case_consumed_quantity.
+
+10. Identify reworked case by scanning cases.csv for reworked_flag == "true"; extract parent batch IDs and record both parents explicitly.
+
+11. Flag both parent batches of reworked case as affected even if they don’t directly consume the bad lot — this is a downstream closure edge case.
+
+12. Build clean list: iterate over all cases not in closure path; for each, verify that no batch in its batch_ids consumes the contaminated lot; output full case_id and proof trail (batch paths).
+
+13. Generate recall.md with plain text sections:
+    - Summary of contamination source
+    - Affected batches, cases, quantities
+    - Reconstructed genealogy as a table
+    - Clean list summary
+    - List of variant entries and corrections
+
+14. Generate closure.json in JSON format with fields:
+    - contaminated_lot_id
+    - affected_batches (list of batch_id with quantity consumed)
+    - affected_cases (list of case_id with total consumed quantity)
+    - reworked_case_info (case_id, parent_batch_ids, rework_reason)
+    - clean_list (array of case_id with proof trail)
+
+15. Generate clean-list.csv: one row per unaffected case; columns: case_id, batch_ids, weight_pounds, proof_trail (as JSON string), verified_clean
+
+16. Log each data defect explicitly in logs/defects.log:
+    - "Lot ID 'L-03' appears with variant 'L-03a' — corrected to L-03a and logged"
+    - "Batch B25 consumes lot L-04 on 2024-01-15, then again on 2024-01-16: duplicated consumption recorded as two entries"
+    - "Case C98 has approximate weight (3.7 lbs) — flagged with note 'approximate'"
+
+17. Define and document rules in rules.md:
+    - Rule: "If a lot appears with hyphen variant, treat it as a separate entry; log and count" → threshold: any occurrence of '-' in lot_id
+    - Rule: "Batch consumption on same lot across days must be recorded separately" → threshold: date difference < 1 day (in seconds)
+    - Rule: "Reworked case must list both parent batches, even if one is unaffected" → threshold: rework_flag == true
+
+18. Add timing logs at each stage with real timestamps in logs/stage_*.log:
+    - Format: [YYYY-MM-DD HH:MM:SS] Stage X started
+    - Format: [YYYY-MM-DD HH:MM:SS] Stage X completed
+
+19. Run pipeline twice consecutively:
+    - First run: validate basic flow and outputs
+    - Second run: verify idempotency; check for state changes or side effects
+
+20. Verify all outputs using a standalone checker script (verifier.py):
+    - Recompute closure from

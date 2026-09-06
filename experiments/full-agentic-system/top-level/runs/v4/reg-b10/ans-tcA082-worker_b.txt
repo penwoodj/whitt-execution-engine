@@ -1,0 +1,58 @@
+Phase 1 RULE SCAN:
+
+- Rule: Expiry rule triggers on package "selfdep" due to self-dependency; triggered by event "selfdep" in dependency dump.  
+  Event/Claim: selfdep  
+
+- Rule: Mutual exclusion conflict resolution rule activates when both "mutual_a" and "mutual_b" are present; triggered by claim of mutual exclusivity between mutual_a and mutual_b.  
+  Event/Claim: mutual_exclusion_claim  
+
+- Rule: External dependency flag rule sets "absent_pkg_flag" for any package referencing a missing package (e.g., "missing_x", "missing_y", "missing_z"); triggered when parsing dependency dump finds references to absent packages.  
+  Event/Claim: parse_dependency_dump  
+
+- Rule: Source-ranking fallback rule assigns priority rank to packages with no dependencies, using name-sort as tiebreaker; triggered during topological sort of ready nodes.  
+  Event/Claim: topological_sort_ready_nodes  
+
+- Rule: Script ordering constraint rule enforces serialization between post-install scripts that depend on one another (e.g., script_after_package_A depends on script_before_package_B); triggered when parsing post-install script dependencies.  
+  Event/Claim: parse_script_dependencies  
+
+- Rule: Parallel batch level-by-level rule groups installable packages into batches based on independence; triggered after topological order is established and no dependency chains remain.  
+  Event/Claim: parallel_batch_grouping  
+
+- Rule: Choice rule for alternative dependency satisfaction selects between "alt1" and "alt2" when both satisfy the same requirement; triggered by dependency resolution conflict in package "dep_resolver".  
+  Event/Claim: dep_resolver_alternative_choice  
+
+- Rule: Refill rule reactivates a package if it was previously installed but its dependency is now satisfied; triggered during post-install script execution phase.  
+  Event/Claim: refill_after_dependency_satisfied  
+
+- Rule: Revocation rule removes a package from install list if it violates mutual exclusivity or has been superseded by another; triggered when conflict resolution resolves mutual exclusion.  
+  Event/Claim: revocation_on_mutual_exclusion_resolved  
+
+Phase 2 LEDGER WALK:
+
+- Initial state: packages = ["selfdep", "mutual_a", "mutual_b", "missing_x", "missing_y", "missing_z", "dep_resolver"], dependencies = {selfdep: selfdep, mutual_a: mutual_b, mutual_b: mutual_a, dep_resolver: alt1 or alt2}, scripts = {"post_A": ["after_B"], "post_B": ["before_A"]}, external_flags = {"missing_x": true, "missing_y": true, "missing_z": true}  
+
+- Event: parse_dependency_dump → sets absent_pkg_flag for missing_x, missing_y, missing_z; adds to external_flags.  
+  State after: external_flags updated, all three absent packages flagged.  
+
+- Event: topological_sort_ready_nodes → applies name-sort among ready nodes (selfdep is ready due to self-dependency loop); selfdep remains unready due to cycle.  
+  State after: selfdep not in ready list; mutual_a and mutual_b are both ready but mutually exclusive.  
+
+- Event: mutual_exclusion_claim → triggers mutual exclusion rule; mutual_a and mutual_b are flagged as conflicting; revocation_on_mutual_exclusion_resolved is triggered, removing one of them (mutual_b).  
+  State after: mutual_b removed from install list; mutual_a remains.  
+
+- Event: parallel_batch_grouping → groups packages by independence; only mutual_a and dep_resolver are independent; batch1 = [mutual_a], batch2 = [dep_resolver].  
+  State after: batches.json updated with two batches, no overlap.  
+
+- Event: parse_script_dependencies → detects post_A depends on post_B, which depends on post_A → creates serialization constraint between A and B; script ordering rule enforces that post_A must run before post_B.  
+  State after: script order enforced: post_A → post_B.  
+
+- Event: dep_resolver_alternative_choice → both alt1 and alt2 satisfy dependency for dep_resolver; choice rule selects alt1 due to lower name-sort priority (alt1 < alt2).  
+  State after: final choice = alt1; decision recorded in decisions.txt.  
+
+- Event: refill_after_dependency_satisfied → dep_resolver's dependency is now satisfied via alt1; refills dep_resolver into install list.  
+  State after: dep_resolver added to install list, now in batch2.  
+
+- Final state: packages installed = [mutual_a, dep_resolver], batches = [[mutual_a], [dep_resolver]], script order = post_A → post_B, choice = alt1, external flags = {missing_x: true, missing_y: true, missing_z: true}, selfdep remains uninstalled due to cycle.  
+
+Final answer JSON:
+{"batches": [["mutual_a"], ["dep_resolver"]], "script_order": ["post_A", "post_B"], "choice": "alt1", "external_flags": {"missing_x": true, "missing_y": true, "missing_z": true}, "selfdep_status": "uninstalled_due_to_self_dependency_cycle"}

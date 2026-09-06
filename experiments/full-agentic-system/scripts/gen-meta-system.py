@@ -23,11 +23,14 @@ SCRIPTS = Path(__file__).resolve().parent
 FAS = SCRIPTS.parent
 REPO = FAS.parents[1]
 
+MODEL_GGUF = "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
 MODELS = {
-    "fmt": "Qwen3-5-9B-Q4_K_M",
-    "deep": "Qwen3-5-9B-Q4_K_M",
-    "think": "Qwen3-5-9B-Q4_K_M",
+    "fmt": MODEL_GGUF,
+    "deep": MODEL_GGUF,
+    "think": MODEL_GGUF,
 }
+# Rule 9 (schema L912): absolute GGUF path, basename == model name.
+SOURCE_PATH = Path("/run/media/jon/data/models/") / MODEL_GGUF
 
 LANES = {
     "HEAVY": [("plan", "think", 1000, "plan"),
@@ -93,7 +96,7 @@ def gate_block(sid, probe, heads, run_dir):
 
 
 def stage_block(sid, nxt, mkey, mt, gate_cmd, check_cmd, run_dir,
-                save_name=None, live=False):
+                save_name=None, live=False, after_route=None):
     if live:
         gwt_lines = [
             "          - gwt:",
@@ -140,6 +143,10 @@ def stage_block(sid, nxt, mkey, mt, gate_cmd, check_cmd, run_dir,
            f"              to_file_path: {run_dir}/progress.log",
            "              event_fields: [step_name, model_name, "
            "duration_ms, token_count]"]
+    if after_route:
+        y += ["          - gwt:",
+              "              - given: '1 == 1'",
+              f"                then: {after_route}"]
     return "\n".join(y)
 
 
@@ -170,6 +177,12 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--run-dir", default=None)
     ap.add_argument("--seed", default=None)
+    ap.add_argument("--prompts", default=None,
+                    help="prompts yml override (default meta-prompts.yml)")
+    ap.add_argument("--only", default=None,
+                    help="comma-separated prompt_id filter (batch)")
+    ap.add_argument("--case-dir", default=None)
+    ap.add_argument("--fixtures", default=None)
     a = ap.parse_args()
     global SEED_DIR
     SEED_DIR = str(Path(a.seed).resolve()) if a.seed else None
@@ -179,12 +192,21 @@ def main():
         f"meta-v1-{mode}.yml"
     run_dir = (Path(a.run_dir) if a.run_dir else
                FAS / "top-level" / "runs" / f"{mode}-r1").resolve()
+    case_dir = (Path(a.case_dir) if a.case_dir
+                else FAS / "top-level" / "cases")
+    fixtures_path = (Path(a.fixtures) if a.fixtures
+                     else FAS / "top-level" / "fixtures" / "meta-fixes.yml")
     run_dir.mkdir(parents=True, exist_ok=True)
-    (FAS / "top-level" / "cases").mkdir(parents=True, exist_ok=True)
-    (FAS / "top-level" / "fixtures").mkdir(parents=True, exist_ok=True)
+    case_dir.mkdir(parents=True, exist_ok=True)
+    fixtures_path.parent.mkdir(parents=True, exist_ok=True)
 
     prompts = yaml.safe_load(
-        (FAS / "prompts" / "meta-prompts.yml").read_text())["meta-prompts"]
+        (Path(a.prompts) if a.prompts
+         else FAS / "prompts" / "meta-prompts.yml").read_text()
+    )["meta-prompts"]
+    if a.only:
+        keep = {p.strip() for p in a.only.split(",") if p.strip()}
+        prompts = [p for p in prompts if p["prompt_id"] in keep]
 
     # scenario + probes + case ymls + fixtures (route truth, computed
     # from registered meta — never hand-typed per stage)
@@ -202,14 +224,15 @@ def main():
         tj = json.dumps(truth, sort_keys=True)
         fixtures += [f"{pid}:  # lane from meta-prompts.yml",
                      f"  {json.dumps(truth, sort_keys=True)}"]
-        (FAS / "top-level" / "cases" / f"case-{pid}.yml").write_text(
+        case_case = case_dir / f"case-{pid}.yml"
+        case_case.write_text(
             yaml.safe_dump({
                 "prompt_id": pid, "prompt": p["text"].strip(),
                 "meta": p["meta"],
                 "success_criteria": {"deterministic_checks": {
                     "json_exact": tj}}},
                 sort_keys=False, width=78))
-    (FAS / "top-level" / "fixtures" / "meta-fixes.yml").write_text(
+    fixtures_path.write_text(
         "\n".join(fixtures) + "\n")
     (run_dir / "scenario.json").write_text(json.dumps(scenario, indent=1))
 
@@ -255,10 +278,12 @@ def main():
                    else live_cmd(pid, stage, style, rd))
             if not a.spoof and style == "cot":
                 mt = max(mt, 2200)
-            steps.append(stage_block(sid, nxt, mkey, mt, cmd, None, rd,
-                                     save_name=f"{pid}-{stage}" if not
-                                     a.spoof else None,
-                                     live=not a.spoof))
+            chain_last = nxt == f"routelog_{pid}"
+            steps.append(stage_block(
+                sid, nxt, mkey, mt, cmd, None, rd,
+                save_name=f"{pid}-{stage}" if not a.spoof else None,
+                live=not a.spoof,
+                after_route=nxt if chain_last else None))
         else:  # routelog: spoof-emit writes route truth, then check
             pid, rd = payload
             nxt = step_order[pos + 1][0] if pos + 1 < len(step_order) \
@@ -307,8 +332,24 @@ def main():
         "  timing:",
         "    cooldown_after_unload_secs: 0",
         "    min_tmp_space_mb: 50",
+        # schema L562-574: resource admission contract (rule 9)
+        "  resource_admission:",
+        "    enforcement_policy: block",
+        "    minimum_available:",
+        "      ram: 6GiB",
+        "      vram: 6GiB",
+        "      swap_free: 4GiB",
+        "    model_estimate:",
+        f"      kv_cache: 2.1GiB  # {SOURCE_PATH.name}:"
+        " 2.33GiB weights, ctx 32768 q8_0",
+        "      compute_buffer: 512MiB",
+        "      host_runtime: 700MiB",
+        f"      expected_runtime_secs: {400 * max(1, len(prompts))}",
+        "    telemetry:",
+        "      write_profile: true",
         "models:",
-    ] + [f"  m_{k}:\n    name: {yq(v)}\n    host:\n"
+    ] + [f"  m_{k}:\n    name: {yq(v)}\n"
+          f"    source_path: {SOURCE_PATH}\n    host:\n"
           f"      type: llama_cpp_with_vulkan" for k, v in MODELS.items()]
         + ["agentic_workflow:",
            "  when:",
@@ -319,6 +360,9 @@ def main():
            "          event_fields: [workflow_id, total_steps, "
            "succeeded, failed]",
            "  steps:"]) + "\n" + "\n".join(steps) + "\n"
+
+    if not SOURCE_PATH.exists() or SOURCE_PATH.stat().st_size == 0:
+        sys.exit(f"fatal: model source missing or empty: {SOURCE_PATH}")
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(yml)

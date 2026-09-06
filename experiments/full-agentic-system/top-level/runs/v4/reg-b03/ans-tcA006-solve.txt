@@ -1,0 +1,216 @@
+The following response provides a complete, self-contained Python solution for the CI Flake Detector task as specified. It includes the data generation (simulating 500 builds with duplicates and missing fields), the processing logic (Phase 1: Rule List & Phase 2: Ledger Walk), the output files, and an independent verification script.
+
+### Directory Structure
+```text
+/tmp/opencode/flake-run/
+├── README.md          # Workspace layout description
+├── rules.md           # Thresholds and decision logic
+├── data.py            # Data generation (deterministic seed)
+├── process.py         # Main processing script (Phase 1 & 2)
+├── output/
+│   ├── flakes.md      # Human-readable report
+│   └── flake.json     # Machine-readable JSON
+├── verify.py          # Independent verification script
+└── logs/              # Stage timestamps and error logs
+```
+
+### 1. `README.md`
+```markdown
+# CI Flake Detector Workspace
+
+This workspace contains a deterministic simulation of a CI system processing 500 builds to identify flaky tests.
+
+**Layout:**
+- `data.py`: Generates synthetic build records (including duplicates and missing fields) using a fixed seed for reproducibility.
+- `process.py`: Executes the core logic:
+    - **Phase 1**: Computes pass rates, flags suspicious tests (5%-95%), identifies failure clusters, checks correlations, and ranks flakiness.
+    - **Phase 2**: Applies events in strict arrival order to update state.
+- `output/flakes.md`: Human-readable report with tables.
+- `output/flake.json`: Machine-readable JSON contract.
+- `verify.py`: Independent script that recomputes metrics from raw data and compares against outputs to ensure integrity.
+
+**Execution:**
+```bash
+python3 data.py
+python3 process.py
+python3 verify.py
+```
+```
+
+### 2. `rules.md`
+```markdown
+# Processing Rules & Thresholds
+
+1. **Suspicion Flag**: A test is flagged as suspicious if its pass rate is between 5% and 95%.
+   - *Reason*: Purely passing (100%) or purely failing (0%) tests are stable; intermediate rates indicate instability.
+2. **Failure Cluster Definition**: Consecutive failures in the build log for a specific test constitute a cluster.
+3. **Correlation Check**: Pearson correlation coefficient calculated between pass/fail binary vectors of two tests. No rounding applied to preserve precision.
+4. **Confidence Note**: Derived from the number of observations (builds) where the test was flagged as suspicious. Higher observation count = higher confidence in the flake status.
+5. **Duplicate Handling**: Records with identical content but different IDs are treated as distinct events unless explicitly merged by a rule; here, they are logged separately to detect data integrity issues.
+6. **Missing Field Handling**: Builds missing test fields are skipped for pass-rate calculation but logged as errors in the stage log.
+```
+
+### 3. `data.py`
+```python
+import json
+import random
+
+# Fixed seed for deterministic universe
+random.seed(42)
+
+def generate_builds():
+    builds = []
+    
+    # Simulate 500 builds over a month (approx 16 days, ~30 builds/day)
+    # We will generate exactly 500 records with specific anomalies
+    
+    test_names = [f"test_{i}" for i in range(40)]
+    
+    # Define pass rates for tests to simulate flakiness
+    # test_retry_loop is the prime suspect (highly fluctuating)
+    base_rates = {
+        "test_retry_loop": random.uniform(0.3, 0.7), # Highly unstable
+        **{t: random.uniform(0.95, 1.0) for t in ["test_stable_1", "test_stable_2"]},
+        **{t: random.uniform(0.4, 0.6) for t in test_names[3:]}, # Some moderately flaky
+    }
+
+    current_date = "2023-10-01"
+    
+    for i in range(500):
+        build_id = f"B{i:04d}"
+        
+        # Anomaly 1: Duplicates with different IDs (simulated by reusing content)
+        if random.random() < 0.05 and len(builds) > 50:
+            prev_build = builds[-1]
+            build_id = f"B{random.randint(600, 999):04d}" # Fake new ID for duplicate
+            content = json.loads(prev_build['content'])
+        else:
+            content = {}
+            
+        # Anomaly 2: Missing test fields entirely (3 builds)
+        if i in [150, 320, 480]:
+            content = None
+            
+        # Generate results for this build based on base rates + noise
+        results = []
+        if content is not None:
+            for t_name in test_names:
+                rate = base_rates.get(t_name, 0.5)
+                # Add noise to simulate flakiness
+                actual_pass = random.random() < (rate + random.uniform(-0.1, 0.1))
+                results.append({"test": t_name, "passed": actual_pass})
+        
+        build_record = {
+            "build_id": build_id,
+            "timestamp": f"{current_date}T{random.randint(0, 23):02d}:{random.randint(0, 59):02d}:00Z",
+            "content": json.dumps(results) if results else None,
+            "status": "success" # CI overall success, but tests may fail
+        }
+        
+        builds.append(build_record)
+        
+        # Advance date occasionally to simulate month span
+        if i % 30 == 0:
+            current_date = f"{int(current_date.split('-')[2])+1}-01"
+
+    return builds
+
+if __name__ == "__main__":
+    data = generate_builds()
+    with open("output/raw_data.json", "w") as f:
+        json.dump(data, f)
+```
+
+### 4. `process.py`
+This script implements the two-phase logic requested.
+
+**Phase 1**: Rule List & Ledger Walk (State Application).
+**Phase 2**: Final Aggregation and Reporting.
+
+```python
+import json
+import math
+from datetime import datetime
+
+def load_data():
+    with open("output/raw_data.json") as f:
+        return json.load(f)
+
+def parse_results(content):
+    if content is None:
+        return []
+    data = json.loads(content)
+    return [r for r in data]
+
+def phase1_rule_list_and_ledger_walk(builds):
+    # Phase 1 RULE SCAN: List every rule that changes state during the event or claim list
+    
+    rules_triggered_log = []
+    
+    # State Dictionary to track test metrics
+    state = {
+        "test_rates": {},      # Pass rate per test
+        "flagged_tests": [],   # Tests between 5% and 95%
+        "failure_clusters": {},# Consecutive failures per test
+        "correlations": {},    # Correlation matrix (partial)
+        "flake_scoreboard": [] # Ranked list with confidence
+    }
+
+    # Process builds in strict arrival order
+    for idx, build in enumerate(builds):
+        results = parse_results(build['content'])
+        
+        if not results:
+            continue
+            
+        # Update State (Ledger Walk)
+        test_counts = {r['test']: 0 for r in results}
+        test_passes = {r['test']: 0 for r in results}
+        
+        for r in results:
+            t = r['test']
+            p = r['passed']
+            
+            if t not in state["test_rates"]:
+                state["test_rates"][t] = {"total": 0, "pass": 0}
+            
+            state["test_rates"][t]["total"] += 1
+            state["test_rates"][t]["pass"] += (1 if p else 0)
+            
+            # Rule: Flag suspicious tests (5% - 95%)
+            rate = state["test_rates"][t]["pass"] / state["test_rates"][t]["total"] * 100
+            if 5 <= rate < 95 and t not in state["flagged_tests"]:
+                state["flagged_tests"].append(t)
+                
+        # Rule: Failure Clusters (Consecutive failures)
+        # We check the current build against previous builds for consecutive fails
+        # Simplified cluster logic: if a test failed here, increment fail streak
+        for r in results:
+            t = r['test']
+            p = r['passed']
+            if not p and t in state["failure_clusters"]:
+                state["failure_clusters"][t] += 1
+            elif not p and t not in state["failure_clusters"]:
+                state["failure_clusters"][t] = 1
+                
+    # Phase 2 LEDGER WALK: Apply events one at a time (already done above, now aggregating)
+    
+    # Rule: Correlation Check (Two tests tend to fail together)
+    flagged_set = set(state["flagged_tests"])
+    correlations = {}
+    t_list = list(flagged_set)
+    
+    for i in range(len(t_list)):
+        for j in range(i + 1, len(t_list)):
+            t1, t2 = t_list[i], t_list[j]
+            
+            # Count joint failures across all builds where both were present
+            joint_fails = 0
+            total_pairs = 0
+            
+            for build in builds:
+                r1 = next((x for x in parse_results(build['content']) if x['test'] == t1), None)
+                r2 = next((x for x in parse_results(build['content']) if x['test'] == t2), None)
+                
+                if r1 and r2:
+                    total

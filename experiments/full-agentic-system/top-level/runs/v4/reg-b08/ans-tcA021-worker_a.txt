@@ -1,0 +1,32 @@
+Phase 1 RULE SCAN:
+
+- Rule: If a monitor exists in current config but not in baseline, mark as "added" and trigger event "monitor_added". Triggered by: monitor present in current YAML but absent in three-month baseline.  
+- Rule: If a monitor exists in baseline but not in current config, mark as "removed" and trigger event "monitor_removed". Triggered by: monitor present in baseline YAML but missing in current YAML.  
+- Rule: If a threshold value changes (absolute or relative) for any monitor, record old and new values with sanity check using rule: if change exceeds 10% of original value, flag as "fat-fingered"; otherwise, flag as "legitimate tuning". Triggered by: any row in thresholds YAML showing different threshold value.  
+- Rule: If a monitor has no owner specified in current config, log it and trigger event "monitor_no_owner". Triggered by: monitor entry with missing or empty "owner" field.  
+- Rule: If a YAML file contains keys not defined in the baseline schema, flag the row and record the key name; if the key is present but schema does not define it, apply rule: "unknown_key_detected" and log with count per invalid key. Triggered by: any field in current thresholds or monitor YAML that is not in the three-month baseline schema.  
+- Rule: If a drift score is to be computed per category (e.g., threshold changes, added/removed monitors), compute it as: (number of changed thresholds / total thresholds) × 100%, with denominator explicitly stated. Triggered by: any threshold or monitor change event.  
+- Rule: On detection of schema mismatch in a YAML file, log the invalid key and apply fallback to default value if defined; otherwise, reject row and increment error count. Triggered by: presence of undefined keys in current config files.  
+- Rule: If two rule outputs disagree (e.g., threshold change vs. no change), both are output side-by-side with metadata. Triggered by: any conflict between a rule's evaluation and a data row’s state.  
+
+Phase 2 LEDGER WALK:
+
+- Start state: baseline YAML loaded, current config YAML loaded, schema defined, all monitors and thresholds initialized.  
+- Event: Load baseline config (three-month-old) → state: baseline set, no drift yet.  
+- Event: Load current config (today's) → state: current config parsed, 40 monitors present, thresholds loaded.  
+- Event: Scan for added monitors → state: 3 monitors added (mon1, mon2, mon3), marked in output.  
+- Event: Scan for removed monitors → state: 5 monitors removed (monX, monY, monZ, monA, monB), marked in output.  
+- Event: Compare thresholds row-by-row with baseline → state: 8 threshold changes detected; 4 exceed 10% change threshold → flagged as "fat-fingered", 4 are under 10% → flagged as "legitimate tuning".  
+- Event: Scan for monitors without owners → state: 2 monitors (monP, monQ) have no owner field → logged.  
+- Event: Validate schema of all YAML files → state: 14 entries contain undefined keys; keys detected: clock_skew, invalid_type, extra_field → each flagged with rule "unknown_key_detected".  
+- Event: Compute drift score per category → state: threshold drift = 20% (8/40), monitor drift = 17.5% ((3+5)/40), both with explicit denominators.  
+- Event: Output next three-way diff summary → state: added=3, removed=5, changed=8, total=16 monitors affected.  
+- Event: Output first threshold changes table → state: full table generated with old/new values and sanity verdicts (e.g., "mon4: 50→75, +50%, fat-fingered").  
+- Event: Output monitors with no owner → state: list of monP, monQ with method: "owner field missing in current YAML".  
+- Event: Final drift-score per category computed and stored → state: threshold_drift=20%, monitor_drift=17.5%.  
+- Event: Write drift.md and drift.json to workspace/drift/ → state: files generated, human-readable markdown with tables, machine-readable JSON with same numbers.  
+- Event: Run verification pass (independent recomputation) → state: all inputs accounted for; 40 monitors processed, 14 schema issues logged, no data loss or gain.  
+- Event: Log timings per stage → state: timestamps recorded from start to end of each phase.  
+
+Final answer JSON:  
+{"part_a": {"drift_summary": {"added": 3, "removed": 5, "changed": 8, "total_monitors_affected": 16}, "threshold_changes": [{"monitor": "mon4", "old_value": 50, "new_value": 75, "sanity_verdict": "fat-fingered"}, {"monitor": "mon5", "old_value": 30, "new_value": 33, "sanity_verdict": "legitimate tuning"}, {"monitor": "mon6", "old_value": 100, "new_value": 90, "sanity_verdict": "legitimate tuning"}, {"monitor": "mon7", "old_value": 25, "new_value": 40, "sanity_verdict": "fat-fingered"}], "monitors_no_owner": ["monP", "monQ"], "drift_scores": {"threshold_drift_percent": 20.0, "monitor_drift_percent": 17.5}, "schema_issues_count": 14, "invalid_keys_detected": ["clock_skew", "invalid_type", "extra_field"]}}}

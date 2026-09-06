@@ -1,0 +1,30 @@
+Phase 1 RULE SCAN:
+
+- Rule: If consumer offset is greater than log end offset by more than 30 seconds, mark as lagging. Triggered by every lag snapshot event.  
+- Rule: If a rebalance event occurs at timestamp T, flag all lag snapshots from T–5 minutes to T+5 minutes as "rebalance-influenced". Triggered by rebalance event.  
+- Rule: If lag exceeds 60 seconds for any partition in worker-2, classify burst window and record start/end timestamps. Triggered by lag snapshot with worker-2.  
+- Rule: If offset goes backwards (i.e., new offset < previous offset), flag as invalid and log error. Triggered by any offset update event.  
+- Rule: If a rebalance occurs and the consumer is worker-2, mark all lag snapshots during that rebalance as "rebalance-triggered". Triggered by rebalance event with worker-2 involved.  
+- Rule: If mean lag across partitions exceeds 10 seconds for more than two consecutive minutes, trigger burst detection. Triggered by every minute snapshot.  
+- Rule: If max lag in any partition exceeds 300 seconds, mark as critical and record timestamp. Triggered by any lag snapshot with max lag > 300s.  
+- Rule: On arrival of a rebalance event, reset all consumer lag metrics to zero. Triggered by every rebalance event.
+
+Phase 2 LEDGER WALK:
+
+- At "00:06:00": Rebalance event occurs involving worker-2; reset all lag metrics to zero; mark all lag snapshots from 00:05:00 to 00:11:00 as "rebalance-influenced" and "rebalance-triggered"; offset invalidity flags not triggered yet.  
+- At "00:07:00": Lag snapshot shows worker-2 partition lag at 45 seconds; no burst, no critical lag; mean lag = 30s (across partitions), below threshold; no offset backward event.  
+- At "00:10:00": Lag snapshot shows worker-2 partition lag at 80 seconds; mean lag now 60s across partitions; still under 10s mean for two minutes, so no burst detection yet.  
+- At "00:12:00": Rebalance event occurs again (worker-2 involved); reset all lag metrics to zero; mark lag snapshots from 00:11:00 to 00:17:00 as "rebalance-influenced" and "rebalance-triggered".  
+- At "00:15:00": Lag snapshot shows worker-2 partition lag at 90 seconds; mean lag = 45s across partitions; still below burst threshold.  
+- At "00:17:00": Lag snapshot shows worker-2 max lag reaches 60 seconds; triggers burst window classification; start timestamp set to 00:17:00, end timestamp not yet known. Mean lag now exceeds 10s for two consecutive minutes (from 00:15:00–00:17:00), so burst detection triggered.  
+- At "00:20:00": Lag snapshot shows worker-2 max lag at 180 seconds; mean lag = 90s across partitions; burst window ends at 00:20:00; burst detected from 00:17:00 to 00:20:00.  
+- At "00:25:00": Lag snapshot shows worker-2 max lag at 320 seconds; exceeds 300s threshold → mark as critical and record timestamp.  
+- At "00:27:00": Lag snapshot shows worker-2 max lag at 140 seconds; mean lag = 85s across partitions; mean lag exceeds 10s for more than two minutes (from 00:26:00–00:29:00), so burst detection triggered.  
+- At "00:29:00": Lag snapshot shows worker-2 max lag at 135 seconds; mean lag = 80s across partitions; burst window ends at 00:29:00; burst detected from 00:27:00 to 00:29:00.  
+- At "00:30:00": Lag snapshot shows worker-2 max lag at 160 seconds; no new burst or critical lag; mean lag = 85s, still above threshold but not sustained for three minutes.  
+- Offset update at "00:31:00" shows new offset < previous offset → flag as invalid and log error.  
+- At "00:45:00": Lag snapshot shows worker-2 max lag at 280 seconds; exceeds 300s? No — not critical. Mean lag = 95s, still above threshold but no sustained three-minute window → no new burst.  
+- At "01:00:00": Final lag snapshot shows worker-2 max lag at 400 seconds; exceeds 300s → mark as critical and record timestamp.
+
+Final answer JSON:
+{"burst_detections": [{"start_timestamp": "00:17:00", "end_timestamp": "00:20:00", "consumer": "worker-2", "reason": "max lag exceeds 10 seconds for more than three minutes"}, {"start_timestamp": "00:27:00", "end_timestamp": "00:29:00", "consumer": "worker-2", "reason": "max lag exceeds 10 seconds for more than three minutes"}], "rebalance_events": [{"timestamp": "00:06:00", "involved_worker": "worker-2", "action": "reset lag metrics to zero, mark as rebalance-triggered"}, {"timestamp": "00:12:00", "involved_worker": "worker-2", "action": "reset lag metrics to zero, mark as rebalance-triggered"}], "critical_lag_events": [{"timestamp": "00:25:00", "max_lag_seconds": 320}, {"timestamp": "01:00:00", "max_lag_seconds": 400}], "invalid_offset_event": {"timestamp": "00:31:00", "reason": "new offset < previous offset"}}

@@ -1,0 +1,66 @@
+Phase 1 RULE SCAN:
+
+- Rule: Convert all timestamps to UTC by applying a local-to-UTC offset if present; trigger when reading any log with local time (services A, B, C, D, E, F).  
+  Event/Claim: Log ingestion from services with local timestamps  
+
+- Rule: Detect detection moment as the first log line with level "ERROR" and message containing "initial anomaly detected"; trigger on arrival of such a line.  
+  Event/Claim: Detection moment  
+
+- Rule: Identify mitigation attempt one as the next log line after detection that contains "mitigation initiated" and has level "INFO", but fails if it is followed by a line with level "ERROR" and message containing "failed to apply"; trigger on arrival of such a line.  
+  Event/Claim: Mitigation attempt one (failure)  
+
+- Rule: Identify mitigation attempt two as the log line after mitigation attempt one that contains "mitigation applied successfully" and has level "INFO", and only if it is not immediately followed by an error; trigger on arrival of such a line.  
+  Event/Claim: Mitigation attempt two (success)  
+
+- Rule: Define resolution as the first log line with level "SUCCESS" or "RESOLVED" that appears after mitigation attempt two, and must appear after any prior failure message; trigger on arrival of such a line.  
+  Event/Claim: Resolution  
+
+- Rule: Flag all log lines with timestamps that are exactly two minutes out of sync from expected sequence (based on service-level ordering) as time-gap anomalies; trigger when processing the merged chronological stream.  
+  Event/Claim: Time gap anomaly detection  
+
+- Rule: For each service, count how many log entries fall into five-minute buckets starting at 15:48:00 UTC and incrementing every five minutes (e.g., 15:48–15:53, 15:53–15:58, etc.); trigger during bucket aggregation phase.  
+  Event/Claim: Five-minute bucket activity chart generation  
+
+- Rule: When a log line has a local timestamp with an offset that is not specified or invalid (e.g., "UTC+9" but no known timezone), treat it as malformed and record in error log; trigger on parsing of such lines.  
+  Event/Claim: Malformed timestamp detection  
+
+- Rule: If any mitigation attempt fails due to immediate follow-up error, mark the failure with a detailed reason from the error message; trigger when detecting "failed to apply" after "mitigation initiated".  
+  Event/Claim: Mitigation failure root cause extraction  
+
+Phase 2 LEDGER WALK:
+
+[log_input_01.txt] → merged_log_stream.txt (timestamp conversion applied, all local timestamps adjusted to UTC with known offsets)  
+→ [log_input_02.txt] → merged_log_stream.txt (UTC offset applied for service B: UTC+3)  
+→ [log_input_03.txt] → merged_log_stream.txt (UTC offset applied for service C: UTC-5)  
+→ [log_input_04.txt] → merged_log_stream.txt (UTC offset applied for service D: UTC+0, no offset)  
+→ [log_input_05.txt] → merged_log_stream.txt (UTC offset applied for service E: UTC+1)  
+→ [log_input_06.txt] → merged_log_stream.txt (UTC offset applied for service F: UTC-4)  
+
+After merging and timestamp normalization:  
+- Line 32: "ERROR: initial anomaly detected in service C" → Detection moment triggered.  
+- Line 35: "INFO: mitigation initiated for service D" → Mitigation attempt one begins.  
+- Line 37: "ERROR: failed to apply mitigation due to config lock" → Mitigation attempt one fails (failure confirmed).  
+- Line 48: "INFO: mitigation applied successfully on service D" → Mitigation attempt two succeeds, no immediate error after.  
+- Line 56: "SUCCESS: anomaly resolved in service D" → Resolution triggered.  
+
+Time gap detected between line 20 and line 21 (service A): 2-minute gap; logged as anomaly.  
+Malformed timestamp found in service E log line 43 ("UTC+Z") — flagged, error recorded.  
+
+Five-minute bucket activity:  
+- Interval "0–5 (15:48–15:53)": events from services C, B, E, A, D → count = 7  
+- Interval "5–10 (15:53–15:58)": events from services F, D, B → count = 5  
+- Interval "10–15 (15:58–16:03)": events from services A, C → count = 2  
+
+Final timeline table:
+
+| Clock Time | Event                          | Evidence Line Reference |
+|-----------|-------------------------------|--------------------------|
+| 15:48:12 UTC | Detection moment             | line 32 (service C)     |
+| 15:49:03 UTC | Mitigation attempt one initiated | line 35 (service D)    |
+| 15:50:11 UTC | Mitigation attempt one failed | line 37 (service D)     |
+| 15:52:45 UTC | Mitigation attempt two succeeded | line 48 (service D)   |
+| 15:58:34 UTC | Resolution achieved          | line 56 (service D)     |
+
+Final answer JSON:
+
+{"final_state": "resolved", "resolution_timestamp": "15:58:34 UTC", "detection_timestamp": "15:48:12 UTC", "mitigation_attempt_one": {"service": "D", "line": 35, "message": "mitigation initiated for service D", "failure": true, "failure_reason": "failed to apply mitigation due to config lock"}, "mitigation_attempt_two": {"service": "D", "line": 48, "message": "mitigation applied successfully on service D", "success": true}, "five_minute_buckets": [{"interval": "0-5 (15:48–15:53)", "events_count": 7, "services": ["C", "B", "E", "A", "D"]}, {"interval": "5-10 (15:53–15:58)", "events_count": 5, "services": ["F", "D", "B"]}, {"interval": "10-15 (15:58–16:03)", "events_count": 2, "services": ["A", "C"]}]}

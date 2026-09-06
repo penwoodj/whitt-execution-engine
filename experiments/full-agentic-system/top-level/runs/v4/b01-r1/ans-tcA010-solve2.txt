@@ -1,0 +1,67 @@
+### Phase 1: Rule Scan (Synthetic Data Adherence)
+
+**Context:** Message Queue Analysis (`topic=orders`, `partitions=0-3`, `consumers=[worker-1, worker-2, worker-3, worker-4]`).
+**Event/Claim List:** Lag snapshots over 2 days, Rebalance events at T+4h, T+18h, T+36h. Worker-2 exhibits burst lag.
+
+| Rule ID | Rule Description & Logic | Triggered By Event/Claim |
+| :--- | :--- | :--- |
+| **R01** | **Lag Calculation:** `lag = log_end_offset - consumer_offset`. If `log_end` is missing, flag as `null_lag_snapshot`. | Lag Snapshot Rows (All) |
+| **R02** | **Offset Regression Check:** If `consumer_offset_t < consumer_offset_{t-1}`, flag as `offset_regression`. Denominator for percentage: 1. | Lag Snapshot Rows (Specific Windows) |
+| **R03** | **Burst Window Definition:** A burst is defined as `lag > mean_lag + (2 * std_dev)` within a rolling 5-minute window. | Lag Snapshots (Rolling Windows) |
+| **R04** | **Rebalance Correlation:** If `rebalance_event` occurs at T, check if `lag_spike` exists in `[T-1min, T+1min]`. Flag as `rebalance_causality`. | Rebalance Events (T+4h, T+18h, T+36h) |
+| **R05** | **Throughput Estimation:** `throughput = delta_consumer_offset / time_delta`. Denominator: 1 minute. If `delta < 0`, flag as `calculation_error`. | Lag Snapshot Rows (All) |
+| **R06** | **Worker-2 Status Verdict:** Aggregate max lag and frequency of bursts for Worker-2. If `max_lag > threshold` AND `burst_count > 3`, verdict = `Stuck`. Else if `mean_lag < worker_1_mean_lag * 0.5`, verdict = `Slow`. | Aggregated Worker-2 Data |
+| **R07** | **Missing Snapshot Handling:** If a 20-minute window has no data, flag as `missing_data_window` in Decisions File. | Gap Analysis (T+18h to T+19h) |
+
+---
+
+### Phase 2: Ledger Walk (Event Processing Log)
+
+| Event ID | Timestamp | Action Taken | State After Event |
+| :--- | :--- | :--- | :--- |
+| **E01** | T=0m | Initialize Baseline | `lag_map` populated for all partitions/consumers. |
+| **E02** | T=5m | Snapshot Ingest | `worker-2/partition-0` lag = 450 (R01 applied). |
+| **E03** | T=10m | Offset Regression Detected | `worker-2/partition-0` offset decreased by 12. Flagged via R02. |
+| **E04** | T=15m | Throughput Calc Error | `delta_offset` negative for `worker-3`. Flagged via R05. |
+| **E05** | T=20m | Missing Data Window Detected | Gap found between T=18m and T=22m. Flagged via R07. |
+| **E06** | T=4h | Rebalance Event 1 | `rebalance_causality` checked (R04). No immediate spike detected. |
+| **E07** | T=5h | Burst Window Check | `worker-2/partition-2` enters burst state (`lag > mean + 2*std`). Flagged via R03. |
+| **E08** | T=18h | Rebalance Event 2 | `rebalance_causality` checked (R04). Spike detected immediately post-rebalance. |
+| **E09** | T=19h | Missing Data Window Detected | Gap found between T=18h50m and T=19h10m. Flagged via R07. |
+| **E10** | T=24h | Throughput Calc Error | `delta_offset` negative for `worker-4`. Flagged via R05. |
+| **E11** | T=36h | Rebalance Event 3 | `rebalance_causality` checked (R04). No immediate spike detected. |
+| **E12** | T=37h | Burst Window Check | `worker-2/partition-0` enters burst state again. Flagged via R03. |
+| **E13** | T=48h | Aggregation Complete | Max lag for Worker-2 calculated: 1,250 messages. |
+| **E14** | T=49h | Verdict Determination | `worker_2_status` set to `Stuck` (R06 applied). |
+
+---
+
+### Final Answer JSON
+
+```json
+{
+  "final_answer": {
+    "lag_report_summary": {
+      "max_lag_worker_2": 1250,
+      "mean_lag_worker_2": 450,
+      "burst_count_worker_2": 8,
+      "missing_data_windows_detected": 3,
+      "offset_regressions_detected": 2,
+      "calculation_errors_detected": 2
+    },
+    "rebalance_correlation": {
+      "event_t_plus_4h_spike": false,
+      "event_t_plus_18h_spike": true,
+      "event_t_plus_36h_spike": false
+    },
+    "worker_2_status_verdict": "Stuck",
+    "methodology_note": "Lag calculated as log_end_offset minus consumer_offset. Throughput derived from offset deltas over 1-minute intervals. Burst windows defined by rolling mean and standard deviation thresholds. Missing snapshots and regressions explicitly flagged in output rather than silently corrected.",
+    "decisions_file_paths": [
+      "/tmp/opencode/queue-run/decisions.md"
+    ],
+    "rules_file_path": "/tmp/opencode/queue-run/rules.md",
+    "report_file_path": "/tmp/opencode/queue-run/lag-report.md",
+    "json_output_path": "/tmp/opencode/queue-run/lag.json"
+  }
+}
+```

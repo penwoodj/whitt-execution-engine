@@ -1,0 +1,61 @@
+Phase 1 RULE SCAN:
+
+- Rule: Timeout value override by more specific block triggers when a site-specific server block contains a `timeout` directive and is nested within an include chain.  
+  Trigger: Site-specific server block with timeout directive in the config tree (e.g., site2.conf).  
+
+- Rule: Conflicting timeout values are resolved via inheritance depth and specificity; deeper blocks override shallower ones if both exist.  
+  Trigger: Two or more overlapping blocks define `timeout` for same directive on same site.  
+
+- Rule: A commented-out server block is parsed but ignored by nginx, so directives inside it do not take effect.  
+  Trigger: Presence of a commented-out `server { }` block in any config file (e.g., site3.conf).  
+
+- Rule: If an include file contains a directive that is never consumed by any active block, the directive is considered dead and removed from effective config.  
+  Trigger: A directive appears in an included file but no active server block consumes it.  
+
+- Rule: A typo in a directive name (e.g., `timeou` instead of `timeout`) causes nginx to silently ignore that line; no error or warning is logged.  
+  Trigger: Directive with spelling error in any config file, such as `timeou` in site1.conf.  
+
+- Rule: When a per-site file includes another per-site file, the inheritance depth increases and values are resolved via nested block traversal.  
+  Trigger: A site-specific config includes another site-specific config (e.g., site2.conf → site3.conf).  
+
+- Rule: If a directive is defined in a main config or include but not overridden by any more specific block, it remains active unless explicitly disabled.  
+  Trigger: Directive exists at root level or in an include with no override path.  
+
+- Rule: A fallback rule activates when no explicit value is found after inheritance traversal; uses the default from parent context.  
+  Trigger: No `timeout` directive found in any block for a given site, and no default defined.  
+
+- Rule: Source-ranking rule assigns priority to config files based on file path depth and inclusion order; deeper files have higher rank.  
+  Trigger: Multiple config files define same directive with different values due to differing paths or include chains.  
+
+- Rule: Refill rule re-evaluates a directive if it was previously overridden but later redefined in a more specific block after the initial override.  
+  Trigger: A directive is defined, then overridden, then re-defined in a deeper block that inherits from an earlier one.  
+
+- Rule: Expiry rule removes any directive value after a configured time (e.g., timeout expires after 30 seconds of inactivity).  
+  Trigger: A timeout directive has an expiry clause defined in the config (e.g., `timeout 60s; expire_after 30s;`).  
+
+- Rule: Return rule reverts to a previous value if current override fails due to syntax or parsing error.  
+  Trigger: Directive fails to parse due to typo or malformed syntax, and fallback to prior value is enabled.  
+
+Phase 2 LEDGER WALK:
+
+- [14:30:05] Start: Initial config state — main.conf defines default timeout=60s; no site-specific overrides yet.  
+- [14:30:07] Apply site1.conf: includes site3.conf, which contains `timeout 80s;` — this is parsed but not consumed due to being in an include with no active server block.  
+- [14:30:09] Apply site2.conf: defines `timeout 50s;` in a server block that directly matches the site context — overrides main timeout via specificity.  
+- [14:30:11] Apply site3.conf: contains commented-out server block with `timeout 70s;` — ignored due to comment syntax, no effect on effective config.  
+- [14:30:13] Apply site2.conf → includes site3.conf (depth two): resolves timeout via nested inheritance; value from site3.conf is not applied because it's in a commented block.  
+- [14:30:15] Detect typo in site1.conf: line `timeou 80s;` — nginx silently ignores this due to invalid directive name, no error logged.  
+- [14:30:17] Resolve conflicting timeouts per site:  
+   - Site1: effective timeout = 60s (no active override, typo ignored)  
+   - Site2: effective timeout = 50s (specific block wins over main config)  
+   - Site3: effective timeout = 60s (only default applies; commented-out block not parsed)  
+- [14:30:19] Identify dead directives: `keepalive_timeout` in site1.conf is defined but never consumed by any active server block → marked as dead.  
+- [14:30:21] Apply fallback rule for missing timeout on site4: no timeout found, so default 60s applied via parent context.  
+- [14:30:23] Final effective config per site:  
+   - site1: timeout=60s (typo ignored)  
+   - site2: timeout=50s (specific block wins)  
+   - site3: timeout=60s (commented-out block not active)  
+   - site4: timeout=60s (fallback to default)  
+
+Final answer JSON:
+
+{"site1_timeout": 60, "site2_timeout": 50, "site3_timeout": 60, "site4_timeout": 60, "dead_directives": ["keepalive_timeout"], "typo_detected": true, "typo_location": "site1.conf: timeou 80s;", "timeout_resolution_method": "specificity and inheritance depth", "inheritance_depth": 2}

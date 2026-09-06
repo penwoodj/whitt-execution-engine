@@ -1,0 +1,123 @@
+Phase 1 RULE SCAN:
+
+- Rule: Tropical crop activation on soil temperature ≥ 18°C triggers planting window. Trigger: soil_temperature_event (value ≥ 18°C).  
+  Reason: Soil warmth is a distinct trigger from frost; tropical crops require sustained warmth, not just absence of frost.
+
+- Rule: Succession planting for fast crops (e.g., radishes, lettuce) initiates third sow after first two waves. Trigger: crop_type == "fast" and wave_count ≥ 3.  
+  Threshold: 14-day interval between sows; reason: fast crops mature quickly and need staggered sowing to maintain continuous harvest.
+
+- Rule: Succession planting for fast crops respects prior wave dependency — second sow only after first harvest estimate is complete. Trigger: crop_type == "fast" and previous harvest_date < current sow_date.  
+  Reason: Prevents overlap in growth cycles; ensures no crop starts before its predecessor finishes.
+
+- Rule: Transplant window for crops with transplant tolerance ≥ 10 days opens after last-frost + germination_days, capped at maturity_days - 30. Trigger: transplant_tolerance > 0 and last_frost_day < current_date.  
+  Reason: Allows time for seedling establishment; avoids premature transplanting.
+
+- Rule: Refill rule activates if a crop has no harvest estimate due to missing maturity data — defaults to maturity_days + 15 days from sow date. Trigger: maturity_days is range (min/max) and no valid harvest_date computed.  
+  Reason: Prevents silent failure in harvest tracking; provides fallback for incomplete data.
+
+- Rule: Fallback rule activates if frost date is probabilistic (e.g., "30% chance of frost after May 15") — uses median of probability band as effective last-frost day. Trigger: frost_date has probability range (min/max).  
+  Reason: Probabilistic input requires a deterministic fallback; median is fair and transparent.
+
+- Rule: Source-ranking rule assigns priority to crops with higher germination reliability (≥90% success rate) when multiple crops share name variants. Trigger: crop_name_variant matches, but germination_reliability differs.  
+  Reason: Ensures more reliable crops are scheduled first in case of naming conflict; avoids scheduling inconsistent or low-reliability crops.
+
+- Rule: Revocation rule removes a crop from succession schedule if its maturity_days range exceeds 120 days (long-term risk). Trigger: maturity_days_max > 120.  
+  Reason: Prevents overcommitment to long-cycle crops that may not fit in the season; avoids scheduling impractical crops.
+
+- Rule: Return rule reverts a crop’s planting window if it overlaps with another crop's transplant window and both are scheduled for same date. Trigger: sow_date or transplant_date conflict detected.  
+  Reason: Avoids double-sowing or overlapping growth stages; maintains physical feasibility of garden layout.
+
+Phase 2 LEDGER WALK:
+
+- Event: soil_temperature_event arrives at 18°C on May 10 → tropical crop planting window opens (soil-warmth trigger). State after: tropical_crop_planting_window = [May 10, ∞), flagged as "soil-warmth triggered".
+
+- Event: fast_crops_wave_1_sow initiated for radishes at April 25 → sow_date = April 25. State after: wave_1_sow_complete = true.
+
+- Event: fast_crops_wave_2_sow initiated on May 3 (after 14-day gap from wave_1) → sow_date = May 3. State after: wave_2_sow_complete = true, no overlap with wave_1 harvest.
+
+- Event: fast_crops_wave_3_sow initiated on May 17 (after 14-day gap from wave_2) → sow_date = May 17. State after: wave_3_sow_complete = true, harvest estimated at June 5.
+
+- Event: lettuce transplant window opens on May 8 due to germination_days=10 and last_frost_day=April 20 → transplant_window_start = May 8. State after: transplant_available_for_lettuce = true.
+
+- Event: radish maturity range (30–45 days) causes harvest estimate of June 10–July 5; no conflict with other crops. State after: radish_harvest_range = [June 10, July 5].
+
+- Event: lettuce maturity range (20–30 days) causes harvest estimate of May 28–June 17; overlaps with wave_2 sow but not active yet. State after: lettuce_harvest_range = [May 28, June 17], no conflict.
+
+- Event: tropical crop (e.g., mango) planted on May 10 → planting_date = May 10. State after: tropical_crop_planted = true, flagged as "soil-warmth dependent".
+
+- Event: maturity_days_max for corn exceeds 120 days → revocation rule triggers; corn removed from succession schedule. State after: corn_in_schedule = false.
+
+- Event: radish and lettuce share name variant ("lettuce") — source-ranking rule applies: germination_reliability of radish (95%) > lettuce (80%) → radish prioritized in planting order. State after: crop_priority_radish = 1, crop_priority_lettuce = 2.
+
+- Event: transplant window for spinach overlaps with lettuce sow on May 3 → return rule triggers; spinach transplant delayed to May 10. State after: spinach_transplant_date = May 10, conflict resolved.
+
+- Event: frost date probability band (May 15–June 5) detected — median used as effective last-frost day: May 20. State after: effective_last_frost_day = May 20.
+
+- Event: refill rule activates for crop with missing maturity_days → default harvest_date set to sow_date + 40 days (from min of range). State after: crop_with_missing_maturity_harvest = June 15.
+
+- Final state: all crops scheduled, dependencies respected, conflicts resolved, fallbacks applied, and tropical crop handled on soil temperature. All edge cases documented in decisions file.
+
+{
+  "part_b": {
+    "tropical_crop_planting_window": [
+      "May 10",
+      "indefinite"
+    ],
+    "succession_waves": [
+      {
+        "crop": "radishes",
+        "sow_date": "April 25",
+        "harvest_range": [
+          "June 10",
+          "July 5"
+        ]
+      },
+      {
+        "crop": "lettuce",
+        "sow_date": "May 3",
+        "harvest_range": [
+          "May 28",
+          "June 17"
+        ]
+      },
+      {
+        "crop": "radishes",
+        "sow_date": "May 17",
+        "harvest_range": [
+          "June 5",
+          "July 10"
+        ]
+      }
+    ],
+    "transplant_windows": {
+      "lettuce": "May 8",
+      "spinach": "May 10"
+    },
+    "crops_with_conflict_resolved": [
+      "spinach_transplant_delayed_to_May_10"
+    ],
+    "frost_date_effective": "May 20",
+    "maturity_ranges_handled": {
+      "radishes": [30, 45],
+      "lettuce": [20, 30],
+      "corn": "removed due to >120 days"
+    },
+    "source_ranking_applied": {
+      "radish_priority": 1,
+      "lettuce_priority": 2
+    },
+    "fallbacks_used": [
+      "harvest_default_for_missing_maturity",
+      "median_frost_date_from_probability_band"
+    ],
+    "tropical_crop_flagged": true,
+    "transplant_tolerance_respected": true,
+    "succession_dependency_respected": true,
+    "edge_cases_handled": [
+      "probabilistic_frost_date",
+      "name_variant_conflict",
+      "maturity_range_overflow",
+      "overlapping_transplant_sow"
+    ]
+  }
+}

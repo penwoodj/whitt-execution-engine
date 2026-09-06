@@ -1,0 +1,52 @@
+Phase 1 RULE SCAN:
+
+- Rule: Dependency resolution rule triggers when a migration references a table or column created in a later-numbered file; triggered by any file that depends on a later file's schema change.  
+  Event/Claim: File 7 references a column added in File 12 → triggers dependency resolution.
+
+- Rule: Numbering-vs-actual-order mismatch detection rule activates when two files share the same number; triggered by duplicate numbers in input list.  
+  Event/Claim: Files 3 and 9 both have number 5 → triggers detection.
+
+- Rule: Syntax error handling rule revokes a migration if it contains a syntax error on a rarely-checked constraint; triggered by file 10 with syntax error in CHECK constraint.  
+  Event/Claim: File 10 fails parsing due to invalid CHECK constraint → rule applies and marks for quarantine.
+
+- Rule: Column drop-and-re-add detection rule flags when one migration drops a column that is later re-added; triggered by file 4 dropping column "user_email" and file 8 adding it back.  
+  Event/Claim: File 4 drops "user_email", File 8 adds it → triggers flag.
+
+- Rule: Reordering fallback rule activates if no valid topological order exists, defaults to sorted-by-numbering; triggered when dependency graph has cycle or unresolved dependencies.  
+  Event/Claim: Graph contains a cycle between Files 1–5 and 9–12 → triggers fallback to number-based sort.
+
+- Rule: Source-ranking rule assigns priority based on actual schema impact (creates > alters > drops); triggered during dependency analysis phase.  
+  Event/Claim: File 6 creates table "orders", File 11 alters "users" → source-ranking applies and prioritizes creation over alteration.
+
+- Rule: Expiry rule revokes any migration that references a dropped column not re-added; triggered when file 4 drops "user_email" and no later file re-adds it.  
+  Event/Claim: File 4 drops "user_email", File 8 adds it → expiry rule applies only if no re-add, but since re-add exists, rule does not trigger.
+
+- Rule: Refill rule reinstates a migration after a drop-and-re-add sequence; triggered when column is dropped and later added.  
+  Event/Claim: File 4 drops "user_email", File 8 adds it → triggers refill of file 4 in the run order.
+
+- Rule: Promotion rule elevates a migration to early stage if it creates foundational tables; triggered by file 2 creating table "users" used by all others.  
+  Event/Claim: File 2 creates "users" table, referenced by files 5–15 → triggers promotion to position 0.
+
+- Rule: Return rule reverts state after a failed migration; triggered if any migration fails during simulation.  
+  Event/Claim: File 10 fails due to syntax error → returns to pre-file-10 state.
+
+Phase 2 LEDGER WALK:
+
+- Initial state: empty schema, no tables, no columns, no dependencies resolved.  
+- Apply file 2 (promoted): creates table "users" with columns user_id (PK), name, email.  
+- Apply file 6: creates table "orders" with order_id (PK), user_id (FK to users.user_id).  
+- Apply file 7: adds column "status" to "orders"; references column from File 12 → dependency resolved.  
+- Apply file 8: re-adds column "user_email" to "users", after being dropped in file 4 → refill rule applies, migration 4 is now valid.  
+- Apply file 3 (numbered 5): creates table "products"; no dependencies → applied as-is.  
+- Apply file 9 (numbered 5): duplicate number detected; quarantined and rejected per numbering-vs-order rule.  
+- Apply file 10: syntax error in CHECK constraint on "users.email" → fails parsing, triggers return rule → state reverts to pre-file-10.  
+- Apply file 4: drops column "user_email" from "users"; triggers expiry check; no re-add before file 8 → expiry rule does not trigger due to later re-add in file 8.  
+- Apply file 5: alters "users.name" length to 255; references existing table → valid.  
+- Apply file 11: alters "orders.status" to VARCHAR(50); references existing column → valid.  
+- Apply file 12: adds column "created_at" to "orders"; referenced by file 7 → dependency satisfied.  
+- Apply file 13: creates table "inventory"; no dependencies → applied.  
+- Apply file 14: alters "products.category" to TEXT; references existing column → valid.  
+- Apply file 15: adds index on "users.user_id" in "orders" → valid.  
+
+Final answer JSON:
+{"files": ["2", "6", "7", "8", "3", "5", "11", "12", "13", "14", "15"], "duplicates_found": 1, "syntax_errors_handled": 1, "column_drop_readd_count": 1, "migrations_quarantined": 1, "valid_order_count": 15, "dependency_cycle_detected": false, "promotion_applied_to": ["2"], "refill_triggered_by": ["4"], "expiry_rule_triggered": false}

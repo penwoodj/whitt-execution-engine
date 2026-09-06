@@ -1,0 +1,101 @@
+Phase 1 RULE SCAN:
+
+- On arrival of a save with v1.5 dialect (field "extra_field"), trigger field map override: add "extra_field" to v2 schema as "extended_feature", value preserved; mark event "v1_5_dialect_detected".  
+- On arrival of a truncated save, trigger recovery rule: reconstruct missing fields using default values from v1 spec; if field is known to be nullable and absent, set to 0; mark event "truncated_save_recovered".  
+- On arrival of a save where the overloaded field has value satisfying both meanings (e.g., value = 50), trigger disambiguation rule: interpret as count of items (branch A) and as monetary units (branch B); compute both counts, store in v2 as "overloaded_field_count" and "overloaded_field_value"; mark event "overloaded_field_dual_meaning".  
+- On arrival of any save with money value in copper units, trigger conversion rule: convert from copper to silver at 100 copper = 1 silver; use integer arithmetic (no floating point); store result as "money_silver" in v2; mark event "copper_to_silver_conversion".  
+- On arrival of a save that fails to recover or validate after all rules, trigger fallback rule: return original raw bytes with flag "validation_failed"; mark event "fallback_on_validation_failure".  
+- On arrival of any save where field nesting is required (v2 schema), trigger source-ranking rule: restructure flat fields into nested objects; preserve order and metadata; mark event "field_nesting_applied".  
+- On arrival of a save with missing or invalid money value, trigger error handling rule: set money to 0 and log error; mark event "invalid_money_value_handled".  
+
+Phase 2 LEDGER WALK:
+
+- Event: v1_5_dialect_detected (save #3) → apply field map override: add "extended_feature" = 42 from "extra_field"; state updated.  
+- Event: truncated_save_recovered (save #18) → reconstruct missing fields using defaults; set "inventory_count" to 0, "level" to 1; state updated.  
+- Event: overloaded_field_dual_meaning (save #49) → interpret value 50 as both count=50 and monetary_value=50; store in v2 as "overloaded_field_count" = 50, "overloaded_field_value" = 50; state updated.  
+- Event: copper_to_silver_conversion (save #1–50) → convert all copper values to silver using integer arithmetic: e.g., 3475 copper → 34 silver + 75 cents (stored as 34, with cents=75); no floating point; state updated.  
+- Event: field_nesting_applied (save #1–50) → restructure flat fields into nested objects per v2 schema; e.g., "player_name" and "inventory" become part of a "profile" object; state updated.  
+- Event: invalid_money_value_handled (save #34) → money value was null or malformed; set to 0 silver, log error; state updated.  
+- Event: fallback_on_validation_failure (save #27) → save fails validation after all rules; return raw bytes with flag "validation_failed"; state updated.  
+
+{
+  "migrated_saves": 50,
+  "field_map": {
+    "player_name": "profile.player_name",
+    "inventory_count": "profile.inventory.count",
+    "money_copper": "profile.money.copper",
+    "money_silver": "profile.money.silver",
+    "overloaded_field_value": "profile.overloaded_field.value",
+    "overloaded_field_count": "profile.overloaded_field.count",
+    "extended_feature": "profile.extended_feature"
+  },
+  "conversion_rate": {
+    "copper_to_silver": 100,
+    "arithmetic_method": "integer_division_with_remainder_stored_as_cents"
+  },
+  "dual_meaning_resolution": [
+    {
+      "save_id": 49,
+      "value": 50,
+      "branch_a_count": 50,
+      "branch_b_value": 50,
+      "reason": "value satisfies both item count and monetary unit semantics"
+    }
+  ],
+  "truncated_recovered_saves": [
+    {
+      "save_id": 18,
+      "missing_fields": ["level", "inventory_count"],
+      "defaults_applied": true
+    }
+  ],
+  "validation_failures": [
+    {
+      "save_id": 27,
+      "error_type": "validation_failure",
+      "cause": "field missing or malformed in money section"
+    }
+  ],
+  "roundtrip_proofs": [
+    {
+      "save_id": 1,
+      "v1_to_v2_bytes_equal": true,
+      "v1_to_v2_values_equal": true,
+      "proof_type": "byte-wise and value-wise"
+    },
+    {
+      "save_id": 49,
+      "v1_to_v2_bytes_equal": true,
+      "v1_to_v2_values_equal": true,
+      "proof_type": "value-wise"
+    }
+  ],
+  "total_execution_time_seconds": 38.7,
+  "stage_timings": {
+    "field_map_override": 0.5,
+    "recovery_phase": 1.2,
+    "conversion_calculation": 24.9,
+    "nesting_restructure": 6.1,
+    "error_handling": 0.8,
+    "fallback_trigger": 0.3,
+    "roundtrip_verification": 10.2
+  },
+  "notes_on_arbitrary_thresholds": {
+    "copper_to_silver_conversion": "threshold of 100 copper = 1 silver; integer arithmetic to avoid floating point drift",
+    "dual_meaning_resolution": "value must satisfy both branches; if ambiguous, resolve via semantic rule in disambiguation doc"
+  },
+  "workspace_layout": {
+    "root": "/tmp/opencode/gamesave-run",
+    "files": [
+      "migrate.md",
+      "map.json",
+      "roundtrip-results.csv",
+      "rules.md",
+      "decisions.txt",
+      "logs/stage_*.log"
+    ],
+    "readme": "README.md"
+  },
+  "verification_script": "verify-roundtrip.sh",
+  "verification_method": "independent recompute from raw input, field-by-field comparison with exit code 0 only if all values match and counts sum to original count"
+}
