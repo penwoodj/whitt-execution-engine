@@ -222,6 +222,13 @@ fn hook_actions_as_vec(actions: &serde_json::Value) -> Vec<serde_json::Value> {
 /// Returns capped value: 1 (min) <= result <= 4 (max).
 /// Falls back to 2 on detection failure.
 fn detect_max_concurrent_inferences() -> usize {
+    if let Ok(env_val) = std::env::var("WHITT_MAX_CONCURRENT_INFERENCES") {
+        if let Ok(parsed) = env_val.parse::<usize>() {
+            let capped = parsed.clamp(1, 4);
+            info!("[benchmark] WHITT_MAX_CONCURRENT_INFERENCES={} overridden (clamped to {})", parsed, capped);
+            return capped;
+        }
+    }
     if let Some(vram_gb) = detect_vram_gb() {
         let max_concurrent = (vram_gb / 2.0).floor() as usize;
         let capped = max_concurrent.clamp(1, 4);
@@ -327,6 +334,20 @@ fn read_proc_vram_nvidia() -> Option<u64> {
 
 impl BenchmarkRunner {
     /// Pre-flight checks: verify system health before starting benchmark.
+    /// Zombie detector must count only llama-server children, never
+    /// the router parent (router-mode legitimately runs 1 router +
+    /// N loaded models; counting the router false-positives at N=2).
+    fn zombie_threshold() -> i32 {
+        std::env::var("WHITT_ZOMBIE_MAX")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2)
+    }
+
+    fn zombie_check_command() -> String {
+        "ps -eo stat,args | grep -v 'Z' | grep llama-server | grep -v -- --models-dir | grep -c llama-server".to_string()
+    }
+
     pub async fn preflight_check(&self) -> Result<()> {
         info!("[benchmark] starting preflight checks...");
 
@@ -360,17 +381,18 @@ impl BenchmarkRunner {
 
         // Count only non-defunct (running/sleeping) llama-server processes
         let zombie_check = TokioCommand::new("sh")
-            .args(["-c", "ps -eo stat,comm | grep -v 'Z' | grep -c llama-server"])
+            .args(["-c", &Self::zombie_check_command()])
             .output()
             .await;
         match zombie_check {
             Ok(output) => {
                 let count_str = String::from_utf8_lossy(&output.stdout);
                 let count: i32 = count_str.trim().parse().unwrap_or(0);
-                if count <= 2 {
+                if count <= Self::zombie_threshold() {
                     info!("[benchmark] ✓ Zombie process check passed: {} llama-server process(es) found", count);
                 } else {
-                    let msg = format!("Found {} zombie llama-server processes (expected 0-2)", count);
+                    let msg = format!("Found {} llama-server processes (threshold {})",
+                    count, Self::zombie_threshold());
                     info!("[benchmark] ✗ {}", msg);
                     anyhow::bail!(crate::error::Error::benchmark(msg));
                 }
@@ -2237,6 +2259,22 @@ impl BenchmarkRunner {
         })
     }
 
+    /// Iteration cap for the linear workflow loop: guards against
+    /// route_to/loop cycles without capping total steps in large
+    /// linear workflows. Floor 100, loop overrides win, otherwise
+    /// scale with step count (4x) so every step can execute once
+    /// plus bounded re-visits.
+    fn max_workflow_iterations(steps: &[WorkflowStep]) -> usize {
+        let loop_override = steps.iter()
+            .filter_map(|s| s.r#loop.as_ref())
+            .filter_map(|l| l.get("count"))
+            .filter_map(|c| c.get("max_iterations"))
+            .filter_map(|m| m.as_u64())
+            .max()
+            .unwrap_or(100);
+        (loop_override.max(100).max(steps.len() as u64 * 4)) as usize
+    }
+
     pub async fn run(&mut self) -> Result<BenchmarkSuiteResult> {
         self.preflight_check().await.context("Preflight checks failed")?;
 
@@ -2467,14 +2505,7 @@ impl BenchmarkRunner {
                 .map(|(i, s)| (s.step_id.clone(), i))
                 .collect();
 
-            let max_loop_iterations = steps.iter()
-                .filter_map(|s| s.r#loop.as_ref())
-                .filter_map(|l| l.get("count"))
-                .filter_map(|c| c.get("max_iterations"))
-                .filter_map(|m| m.as_u64())
-                .max()
-                .unwrap_or(100)
-                .max(100) as usize;
+            let max_loop_iterations = Self::max_workflow_iterations(&steps);
             let mut current_index: usize = 0;
             let mut loop_count: usize = 0;
 
@@ -4191,6 +4222,22 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    fn given_env_override_when_zombie_threshold_resolved_then_env_wins() {
+        std::env::set_var("WHITT_ZOMBIE_MAX", "8");
+        assert_eq!(BenchmarkRunner::zombie_threshold(), 8);
+        std::env::remove_var("WHITT_ZOMBIE_MAX");
+        assert_eq!(BenchmarkRunner::zombie_threshold(), 2);
+    }
+
+    #[test]
+    fn given_router_mode_zombie_command_when_built_then_excludes_router_process() {
+        let cmd = BenchmarkRunner::zombie_check_command();
+        assert!(cmd.contains("models-dir"),
+            "zombie check must exclude the router process so legitimately \
+loaded router children are not false-positive zombies");
+    }
+
+    #[test]
     fn is_retry_exhausted_error_matches_known_patterns() {
         assert!(is_retry_exhausted_error("All 3 attempts failed: timeout"));
         assert!(is_retry_exhausted_error("All 1 attempts failed: connection refused"));
@@ -4199,6 +4246,67 @@ mod tests {
         assert!(!is_retry_exhausted_error(""));
     }
 
+    #[test]
+    fn given_linear_workflow_exceeding_100_steps_when_iteration_cap_computed_then_allows_full_run() {
+        let steps: Vec<WorkflowStep> = (0..385)
+            .map(|i| WorkflowStep {
+                step_name: format!("s{}", i),
+                step_id: format!("s{}", i),
+                requires: vec![],
+                when: None,
+                prompt: None,
+                generative_entity: None,
+                model_overrides: None,
+                r#loop: None,
+            })
+            .collect();
+        assert!(BenchmarkRunner::max_workflow_iterations(&steps) >= 385);
+    }
+
+    #[test]
+    fn given_no_loop_steps_when_iteration_cap_computed_then_floor_is_100() {
+        let steps = vec![WorkflowStep {
+            step_name: "only".into(),
+            step_id: "only".into(),
+            requires: vec![],
+            when: None,
+            prompt: None,
+            generative_entity: None,
+            model_overrides: None,
+            r#loop: None,
+        }];
+        assert_eq!(BenchmarkRunner::max_workflow_iterations(&steps), 100);
+    }
+
+    #[test]
+    fn given_loop_max_iterations_when_iteration_cap_computed_then_respects_override_and_scale() {
+        let mut with_loop = WorkflowStep {
+            step_name: "looped".into(),
+            step_id: "looped".into(),
+            requires: vec![],
+            when: None,
+            prompt: None,
+            generative_entity: None,
+            model_overrides: None,
+            r#loop: Some(serde_json::json!({"count": {"max_iterations": 5000}})),
+        };
+        let steps = vec![
+            with_loop.clone(),
+            WorkflowStep {
+                step_name: "tail".into(),
+                step_id: "tail".into(),
+                requires: vec![],
+                when: None,
+                prompt: None,
+                generative_entity: None,
+                model_overrides: None,
+                r#loop: None,
+            },
+        ];
+        assert_eq!(BenchmarkRunner::max_workflow_iterations(&steps), 5000);
+        with_loop.r#loop = Some(serde_json::json!({"count": {"max_iterations": 3}}));
+        assert_eq!(BenchmarkRunner::max_workflow_iterations(&[with_loop]), 100);
+    }
     #[test]
     fn refusal_patterns_default_and_override_via_builder() {
         let cfg = BenchmarkConfig {
