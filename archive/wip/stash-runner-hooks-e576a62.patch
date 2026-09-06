@@ -1,0 +1,476 @@
+diff --git a/src/benchmark/runner.rs b/src/benchmark/runner.rs
+index 6b0da8f0..a67d6fc6 100644
+--- a/src/benchmark/runner.rs
++++ b/src/benchmark/runner.rs
+@@ -4,7 +4,7 @@ use crate::client::disk_monitor;
+ use crate::agent::loop_hooks::HookContext;
+ use crate::workflow::hooks::{HookEngine, HookResult};
+ use crate::workflow::hooks::actions::execute_action;
+-use crate::workflow::hooks::context::{WorkflowHookContext, BeforeStepStartsContext, AfterStepSucceedsContext, AfterStepFailsContext, StepType};
++use crate::workflow::hooks::context::{WorkflowHookContext, BeforeStepStartsContext, AfterStepStartsContext, AfterStepSucceedsContext, AfterStepFailsContext, AfterAllRetriesExhaustedContext, OnRequiresFailedContext, StepType};
+ use crate::workflow::HookAction;
+ use super::{BenchmarkSuiteResult, ModelBenchmarkResult, InferenceResult};
+ use anyhow::{Context, Result};
+@@ -67,6 +67,7 @@ struct BenchmarkWorkflowConfig {
+     compare_modes: bool,
+     model_list: Vec<String>,
+     gpu_layers: usize,
++    when: Option<serde_json::Value>,
+ }
+ 
+ struct WorkflowStep {
+@@ -80,6 +81,7 @@ struct WorkflowStep {
+     model_overrides: Option<serde_json::Value>,
+     #[allow(dead_code)]
+     r#loop: Option<serde_json::Value>,
++    retry: Option<serde_json::Value>,
+ }
+ 
+ impl BenchmarkRunner {
+@@ -363,6 +365,8 @@ impl BenchmarkRunner {
+ 
+         let model_list: Vec<String> = vec![];
+ 
++        let workflow_when = agentic_workflow.get("when").cloned();
++
+         info!("[benchmark] extracted workflow config: prompts={}, max_tokens={}, temperature={}, top_p={}, gpu_layers={}, model_list={}",
+             prompts.len(), max_tokens, temperature, top_p, gpu_layers, model_list.len());
+ 
+@@ -374,6 +378,7 @@ impl BenchmarkRunner {
+             compare_modes: false,
+             model_list,
+             gpu_layers,
++            when: workflow_when,
+         })
+     }
+ 
+@@ -409,6 +414,7 @@ impl BenchmarkRunner {
+                     let generative_entity = step.get("generative_entity").and_then(|v| v.as_str()).map(|s| s.to_string());
+                     let model_overrides = step.get("model_overrides").cloned();
+                     let loop_config = step.get("loop").cloned();
++                    let retry = step.get("retry").cloned();
+ 
+                     Some(WorkflowStep {
+                         step_name,
+@@ -419,6 +425,7 @@ impl BenchmarkRunner {
+                         generative_entity,
+                         model_overrides,
+                         r#loop: loop_config,
++                        retry,
+                     })
+                 })
+                 .collect()
+@@ -443,6 +450,7 @@ impl BenchmarkRunner {
+                     let generative_entity = step_value.get("generative_entity").and_then(|v| v.as_str()).map(|s| s.to_string());
+                     let model_overrides = step_value.get("model_overrides").cloned();
+                     let loop_config = step_value.get("loop").cloned();
++                    let retry = step_value.get("retry").cloned();
+ 
+                     WorkflowStep {
+                         step_name,
+@@ -453,6 +461,7 @@ impl BenchmarkRunner {
+                         generative_entity,
+                         model_overrides,
+                         r#loop: loop_config,
++                        retry,
+                     }
+                 })
+                 .collect()
+@@ -847,6 +856,99 @@ impl BenchmarkRunner {
+         Ok(merged_result)
+     }
+ 
++    /// Check if step requirements are satisfied and fire on_requires_failed hook if not.
++    /// Returns true if step should execute, false if it should be skipped.
++    fn check_and_fire_on_requires_failed(
++        &mut self,
++        step: &WorkflowStep,
++        step_outputs: &std::collections::HashMap<String, String>,
++    ) -> Result<bool> {
++        let requires = &step.requires;
++        if requires.is_empty() {
++            return Ok(true);
++        }
++
++        let missing_deps: Vec<String> = requires
++            .iter()
++            .filter(|dep| !step_outputs.contains_key(dep.as_str()))
++            .cloned()
++            .collect();
++
++        if missing_deps.is_empty() {
++            return Ok(true);
++        }
++
++        let context = WorkflowHookContext::OnRequiresFailed(OnRequiresFailedContext {
++            failed_step: step.step_id.clone(),
++            reason: format!("Missing dependencies: {:?}", missing_deps),
++            dependency_chain: requires.clone(),
++        });
++
++        match self.execute_hooks_for_trigger(&step.when, "on_requires_failed", &context) {
++            Ok(HookResult::Fail { reason }) => {
++                Err(anyhow::anyhow!(
++                    "Dependency check failed for step {}: {}",
++                    step.step_id,
++                    reason
++                ))
++            }
++            Ok(HookResult::SkipRemaining) => {
++                info!(
++                    "[benchmark] step {} and all remaining steps skipped due to failed dependencies",
++                    step.step_id
++                );
++                Ok(false)
++            }
++            Ok(HookResult::SkipStep | HookResult::SkipLoop | HookResult::Continue) => {
++                info!(
++                    "[benchmark] step {} skipped due to failed dependencies: {:?}",
++                    step.step_id, missing_deps
++                );
++                Ok(false)
++            }
++            Ok(HookResult::RouteTo { .. }) => {
++                warn!("[benchmark] RouteTo not applicable in on_requires_failed, skipping step {}", step.step_id);
++                Ok(false)
++            }
++            Err(e) => {
++                warn!(
++                    "[benchmark] on_requires_failed hook error for step {}: {}, skipping",
++                    step.step_id, e
++                );
++                Ok(false)
++            }
++        }
++    }
++
++    /// Merge workflow-level and step-level `when:` hooks.
++    ///
++    /// Step-level hooks take precedence over workflow-level hooks.
++    /// If both are objects, deep merge where step-level overrides workflow-level.
++    fn merge_when_hooks(
++        workflow_when: Option<&serde_json::Value>,
++        step_when: &Option<serde_json::Value>,
++    ) -> Option<serde_json::Value> {
++        match (workflow_when, step_when) {
++            (None, step) => step.as_ref().cloned(),
++            (Some(workflow_val), None) => Some(workflow_val.clone()),
++            (Some(workflow_val), Some(step_val)) => {
++                let workflow_obj = workflow_val.as_object();
++                let step_obj = step_val.as_object();
++
++                match (workflow_obj, step_obj) {
++                    (Some(wf), Some(st)) => {
++                        let mut merged = wf.clone();
++                        for (key, value) in st.iter() {
++                            merged.insert(key.clone(), value.clone());
++                        }
++                        Some(serde_json::Value::Object(merged))
++                    }
++                    _ => step_val.clone(),
++                }
++            }
++        }
++    }
++
+     /// Execute hook actions: log, save_to, append_to, fail.
+     ///
+     /// Supports template interpolation: {{current_model}}, {{step.output}}, {{iteration}}
+@@ -1223,7 +1325,7 @@ impl BenchmarkRunner {
+     }
+ 
+     #[allow(clippy::too_many_arguments)]
+-    async fn execute_workflow_step(&mut self, step: &WorkflowStep, client: &LlamaHttpClient, model: &(String, String), max_tokens: usize, temperature: f64, top_p: f64, variables: Option<&serde_json::Map<String, serde_json::Value>>) -> Result<ModelBenchmarkResult> {
++    async fn execute_workflow_step(&mut self, step: &WorkflowStep, client: &LlamaHttpClient, model: &(String, String), max_tokens: usize, temperature: f64, top_p: f64, variables: Option<&serde_json::Map<String, serde_json::Value>>, workflow_when: &Option<serde_json::Value>) -> Result<ModelBenchmarkResult> {
+         let (model_id, model_path) = model;
+         let default_prompt = String::new();
+         let prompt = step.prompt.as_ref().unwrap_or(&default_prompt);
+@@ -1246,6 +1348,8 @@ impl BenchmarkRunner {
+             std::collections::HashMap::new()
+         };
+ 
++        let merged_when = Self::merge_when_hooks(workflow_when, &step.when);
++
+         let before_context = WorkflowHookContext::BeforeStepStarts(BeforeStepStartsContext {
+             step_name: step.step_name.clone(),
+             step_type: StepType::Generative,
+@@ -1254,7 +1358,7 @@ impl BenchmarkRunner {
+             workflow_variables,
+         });
+ 
+-        match self.execute_hooks_for_trigger(&step.when, "before_step_starts", &before_context) {
++        match self.execute_hooks_for_trigger(&merged_when, "before_step_starts", &before_context) {
+             Ok(HookResult::SkipStep) => {
+                 info!("[benchmark] step {} skipped by before_step_starts hook", step.step_id);
+                 return Ok(ModelBenchmarkResult {
+@@ -1284,6 +1388,40 @@ impl BenchmarkRunner {
+             }
+         }
+ 
++        let after_starts_context = WorkflowHookContext::AfterStepStarts(AfterStepStartsContext {
++            step_name: step.step_name.clone(),
++            step_type: StepType::Generative,
++        });
++        match self.execute_hooks_for_trigger(&merged_when, "after_step_starts", &after_starts_context) {
++            Ok(HookResult::SkipStep) => {
++                info!("[benchmark] step {} skipped by after_step_starts hook", step.step_id);
++                return Ok(ModelBenchmarkResult {
++                    model_id: model_id.to_string(),
++                    model_path: model_path.clone(),
++                    file_size_bytes: 0,
++                    load_duration: Duration::ZERO,
++                    inference_results: vec![],
++                    unload_duration: Duration::ZERO,
++                    total_duration: Duration::ZERO,
++                    tokens_per_second: 0.0,
++                    avg_latency_ms: 0.0,
++                    p50_latency_ms: 0.0,
++                    p95_latency_ms: 0.0,
++                    p99_latency_ms: 0.0,
++                    error: Some("Skipped by hook".to_string()),
++                    gpu_mode: "gpu".to_string(),
++                    speedup_factor: None,
++                });
++            }
++            Ok(HookResult::Fail { reason }) => {
++                return Err(anyhow::anyhow!("Hook failed after step starts: {}", reason));
++            }
++            Ok(_) => {}
++            Err(e) => {
++                warn!("[benchmark] after_step_starts hook error: {}, continuing", e);
++            }
++        }
++
+         let system_prompt = if let Some(vars) = variables {
+             let model_name = vars.get("step.model_name")
+                 .and_then(|v| v.as_str())
+@@ -1298,33 +1436,58 @@ impl BenchmarkRunner {
+             None
+         };
+ 
+-        let model_result = self.benchmark_single_model(client, model_id, model_path, "gpu", std::slice::from_ref(prompt), step_max_tokens, step_temperature, top_p, system_prompt).await;
+-
+-        let output_text = model_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
+-
+-        if let Some(ref error) = model_result.error {
+-            let after_context = WorkflowHookContext::AfterStepFails(AfterStepFailsContext {
+-                step_name: step.step_name.clone(),
+-                error_type: "InferenceError".to_string(),
+-                error_message: error.clone(),
+-                error: crate::workflow::hooks::context::ErrorDetails {
+-                    is_retryable: false,
+-                    count: 1,
+-                },
+-                attempt_number: 1,
+-                model_name: model_id.to_string(),
+-            });
++        let max_attempts = step.retry.as_ref()
++            .and_then(|r| r.get("max_attempts"))
++            .and_then(|v| v.as_u64())
++            .unwrap_or(1) as u32;
++
++        let mut last_error: Option<String> = None;
++        let mut last_error_type: Option<String> = None;
++        let mut model_result_opt: Option<ModelBenchmarkResult> = None;
++
++        for attempt in 1..=max_attempts {
++            info!("[benchmark] step {} attempt {}/{}", step.step_id, attempt, max_attempts);
++
++            let model_result = self.benchmark_single_model(client, model_id, model_path, "gpu", std::slice::from_ref(prompt), step_max_tokens, step_temperature, top_p, system_prompt.clone()).await;
++
++            if let Some(ref error) = model_result.error {
++                last_error = Some(error.clone());
++                last_error_type = Some("InferenceError".to_string());
++
++                let after_context = WorkflowHookContext::AfterStepFails(AfterStepFailsContext {
++                    step_name: step.step_name.clone(),
++                    error_type: "InferenceError".to_string(),
++                    error_message: error.clone(),
++                    error: crate::workflow::hooks::context::ErrorDetails {
++                        is_retryable: attempt < max_attempts,
++                        count: attempt,
++                    },
++                    attempt_number: attempt,
++                    model_name: model_id.to_string(),
++                });
+ 
+-            match self.execute_hooks_for_trigger(&step.when, "after_step_fails", &after_context) {
+-                Ok(HookResult::Fail { reason }) => {
+-                    warn!("[benchmark] after_step_fails hook failed: {}", reason);
++                match self.execute_hooks_for_trigger(&merged_when, "after_step_fails", &after_context) {
++                    Ok(HookResult::Fail { reason }) => {
++                        warn!("[benchmark] after_step_fails hook failed: {}", reason);
++                        return Err(anyhow::anyhow!("Hook failed after step fails: {}", reason));
++                    }
++                    Ok(_) => {}
++                    Err(e) => {
++                        warn!("[benchmark] after_step_fails hook error: {}", e);
++                    }
+                 }
+-                Ok(_) => {}
+-                Err(e) => {
+-                    warn!("[benchmark] after_step_fails hook error: {}", e);
++
++                if attempt < max_attempts {
++                    info!("[benchmark] step {} attempt {}/{} failed, retrying...", step.step_id, attempt, max_attempts);
+                 }
++            } else {
++                model_result_opt = Some(model_result);
++                break;
+             }
+-        } else {
++        }
++
++        if let Some(model_result) = model_result_opt {
++            let output_text = model_result.inference_results.first().map(|inf| inf.response_text.clone()).unwrap_or_default();
+             let total_tokens: usize = model_result.inference_results.iter()
+                 .map(|inf| inf.total_tokens)
+                 .sum();
+@@ -1337,7 +1500,7 @@ impl BenchmarkRunner {
+                 model_name: model_id.to_string(),
+             });
+ 
+-            match self.execute_hooks_for_trigger(&step.when, "after_step_succeeds", &after_context) {
++            match self.execute_hooks_for_trigger(&merged_when, "after_step_succeeds", &after_context) {
+                 Ok(HookResult::Fail { reason }) => {
+                     warn!("[benchmark] after_step_succeeds hook failed: {}", reason);
+                 }
+@@ -1346,9 +1509,31 @@ impl BenchmarkRunner {
+                     warn!("[benchmark] after_step_succeeds hook error: {}", e);
+                 }
+             }
+-        }
+ 
+-        Ok(model_result)
++            Ok(model_result)
++        } else {
++            let error_msg = last_error.unwrap_or_else(|| "Unknown error".to_string());
++            let error_type = last_error_type.unwrap_or_else(|| "UnknownError".to_string());
++
++            let exhausted_context = WorkflowHookContext::AfterAllRetriesExhausted(AfterAllRetriesExhaustedContext {
++                step_name: step.step_name.clone(),
++                total_attempts: max_attempts,
++                last_error: error_msg.clone(),
++                last_error_type: error_type.clone(),
++            });
++
++            match self.execute_hooks_for_trigger(&merged_when, "after_all_retries_exhausted", &exhausted_context) {
++                Ok(HookResult::Fail { reason }) => {
++                    warn!("[benchmark] after_all_retries_exhausted hook failed: {}", reason);
++                }
++                Ok(_) => {}
++                Err(e) => {
++                    warn!("[benchmark] after_all_retries_exhausted hook error: {}", e);
++                }
++            }
++
++            Err(anyhow::anyhow!("Step {} failed after {} attempts: {}", step.step_id, max_attempts, error_msg))
++        }
+     }
+ 
+     pub async fn run(&mut self) -> Result<BenchmarkSuiteResult> {
+@@ -1514,11 +1699,18 @@ impl BenchmarkRunner {
+                                     when: step.when.clone(),
+                                     prompt: resolved_prompt.clone(),
+                                     generative_entity: resolved_ge,
+-                                    model_overrides: step.model_overrides.clone(),
+-                                    r#loop: step.r#loop.clone(),
+-                                };
++                                model_overrides: step.model_overrides.clone(),
++                                r#loop: step.r#loop.clone(),
++                                retry: step.retry.clone(),
++                            };
++
++                                if !self.check_and_fire_on_requires_failed(&resolved_step, &step_outputs)? {
++                                    info!("[benchmark] [{}/{}] step {} skipped due to failed dependencies",
++                                        iteration, var_sets.len(), step.step_id);
++                                    continue;
++                                }
+ 
+-                                let result = self.execute_workflow_step(&resolved_step, &client, &model, max_tokens, temperature, top_p, Some(vars)).await?;
++                                let result = self.execute_workflow_step(&resolved_step, &client, &model, max_tokens, temperature, top_p, Some(vars), wf_ctx.as_ref().map(|ctx| ctx.when.as_ref()).unwrap_or(&None)).await?;
+                                 results.push(result);
+ 
+                                 if let Some(ref last_result) = results.last() {
+@@ -1559,9 +1751,15 @@ impl BenchmarkRunner {
+                                 generative_entity: step.generative_entity.clone(),
+                                 model_overrides: step.model_overrides.clone(),
+                                 r#loop: step.r#loop.clone(),
++                                retry: step.retry.clone(),
+                             };
+ 
+-                            let result = self.execute_workflow_step(&resolved_step, &client, &model, max_tokens, temperature, top_p, None).await?;
++                            if !self.check_and_fire_on_requires_failed(&resolved_step, &step_outputs)? {
++                                info!("[benchmark] step {} skipped due to failed dependencies", step.step_id);
++                                continue;
++                            }
++
++                            let result = self.execute_workflow_step(&resolved_step, &client, &model, max_tokens, temperature, top_p, None, wf_ctx.as_ref().map(|ctx| ctx.when.as_ref()).unwrap_or(&None)).await?;
+                             results.push(result);
+ 
+                             if let Some(ref last_result) = results.last() {
+@@ -1585,9 +1783,15 @@ impl BenchmarkRunner {
+                                 generative_entity: step.generative_entity.clone(),
+                                 model_overrides: step.model_overrides.clone(),
+                                 r#loop: step.r#loop.clone(),
++                                retry: step.retry.clone(),
+                             };
+ 
+-                            let result = self.execute_workflow_step(&resolved_step, &client, model, max_tokens, temperature, top_p, None).await?;
++                            if !self.check_and_fire_on_requires_failed(&resolved_step, &step_outputs)? {
++                                info!("[benchmark] step {} skipped due to failed dependencies", step.step_id);
++                                continue;
++                            }
++
++                            let result = self.execute_workflow_step(&resolved_step, &client, model, max_tokens, temperature, top_p, None, wf_ctx.as_ref().map(|ctx| ctx.when.as_ref()).unwrap_or(&None)).await?;
+                             results.push(result);
+ 
+                             if let Some(ref last_result) = results.last() {
+@@ -2977,6 +3181,7 @@ agentic_workflow:
+             generative_entity: None,
+             model_overrides: None,
+             r#loop: None,
++            retry: None,
+         };
+ 
+         let result = runner.extract_iterate_values(&step);
+@@ -3009,6 +3214,7 @@ agentic_workflow:
+             generative_entity: None,
+             model_overrides: None,
+             r#loop: None,
++            retry: None,
+         };
+ 
+         let result = runner.extract_iterate_values(&step);
+@@ -3031,6 +3237,7 @@ agentic_workflow:
+             generative_entity: None,
+             model_overrides: None,
+             r#loop: None,
++            retry: None,
+         };
+ 
+         let result = runner.extract_iterate_values(&step);
+@@ -3055,6 +3262,7 @@ agentic_workflow:
+             generative_entity: None,
+             model_overrides: None,
+             r#loop: None,
++            retry: None,
+         };
+ 
+         let result = runner.extract_iterate_values(&step);
+@@ -3084,6 +3292,7 @@ agentic_workflow:
+             generative_entity: None,
+             model_overrides: None,
+             r#loop: None,
++            retry: None,
+         };
+ 
+         let result = runner.extract_iterate_values(&step);
+@@ -3125,6 +3334,7 @@ agentic_workflow:
+             generative_entity: None,
+             model_overrides: None,
+             r#loop: None,
++            retry: None,
+         };
+ 
+         let result = runner.extract_iterate_values(&step);

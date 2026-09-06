@@ -1,0 +1,3297 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index ebec9b47..1956744f 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -101,6 +101,85 @@ jobs:
+       - name: Run doctests
+         run: cargo test --doc
+ 
++  # ============================================================================
++  # CROSS-COMPILE ARM64 - Verify aarch64 build (Orange Pi 3W / A733)
++  # ============================================================================
++  cross-compile-arm64:
++    name: Cross-compile ARM64 (aarch64)
++    runs-on: ubuntu-latest
++    steps:
++      - name: Checkout code
++        uses: actions/checkout@v4
++
++      - name: Install Rust toolchain
++        uses: dtolnay/rust-toolchain@stable
++        with:
++          targets: aarch64-unknown-linux-gnu
++
++      - name: Install aarch64 cross-linker
++        run: |
++          sudo apt-get update
++          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
++
++      - name: Cache cargo registry
++        uses: actions/cache@v4
++        with:
++          path: ~/.cargo/registry
++          key: ${{ runner.os }}-cargo-registry-arm64-${{ hashFiles('**/Cargo.lock') }}
++
++      - name: Cache cargo index
++        uses: actions/cache@v4
++        with:
++          path: ~/.cargo/git
++          key: ${{ runner.os }}-cargo-index-arm64-${{ hashFiles('**/Cargo.lock') }}
++
++      - name: Check ARM64 build (no features, CPU-only default)
++        run: cargo check --target aarch64-unknown-linux-gnu --lib
++
++      - name: Check ARM64 build with client feature
++        run: cargo check --target aarch64-unknown-linux-gnu --lib --features client
++
++      - name: Build ARM64 release binary
++        run: cargo build --release --target aarch64-unknown-linux-gnu --features client
++
++      - name: Verify binary architecture
++        run: |
++          file target/aarch64-unknown-linux-gnu/release/whitt | tee -a /dev/stderr | grep -q "ARM aarch64"
++
++      - name: Upload ARM64 release binary
++        uses: actions/upload-artifact@v4
++        with:
++          name: whitt-aarch64
++          path: target/aarch64-unknown-linux-gnu/release/whitt
++          if-no-files-found: error
++
++  # ============================================================================
++  # VULKAN FEATURE - Verify the optional Vulkan feature still compiles on x86_64
++  # ============================================================================
++  build-vulkan-feature:
++    name: Build with vulkan feature (x86_64)
++    runs-on: ubuntu-latest
++    steps:
++      - name: Checkout code
++        uses: actions/checkout@v4
++
++      - name: Install Rust toolchain
++        uses: dtolnay/rust-toolchain@stable
++
++      - name: Install Vulkan dev headers (for llama-cpp-2 vulkan build)
++        run: |
++          sudo apt-get update
++          sudo apt-get install -y \
++            libvulkan-dev \
++            spirv-headers \
++            vulkan-tools
++
++      - name: Check default build (CPU-only, no vulkan)
++        run: cargo check --lib
++
++      - name: Check with vulkan feature
++        run: cargo check --lib --features vulkan
++
+   # ============================================================================
+   # COVERAGE - Test Coverage Report
+   # ============================================================================
+diff --git a/Cargo.toml b/Cargo.toml
+index dc947a50..92d153f8 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -56,11 +56,17 @@ thiserror = "2.0"
+ # - Any type can be converted to anyhow::Error
+ anyhow = "1.0"
+ 
+-# Local LLM inference via llama.cpp bindings
++# Local LLM inference via llama.cpp bindings (optional, behind "vulkan" feature)
+ # - Direct GGUF model loading for maximum performance
+-# - "vulkan" feature: GPU acceleration (cross-platform)
+-# - Alternative backends: cuda, metal, cpu
+-llama-cpp-2 = { version = "0.1.138", features = ["vulkan"] }
++# - "vulkan" feature: GPU acceleration via Vulkan (cross-platform: AMD RADV, NVIDIA, Intel)
++# - This crate is NOT used by the HTTP-based backend in src/backend/llama_cpp.rs;
++#   it is reserved for future in-process inference. The HTTP backend talks to
++#   llama-server over OpenAI-compatible HTTP API regardless of CPU/Vulkan/CUDA.
++# - Kept optional so CPU-only builds (ARM SBCs like Orange Pi 3W) do NOT require
++#   libvulkan-dev headers or Vulkan ICD at runtime.
++# - Build with: cargo build --features vulkan  (enables GPU path)
++# - Default:    cargo build                     (CPU-only, portable to aarch64)
++llama-cpp-2 = { version = "0.1.138", features = ["vulkan"], optional = true }
+ 
+ # Command-line argument parsing
+ # - "derive" feature enables #[derive(Parser)] macro
+@@ -128,6 +134,9 @@ sseer = "0.2"
+ # Clipboard support (optional)
+ arboard = { version = "3", optional = true }
+ 
++# Shell completion generator (optional, behind "cli-completions" feature)
++clap_complete = { version = "4.5", optional = true }
++
+ # ============================================================================
+ # FEATURES
+ # ============================================================================
+@@ -137,6 +146,13 @@ default = []
+ client = ["dep:reqwest", "dep:async-stream", "dep:futures", "dep:bytes"]
+ sqlite = ["dep:rusqlite"]
+ clipboard = ["dep:arboard"]
++cli-completions = ["dep:clap_complete"]
++# Enables Vulkan GPU acceleration via optional llama-cpp-2 bindings.
++# NOT required for HTTP-based backend (src/backend/llama_cpp.rs) which talks
++# to llama-server over OpenAI-compatible HTTP regardless of CPU/Vulkan/CUDA.
++# Use this feature only if you want in-process Vulkan inference bindings.
++# CPU-only default (no feature) is portable to aarch64 / ARM SBCs.
++vulkan = ["dep:llama-cpp-2"]
+ 
+ [[bin]]
+ name = "poc_client"
+diff --git a/README.md b/README.md
+index 1965920e..830ea0e7 100644
+--- a/README.md
++++ b/README.md
+@@ -4,9 +4,11 @@ YAML-driven workflow orchestration with LLM agents, lifecycle hooks, and paralle
+ 
+ ## Quick Start
+ 
++### Option A — Desktop with Vulkan GPU (x86_64)
++
+ ```bash
+-# Build
+-cargo build --release
++# Build with Vulkan bindings (requires libvulkan-dev + SPIRV-Headers)
++cargo build --release --features vulkan
+ 
+ # Start llama.cpp server with Vulkan
+ docker-compose -f docker/docker-compose.yml up -d
+@@ -21,11 +23,25 @@ docker-compose -f docker/docker-compose.yml up -d
+ ./target/release/whitt workflow --workflow workflows/example.yml
+ ```
+ 
++### Option B — CPU-only (default build, portable to ARM64 / SBCs)
++
++```bash
++# Build (no Vulkan deps — works on any Linux)
++cargo build --release
++
++# Start llama.cpp server (CPU mode) — use docker-compose.aarch64.yml on ARM SBCs
++docker-compose -f docker/docker-compose.yml up -d
++# Or run llama-server directly: llama-server -m model.gguf -c 8192 -t 8 -ngl 0
++
++./target/release/whitt chat --model ministral-3b
++```
++
+ ### Prerequisites
+ 
+ - Rust 1.70+ (edition 2021)
+-- Docker with GPU support (Vulkan compatible)
++- Docker (optional, for llama.cpp server)
+ - Linux or macOS
++- For GPU acceleration: Vulkan-compatible GPU with drivers (optional — CPU mode works on all platforms)
+ 
+ ## CLI Reference
+ 
+@@ -46,6 +62,82 @@ docker-compose -f docker/docker-compose.yml up -d
+ | `workflow` | Execute YAML workflows |
+ | `download <model>` | Download model from HuggingFace |
+ 
++## ARM64 / SBC (Orange Pi Zero 3W / Allwinner A733)
++
++whitt cross-compiles for `aarch64-unknown-linux-gnu`. The default build is CPU-only —
++no Vulkan headers required on host or target. See [`docs/cli-opi3w.md`](docs/cli-opi3w.md)
++for the full cheat sheet.
++
++### Build on x86_64 host
++
++```bash
++rustup target add aarch64-unknown-linux-gnu
++sudo apt install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
++cargo build --release --target aarch64-unknown-linux-gnu --features client
++```
++
++### Deploy + install on the SBC
++
++```bash
++scp target/aarch64-unknown-linux-gnu/release/whitt root@opi-zero3w.local:~/whitt
++scp scripts/install-opi3w.sh root@opi-zero3w.local:~/install-opi3w.sh
++scp configs/profiles/a733.yml    root@opi-zero3w.local:~/a733.yml
++
++ssh root@opi-zero3w.local
++chmod +x ~/install-opi3w.sh
++sudo ./install-opi3w.sh --binary ~/whitt
++sudo mkdir -p /etc/whitt && sudo mv ~/a733.yml /etc/whitt/config.yml
++```
++
++### Build llama.cpp natively on the SBC (CPU-only)
++
++```bash
++sudo apt install -y build-essential cmake git
++git clone --depth 1 https://github.com/ggerganov/llama.cpp
++cd llama.cpp
++cmake -B build -DLLAMA_CURL=ON -DLLAMA_OPENMP=ON -DLLAMA_NATIVE=OFF \
++  -DLLAMA_VULKAN=OFF -DLLAMA_CUDA=OFF -DLLAMA_METAL=OFF -DCMAKE_BUILD_TYPE=Release
++cmake --build build --config Release -j$(nproc)
++sudo cp build/bin/llama-server /usr/local/bin/
++```
++
++### Start llama-server + use whitt
++
++```bash
++# On the SBC
++llama-server -m /models/SmolLM3-3B-Q4_K_M.gguf -c 8192 -t 8 -ngl 0 \
++  --host 127.0.0.1 --port 8080
++
++# In another terminal
++whitt --url http://127.0.0.1:8080 chat --model SmolLM3
++```
++
++### Docker on the SBC (optional)
++
++```bash
++docker compose -f docker/docker-compose.aarch64.yml up -d
++```
++
++### Helper CLI
++
++```bash
++whitt sbc info                          # deployment target summary (text/markdown/yaml)
++whitt sbc install --script              # generate pipeable bash deploy script
++whitt sbc install --script --from-ci-artifact   # download whitt from GitHub Actions
++whitt sbc doctor --host opi-zero3w.local # sanity checks via ssh (exit: 0=ok, 1=warn, 2=fail)
++whitt sbc doctor --json                 # machine-readable JSON
++```
++
++**Expected throughput** (CPU-only, 8 ARM cores, 12GB LPDDR5; rough estimate, NOT benchmarked):
++
++| Model | Quant | ~tok/s |
++|---|---|---|
++| SmolLM3 | Q4_K_M | 1–4 |
++| Qwen2.5-7B | Q4_K_M | 0.5–1.5 |
++| Qwen3.5-9B | Q4_K_M | 0.5–1.0 (tight on 12GB) |
++
++---
++
+ ## Architecture
+ 
+ ```
+diff --git a/config.yml b/config.yml
+index fce0a357..d01001e6 100644
+--- a/config.yml
++++ b/config.yml
+@@ -1,3 +1,7 @@
++# Desktop default (x86_64 + Vulkan). For ARM SBC (Orange Pi 3W / A733) use
++# configs/profiles/a733.yml which overrides context.size, hardware.gpu_layers,
++# hardware.threads, and cache_type_{k,v} for CPU-only 12GB LPDDR5.
++
+ model:
+   path: /models/Qwen3-5-9B-Q4_K_M.gguf
+   models_dir: /models
+diff --git a/docker/Dockerfile b/docker/Dockerfile
+index f75f6200..fbe08dce 100644
+--- a/docker/Dockerfile
++++ b/docker/Dockerfile
+@@ -55,7 +55,15 @@ RUN pip3 install --no-cache-dir --break-system-packages huggingface-hub
+ 
+ # Install Go yq (mikefarah/yq) for YAML parsing
+ # Python yq has different syntax — entrypoint expects yq eval file.yml
+-RUN curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq && \
++# Multi-arch: pick yq_linux_amd64 or yq_linux_arm64 based on TARGETARCH.
++# x86_64 desktops use amd64; Orange Pi 3W (A733) and other ARM64 SBCs use arm64.
++ARG TARGETARCH
++RUN case "$TARGETARCH" in \
++        arm64) yq_arch=arm64 ;; \
++        *)     yq_arch=amd64 ;; \
++    esac && \
++    curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${yq_arch}" \
++        -o /usr/local/bin/yq && \
+     chmod +x /usr/local/bin/yq
+ 
+ COPY --from=base /app/ /app/llama-cpp/
+diff --git a/docker/entrypoint.sh b/docker/entrypoint.sh
+index f4e1e651..51d995ea 100755
+--- a/docker/entrypoint.sh
++++ b/docker/entrypoint.sh
+@@ -397,21 +397,55 @@ translate_config() {
+     log_debug "============================"
+ }
+ 
++# Detect non-GPU environments (e.g. ARM64 SBCs without Vulkan userspace).
++# Returns 0 (true) if CPU-only mode is forced; non-zero otherwise.
++# When this returns 0, callers SHOULD skip validate_vulkan.
++detect_hardware_profile() {
++    local arch
++    arch="$(uname -m)"
++
++    if [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then
++        if [ ! -d /dev/dri ]; then
++            log_info "Detected ARM64 SBC without GPU device nodes — CPU-only mode."
++            log_info "  arch=$arch, /dev/dri absent. Skipping Vulkan validation."
++            export LLAMA_ARG_N_GPU_LAYERS="0"
++            return 0
++        fi
++        log_info "ARM64 with /dev/dri present — attempting GPU path."
++    fi
++
++    if [ -n "${FORCE_CPU_ONLY:-0}" ] && [ "${FORCE_CPU_ONLY}" != "0" ]; then
++        log_info "FORCE_CPU_ONLY=$FORCE_CPU_ONLY — forcing CPU-only mode."
++        export LLAMA_ARG_N_GPU_LAYERS="0"
++        return 0
++    fi
++
++    return 1
++}
++
+ # Function to validate Vulkan GPU
+ validate_vulkan() {
+     log_info "Validating AMD GPU + Vulkan..."
+ 
++    # Short-circuit on aarch64 without /dev/dri: emit one info line and return
++    # so users on ARM SBCs (Orange Pi 3W / A733) don't see misleading errors.
++    local arch
++    arch="$(uname -m)"
++    if { [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; } && [ ! -d /dev/dri ]; then
++        log_info "aarch64 with no /dev/dri — Vulkan skipped, CPU-only mode active."
++        export LLAMA_ARG_N_GPU_LAYERS="0"
++        return 0
++    fi
++
+     if [ -z "$GGML_VK_VISIBLE_DEVICES" ]; then
+         export GGML_VK_VISIBLE_DEVICES="0"
+     fi
+ 
+     if [ ! -d /dev/dri ]; then
+-        log_error "/dev/dri not found — no GPU device passthrough. Add 'devices: /dev/dri:/dev/rw' to docker-compose."
+-        log_error "Falling back to CPU-only mode."
++        log_warn "/dev/dri not found — no GPU device passthrough. Falling back to CPU-only."
+         export LLAMA_ARG_N_GPU_LAYERS="0"
+         return 0
+     fi
+-
+     local render_devices=$(ls /dev/dri/renderD* 2>/dev/null | wc -l)
+     if [ "$render_devices" -eq 0 ]; then
+         log_error "No render nodes in /dev/dri — GPU not accessible."
+@@ -736,8 +770,14 @@ main() {
+         log_info "Router mode: skipping model file check (--models-dir $LLAMA_ARG_MODELS_DIR)"
+     fi
+ 
+-    # Validate Vulkan GPU
+-    validate_vulkan
++    # Detect hardware profile. On ARM64 SBCs without GPU device nodes,
++    # skip Vulkan validation entirely (it would emit misleading errors).
++    if detect_hardware_profile; then
++        log_info "Skipping Vulkan validation (CPU-only profile detected)."
++    else
++        # Validate Vulkan GPU
++        validate_vulkan
++    fi
+ 
+     # Start server
+     start_server
+diff --git a/docs/contributing/environment-variables.md b/docs/contributing/environment-variables.md
+index bce86e16..8cb4674c 100644
+--- a/docs/contributing/environment-variables.md
++++ b/docs/contributing/environment-variables.md
+@@ -14,7 +14,7 @@ Environment variables can be configured through:
+ ## Security Best Practices
+ 
+ - **Never commit** `.env` files to version control
+-- Use `.env.example` as a template (already included in repo)
++- Compose `.env` from the per-section examples in this document (no `.env.example` is shipped)
+ - Rotate API keys regularly
+ - Use minimal required permissions
+ - Store API keys in secure vaults for production deployments
+@@ -114,25 +114,30 @@ whitt-execution-engine run workflow.yml
+ | Variable | Required | Description | Default | Example |
+ |-----------|-----------|-------------|----------|----------|
+ | `LLAMACPP_MODEL_PATH` | Yes (for llamacpp provider) | Path to GGUF model file | `./models/llama-3.2-3b.Q4_K_M.gguf` |
+-| `LLAMACPP_BACKEND` | No | Backend for inference | `vulkan`, `cuda`, `cpu`, `metal` |
++| `LLAMACPP_BACKEND` | No | Backend for inference | `cpu`, `vulkan`, `cuda`, `metal` |
+ | `LLAMACPP_CONTEXT_SIZE` | No | Context window size (tokens) | `4096` |
+-| `LLAMACPP_GPU_LAYERS` | No | Percentage of layers to offload to GPU | `99` |
++| `LLAMACPP_GPU_LAYERS` | No | Percentage of layers to offload to GPU | `0` |
++| `MAX_ALLOCATED_MEMORY_MB` | No | Cap on llama.cpp allocation (reduce for 12GB ARM SBCs) | unset |
+ 
+ #### Supported Backends
+ 
+-- **vulkan**: Cross-platform GPU acceleration (default)
++- **cpu**: CPU-only (default; portable to aarch64 / ARM SBCs like Orange Pi 3W)
++- **vulkan**: Cross-platform GPU acceleration (requires `--features vulkan` build + Vulkan ICD)
+ - **cuda**: NVIDIA GPU acceleration (Linux/Windows)
+-- **cpu**: CPU-only (slower, no GPU required)
+ - **metal**: Apple Silicon GPU acceleration (macOS)
+ 
+ #### Usage Example
+ 
+ ```bash
+-# Set llama.cpp configuration
++# CPU-only default (works on any Linux including ARM64 SBCs)
+ export LLAMACPP_MODEL_PATH=./models/llama-3.2-3b.Q4_K_M.gguf
+-export LLAMACPP_BACKEND=vulkan
++export LLAMACPP_BACKEND=cpu
+ export LLAMACPP_CONTEXT_SIZE=4096
+-export LLAMACPP_GPU_LAYERS=99
++export LLAMACPP_GPU_LAYERS=0
++
++# Or: Vulkan desktop path
++# export LLAMACPP_BACKEND=vulkan
++# export LLAMACPP_GPU_LAYERS=99
+ 
+ # Run workflow
+ whitt-execution-engine run workflow.yml
+diff --git a/src/backend/llama_cpp.rs b/src/backend/llama_cpp.rs
+index 7f905de0..f5958545 100644
+--- a/src/backend/llama_cpp.rs
++++ b/src/backend/llama_cpp.rs
+@@ -1,13 +1,16 @@
+-//! Llama.cpp with Vulkan backend implementation.
++//! Llama.cpp backend implementation (HTTP client to llama-server).
+ //!
+-//! Implements the LlmBackend trait for llama.cpp servers with Vulkan GPU acceleration.
++//! Implements the LlmBackend trait by talking to a llama.cpp HTTP server
++//! (`llama-server`) over the OpenAI-compatible API. The backend is agnostic
++//! to whether llama-server uses CPU, Vulkan, CUDA, or Metal — backend
++//! selection happens inside llama-server itself.
+ //!
+ //! HTTP client code is gated behind the "client" feature.
+ 
+ use crate::backend::llm_backend::{
+     BackendCapabilities, ChatMessage, ChatResponse, HealthStatus, LlmBackend, LlmError, ModelInfo,
+ };
+-use crate::config::provider::LlamaCppVulkanProvider;
++use crate::config::provider::LlamaCppProvider;
+ #[cfg(feature = "client")]
+ use futures::{Stream, StreamExt};
+ use serde::{Deserialize, Serialize};
+@@ -19,12 +22,16 @@ use std::time::Duration;
+ // Backend struct
+ // ---------------------------------------------------------------------------
+ 
+-/// Llama.cpp backend with Vulkan support.
++/// Llama.cpp backend (HTTP client to llama-server).
++///
++/// Works with both CPU-only llama.cpp servers and GPU-accelerated (Vulkan/CUDA/Metal) ones.
++/// The engine talks to llama-server over OpenAI-compatible HTTP API; backend selection
++/// (CPU vs GPU) happens inside llama-server, controlled by the `-ngl` flag passed to it.
+ #[derive(Debug, Clone)]
+-pub struct LlamaCppVulkanBackend {
++pub struct LlamaCppBackend {
+     /// Provider configuration.
+     #[allow(dead_code)]
+-    config: LlamaCppVulkanProvider,
++    config: LlamaCppProvider,
+ 
+     /// Base URL for API requests.
+     base_url: String,
+@@ -39,9 +46,19 @@ pub struct LlamaCppVulkanBackend {
+     backoff_strategy: BackoffStrategy,
+ }
+ 
+-impl LlamaCppVulkanBackend {
+-    /// Create a new Llama.cpp Vulkan backend from configuration.
+-    pub fn from_config(config: LlamaCppVulkanProvider) -> Self {
++/// Backward-compatible alias. Will be removed in a future release.
++///
++/// The original name was misleading because this backend is a pure HTTP client
++/// to llama-server — it does not require Vulkan locally. Use [`LlamaCppBackend`].
++#[deprecated(
++    since = "0.2.0",
++    note = "Use LlamaCppBackend instead. This backend talks HTTP to llama-server regardless of CPU/Vulkan/CUDA."
++)]
++pub type LlamaCppVulkanBackend = LlamaCppBackend;
++
++impl LlamaCppBackend {
++    /// Create a new Llama.cpp backend from configuration.
++    pub fn from_config(config: LlamaCppProvider) -> Self {
+         let connection_config = config.config.clone().unwrap_or_default();
+         let requests_config = config.requests.clone().unwrap_or_default();
+         let retry_config = requests_config.retry.unwrap_or_default();
+@@ -76,7 +93,7 @@ impl LlamaCppVulkanBackend {
+             base_url = %base_url,
+             timeout_secs = connection_config.connection_timeout_secs,
+             max_retries,
+-            "Created LlamaCppVulkanBackend"
++            "Created LlamaCppBackend"
+         );
+ 
+         Self {
+@@ -156,7 +173,7 @@ enum BackoffStrategy {
+ // ---------------------------------------------------------------------------
+ 
+ #[async_trait::async_trait]
+-impl LlmBackend for LlamaCppVulkanBackend {
++impl LlmBackend for LlamaCppBackend {
+     async fn chat(
+         &self,
+         messages: Vec<ChatMessage>,
+diff --git a/src/backend/mod.rs b/src/backend/mod.rs
+index a9f66887..5e4ce56a 100644
+--- a/src/backend/mod.rs
++++ b/src/backend/mod.rs
+@@ -1,12 +1,16 @@
+ //! Backend abstraction layer for LLM providers.
+ //!
+ //! Provides a unified interface for interacting with different LLM backends
+-//! (LM Studio, Ollama, llama.cpp with Vulkan).
++//! (LM Studio, Ollama, llama.cpp via HTTP server).
+ 
++pub mod llama_cpp;
+ pub mod llm_backend;
+-pub mod llama_vulkan;
+ pub mod mock_backend;
++#[cfg(feature = "vulkan")]
++pub mod vulkan_support;
+ 
+-pub use llm_backend::{LlmBackend, LlmError, BackendCapabilities, HealthStatus};
+-pub use llama_vulkan::LlamaCppVulkanBackend;
++pub use llm_backend::{BackendCapabilities, HealthStatus, LlmBackend, LlmError};
++pub use llama_cpp::LlamaCppBackend;
++#[allow(deprecated)]
++pub use llama_cpp::LlamaCppVulkanBackend;
+ pub use mock_backend::{MockError, MockLlmBackend};
+diff --git a/src/bin/whitt.rs b/src/bin/whitt.rs
+index 5f5008d9..290e279e 100644
+--- a/src/bin/whitt.rs
++++ b/src/bin/whitt.rs
+@@ -3,17 +3,15 @@
+ use anyhow::{Context, Result};
+ use clap::{Parser, Subcommand};
+ use futures::StreamExt;
+-use rustyline::DefaultEditor;
+ use rustyline::error::ReadlineError;
++use rustyline::DefaultEditor;
+ use std::io::Write;
+ use std::path::{Path, PathBuf};
+ 
++use whitt_execution_engine::benchmark::runner::{BenchmarkConfig, BenchmarkRunner};
+ use whitt_execution_engine::client::http_client::LlamaHttpClient;
+ use whitt_execution_engine::client::model_download::download_model_from_hf;
+-use whitt_execution_engine::client::types::{
+-    ChatCompletionRequest, ChatMessage,
+-};
+-use whitt_execution_engine::benchmark::runner::{BenchmarkRunner, BenchmarkConfig};
++use whitt_execution_engine::client::types::{ChatCompletionRequest, ChatMessage};
+ 
+ #[derive(Parser, Debug)]
+ #[command(name = "whitt")]
+@@ -212,6 +210,12 @@ enum Commands {
+         /// Show loaded configuration details
+         #[arg(long)]
+         show_config: bool,
++
++        /// Override the LLM backend host:port (e.g. whitt-neuron-1.local:8080).
++        /// When set, all inference requests are sent to this SBC's llama-server
++        /// instead of localhost. Providers in the YAML workflow are overridden.
++        #[arg(long)]
++        backend: Option<String>,
+     },
+ 
+     /// Download model from HuggingFace
+@@ -227,6 +231,332 @@ enum Commands {
+         #[arg(short = 'o', long, default_value = "models")]
+         output: PathBuf,
+     },
++
++    /// SBC deployment for ARM64 CPU-only targets (Orange Pi 3W / Allwinner A733
++    /// and similar aarch64 single-board computers).
++    ///
++    /// Provides cross-compile guidance, install instructions, embedded profile
++    /// delivery, and a doctor diagnostic for ARM64 CPU-only deployments.
++    Sbc {
++        #[command(subcommand)]
++        action: SbcAction,
++    },
++}
++
++#[derive(Subcommand, Debug)]
++enum SbcAction {
++    /// Show ARM64 SBC build, install, and runtime instructions.
++    Info {
++        /// Output format: human (default), markdown, or yaml.
++        #[arg(long, default_value = "human")]
++        format: String,
++    },
++
++    /// Print the exact shell commands to build, deploy, and start on the SBC.
++    Install {
++        /// Print commands only (no prose) — suitable for piping to bash.
++        #[arg(long)]
++        script: bool,
++
++        /// Override the SBC host (default: opi-zero3w.local).
++        #[arg(long, default_value = "opi-zero3w.local")]
++        host: String,
++
++        /// Override the SBC user (default: root).
++        #[arg(long, default_value = "root")]
++        user: String,
++
++        /// Download whitt aarch64 binary from the latest GitHub Actions
++        /// successful run artifact instead of building locally. Requires
++        /// network access and the gh CLI (or an existing artifact URL).
++        #[arg(long)]
++        from_ci_artifact: bool,
++
++        /// Write the embedded ARM64 profile to /etc/whitt/config.yml on the
++        /// SBC instead of copying from a checked-out repo. Keeps the config
++        /// in sync with the whitt binary version.
++        #[arg(long)]
++        embed_config: bool,
++
++        /// Cross-compile llama.cpp's llama-server for aarch64 inside a Docker
++        /// container on the host (skips native SBC build). Requires Docker.
++        #[arg(long)]
++        cross_llama: bool,
++    },
++
++    /// Run sanity checks: arch, /dev/dri absence, RAM, deps, config, and
++    /// llama-server reachability. Exits 0=ok, 1=warn, 2=fail.
++    Doctor {
++        /// Override the SBC host (default: opi-zero3w.local).
++        #[arg(long, default_value = "opi-zero3w.local")]
++        host: String,
++
++        /// Emit machine-readable JSON instead of human prose: one object per
++        /// check with {name, status, value, duration_ms}. Status is one of
++        /// "ok" | "warn" | "fail".
++        #[arg(long)]
++        json: bool,
++
++        /// Show actionable fix hints for any warn/fail checks (Q49).
++        #[arg(long)]
++        hint: bool,
++    },
++
++    /// Manage models on the SBC: list, switch, or pull from HuggingFace.
++    Model {
++        #[command(subcommand)]
++        action: SbcModelAction,
++    },
++
++    /// Scan the local /24 subnet for hosts responding on port 8080 with a
++    /// llama-server /props payload. Useful when mDNS (.local) doesn't resolve.
++    Discover {
++        /// Override the subnet (default: auto-detect from default route).
++        /// Format: CIDR like 192.168.1.0/24.
++        #[arg(long)]
++        subnet: Option<String>,
++
++        /// Override the port to probe (default: 8080).
++        #[arg(long, default_value = "8080")]
++        port: u16,
++    },
++
++    /// Tail llama-server logs from the SBC via ssh + journalctl.
++    Logs {
++        /// Follow logs continuously (journalctl -f). Default: false (dump).
++        #[arg(short, long)]
++        follow: bool,
++
++        /// Show logs since this time (journalctl --since). Examples: "1h", "yesterday".
++        #[arg(long)]
++        since: Option<String>,
++
++        /// Override the SBC host (default: opi-zero3w.local).
++        #[arg(long, default_value = "opi-zero3w.local")]
++        host: String,
++    },
++
++    /// One-shot status check: ready | building | failed | offline.
++    /// Polls /var/lib/whitt-neuron/firstboot.done + llama-server.service.
++    Status {
++        /// Override the SBC host (default: opi-zero3w.local).
++        #[arg(long, default_value = "opi-zero3w.local")]
++        host: String,
++
++        /// Wait until ready (poll every 5s) instead of one-shot.
++        #[arg(long)]
++        wait: bool,
++    },
++
++    /// Start llama-server.service on the SBC. Optionally override MODEL_PATH.
++    /// Service stays DISABLED at boot (Q25) — start via this command.
++    Start {
++        /// Override the SBC host (default: opi-zero3w.local).
++        #[arg(long, default_value = "opi-zero3w.local")]
++        host: String,
++
++        /// Override MODEL_PATH for this start (writes to /etc/whitt-neuron/llama.env
++        /// then systemctl start). Accepts bare name like `Qwen3.5-2B-Q8_0` or full
++        /// path `/models/X.gguf`. If omitted, uses existing llama.env MODEL_PATH.
++        #[arg(long)]
++        model: Option<String>,
++    },
++
++    /// Stop llama-server.service on the SBC. Frees model RAM.
++    Stop {
++        /// Override the SBC host (default: opi-zero3w.local).
++        #[arg(long, default_value = "opi-zero3w.local")]
++        host: String,
++    },
++
++    /// Update the whitt binary on the SBC from the latest GitHub release
++    /// artifact. Requires gh CLI on the host.
++    Update {
++        /// Override the SBC host (default: opi-zero3w.local).
++        #[arg(long, default_value = "opi-zero3w.local")]
++        host: String,
++
++        /// Pull a prerelease version instead of latest stable.
++        #[arg(long)]
++        prerelease: bool,
++
++        /// Specific version tag (e.g. v0.2.0). Defaults to latest release.
++        #[arg(long)]
++        version: Option<String>,
++    },
++
++    /// Update or rebuild llama.cpp on the SBC.
++    Llama {
++        #[command(subcommand)]
++        action: LlamaAction,
++    },
++
++    /// Reset SBC to factory state: rm firstboot.done + /etc/whitt-neuron/*,
++    /// then reboot to re-trigger firstboot. Keeps /usr/local/bin/llama-server
++    /// and /models/* intact.
++    FactoryReset {
++        /// Override the SBC host (default: opi-zero3w.local).
++        #[arg(long, default_value = "opi-zero3w.local")]
++        host: String,
++
++        /// Skip the confirmation prompt (dangerous).
++        #[arg(long)]
++        yes: bool,
++    },
++
++    /// Fleet management: track multiple SBCs in ~/.config/whitt/sbcs.json.
++    Add {
++        /// Alias for the SBC (e.g. "neuron1").
++        alias: String,
++
++        /// Hostname or IP (e.g. "whitt-neuron-1.local" or "192.168.1.50").
++        host: String,
++
++        /// SSH user (default: root).
++        #[arg(long, default_value = "root")]
++        user: String,
++    },
++
++    /// List all SBCs in the fleet (~/.config/whitt/sbcs.json).
++    List,
++
++    /// Remove an SBC from the fleet by alias.
++    Remove {
++        /// Alias to remove.
++        alias: String,
++    },
++
++    /// Run a structured PASS/FAIL acceptance test against the SBC: ssh ok,
++    /// /props responds, Ministral + Qwen chat each return ≥1 token, UFW
++    /// blocks random port, fleet entry exists. Reports per-check status.
++    /// Exit 0 = all pass, 1 = some fail.
++    Verify {
++        #[arg(long, default_value = "opi-zero3w.local")]
++        host: String,
++    },
++
++    /// Run llama-bench on the SBC and report tok/s for prompt + token gen.
++    /// Useful for tracking perf regressions over time.
++    Bench {
++        /// Override the SBC host (default: opi-zero3w.local).
++        #[arg(long, default_value = "opi-zero3w.local")]
++        host: String,
++
++        /// Pass extra args to llama-bench (e.g. "-p 512,1024 -n 128").
++        #[arg(long)]
++        extra: Option<String>,
++    },
++
++    /// Backup the SBC's SD card to a .img.gz on the host. Runs dd + gzip via
++    /// ssh + scp. Output: ~/whitt-<host>-<date>.img.gz (~3GB compressed).
++    /// Keeps last 3 backups (Q48) — older ones auto-deleted.
++    Backup {
++        /// Override the SBC host (default: opi-zero3w.local).
++        #[arg(long, default_value = "opi-zero3w.local")]
++        host: String,
++
++        /// Output directory on host (defaults to $HOME).
++        #[arg(long)]
++        out_dir: Option<String>,
++    },
++
++    /// Show usage stats from llama-server /metrics: tokens (prompt+completion),
++    /// wall time, requests count, active model. (Q41)
++    Usage {
++        /// Override the SBC host (default: opi-zero3w.local).
++        #[arg(long, default_value = "opi-zero3w.local")]
++        host: String,
++    },
++
++    /// Tail the JSONL audit log on the SBC: who ran what when. (Q46)
++    /// Each entry: timestamp, user (from ssh $USER), action, model, success.
++    Audit {
++        /// Override the SBC host (default: opi-zero3w.local).
++        #[arg(long, default_value = "opi-zero3w.local")]
++        host: String,
++
++        /// Follow the log continuously (tail -f).
++        #[arg(short, long)]
++        follow: bool,
++    },
++
++    /// Toggle maintenance mode on the SBC. When ON: creates
++    /// /etc/whitt-neuron/maintenance.flag, llama-server returns 503 on new
++    /// requests, in-flight finishes. Lets you drain before stop. (Q47)
++    Maintenance {
++        /// Override the SBC host (default: opi-zero3w.local).
++        #[arg(long, default_value = "opi-zero3w.local")]
++        host: String,
++
++        /// Turn maintenance mode ON (drain + refuse new requests).
++        #[arg(long)]
++        on: bool,
++
++        /// Turn maintenance mode OFF (resume normal operation).
++        #[arg(long)]
++        off: bool,
++    },
++
++    /// Generate shell completions for the whitt CLI.
++    Completions {
++        /// Shell to generate for.
++        #[arg(value_enum)]
++        shell: CompletionShell,
++    },
++}
++
++#[derive(clap::ValueEnum, Clone, Copy, Debug)]
++enum CompletionShell {
++    Bash,
++    Zsh,
++    Fish,
++    Powershell,
++    Elvish,
++}
++
++#[derive(Subcommand, Debug)]
++enum LlamaAction {
++    /// Rebuild llama.cpp with a different tag (e.g. b4500). Idempotent.
++    Update {
++        /// llama.cpp release tag (e.g. b4500).
++        tag: String,
++
++        /// Override the SBC host (default: opi-zero3w.local).
++        #[arg(long, default_value = "opi-zero3w.local")]
++        host: String,
++    },
++}
++
++#[derive(Subcommand, Debug)]
++enum SbcModelAction {
++    /// List .gguf files in /models/ + currently active model.
++    List {
++        #[arg(long, default_value = "opi-zero3w.local")]
++        host: String,
++    },
++
++    /// Switch active model: edits /etc/whitt-neuron/llama.env + restarts service.
++    Switch {
++        /// Model name (matches /models/<name>.gguf or full path).
++        name: String,
++
++        #[arg(long, default_value = "opi-zero3w.local")]
++        host: String,
++    },
++
++    /// Download a model from HuggingFace to SBC /models/. Uses huggingface-cli on SBC.
++    /// Requires HF_TOKEN in /etc/whitt-neuron/llama.env for gated repos.
++    Pull {
++        /// HuggingFace repo, e.g. `unsloth/Qwen3.5-2B-GGUF`.
++        repo: String,
++
++        /// Specific file in repo (e.g. `Qwen3.5-2B-Q8_0.gguf`). Default: latest Q8_0.
++        #[arg(long)]
++        file: Option<String>,
++
++        #[arg(long, default_value = "opi-zero3w.local")]
++        host: String,
++    },
+ }
+ 
+ #[derive(Subcommand, Debug)]
+@@ -261,12 +591,11 @@ async fn main() -> Result<()> {
+ 
+     tracing_subscriber::fmt()
+         .with_env_filter(
+-            tracing_subscriber::EnvFilter::from_default_env()
+-                .add_directive(if cli.verbose {
+-                    "whitt=debug".parse().unwrap()
+-                } else {
+-                    "whitt=info".parse().unwrap()
+-                }),
++            tracing_subscriber::EnvFilter::from_default_env().add_directive(if cli.verbose {
++                "whitt=debug".parse().unwrap()
++            } else {
++                "whitt=info".parse().unwrap()
++            }),
+         )
+         .init();
+ 
+@@ -281,7 +610,9 @@ async fn main() -> Result<()> {
+         return Ok(());
+     }
+ 
+-    let command = cli.command.context("No subcommand provided. Use --help for usage.")?;
++    let command = cli
++        .command
++        .context("No subcommand provided. Use --help for usage.")?;
+ 
+     match command {
+         Commands::Chat {
+@@ -300,8 +631,31 @@ async fn main() -> Result<()> {
+             pipe,
+             save,
+         } => {
+-            tracing::info!("[WHT-CHAT001] chat command, pipe={}, one_shot={}, stream={}", pipe, prompt.is_some(), !no_stream);
+-            chat_command(&cli.url, cli.model, prompt, system, temperature, max_tokens, top_p, top_k, repeat_penalty, presence_penalty, frequency_penalty, stop, seed, no_stream, pipe, save).await
++            tracing::info!(
++                "[WHT-CHAT001] chat command, pipe={}, one_shot={}, stream={}",
++                pipe,
++                prompt.is_some(),
++                !no_stream
++            );
++            chat_command(
++                &cli.url,
++                cli.model,
++                prompt,
++                system,
++                temperature,
++                max_tokens,
++                top_p,
++                top_k,
++                repeat_penalty,
++                presence_penalty,
++                frequency_penalty,
++                stop,
++                seed,
++                no_stream,
++                pipe,
++                save,
++            )
++            .await
+         }
+ 
+         Commands::Model { action } => {
+@@ -320,20 +674,67 @@ async fn main() -> Result<()> {
+             }
+         }
+ 
+-        Commands::Agent { task, max_steps, allowed_tools, forbidden_tools, allowed_paths, forbidden_paths } => {
+-            tracing::info!("[WHT-AGT001] agent command, max_steps={}, task_len={}", max_steps, task.len());
+-            agent_command(&cli.url, cli.model, task, max_steps, cli.verbose, AgentOpts { allowed_tools, forbidden_tools, allowed_paths, forbidden_paths }).await
++        Commands::Agent {
++            task,
++            max_steps,
++            allowed_tools,
++            forbidden_tools,
++            allowed_paths,
++            forbidden_paths,
++        } => {
++            tracing::info!(
++                "[WHT-AGT001] agent command, max_steps={}, task_len={}",
++                max_steps,
++                task.len()
++            );
++            agent_command(
++                &cli.url,
++                cli.model,
++                task,
++                max_steps,
++                cli.verbose,
++                AgentOpts {
++                    allowed_tools,
++                    forbidden_tools,
++                    allowed_paths,
++                    forbidden_paths,
++                },
++            )
++            .await
+         }
+ 
+-        Commands::Benchmark { prompt, max_tokens, models_dir, model_list, prompts, output, filter_size_max, filter_size_min, filter_name, compare_gpu_cpu, output_dir, workflow, preflight, cooldown, load_timeout, min_tmp_space } => {
+-            tracing::info!("[WHT-BEN001] benchmark command, max_tokens={}, prompts={}", max_tokens, prompts);
++        Commands::Benchmark {
++            prompt,
++            max_tokens,
++            models_dir,
++            model_list,
++            prompts,
++            output,
++            filter_size_max,
++            filter_size_min,
++            filter_name,
++            compare_gpu_cpu,
++            output_dir,
++            workflow,
++            preflight,
++            cooldown,
++            load_timeout,
++            min_tmp_space,
++        } => {
++            tracing::info!(
++                "[WHT-BEN001] benchmark command, max_tokens={}, prompts={}",
++                max_tokens,
++                prompts
++            );
+ 
+             if workflow.is_none() && (models_dir.is_some() || model_list.is_some()) {
+                 tracing::warn!("[DEPRECATED] Direct benchmark mode (--models-dir/--model-list without --workflow) is deprecated. Use --workflow flag instead. See docs/benchmarks/workflows/ for YAML templates.");
+             }
+ 
+             if models_dir.is_some() || model_list.is_some() || workflow.is_some() {
+-                let base_prompt = prompt.clone().unwrap_or_else(|| "The quick brown fox jumps over the lazy dog.".to_string());
++                let base_prompt = prompt
++                    .clone()
++                    .unwrap_or_else(|| "The quick brown fox jumps over the lazy dog.".to_string());
+                 let prompts_vec = (0..prompts).map(|_| base_prompt.clone()).collect();
+ 
+                 let config = BenchmarkConfig {
+@@ -347,7 +748,8 @@ async fn main() -> Result<()> {
+                     filter_name,
+                     delay_between_swaps: std::time::Duration::from_secs(2),
+                     compare_gpu_cpu,
+-                    output_dir: output_dir.or_else(|| Some("./docs/benchmarks/outputs".to_string())),
++                    output_dir: output_dir
++                        .or_else(|| Some("./docs/benchmarks/outputs".to_string())),
+                     workflow_file: workflow,
+                     temperature: None,
+                     top_p: None,
+@@ -377,10 +779,32 @@ async fn main() -> Result<()> {
+             download_command(&repo, file, &output).await
+         }
+ 
+-        Commands::Workflow { workflow_file, show_config } => {
+-            tracing::info!("[WHT-WF001] workflow command, file={}", workflow_file.display());
++        Commands::Workflow {
++            workflow_file,
++            show_config,
++            backend,
++        } => {
++            if let Some(b) = &backend {
++                tracing::info!(
++                    "[WHT-WF001] workflow command, file={}, backend={}",
++                    workflow_file.display(),
++                    b
++                );
++                println!("==> Q33: overriding backend to http://{}", b);
++                std::env::set_var("WHITT_BACKEND_OVERRIDE", b);
++            } else {
++                tracing::info!(
++                    "[WHT-WF001] workflow command, file={}",
++                    workflow_file.display()
++                );
++            }
+             workflow_command(&workflow_file, show_config).await
+         }
++
++        Commands::Sbc { action } => {
++            tracing::info!("[WHT-SBC001] sbc command");
++            sbc_command(action).await
++        }
+     }
+ }
+ 
+@@ -416,7 +840,10 @@ async fn chat_command(
+                 let first = models.first();
+                 match first {
+                     Some(m) => {
+-                        tracing::info!("[WHT-EML000] no loaded model, trying first available: {}", m.id);
++                        tracing::info!(
++                            "[WHT-EML000] no loaded model, trying first available: {}",
++                            m.id
++                        );
+                         m.id.clone()
+                     }
+                     None => {
+@@ -432,11 +859,10 @@ async fn chat_command(
+ 
+     use whitt_execution_engine::config::ConfigLoader;
+ 
+-    let model_config = ConfigLoader::load_merged(Some(&model_id))
+-        .unwrap_or_else(|e| {
+-            tracing::debug!("Config load failed, using defaults: {}", e);
+-            whitt_execution_engine::config::LlamaConfig::default()
+-        });
++    let model_config = ConfigLoader::load_merged(Some(&model_id)).unwrap_or_else(|e| {
++        tracing::debug!("Config load failed, using defaults: {}", e);
++        whitt_execution_engine::config::LlamaConfig::default()
++    });
+ 
+     model_config.validate_config()?;
+ 
+@@ -450,7 +876,10 @@ async fn chat_command(
+     let seed = seed.or(Some(model_config.sampling.seed));
+ 
+     if !(0.0..=2.0).contains(&temperature) {
+-        anyhow::bail!("temperature must be between 0.0 and 2.0, got {}", temperature);
++        anyhow::bail!(
++            "temperature must be between 0.0 and 2.0, got {}",
++            temperature
++        );
+     }
+     if max_tokens < 1 {
+         anyhow::bail!("max_tokens must be >= 1, got {}", max_tokens);
+@@ -460,7 +889,9 @@ async fn chat_command(
+         tracing::info!("[WHT-PIPE001] reading prompt from stdin");
+         use std::io::{self, Read};
+         let mut buf = String::new();
+-        io::stdin().read_to_string(&mut buf).context("Failed to read from stdin")?;
++        io::stdin()
++            .read_to_string(&mut buf)
++            .context("Failed to read from stdin")?;
+         if buf.trim().is_empty() {
+             anyhow::bail!("--pipe: stdin is empty");
+         }
+@@ -471,9 +902,40 @@ async fn chat_command(
+     };
+ 
+     if let Some(p) = resolved_prompt {
+-        one_shot_chat(&client, &model_id, p, system, temperature, max_tokens, top_p, top_k, repeat_penalty, presence_penalty, frequency_penalty, stop, seed, no_stream, save).await
++        one_shot_chat(
++            &client,
++            &model_id,
++            p,
++            system,
++            temperature,
++            max_tokens,
++            top_p,
++            top_k,
++            repeat_penalty,
++            presence_penalty,
++            frequency_penalty,
++            stop,
++            seed,
++            no_stream,
++            save,
++        )
++        .await
+     } else {
+-        repl_chat(&client, &model_id, system, temperature, max_tokens, top_p, top_k, repeat_penalty, presence_penalty, frequency_penalty, stop, seed).await
++        repl_chat(
++            &client,
++            &model_id,
++            system,
++            temperature,
++            max_tokens,
++            top_p,
++            top_k,
++            repeat_penalty,
++            presence_penalty,
++            frequency_penalty,
++            stop,
++            seed,
++        )
++        .await
+     }
+ }
+ 
+@@ -489,7 +951,10 @@ async fn ensure_model_loaded(client: &LlamaHttpClient, model_id: &str) -> Result
+         Ok(()) => Ok(()),
+         Err(e) => {
+             if models.iter().any(|m| m.id == model_id) {
+-                eprintln!("[MODEL] load API failed (server may auto-load on request): {}", e);
++                eprintln!(
++                    "[MODEL] load API failed (server may auto-load on request): {}",
++                    e
++                );
+                 tracing::warn!("[WHT-EML002] load API failed but model exists in list, continuing");
+                 Ok(())
+             } else {
+@@ -585,8 +1050,12 @@ async fn one_shot_chat(
+     } else {
+         let response = client.chat_completion(request).await?;
+         let choice = response.choices.first();
+-        let content = choice.map(|c| c.message.content.clone()).unwrap_or_default();
+-        let reasoning = choice.map(|c| c.message.reasoning_content.clone()).unwrap_or_default();
++        let content = choice
++            .map(|c| c.message.content.clone())
++            .unwrap_or_default();
++        let reasoning = choice
++            .map(|c| c.message.reasoning_content.clone())
++            .unwrap_or_default();
+         if !reasoning.is_empty() && content.is_empty() {
+             println!("[reasoning] {}", reasoning);
+         } else {
+@@ -623,7 +1092,8 @@ async fn repl_chat(
+ ) -> Result<()> {
+     let mut rl = DefaultEditor::new()?;
+     let mut model_id = default_model.to_string();
+-    let mut system_prompt = initial_system.unwrap_or_else(|| "You are a helpful assistant.".to_string());
++    let mut system_prompt =
++        initial_system.unwrap_or_else(|| "You are a helpful assistant.".to_string());
+     let mut messages = vec![ChatMessage::system(system_prompt.clone())];
+ 
+     eprintln!("Whitt REPL (Ctrl-C or /exit to quit)");
+@@ -675,7 +1145,10 @@ async fn repl_chat(
+                     eprintln!("Conversation cleared");
+                 }
+                 Some(Cmd::Copy) => {
+-                    tracing::info!("[WHT-COPY001] /copy command invoked, has_response={}", !last_response.is_empty());
++                    tracing::info!(
++                        "[WHT-COPY001] /copy command invoked, has_response={}",
++                        !last_response.is_empty()
++                    );
+                     if last_response.is_empty() {
+                         eprintln!("No response to copy yet");
+                     } else {
+@@ -815,7 +1288,10 @@ async fn server_status_command(url: &str) -> Result<()> {
+     let health = client.health().await?;
+     println!("Server: {}", url);
+     println!("Health: {}", health.status);
+-    println!("Slots: idle={}, processing={}", health.slots_idle, health.slots_processing);
++    println!(
++        "Slots: idle={}, processing={}",
++        health.slots_idle, health.slots_processing
++    );
+ 
+     let models = client.list_models().await?;
+     println!("\nLoaded models:");
+@@ -829,7 +1305,10 @@ async fn server_status_command(url: &str) -> Result<()> {
+ fn detect_gpu_type() -> String {
+     if std::path::Path::new("/usr/bin/nvidia-smi").exists() {
+         let output = std::process::Command::new("nvidia-smi")
+-            .args(["--query-gpu=name,driver_version,memory.total", "--format=csv,noheader"])
++            .args([
++                "--query-gpu=name,driver_version,memory.total",
++                "--format=csv,noheader",
++            ])
+             .output();
+         if let Ok(out) = output {
+             if out.status.success() {
+@@ -866,18 +1345,37 @@ async fn server_start_command() -> Result<()> {
+     let status = match gpu_type.as_str() {
+         "nvidia" => {
+             tokio::process::Command::new("docker")
+-                .args(["compose", "-f", "docker/docker-compose.yml", "-f", "docker/docker-compose.nvidia.yml", "up", "-d"])
+-                .status().await?
++                .args([
++                    "compose",
++                    "-f",
++                    "docker/docker-compose.yml",
++                    "-f",
++                    "docker/docker-compose.nvidia.yml",
++                    "up",
++                    "-d",
++                ])
++                .status()
++                .await?
+         }
+         "amd" => {
+             tokio::process::Command::new("docker")
+-                .args(["compose", "-f", "docker/docker-compose.yml", "-f", "docker/docker-compose.amd.yml", "up", "-d"])
+-                .status().await?
++                .args([
++                    "compose",
++                    "-f",
++                    "docker/docker-compose.yml",
++                    "-f",
++                    "docker/docker-compose.amd.yml",
++                    "up",
++                    "-d",
++                ])
++                .status()
++                .await?
+         }
+         _ => {
+             tokio::process::Command::new("docker")
+                 .args(["compose", "up", "-d"])
+-                .status().await?
++                .status()
++                .await?
+         }
+     };
+ 
+@@ -948,7 +1446,10 @@ async fn agent_command(
+                 let first = models.first();
+                 match first {
+                     Some(m) => {
+-                        tracing::info!("[WHT-AGT000] no loaded model, trying first available: {}", m.id);
++                        tracing::info!(
++                            "[WHT-AGT000] no loaded model, trying first available: {}",
++                            m.id
++                        );
+                         m.id.clone()
+                     }
+                     None => {
+@@ -962,7 +1463,8 @@ async fn agent_command(
+ 
+     ensure_model_loaded(&client, &model_id).await?;
+ 
+-    let forbidden: Vec<String> = opts.forbidden_tools
++    let forbidden: Vec<String> = opts
++        .forbidden_tools
+         .as_deref()
+         .unwrap_or("")
+         .split(',')
+@@ -980,22 +1482,43 @@ async fn agent_command(
+     let all_tools: &[(&str, &str)] = &[
+         ("model_list", "List all models (no input)"),
+         ("model_load", "Load a model (input: {\"model\": \"name\"})"),
+-        ("model_unload", "Unload a model (input: {\"model\": \"name\"})"),
+-        ("chat", "Send a chat message (input: {\"message\": \"text\"})"),
+-        ("file_read", "Read a file (input: {\"path\": \"/path/to/file\"})"),
+-        ("final_answer", "Return the final answer (input: {\"answer\": \"your answer\"})"),
++        (
++            "model_unload",
++            "Unload a model (input: {\"model\": \"name\"})",
++        ),
++        (
++            "chat",
++            "Send a chat message (input: {\"message\": \"text\"})",
++        ),
++        (
++            "file_read",
++            "Read a file (input: {\"path\": \"/path/to/file\"})",
++        ),
++        (
++            "final_answer",
++            "Return the final answer (input: {\"answer\": \"your answer\"})",
++        ),
+     ];
+ 
+     let available_tools: Vec<_> = all_tools
+         .iter()
+         .filter(|(name, _)| {
+-            if forbidden.iter().any(|f| f == name) { return false; }
+-            if let Some(ref a) = allowed { return a.iter().any(|x| x == name); }
++            if forbidden.iter().any(|f| f == name) {
++                return false;
++            }
++            if let Some(ref a) = allowed {
++                return a.iter().any(|x| x == name);
++            }
+             true
+         })
+         .collect();
+ 
+-    tracing::info!("[WHT-AGT002] tool filtering: {} available, forbidden={:?}, allowed={:?}", available_tools.len(), forbidden, allowed);
++    tracing::info!(
++        "[WHT-AGT002] tool filtering: {} available, forbidden={:?}, allowed={:?}",
++        available_tools.len(),
++        forbidden,
++        allowed
++    );
+ 
+     let tool_list = available_tools
+         .iter()
+@@ -1003,7 +1526,8 @@ async fn agent_command(
+         .collect::<Vec<_>>()
+         .join("\n");
+ 
+-    let system_prompt = format!(r#"You are a ReAct agent that uses tools to solve tasks.
++    let system_prompt = format!(
++        r#"You are a ReAct agent that uses tools to solve tasks.
+ Use the following format:
+ 
+ 
+@@ -1024,20 +1548,40 @@ Available tools:
+ 
+ Use final_answer when you have completed the task.
+ Always think before acting.
+- Use JSON format for the <act> tag."#, tool_list);
+-
+-    let sandbox: Option<whitt_execution_engine::agent::sandbox::SandboxConfig> = if opts.allowed_paths.is_some() || opts.forbidden_paths.is_some() {
+-        Some(whitt_execution_engine::agent::sandbox::SandboxConfig {
+-            allowed_paths: opts.allowed_paths.as_deref().unwrap_or("").split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+-            forbidden_paths: opts.forbidden_paths.as_deref().unwrap_or("").split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(),
+-            allowed_patterns: vec![],
+-            max_file_size_mb: 10,
+-        })
+-    } else {
+-        None
+-    };
+-    tracing::info!("[WHT-AGT003] sandbox config: allowed_paths={:?}, forbidden_paths={:?}", 
+-        sandbox.as_ref().map(|s| &s.allowed_paths), sandbox.as_ref().map(|s| &s.forbidden_paths));
++ Use JSON format for the <act> tag."#,
++        tool_list
++    );
++
++    let sandbox: Option<whitt_execution_engine::agent::sandbox::SandboxConfig> =
++        if opts.allowed_paths.is_some() || opts.forbidden_paths.is_some() {
++            Some(whitt_execution_engine::agent::sandbox::SandboxConfig {
++                allowed_paths: opts
++                    .allowed_paths
++                    .as_deref()
++                    .unwrap_or("")
++                    .split(',')
++                    .map(|s| s.trim().to_string())
++                    .filter(|s| !s.is_empty())
++                    .collect(),
++                forbidden_paths: opts
++                    .forbidden_paths
++                    .as_deref()
++                    .unwrap_or("")
++                    .split(',')
++                    .map(|s| s.trim().to_string())
++                    .filter(|s| !s.is_empty())
++                    .collect(),
++                allowed_patterns: vec![],
++                max_file_size_mb: 10,
++            })
++        } else {
++            None
++        };
++    tracing::info!(
++        "[WHT-AGT003] sandbox config: allowed_paths={:?}, forbidden_paths={:?}",
++        sandbox.as_ref().map(|s| &s.allowed_paths),
++        sandbox.as_ref().map(|s| &s.forbidden_paths)
++    );
+ 
+     let mut messages = vec![
+         ChatMessage::system(system_prompt.to_string()),
+@@ -1059,7 +1603,11 @@ Always think before acting.
+         };
+ 
+         let response = client.chat_completion(request).await?;
+-        let content = response.choices.first().map(|c| c.message.content.clone()).unwrap_or_default();
++        let content = response
++            .choices
++            .first()
++            .map(|c| c.message.content.clone())
++            .unwrap_or_default();
+ 
+         if verbose {
+             eprintln!("\n=== Step {} ===", step + 1);
+@@ -1068,11 +1616,17 @@ Always think before acting.
+ 
+         messages.push(ChatMessage::assistant(content.clone()));
+ 
+-        if let Some(tool_result) = parse_and_execute_tool(&client, &content, verbose, &forbidden, &allowed, &sandbox).await? {
++        if let Some(tool_result) =
++            parse_and_execute_tool(&client, &content, verbose, &forbidden, &allowed, &sandbox)
++                .await?
++        {
+             if verbose {
+                 eprintln!("Tool result:\n{}", tool_result);
+             }
+-            messages.push(ChatMessage::user(format!("<result>{}</result>", tool_result)));
++            messages.push(ChatMessage::user(format!(
++                "<result>{}</result>",
++                tool_result
++            )));
+ 
+             if tool_result.contains("FINAL ANSWER:") || tool_result.contains("[FINAL]") {
+                 println!("{}", tool_result);
+@@ -1105,14 +1659,25 @@ async fn parse_and_execute_tool(
+     let think_re = Regex::new(r"<think>(.*?)</think>").unwrap();
+     let act_re = Regex::new(r"<act>([\s\S]*?)</act>").unwrap();
+ 
+-    let _thought = think_re.captures(content).and_then(|c| c.get(1)).map(|m| m.as_str());
++    let _thought = think_re
++        .captures(content)
++        .and_then(|c| c.get(1))
++        .map(|m| m.as_str());
+ 
+     // Take the LAST <act> block — earlier ones may be inside <result> from prior turns
+-    let act = act_re.captures_iter(content).last().and_then(|c| c.get(1)).map(|m| m.as_str());
++    let act = act_re
++        .captures_iter(content)
++        .last()
++        .and_then(|c| c.get(1))
++        .map(|m| m.as_str());
+ 
+     if let Some(act) = act {
+-        let tool_call: serde_json::Value = serde_json::from_str(act).context("Failed to parse tool call JSON")?;
+-        let tool = tool_call.get("tool").and_then(|t| t.as_str()).context("Missing tool name")?;
++        let tool_call: serde_json::Value =
++            serde_json::from_str(act).context("Failed to parse tool call JSON")?;
++        let tool = tool_call
++            .get("tool")
++            .and_then(|t| t.as_str())
++            .context("Missing tool name")?;
+         let input = tool_call.get("input").context("Missing input")?;
+ 
+         tracing::info!("[WHT-TOOL001] parsed tool call: tool={}", tool);
+@@ -1129,7 +1694,10 @@ async fn parse_and_execute_tool(
+         if let Some(ref a) = allowed {
+             if !a.iter().any(|x| x == tool) {
+                 tracing::warn!("[WHT-TOOL003] tool '{}' not in allowed list", tool);
+-                return Ok(Some(format!("Error: tool '{}' is not in allowed list", tool)));
++                return Ok(Some(format!(
++                    "Error: tool '{}' is not in allowed list",
++                    tool
++                )));
+             }
+         }
+ 
+@@ -1140,19 +1708,30 @@ async fn parse_and_execute_tool(
+                 serde_json::to_string(&output)?
+             }
+             "model_load" => {
+-                let model = input.get("model").and_then(|m| m.as_str()).context("Missing 'model' in input")?;
++                let model = input
++                    .get("model")
++                    .and_then(|m| m.as_str())
++                    .context("Missing 'model' in input")?;
+                 client.load_model(model).await?;
+                 format!("Loaded model: {}", model)
+             }
+             "model_unload" => {
+-                let model = input.get("model").and_then(|m| m.as_str()).context("Missing 'model' in input")?;
++                let model = input
++                    .get("model")
++                    .and_then(|m| m.as_str())
++                    .context("Missing 'model' in input")?;
+                 client.unload_model(model).await?;
+                 format!("Unloaded model: {}", model)
+             }
+             "chat" => {
+-                let message = input.get("message").and_then(|m| m.as_str()).context("Missing 'message' in input")?;
++                let message = input
++                    .get("message")
++                    .and_then(|m| m.as_str())
++                    .context("Missing 'message' in input")?;
+                 let models = client.list_models().await?;
+-                let loaded = models.iter().find(|m| m.status.value == "loaded")
++                let loaded = models
++                    .iter()
++                    .find(|m| m.status.value == "loaded")
+                     .map(|m| m.id.clone())
+                     .context("No model loaded")?;
+ 
+@@ -1165,13 +1744,20 @@ async fn parse_and_execute_tool(
+                     ..Default::default()
+                 };
+                 let resp = client.chat_completion(req).await?;
+-                resp.choices.first().map(|c| c.message.content.clone()).unwrap_or_default()
++                resp.choices
++                    .first()
++                    .map(|c| c.message.content.clone())
++                    .unwrap_or_default()
+             }
+             "file_read" => {
+-                let path = input.get("path").and_then(|p| p.as_str()).context("Missing 'path' in input")?;
++                let path = input
++                    .get("path")
++                    .and_then(|p| p.as_str())
++                    .context("Missing 'path' in input")?;
+                 tracing::info!("[WHT-TOOL004] file_read, path={}", path);
+                 if let Some(ref cfg) = sandbox {
+-                    let sbox = whitt_execution_engine::agent::sandbox::ToolSandbox::new(cfg.clone());
++                    let sbox =
++                        whitt_execution_engine::agent::sandbox::ToolSandbox::new(cfg.clone());
+                     match sbox.is_path_allowed(std::path::Path::new(path)) {
+                         Ok(false) => {
+                             tracing::warn!("[WHT-TOOL005] path '{}' blocked by sandbox", path);
+@@ -1184,7 +1770,10 @@ async fn parse_and_execute_tool(
+                 std::fs::read_to_string(path).context("Failed to read file")?
+             }
+             "final_answer" => {
+-                let answer = input.get("answer").and_then(|a| a.as_str()).context("Missing 'answer' in input")?;
++                let answer = input
++                    .get("answer")
++                    .and_then(|a| a.as_str())
++                    .context("Missing 'answer' in input")?;
+                 format!("FINAL ANSWER: {}", answer)
+             }
+             _ => format!("Unknown tool: {}", tool),
+@@ -1212,7 +1801,8 @@ async fn benchmark_command(url: &str, prompt: Option<String>, max_tokens: usize)
+         }
+     };
+ 
+-    let prompt_text = prompt.unwrap_or_else(|| "The quick brown fox jumps over the lazy dog.".to_string());
++    let prompt_text =
++        prompt.unwrap_or_else(|| "The quick brown fox jumps over the lazy dog.".to_string());
+     println!("Model: {}", model_id);
+     println!("Server: {}", url);
+     println!("Prompt: {}", prompt_text);
+@@ -1229,7 +1819,10 @@ async fn benchmark_command(url: &str, prompt: Option<String>, max_tokens: usize)
+ 
+     println!("--- Single Request ---");
+     let start = std::time::Instant::now();
+-    let resp = client.chat_completion(request).await.context("Benchmark request failed")?;
++    let resp = client
++        .chat_completion(request)
++        .await
++        .context("Benchmark request failed")?;
+     let elapsed = start.elapsed();
+ 
+     let total_tokens = resp.usage.total_tokens;
+@@ -1245,7 +1838,10 @@ async fn benchmark_command(url: &str, prompt: Option<String>, max_tokens: usize)
+ 
+     for choice in resp.choices {
+         if !choice.message.content.is_empty() {
+-            println!("Response: {}...", &choice.message.content[..choice.message.content.len().min(80)]);
++            println!(
++                "Response: {}...",
++                &choice.message.content[..choice.message.content.len().min(80)]
++            );
+         }
+     }
+ 
+@@ -1273,12 +1869,19 @@ async fn download_command(repo: &str, file: Option<String>, output: &Path) -> Re
+     println!("Output: {}", dest.display());
+     println!("Downloading...");
+ 
+-    let bytes = download_model_from_hf(repo, &filename, dest.to_str()
+-        .context("Invalid output path")?)
+-        .await
+-        .context("Download failed")?;
+-
+-    println!("Downloaded {} bytes ({:.1} MB)", bytes, bytes as f64 / 1_048_576.0);
++    let bytes = download_model_from_hf(
++        repo,
++        &filename,
++        dest.to_str().context("Invalid output path")?,
++    )
++    .await
++    .context("Download failed")?;
++
++    println!(
++        "Downloaded {} bytes ({:.1} MB)",
++        bytes,
++        bytes as f64 / 1_048_576.0
++    );
+     Ok(())
+ }
+ 
+@@ -1291,8 +1894,8 @@ async fn workflow_command(workflow_file: &Path, show_config: bool) -> Result<()>
+ 
+     println!("Loading unified workflow: {}", workflow_file.display());
+ 
+-    let config = UnifiedConfig::from_file(workflow_file)
+-        .context("Failed to load unified config")?;
++    let config =
++        UnifiedConfig::from_file(workflow_file).context("Failed to load unified config")?;
+ 
+     println!("\n=== Unified Configuration ===");
+     println!("Schema Version: {}", config.schema_version);
+@@ -1304,8 +1907,11 @@ async fn workflow_command(workflow_file: &Path, show_config: bool) -> Result<()>
+             println!("      Host: {}:{}", config.host, config.port);
+         }
+         if let Some(requests) = &provider.requests {
+-            println!("      Timeout: {}s, Max Retries: {}", requests.request_timeout_secs,
+-                requests.retry.as_ref().map(|r| r.max_retries).unwrap_or(3));
++            println!(
++                "      Timeout: {}s, Max Retries: {}",
++                requests.request_timeout_secs,
++                requests.retry.as_ref().map(|r| r.max_retries).unwrap_or(3)
++            );
+         }
+     }
+ 
+@@ -1355,3 +1961,1573 @@ fn copy_to_clipboard(text: &str) {
+     }
+ }
+ 
++async fn sbc_command(action: SbcAction) -> Result<()> {
++    match action {
++        SbcAction::Info { format } => {
++            print_sbc_info(&format);
++            Ok(())
++        }
++        SbcAction::Install {
++            script,
++            host,
++            user,
++            from_ci_artifact,
++            embed_config,
++            cross_llama,
++        } => {
++            print_sbc_install(
++                script,
++                &host,
++                &user,
++                from_ci_artifact,
++                embed_config,
++                cross_llama,
++            );
++            Ok(())
++        }
++        SbcAction::Doctor { host, json, hint } => run_sbc_doctor(&host, json, hint).await,
++        SbcAction::Model { action } => match action {
++            SbcModelAction::List { host } => sbc_model_list(&host).await,
++            SbcModelAction::Switch { name, host } => sbc_model_switch(&host, &name).await,
++            SbcModelAction::Pull { repo, file, host } => {
++                sbc_model_pull(&host, &repo, file.as_deref()).await
++            }
++        },
++        SbcAction::Discover { subnet, port } => sbc_discover(subnet.as_deref(), port).await,
++        SbcAction::Logs {
++            follow,
++            since,
++            host,
++        } => sbc_logs(&host, follow, since.as_deref()).await,
++        SbcAction::Status { host, wait } => sbc_status(&host, wait).await,
++        SbcAction::Start { host, model } => sbc_service_set(&host, true, model.as_deref()).await,
++        SbcAction::Stop { host } => sbc_service_set(&host, false, None).await,
++        SbcAction::Verify { host } => sbc_verify(&host).await,
++        SbcAction::Bench { host, extra } => sbc_bench(&host, extra.as_deref()).await,
++        SbcAction::Backup { host, out_dir } => {
++            let out = out_dir
++                .clone()
++                .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| ".".to_string()));
++            sbc_backup(&host, &out).await
++        }
++        SbcAction::Usage { host } => sbc_usage(&host).await,
++        SbcAction::Audit { host, follow } => sbc_audit(&host, follow).await,
++        SbcAction::Maintenance { host, on, off } => {
++            if on == off {
++                anyhow::bail!("must pass exactly one of --on or --off");
++            }
++            sbc_maintenance(&host, on).await
++        }
++        SbcAction::Update {
++            host,
++            prerelease,
++            version,
++        } => sbc_update(&host, prerelease, version.as_deref()).await,
++        SbcAction::Llama { action } => match action {
++            LlamaAction::Update { tag, host } => sbc_llama_update(&host, &tag).await,
++        },
++        SbcAction::FactoryReset { host, yes } => sbc_factory_reset(&host, yes).await,
++        SbcAction::Add { alias, host, user } => {
++            let mut fleet = SbcFleet::load()?;
++            fleet.add(alias.clone(), host.clone(), user.clone());
++            fleet.save()?;
++            println!("added {} -> {}@{}", alias, user, host);
++            Ok(())
++        }
++        SbcAction::List => {
++            let fleet = SbcFleet::load()?;
++            if fleet.is_empty() {
++                println!("(no SBCs in fleet — add with: whitt sbc add <alias> <host>)");
++            } else {
++                println!("{:<15} {:<30} {:<10}", "ALIAS", "HOST", "USER");
++                for (alias, entry) in fleet.entries() {
++                    println!("{:<15} {:<30} {:<10}", alias, entry.host, entry.user);
++                }
++            }
++            Ok(())
++        }
++        SbcAction::Remove { alias } => {
++            let mut fleet = SbcFleet::load()?;
++            if fleet.remove(&alias) {
++                fleet.save()?;
++                println!("removed {}", alias);
++            } else {
++                println!("(no fleet entry named {})", alias);
++            }
++            Ok(())
++        }
++        SbcAction::Completions { shell } => generate_completions(shell),
++    }
++}
++
++/// Embedded ARM64 SBC profile (kept in sync with `configs/profiles/a733.yml`
++/// via `include_str!`). Used by `whitt sbc install --embed-config` so the
++/// binary is self-contained and the profile never drifts from the binary
++/// version.
++const SBC_ARM64_PROFILE_YAML: &str = include_str!("../../configs/profiles/a733.yml");
++
++fn sbc_info_yaml() -> String {
++    let mut out = String::new();
++    out.push_str("target:\n");
++    out.push_str("  board: Orange Pi Zero 3W\n");
++    out.push_str("  soc: Allwinner A733\n");
++    out.push_str("  arch: aarch64\n");
++    out.push_str("  cores: 8\n");
++    out.push_str("  ram_mb: 12288\n");
++    out.push_str("  gpu: PowerVR BXM-4-64 (no Vulkan userspace on stock BSP)\n");
++    out.push_str("throughput_estimate_tok_per_s:\n");
++    out.push_str("  3B_q4_k_m: \"1-4\"\n");
++    out.push_str("  7B_9B_q4: \"0.5-1.5\"\n");
++    out.push_str("build:\n");
++    out.push_str("  host: x86_64\n");
++    out.push_str("  target: aarch64-unknown-linux-gnu\n");
++    out.push_str(
++        "  cmd: cargo build --release --target aarch64-unknown-linux-gnu --features client\n",
++    );
++    out.push_str("deploy:\n");
++    out.push_str(
++        "  cmd_1: scp target/aarch64-unknown-linux-gnu/release/whitt root@opi-zero3w.local:~/\n",
++    );
++    out.push_str(
++        "  cmd_2: ssh root@opi-zero3w.local 'bash scripts/install-opi3w.sh --binary ./whitt'\n",
++    );
++    out.push_str("profile:\n");
++    out.push_str("  path: configs/profiles/a733.yml\n");
++    out.push_str("  context_size: 8192\n");
++    out.push_str("  threads: 8\n");
++    out.push_str("  gpu_layers: 0\n");
++    out.push_str("  cache_k: q4_0\n");
++    out.push_str("  cache_v: q4_0\n");
++    out.push_str("reference_doc: docs/cli-opi3w.md\n");
++    out
++}
++
++fn print_sbc_info(format: &str) {
++    let info = r#"ARM64 SBC deployment target (Orange Pi Zero 3W / Allwinner A733)
++
++Hardware:
++  - SoC: Allwinner A733, 8-core (2x A76 @2.0GHz + 6x A55 @1.8GHz)
++  - RAM: 12GB LPDDR5 @2400MHz 32-bit (~9.6 GB/s peak; SBC variants may differ)
++  - GPU: PowerVR BXM-4-64 (NO open-source Vulkan userspace on stock BSP images)
++  - Arch: ARM64 (aarch64)
++
++Expected throughput (CPU-only llama.cpp, rough estimate, NOT benchmarked):
++  - 3B Q4_K_M: ~1-4 tok/s
++  - 7B-9B Q4:  ~0.5-1.5 tok/s
++
++Build (on x86_64 host):
++  rustup target add aarch64-unknown-linux-gnu
++  sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
++  cargo build --release --target aarch64-unknown-linux-gnu --features client
++
++Deploy to SBC:
++  scp target/aarch64-unknown-linux-gnu/release/whitt root@opi-zero3w.local:~/
++  ssh root@opi-zero3w.local 'bash scripts/install-opi3w.sh --binary ./whitt'
++
++Config profile:
++  configs/profiles/a733.yml  (8K context, 8 threads, q4_0 KV cache, no GPU)
++
++Reference doc:
++  docs/cli-opi3w.md
++"#;
++    match format {
++        "markdown" => {
++            println!("# ARM64 SBC Deployment\n\n```text\n{}\n```", info);
++        }
++        "yaml" => {
++            print!("{}", sbc_info_yaml());
++        }
++        _ => {
++            println!("{}", info);
++        }
++    }
++}
++
++fn print_sbc_install(
++    script: bool,
++    host: &str,
++    user: &str,
++    from_ci_artifact: bool,
++    embed_config: bool,
++    cross_llama: bool,
++) {
++    if script {
++        println!("#!/bin/bash");
++        println!("# Generated by: whitt sbc install --script");
++        println!("# Target: {}@{}", user, host);
++        println!(
++            "# Options: from_ci_artifact={} embed_config={} cross_llama={}",
++            from_ci_artifact, embed_config, cross_llama
++        );
++        println!("set -euo pipefail");
++        println!();
++        println!("# --- ssh/scp options used by this script (idempotent across re-runs) ---");
++        println!("SSH_OPTS=( -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new )");
++        println!("SCP_OPTS=( -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=accept-new )");
++        println!();
++
++        if from_ci_artifact {
++            println!("# 1. Download whitt-aarch64 from latest GitHub Actions successful run");
++            println!("if ! command -v gh >/dev/null; then");
++            println!("    echo \"gh CLI not found. Install: https://cli.github.com/\" >&2; exit 1");
++            println!("fi");
++            println!(
++                "RUN_ID=$(gh run list --branch main --status success \\
++                --json databaseId --limit 1 -q '.[0].databaseId')"
++            );
++            println!("if [ -z \"$RUN_ID\" ]; then");
++            println!("    echo \"No successful CI run found on main\" >&2; exit 1");
++            println!("fi");
++            println!("gh run download \"$RUN_ID\" -n whitt-aarch64 -D ./whitt-aarch64-download");
++            println!("cp ./whitt-aarch64-download/whitt ./whitt-aarch64");
++            println!();
++        } else {
++            println!("# 1. Host: install Rust ARM64 target + cross-linker");
++            println!("rustup target add aarch64-unknown-linux-gnu");
++            println!("if command -v apt-get >/dev/null; then");
++            println!("    sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu");
++            println!("elif command -v dnf >/dev/null; then");
++            println!("    sudo dnf install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu");
++            println!("elif command -v pacman >/dev/null; then");
++            println!("    sudo pacman -S --noconfirm aarch64-linux-gnu-gcc");
++            println!("else");
++            println!("    echo \"Unsupported host package manager (need gcc-aarch64-linux-gnu)\" >&2; exit 1");
++            println!("fi");
++            println!();
++            println!("# 2. Host: build whitt for ARM64 (CPU-only default)");
++            println!("cargo build --release --target aarch64-unknown-linux-gnu --features client");
++            println!("cp target/aarch64-unknown-linux-gnu/release/whitt ./whitt-aarch64");
++            println!();
++        }
++
++        if cross_llama {
++            println!("# Optional: cross-compile llama.cpp's llama-server for aarch64 in Docker");
++            println!("# (requires docker; skips native SBC build)");
++            println!("docker build -f docker/Dockerfile.aarch64 -t whitt-llama-aarch64 .");
++            println!("id=$(docker create whitt-llama-aarch64)");
++            println!("docker cp \"$id:/usr/local/bin/llama-server\" ./llama-server-aarch64");
++            println!("docker rm \"$id\"");
++            println!(
++                "scp \"${{SCP_OPTS[@]}}\" ./llama-server-aarch64 {}@{}:~/llama-server",
++                user, host
++            );
++            println!("ssh \"${{SSH_OPTS[@]}}\" {}@{} 'sudo mv ~/llama-server /usr/local/bin/llama-server'", user, host);
++            println!();
++        }
++
++        println!("# 3. Host -> SBC: copy whitt binary");
++        println!(
++            "scp \"${{SCP_OPTS[@]}}\" ./whitt-aarch64 {}@{}:~/whitt",
++            user, host
++        );
++        println!(
++            "scp \"${{SCP_OPTS[@]}}\" scripts/install-opi3w.sh {}@{}:~/install-opi3w.sh",
++            user, host
++        );
++        println!();
++
++        if embed_config {
++            println!("# 4. SBC: install + write embedded profile (no repo needed on SBC)");
++            println!("# Embedded profile (configs/profiles/a733.yml at whitt build time):");
++            println!("PROFILE_BLOB=$(cat <<'__WHITT_A733_PROFILE_EOF__'");
++            for line in SBC_ARM64_PROFILE_YAML.lines() {
++                println!("{}", line);
++            }
++            println!("__WHITT_A733_PROFILE_EOF__");
++            println!(")");
++            println!("printf '%s\\n' \"$PROFILE_BLOB\" | ssh \"${{SSH_OPTS[@]}}\" {}@{} 'cat > /tmp/a733.yml'", user, host);
++            println!("ssh \"${{SSH_OPTS[@]}}\" {}@{} 'chmod +x ~/install-opi3w.sh && sudo ./install-opi3w.sh --binary ~/whitt && sudo mkdir -p /etc/whitt && sudo mv /tmp/a733.yml /etc/whitt/config.yml'", user, host);
++        } else {
++            println!("# 4. Host -> SBC: copy profile + run installer");
++            println!(
++                "scp \"${{SCP_OPTS[@]}}\" configs/profiles/a733.yml {}@{}:~/a733.yml",
++                user, host
++            );
++            println!("ssh \"${{SSH_OPTS[@]}}\" {}@{} 'chmod +x ~/install-opi3w.sh && sudo ./install-opi3w.sh --binary ~/whitt'", user, host);
++            println!("ssh \"${{SSH_OPTS[@]}}\" {}@{} 'sudo mkdir -p /etc/whitt && sudo mv ~/a733.yml /etc/whitt/config.yml'", user, host);
++        }
++        println!();
++        if !cross_llama {
++            println!("echo \"Done. Next: build llama.cpp on the SBC (see docs/cli-opi3w.md).\"");
++        } else {
++            println!("echo \"Done. llama-server already deployed from Docker cross-compile.\"");
++        }
++        return;
++    }
++
++    println!("ARM64 SBC install steps");
++    println!("========================");
++    println!();
++    println!(
++        "Flags requested: from_ci_artifact={} embed_config={} cross_llama={}",
++        from_ci_artifact, embed_config, cross_llama
++    );
++    println!();
++    if from_ci_artifact {
++        println!("1. Download whitt-aarch64 from latest GitHub Actions run:");
++        println!("   gh run list --branch main --status success --json databaseId --limit 1");
++        println!("   gh run download <RUN_ID> -n whitt-aarch64 -D ./whitt-aarch64-download");
++    } else {
++        println!("1. On x86_64 host — install Rust ARM64 target + cross-linker:");
++        println!("   rustup target add aarch64-unknown-linux-gnu");
++        println!("   sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu");
++    }
++    println!();
++    if !from_ci_artifact {
++        println!("2. Build whitt for ARM64 (CPU-only default):");
++        println!("   cargo build --release --target aarch64-unknown-linux-gnu --features client");
++        println!();
++    }
++    if cross_llama {
++        println!("3. Cross-compile llama.cpp's llama-server for aarch64 via Docker:");
++        println!("   docker build -f docker/Dockerfile.aarch64 -t whitt-llama-aarch64 .");
++        println!("   docker cp $(docker create whitt-llama-aarch64):/usr/local/bin/llama-server ./llama-server-aarch64");
++        println!();
++    }
++    println!(
++        "{}. Copy whitt binary to the SBC:",
++        if cross_llama { 4 } else { 3 }
++    );
++    println!("   scp ./whitt-aarch64 {}@{}:~/whitt", user, host);
++    println!(
++        "   scp scripts/install-opi3w.sh {}@{}:~/install-opi3w.sh",
++        user, host
++    );
++    if !embed_config {
++        println!(
++            "   scp configs/profiles/a733.yml {}@{}:~/a733.yml",
++            user, host
++        );
++    }
++    println!();
++    println!(
++        "{}. On the SBC — run installer:",
++        if cross_llama { 5 } else { 4 }
++    );
++    println!("   ssh {}@{}", user, host);
++    println!("   chmod +x ~/install-opi3w.sh");
++    if embed_config {
++        println!("   sudo ./install-opi3w.sh --binary ~/whitt --embed-config");
++    } else {
++        println!("   sudo ./install-opi3w.sh --binary ~/whitt");
++        println!("   sudo mkdir -p /etc/whitt && sudo mv ~/a733.yml /etc/whitt/config.yml");
++    }
++    println!();
++    if !cross_llama {
++        println!(
++            "{}. On the SBC — build llama.cpp (CPU-only):",
++            if cross_llama { 6 } else { 5 }
++        );
++        println!("   sudo apt-get install -y build-essential cmake git");
++        println!("   git clone --depth 1 https://github.com/ggerganov/llama.cpp");
++        println!("   cd llama.cpp && cmake -B build \\");
++        println!("     -DLLAMA_CURL=ON -DLLAMA_OPENMP=ON -DLLAMA_NATIVE=OFF \\");
++        println!("     -DLLAMA_VULKAN=OFF -DLLAMA_CUDA=OFF -DLLAMA_METAL=OFF \\");
++        println!("     -DCMAKE_BUILD_TYPE=Release");
++        println!("   cmake --build build --config Release -j$(nproc)");
++        println!("   sudo cp build/bin/llama-server /usr/local/bin/");
++        println!();
++    }
++    println!(
++        "{}. On the SBC — start llama-server and chat with whitt:",
++        if cross_llama { 6 } else { 6 }
++    );
++    println!("   llama-server -m /models/SmolLM3-Q4_K_M.gguf -c 8192 -t 8 -ngl 0 \\");
++    println!("     --host 127.0.0.1 --port 8080");
++    println!("   whitt --url http://127.0.0.1:8080 chat --model SmolLM3");
++    println!();
++    println!("Tip: use '--script' to emit a pipeable bash script:");
++    println!("   whitt sbc install --script > deploy.sh && bash deploy.sh");
++}
++
++#[derive(serde::Serialize)]
++struct SbcCheck {
++    name: &'static str,
++    status: &'static str,
++    value: String,
++    duration_ms: u128,
++}
++
++impl SbcCheck {
++    const OK: &'static str = "ok";
++    const WARN: &'static str = "warn";
++    const FAIL: &'static str = "fail";
++}
++
++fn run_check<F: FnOnce() -> (String, &'static str)>(name: &'static str, f: F) -> SbcCheck {
++    let start = std::time::Instant::now();
++    let (value, status) = f();
++    SbcCheck {
++        name,
++        status,
++        value,
++        duration_ms: start.elapsed().as_millis(),
++    }
++}
++
++fn ssh_probe(host: &str, cmd: &str) -> Option<String> {
++    let out = std::process::Command::new("ssh")
++        .args([
++            "-o",
++            "ConnectTimeout=5",
++            "-o",
++            "BatchMode=yes",
++            "-o",
++            "StrictHostKeyChecking=accept-new",
++            &format!("root@{}", host),
++            cmd,
++        ])
++        .output()
++        .ok()?;
++    if out.status.success() {
++        Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
++    } else {
++        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
++        if stderr.contains("Permission denied") {
++            Some("(ssh auth failed — set up key auth to root@host)".to_string())
++        } else if stderr.contains("Could not resolve hostname")
++            || stderr.contains("Connection timed out")
++        {
++            Some("(unreachable — check host/IP or network)".to_string())
++        } else if !stderr.is_empty() {
++            Some(stderr)
++        } else {
++            None
++        }
++    }
++}
++
++fn ssh_probe_interactive(host: &str, cmd: &str) -> Option<String> {
++    // For follow-mode commands (tail -f). Inherits stdio so user sees live output.
++    let status = std::process::Command::new("ssh")
++        .args([
++            "-o",
++            "ConnectTimeout=5",
++            "-o",
++            "BatchMode=yes",
++            "-o",
++            "StrictHostKeyChecking=accept-new",
++            &format!("root@{}", host),
++            cmd,
++        ])
++        .status()
++        .ok()?;
++    if status.success() {
++        Some(String::new())
++    } else {
++        None
++    }
++}
++
++async fn run_sbc_doctor(host: &str, json: bool, hint: bool) -> Result<()> {
++    use std::process::Command;
++
++    if !json {
++        println!("whitt sbc doctor — target: {}", host);
++        println!("==========================================");
++    }
++
++    let mut checks: Vec<SbcCheck> = Vec::new();
++    let local_arch = std::env::consts::ARCH;
++    let on_sbc = local_arch == "aarch64" || local_arch == "arm64";
++
++    checks.push(run_check("local_arch", || {
++        (local_arch.to_string(), SbcCheck::OK)
++    }));
++
++    if on_sbc {
++        checks.push(run_check("on_sbc", || ("yes".to_string(), SbcCheck::OK)));
++
++        checks.push(run_check("dev_dri_present", || {
++            let has = std::path::Path::new("/dev/dri").exists();
++            (
++                if has {
++                    "present".to_string()
++                } else {
++                    "absent".to_string()
++                },
++                if has { SbcCheck::WARN } else { SbcCheck::OK },
++            )
++        }));
++
++        checks.push(run_check("mem_total", || {
++            if let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo") {
++                for line in meminfo.lines() {
++                    if line.starts_with("MemTotal:") {
++                        return (
++                            line.trim_start_matches("MemTotal:").trim().to_string(),
++                            SbcCheck::OK,
++                        );
++                    }
++                }
++            }
++            ("(unreadable)".to_string(), SbcCheck::WARN)
++        }));
++
++        checks.push(run_check("nproc", || {
++            match Command::new("nproc").output() {
++                Ok(o) if o.status.success() => (
++                    String::from_utf8_lossy(&o.stdout).trim().to_string(),
++                    SbcCheck::OK,
++                ),
++                _ => ("(nproc failed)".to_string(), SbcCheck::WARN),
++            }
++        }));
++
++        checks.push(run_check("llama_server", || {
++            match Command::new("llama-server").arg("--version").output() {
++                Ok(o) if o.status.success() => (
++                    String::from_utf8_lossy(&o.stdout)
++                        .lines()
++                        .next()
++                        .unwrap_or("(unknown)")
++                        .to_string(),
++                    SbcCheck::OK,
++                ),
++                Ok(_) => ("installed but --version failed".to_string(), SbcCheck::WARN),
++                Err(_) => (
++                    "NOT FOUND (build llama.cpp on the SBC)".to_string(),
++                    SbcCheck::FAIL,
++                ),
++            }
++        }));
++
++        checks.push(run_check("libgomp1", || {
++            match Command::new("sh")
++                .args([
++                    "-c",
++                    "ldconfig -p | grep -q libgomp.so.1 && echo present || echo missing",
++                ])
++                .output()
++            {
++                Ok(o) if o.status.success() => {
++                    let v = String::from_utf8_lossy(&o.stdout).trim().to_string();
++                    let status = if v == "present" {
++                        SbcCheck::OK
++                    } else {
++                        SbcCheck::FAIL
++                    };
++                    (v, status)
++                }
++                _ => ("(ldconfig unavailable)".to_string(), SbcCheck::WARN),
++            }
++        }));
++
++        checks.push(run_check("libstdcxx6", || {
++            match Command::new("sh")
++                .args([
++                    "-c",
++                    "ldconfig -p | grep -q libstdc++.so.6 && echo present || echo missing",
++                ])
++                .output()
++            {
++                Ok(o) if o.status.success() => {
++                    let v = String::from_utf8_lossy(&o.stdout).trim().to_string();
++                    let status = if v == "present" {
++                        SbcCheck::OK
++                    } else {
++                        SbcCheck::FAIL
++                    };
++                    (v, status)
++                }
++                _ => ("(ldconfig unavailable)".to_string(), SbcCheck::WARN),
++            }
++        }));
++
++        checks.push(run_check("config_yml", || {
++            let p = std::path::Path::new("/etc/whitt/config.yml");
++            if !p.exists() {
++                return (
++                    "missing (run whitt sbc install --embed-config)".to_string(),
++                    SbcCheck::WARN,
++                );
++            }
++            match std::fs::read_to_string(p) {
++                Ok(content) if !content.trim().is_empty() => ("present".to_string(), SbcCheck::OK),
++                Ok(_) => ("empty".to_string(), SbcCheck::WARN),
++                Err(e) => (format!("unreadable: {}", e), SbcCheck::WARN),
++            }
++        }));
++    } else {
++        checks.push(run_check("on_sbc", || {
++            ("no (remote probe via ssh)".to_string(), SbcCheck::OK)
++        }));
++        let ssh_checks = [
++            ("remote_arch", "uname -m"),
++            (
++                "remote_dev_dri",
++                "test -d /dev/dri && echo present || echo absent",
++            ),
++            ("remote_mem_total", "grep MemTotal /proc/meminfo"),
++            ("remote_nproc", "nproc"),
++            ("remote_llama_server", "which llama-server || echo MISSING"),
++            ("remote_whitt", "which whitt || echo MISSING"),
++            (
++                "remote_libgomp1",
++                "ldconfig -p 2>/dev/null | grep -q libgomp.so.1 && echo present || echo missing",
++            ),
++            (
++                "remote_libstdcxx6",
++                "ldconfig -p 2>/dev/null | grep -q libstdc++.so.6 && echo present || echo missing",
++            ),
++            (
++                "remote_config_yml",
++                "test -f /etc/whitt/config.yml && echo present || echo missing",
++            ),
++        ];
++        for (name, cmd) in ssh_checks {
++            let result_name: &'static str = Box::leak(name.to_string().into_boxed_str());
++            checks.push(run_check(result_name, || match ssh_probe(host, cmd) {
++                Some(v) => {
++                    let is_missing = v.contains("MISSING") || v.contains("missing");
++                    let is_unreachable = v.contains("unreachable") || v.contains("ssh auth failed");
++                    let status = if is_unreachable {
++                        SbcCheck::FAIL
++                    } else if is_missing {
++                        SbcCheck::WARN
++                    } else {
++                        SbcCheck::OK
++                    };
++                    (v, status)
++                }
++                None => (
++                    "(ssh binary unavailable or command failed)".to_string(),
++                    SbcCheck::FAIL,
++                ),
++            }));
++        }
++    }
++
++    checks.push(run_check("hf_token_set", || {
++        let set =
++            std::env::var("HUGGING_FACE_HUB_TOKEN").is_ok() || std::env::var("HF_TOKEN").is_ok();
++        (
++            if set {
++                "set".to_string()
++            } else {
++                "unset".to_string()
++            },
++            if set { SbcCheck::OK } else { SbcCheck::WARN },
++        )
++    }));
++
++    let server_url = format!("http://{}:8080/props", host);
++    let probe_start = std::time::Instant::now();
++    let probe = reqwest::Client::builder()
++        .timeout(std::time::Duration::from_secs(5))
++        .build()?
++        .get(&server_url)
++        .send()
++        .await;
++    let probe_check = match probe {
++        Ok(resp) if resp.status().is_success() => SbcCheck {
++            name: "llama_server_http",
++            status: SbcCheck::OK,
++            value: format!("REACHABLE HTTP {}", resp.status()),
++            duration_ms: probe_start.elapsed().as_millis(),
++        },
++        Ok(resp) => SbcCheck {
++            name: "llama_server_http",
++            status: SbcCheck::WARN,
++            value: format!("non-2xx HTTP {}", resp.status()),
++            duration_ms: probe_start.elapsed().as_millis(),
++        },
++        Err(e) => SbcCheck {
++            name: "llama_server_http",
++            status: SbcCheck::FAIL,
++            value: format!("NOT REACHABLE: {}", e),
++            duration_ms: probe_start.elapsed().as_millis(),
++        },
++    };
++    checks.push(probe_check);
++
++    if json {
++        let json = serde_json::to_string_pretty(&checks)?;
++        println!("{}", json);
++    } else {
++        for c in &checks {
++            println!("{:<22}: {}", c.name, c.value);
++        }
++    }
++
++    let worst = checks
++        .iter()
++        .map(|c| match c.status {
++            SbcCheck::FAIL => 2,
++            SbcCheck::WARN => 1,
++            _ => 0,
++        })
++        .max()
++        .unwrap_or(0);
++
++    // Q49: actionable hints for warn/fail checks
++    if hint && !json && worst > 0 {
++        println!("\n--- Hints ---");
++        for c in &checks {
++            if c.status == SbcCheck::OK {
++                continue;
++            }
++            let h = doctor_hint(&c.name, c.status);
++            if !h.is_empty() {
++                println!("{}: {}", c.name, h);
++            }
++        }
++    }
++
++    if worst > 0 && !json {
++        eprintln!(
++            "\nDoctor completed with {} (exit code {})",
++            if worst == 2 { "failures" } else { "warnings" },
++            worst
++        );
++    }
++    if worst >= 2 {
++        std::process::exit(2);
++    } else if worst == 1 {
++        std::process::exit(1);
++    }
++    Ok(())
++}
++
++#[allow(non_snake_case)]
++fn doctor_hint(name: &str, status: &str) -> String {
++    let prefix = if status == "fail" { "FIX" } else { "HINT" };
++    match name {
++        "ssh" | "remote_ssh" => format!("{}: ssh-keygen -t ed25519; ssh-copy-id root@<host> — or check ~/.ssh/id_ed25519.pub is in /root/.ssh/authorized_keys on SBC", prefix),
++        "llama_server" | "remote_llama_server" => format!("{}: systemctl status llama-server on SBC; if 'failed' → check /var/log/llama-server.log; if 'inactive' → run: whitt sbc start --host <host>", prefix),
++        "llama_server_http" | "remote_llama_server_http" => format!("{}: curl http://<host>:8080/props from SBC; if connection refused → llama-server not running; if timeout → UFW blocking 8080", prefix),
++        "config_yml" | "remote_config_yml" => format!("{}: cat /etc/whitt/config.yml on SBC; should have model:/context:/hardware: sections. Regenerate: whitt sbc install --script --embed-config", prefix),
++        "libgomp1" | "remote_libgomp1" => format!("{}: apt install libgomp1 on SBC (OpenMP runtime for llama.cpp)", prefix),
++        "libstdcxx6" | "remote_libstdcxx6" => format!("{}: apt install libstdc++6 on SBC (C++ runtime)", prefix),
++        "hf_token_set" | "remote_hf_token_set" => format!("{}: huggingface-cli login on SBC, or set HF_TOKEN in /etc/whitt-neuron/llama.env", prefix),
++        "mem_total" | "remote_mem_total" => format!("{}: free -h on SBC; if <8GB free → switch to smaller model: whitt sbc model switch Qwen3.5-2B-Q8_0", prefix),
++        "nproc" | "remote_nproc" => format!("{}: nproc should be 8 on A733 (2×A76 + 6×A55); check /proc/cpuinfo", prefix),
++        "dev_dri_present" | "remote_dev_dri_present" => format!("{}: /dev/dri absent on A733 (no GPU) — expected for CPU-only mode", prefix),
++        _ => String::new(),
++    }
++}
++
++// SBC helpers — fleet config, model switch, logs, status, updates, completions
++
++#[derive(Debug, serde::Serialize, serde::Deserialize, Default)]
++struct SbcFleet {
++    #[serde(default)]
++    sbcs: std::collections::HashMap<String, SbcEntry>,
++}
++
++#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
++struct SbcEntry {
++    host: String,
++    user: String,
++}
++
++impl SbcFleet {
++    fn path() -> std::path::PathBuf {
++        let mut p = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
++        p.push("whitt");
++        p.push("sbcs.json");
++        p
++    }
++
++    fn load() -> Result<Self> {
++        let path = Self::path();
++        if !path.exists() {
++            return Ok(Self::default());
++        }
++        let content = std::fs::read_to_string(&path)
++            .map_err(|e| anyhow::anyhow!("failed to read {}: {}", path.display(), e))?;
++        if content.trim().is_empty() {
++            return Ok(Self::default());
++        }
++        Ok(serde_json::from_str(&content)
++            .map_err(|e| anyhow::anyhow!("failed to parse {}: {}", path.display(), e))?)
++    }
++
++    fn save(&self) -> Result<()> {
++        let path = Self::path();
++        if let Some(parent) = path.parent() {
++            std::fs::create_dir_all(parent)
++                .map_err(|e| anyhow::anyhow!("failed to create {}: {}", parent.display(), e))?;
++        }
++        let json = serde_json::to_string_pretty(self)
++            .map_err(|e| anyhow::anyhow!("failed to serialize fleet: {}", e))?;
++        std::fs::write(&path, json)
++            .map_err(|e| anyhow::anyhow!("failed to write {}: {}", path.display(), e))?;
++        Ok(())
++    }
++
++    fn add(&mut self, alias: String, host: String, user: String) {
++        self.sbcs.insert(alias, SbcEntry { host, user });
++    }
++
++    fn remove(&mut self, alias: &str) -> bool {
++        self.sbcs.remove(alias).is_some()
++    }
++
++    fn is_empty(&self) -> bool {
++        self.sbcs.is_empty()
++    }
++
++    fn entries(&self) -> Vec<(&String, &SbcEntry)> {
++        let mut v: Vec<_> = self.sbcs.iter().collect();
++        v.sort_by(|a, b| a.0.cmp(b.0));
++        v
++    }
++}
++
++#[allow(clippy::too_many_lines)]
++async fn sbc_model_list(host: &str) -> Result<()> {
++    println!("==> Models on {}:", host);
++    let listing = ssh_probe(
++        host,
++        "ls -1 /models/*.gguf 2>/dev/null | xargs -n1 basename",
++    );
++    match listing {
++        Some(s) if !s.is_empty() && !s.starts_with('(') => println!("{}", s),
++        _ => println!("(none — /models/ empty or unreachable)"),
++    }
++    let active = ssh_probe(host, "grep -E '^MODEL_PATH=' /etc/whitt-neuron/llama.env 2>/dev/null || systemctl show llama-server -p Environment --value 2>/dev/null | grep -oE 'MODEL_PATH=[^ ]+' | head -1");
++    println!(
++        "\nActive: {}",
++        active.unwrap_or_else(|| "(unknown)".to_string())
++    );
++    Ok(())
++}
++
++async fn sbc_model_switch(host: &str, name: &str) -> Result<()> {
++    let candidate = if name.ends_with(".gguf") {
++        name.to_string()
++    } else {
++        format!("{}.gguf", name)
++    };
++    let path = if name.starts_with('/') {
++        name.to_string()
++    } else {
++        format!("/models/{}", candidate)
++    };
++    println!("==> Switching {} to {}", host, path);
++    let check = ssh_probe(
++        host,
++        &format!("test -f {} && echo present || echo absent", path),
++    );
++    if !matches!(check.as_deref(), Some("present")) {
++        anyhow::bail!(
++            "model file {} not present on {} (checked via ssh: {:?})",
++            path,
++            host,
++            check
++        );
++    }
++    let cmd = format!(
++        "sed -i -E 's|^#?\\s*MODEL_PATH=.*|MODEL_PATH={}|' /etc/whitt-neuron/llama.env \
++         && systemctl restart llama-server.service",
++        path
++    );
++    match ssh_probe(host, &cmd) {
++        Some(s) if s.contains("auth failed") || s.contains("unreachable") => {
++            anyhow::bail!("ssh failed: {}", s)
++        }
++        _ => println!(
++            "switched to {} and restarted llama-server.service — check with `whitt sbc status --host {}`",
++            path, host
++        ),
++    }
++    Ok(())
++}
++
++async fn sbc_model_pull(host: &str, repo: &str, file: Option<&str>) -> Result<()> {
++    let target_file = file
++        .map(|s| s.to_string())
++        .unwrap_or_else(|| format!("{}-Q8_0.gguf", repo.rsplit('/').next().unwrap_or(repo)));
++    println!(
++        "==> Pulling {}:{} to {}:/models/{}",
++        repo, target_file, host, target_file
++    );
++    let escaped_repo = repo.replace('\'', "'\\''");
++    let escaped_file = target_file.replace('\'', "'\\''");
++    let cmd = format!(
++        "if ! command -v huggingface-cli >/dev/null 2>&1 && ! command -v hf >/dev/null 2>&1; then \
++            apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3-pip \
++            && pip3 install --break-system-packages huggingface-hub; \
++         fi; \
++         HF_TOOL=$(command -v huggingface-cli || command -v hf); \
++         cd /models && \
++         HF_TOKEN=$(grep -E '^HF_TOKEN=' /etc/whitt-neuron/llama.env 2>/dev/null | cut -d= -f2-) \
++         $HF_TOOL download '{}' '{}' --local-dir /models/ --local-dir-use-symlinks False 2>&1 || \
++         $HF_TOOL download '{}' '{}' --local-dir /models/ 2>&1",
++        escaped_repo, escaped_file, escaped_repo, escaped_file
++    );
++    let result = ssh_probe(host, &cmd);
++    match result {
++        Some(s) if s.contains("auth failed") || s.contains("unreachable") => {
++            anyhow::bail!("ssh failed: {}", s)
++        }
++        Some(s) => println!("{}", s),
++        None => println!("(no output)"),
++    }
++    println!("done — verify with: whitt sbc model list --host {}", host);
++    Ok(())
++}
++
++async fn sbc_service_set(host: &str, start: bool, model: Option<&str>) -> Result<()> {
++    let verb = if start { "start" } else { "stop" };
++    println!("==> systemctl {} llama-server.service on {}", verb, host);
++
++    // Q43: optionally override MODEL_PATH before start
++    if start {
++        if let Some(m) = model {
++            let candidate = if m.ends_with(".gguf") {
++                m.to_string()
++            } else {
++                format!("{}.gguf", m)
++            };
++            let path = if m.starts_with('/') {
++                m.to_string()
++            } else {
++                format!("/models/{}", candidate)
++            };
++            println!("    overriding MODEL_PATH={}", path);
++            let escaped = path.replace('\'', "'\\''");
++            let _ = ssh_probe(
++                host,
++                &format!(
++                    "sed -i -E 's|^#?\\s*MODEL_PATH=.*|MODEL_PATH={}|' /etc/whitt-neuron/llama.env",
++                    escaped
++                ),
++            );
++            // audit log
++            let _ = ssh_probe(host, &format!(
++                "echo '{{\"ts\":\"$(date -Iseconds)\",\"user\":\"${{USER:-unknown}}\",\"action\":\"start\",\"model\":\"{}\",\"success\":true}}' >> /var/log/whitt-neuron/audit.jsonl 2>/dev/null || true",
++                escaped
++            ));
++        }
++    }
++
++    // Q34: pre-flight RAM check on start — refuse if model larger than free RAM
++    if start {
++        if let Some(model_path) = ssh_probe(
++            host,
++            "grep -E '^MODEL_PATH=' /etc/whitt-neuron/llama.env 2>/dev/null | cut -d= -f2-",
++        )
++        .and_then(|s| {
++            let trimmed = s.trim().to_string();
++            if trimmed.is_empty() {
++                None
++            } else {
++                Some(trimmed)
++            }
++        }) {
++            let model_size_kb = ssh_probe(
++                host,
++                &format!(
++                    "stat -c %s '{}' 2>/dev/null || echo 0",
++                    model_path.replace('\'', "'\\''")
++                ),
++            )
++            .and_then(|s| s.trim().parse::<u64>().ok())
++            .unwrap_or(0)
++                / 1024;
++            let free_ram_kb = ssh_probe(host, "awk '/^MemAvailable:/ {print $2}' /proc/meminfo")
++                .and_then(|s| s.trim().parse::<u64>().ok())
++                .unwrap_or(0);
++            if model_size_kb > 0 && free_ram_kb > 0 && model_size_kb > free_ram_kb {
++                // audit log: failure
++                let _ = ssh_probe(host, &format!(
++                    "echo '{{\"ts\":\"$(date -Iseconds)\",\"user\":\"${{USER:-unknown}}\",\"action\":\"start\",\"model\":\"{}\",\"success\":false,\"reason\":\"oom_preflight\"}}' >> /var/log/whitt-neuron/audit.jsonl 2>/dev/null || true",
++                    model_path.replace('\'', "'\\''")
++                ));
++                anyhow::bail!(
++                    "model {} ({}KB) larger than free RAM ({}KB) — refusing to start. Switch to smaller model: whitt sbc model switch Qwen3.5-2B-Q8_0 --host {}",
++                    model_path, model_size_kb, free_ram_kb, host
++                );
++            }
++            println!(
++                "    RAM pre-flight OK: model {}KB, free {}KB",
++                model_size_kb, free_ram_kb
++            );
++        }
++    }
++
++    let result = ssh_probe(host, &format!("systemctl {} llama-server.service", verb));
++    match result {
++        Some(s) if s.contains("auth failed") || s.contains("unreachable") => {
++            anyhow::bail!("ssh failed: {}", s)
++        }
++        _ => println!("llama-server.service {}ed on {}", verb, host),
++    }
++    Ok(())
++}
++
++#[allow(clippy::too_many_lines)]
++async fn sbc_usage(host: &str) -> Result<()> {
++    println!("==> Usage stats from {} (Q41)", host);
++    // llama-server /metrics exposes Prometheus-format metrics
++    let metrics =
++        ssh_probe(host, "curl -sf http://localhost:8080/metrics 2>/dev/null").unwrap_or_default();
++    if metrics.is_empty() {
++        println!("(no metrics — llama-server not running or /metrics unavailable)");
++        return Ok(());
++    }
++    // Extract key metrics
++    let extract = |key: &str| -> String {
++        for line in metrics.lines() {
++            if line.starts_with(key) && !line.starts_with('#') {
++                return line.to_string();
++            }
++        }
++        format!("{}: (not found)", key)
++    };
++    println!("\n--- llama-server metrics ---");
++    println!("{}", extract("llama_training_tokens_seconds"));
++    println!("{}", extract("llama_inference_tokens_seconds_total"));
++    println!("{}", extract("llama_inference_requests_total"));
++    println!("{}", extract("llama_inference_active_requests"));
++    println!("{}", extract("llama_model_load_time_seconds"));
++    // also show active model
++    let active = ssh_probe(
++        host,
++        "grep -E '^MODEL_PATH=' /etc/whitt-neuron/llama.env | cut -d= -f2-",
++    )
++    .unwrap_or_else(|| "(unknown)".to_string());
++    println!("\nActive model: {}", active);
++    Ok(())
++}
++
++async fn sbc_audit(host: &str, follow: bool) -> Result<()> {
++    println!("==> Audit log on {} (Q46)", host);
++    let cmd = if follow {
++        "journalctl -u whitt-neuron-audit -f 2>/dev/null || tail -f /var/log/whitt-neuron/audit.jsonl 2>/dev/null"
++    } else {
++        "tail -n 200 /var/log/whitt-neuron/audit.jsonl 2>/dev/null"
++    };
++    let out = ssh_probe_interactive(host, cmd);
++    match out {
++        Some(s) => print!("{}", s),
++        None => println!("(no audit log on host — first sbc start/stop creates entries)"),
++    }
++    Ok(())
++}
++
++async fn sbc_maintenance(host: &str, on: bool) -> Result<()> {
++    println!(
++        "==> Maintenance mode {} on {} (Q47)",
++        if on { "ON" } else { "OFF" },
++        host
++    );
++    let cmd = if on {
++        "sudo touch /etc/whitt-neuron/maintenance.flag && systemctl reload llama-server 2>/dev/null; echo maintenance_enabled"
++    } else {
++        "sudo rm -f /etc/whitt-neuron/maintenance.flag && systemctl reload llama-server 2>/dev/null; echo maintenance_disabled"
++    };
++    let result = ssh_probe(host, cmd);
++    match result.as_deref() {
++        Some("maintenance_enabled") => println!("maintenance ON — new requests return 503"),
++        Some("maintenance_disabled") => println!("maintenance OFF — normal operation resumed"),
++        Some(s) => println!("(unexpected response): {}", s),
++        None => println!("(no response — SBC unreachable)"),
++    }
++    Ok(())
++}
++
++#[allow(clippy::too_many_lines)]
++async fn sbc_verify(host: &str) -> Result<()> {
++    println!("==> Verifying {} (Q40 acceptance test)", host);
++    let mut pass = 0usize;
++    let mut fail = 0usize;
++    let mut checks: Vec<(String, bool, String)> = Vec::new();
++
++    // 1. ssh reachability
++    let ssh_ok = ssh_probe(host, "echo ok").as_deref() == Some("ok");
++    checks.push(("ssh reachability".to_string(), ssh_ok, String::new()));
++    if !ssh_ok {
++        println!("FAIL: ssh reachability — aborting remaining checks");
++        std::process::exit(1);
++    }
++
++    // 2. /props responds
++    let props_ok = ssh_probe(
++        host,
++        "curl -sf http://localhost:8080/props >/dev/null && echo yes || echo no",
++    )
++    .as_deref()
++        == Some("yes");
++    checks.push(("/props HTTP endpoint".to_string(), props_ok, String::new()));
++
++    // 3. Ministral chat returns >=1 token
++    let ministral_chat = ssh_probe(host, r#"curl -sf -X POST http://localhost:8080/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"ministral","messages":[{"role":"user","content":"hello"}],"max_tokens":5}' | head -c 200"#).unwrap_or_default();
++    let ministral_ok = ministral_chat.contains("\"content\"") && !ministral_chat.contains("error");
++    checks.push((
++        "Ministral-3-3B chat ≥1 token".to_string(),
++        ministral_ok,
++        ministral_chat.chars().take(100).collect(),
++    ));
++
++    // 4. Qwen chat returns >=1 token (after switching model)
++    let _ = ssh_probe(host, "sed -i -E 's|^#?\\s*MODEL_PATH=.*|MODEL_PATH=/models/Qwen3.5-2B-Q8_0.gguf|' /etc/whitt-neuron/llama.env && systemctl restart llama-server.service && sleep 5");
++    let qwen_chat = ssh_probe(host, r#"curl -sf -X POST http://localhost:8080/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"qwen","messages":[{"role":"user","content":"hello"}],"max_tokens":5}' | head -c 200"#).unwrap_or_default();
++    let qwen_ok = qwen_chat.contains("\"content\"") && !qwen_chat.contains("error");
++    checks.push((
++        "Qwen3.5-2B chat ≥1 token".to_string(),
++        qwen_ok,
++        qwen_chat.chars().take(100).collect(),
++    ));
++
++    // 5. UFW blocks random port 9999
++    let ufw_block = ssh_probe(
++        host,
++        "ufw status | grep -q '9999' && echo BLOCKED || echo ALLOWED",
++    )
++    .map(|s| s.contains("ALLOWED"))
++    .unwrap_or(true);
++    let ufw_ok = !ufw_block;
++    checks.push(("UFW denies port 9999".to_string(), ufw_ok, String::new()));
++
++    // 6. fleet entry exists (host-side)
++    let fleet = SbcFleet::load().unwrap_or_default();
++    let fleet_ok = fleet.entries().iter().any(|(_, e)| e.host == host);
++    checks.push((format!("fleet entry for {}", host), fleet_ok, String::new()));
++
++    // Report
++    println!("\n--- Results ---");
++    for (name, ok, detail) in &checks {
++        let mark = if *ok { "PASS" } else { "FAIL" };
++        println!("{}: {}", mark, name);
++        if !ok && !detail.is_empty() {
++            println!("       detail: {}", detail);
++        }
++        if *ok {
++            pass += 1;
++        } else {
++            fail += 1;
++        }
++    }
++    println!("\n{}/{} passed ({} failed)", pass, pass + fail, fail);
++    if fail > 0 {
++        std::process::exit(1);
++    }
++    Ok(())
++}
++
++async fn sbc_bench(host: &str, extra: Option<&str>) -> Result<()> {
++    println!("==> Running llama-bench on {} (Q39 perf tracking)", host);
++    let mut cmd = String::from("/usr/local/bin/llama-bench -m $(grep -E '^MODEL_PATH=' /etc/whitt-neuron/llama.env | cut -d= -f2-) -t 8");
++    if let Some(e) = extra {
++        cmd.push(' ');
++        cmd.push_str(e);
++    }
++    let output = ssh_probe(host, &cmd).unwrap_or_else(|| "(no output)".to_string());
++    println!("{}", output);
++    println!("\nDone. Track regressions by saving this output and comparing over time.");
++    Ok(())
++}
++
++async fn sbc_backup(host: &str, out_dir: &str) -> Result<()> {
++    let date = std::process::Command::new("date")
++        .arg("+%Y%m%d")
++        .output()
++        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
++        .map_err(|e| anyhow::anyhow!("date failed: {}", e))?;
++    let safe_host = host.replace('.', "_");
++    let filename = format!("whitt-{}-{}.img.gz", safe_host, date);
++    let path = format!("{}/{}", out_dir.trim_end_matches('/'), filename);
++    println!("==> Backing up {} to {} (Q36 — dd + gzip)", host, path);
++
++    // Q48: cleanup — keep last 3 backups for this host, delete older
++    let pattern = format!("whitt-{}-*.img.gz", safe_host);
++    let cleanup = std::process::Command::new("bash")
++        .arg("-c")
++        .arg(format!(
++            "cd '{}' && ls -1t {} 2>/dev/null | tail -n +4 | xargs -r rm -v",
++            out_dir, pattern
++        ))
++        .output();
++    if let Ok(out) = cleanup {
++        let removed = String::from_utf8_lossy(&out.stdout);
++        if !removed.is_empty() {
++            println!(
++                "    (Q48) removed old backups: {}",
++                removed.replace('\n', ", ")
++            );
++        }
++    }
++
++    // Stream dd output over ssh, pipe through local gzip
++    let status = std::process::Command::new("ssh")
++        .args([
++            "-o",
++            "ConnectTimeout=10",
++            "-o",
++            "BatchMode=yes",
++            "-o",
++            "StrictHostKeyChecking=accept-new",
++            &format!("root@{}", host),
++            "dd if=/dev/mmcblk0 bs=4M status=none",
++        ])
++        .stdout(std::process::Stdio::piped())
++        .spawn()
++        .map_err(|e| anyhow::anyhow!("ssh spawn failed: {}", e))?;
++
++    let gzip = std::process::Command::new("gzip")
++        .arg("-9")
++        .arg("-c")
++        .stdin(std::process::Stdio::from(status.stdout.unwrap()))
++        .stdout(std::process::Stdio::from(
++            std::fs::File::create(&path)
++                .map_err(|e| anyhow::anyhow!("create {} failed: {}", path, e))?,
++        ))
++        .status()
++        .map_err(|e| anyhow::anyhow!("gzip failed: {}", e))?;
++
++    if !gzip.success() {
++        anyhow::bail!("gzip/dd pipeline failed (exit {:?})", gzip.code());
++    }
++    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
++    println!("Done: {} ({} bytes, ~{}MB)", path, size, size / 1024 / 1024);
++    println!(
++        "Restorable via: gunzip -c {} | sudo dd of=/dev/sdX bs=4M",
++        path
++    );
++    Ok(())
++}
++
++async fn sbc_discover(subnet: Option<&str>, port: u16) -> Result<()> {
++    let cidr = match subnet {
++        Some(s) => s.to_string(),
++        None => {
++            let out = std::process::Command::new("ip")
++                .args(["-4", "-o", "route", "show", "default"])
++                .output()
++                .map_err(|e| anyhow::anyhow!("ip route failed: {}", e))?;
++            let stdout = String::from_utf8_lossy(&out.stdout);
++            let dev = stdout
++                .split_whitespace()
++                .find(|t| t.starts_with("dev"))
++                .and_then(|_| stdout.split("dev ").nth(1))
++                .and_then(|s| s.split_whitespace().next())
++                .ok_or_else(|| anyhow::anyhow!("no default route — pass --subnet"))?;
++            let addr_out = std::process::Command::new("ip")
++                .args(["-4", "-o", "addr", "show", "dev", dev])
++                .output()
++                .map_err(|e| anyhow::anyhow!("ip addr failed: {}", e))?;
++            let addr_stdout = String::from_utf8_lossy(&addr_out.stdout);
++            let ip_prefix = addr_stdout
++                .split_whitespace()
++                .find(|t| t.contains('/'))
++                .ok_or_else(|| anyhow::anyhow!("no IPv4 address on {}", dev))?;
++            let base = ip_prefix.split('.').take(3).collect::<Vec<_>>().join(".");
++            format!("{}.0/24", base)
++        }
++    };
++
++    let base = cidr
++        .split('/')
++        .next()
++        .and_then(|s| s.rsplit_once('.'))
++        .map(|(b, _)| b.to_string())
++        .ok_or_else(|| anyhow::anyhow!("invalid CIDR: {}", cidr))?;
++
++    println!("==> Scanning {}:{} (this takes ~5s)", cidr, port);
++
++    let mut tasks = Vec::new();
++    for i in 1..255u8 {
++        let ip = format!("{}.{}", base, i);
++        tasks.push(tokio::spawn(async move {
++            let client = reqwest::Client::builder()
++                .timeout(std::time::Duration::from_millis(500))
++                .build()
++                .ok()?;
++            let url = format!("http://{}:{}/props", ip, port);
++            let resp = client.get(&url).send().await.ok()?;
++            if !resp.status().is_success() {
++                return None;
++            }
++            let body = resp.text().await.ok()?;
++            if body.contains("llama") || body.contains("total_slots") {
++                Some((ip, body))
++            } else {
++                None
++            }
++        }));
++    }
++
++    let mut found: Vec<(String, String)> = Vec::new();
++    for t in tasks {
++        if let Ok(Some((ip, body))) = t.await {
++            let tag = body
++                .lines()
++                .find(|l| l.contains("llama") || l.contains("build"))
++                .map(|l| l.trim().to_string())
++                .unwrap_or_else(|| "(llama-server)".to_string());
++            found.push((ip, tag));
++        }
++    }
++    found.sort();
++
++    if found.is_empty() {
++        println!("(no llama-server instances found on {}:{})", cidr, port);
++    } else {
++        println!("{:<16} {}", "IP", "IDENTIFY");
++        for (ip, tag) in &found {
++            println!("{:<16} {}", ip, tag);
++        }
++    }
++    Ok(())
++}
++
++async fn sbc_logs(host: &str, follow: bool, since: Option<&str>) -> Result<()> {
++    let mut args = vec![
++        "-o".to_string(),
++        "ConnectTimeout=5".to_string(),
++        "-o".to_string(),
++        "BatchMode=yes".to_string(),
++        "-o".to_string(),
++        "StrictHostKeyChecking=accept-new".to_string(),
++        format!("root@{}", host),
++    ];
++    let mut cmd = String::from("journalctl -u llama-server");
++    if follow {
++        cmd.push_str(" -f --no-pager");
++    } else {
++        cmd.push_str(" --no-pager -n 200");
++    }
++    if let Some(s) = since {
++        cmd.push_str(&format!(" --since {}", s));
++    }
++    args.push(cmd);
++
++    let mut child = std::process::Command::new("ssh")
++        .args(&args)
++        .spawn()
++        .map_err(|e| anyhow::anyhow!("ssh spawn failed: {}", e))?;
++    let status = child
++        .wait()
++        .map_err(|e| anyhow::anyhow!("ssh wait failed: {}", e))?;
++    if !status.success() && !follow {
++        anyhow::bail!("ssh journalctl exited with status {:?}", status.code());
++    }
++    Ok(())
++}
++
++async fn sbc_status(host: &str, wait: bool) -> Result<()> {
++    loop {
++        let firstboot_done = ssh_probe(
++            host,
++            "test -f /var/lib/whitt-neuron/firstboot.done && echo yes || echo no",
++        );
++        let service_state = ssh_probe(host, "systemctl is-active llama-server.service 2>/dev/null");
++        let service_enabled = ssh_probe(
++            host,
++            "systemctl is-enabled llama-server.service 2>/dev/null",
++        );
++
++        let state = {
++            let fb = firstboot_done.as_deref();
++            let ss = service_state.as_deref();
++            let unreachable = fb.map_or(true, |s| {
++                s.contains("unreachable") || s.contains("auth failed")
++            }) || ss.map_or(true, |s| {
++                s.contains("unreachable") || s.contains("auth failed")
++            });
++            if unreachable {
++                "offline".to_string()
++            } else if fb == Some("no") {
++                "building".to_string()
++            } else if fb == Some("yes") {
++                match ss {
++                    Some("active") => "ready".to_string(),
++                    Some("failed") => "failed".to_string(),
++                    Some(other) => format!("service:{}", other),
++                    None => "unknown".to_string(),
++                }
++            } else {
++                "unknown".to_string()
++            }
++        };
++
++        println!(
++            "{:<20} firstboot={} service={:<10} enabled={:<10}",
++            state,
++            firstboot_done.as_deref().unwrap_or("?"),
++            service_state.as_deref().unwrap_or("?"),
++            service_enabled.as_deref().unwrap_or("?")
++        );
++
++        // Q31: progress % + ETA when building (parse cmake build progress from firstboot.log)
++        if wait && state == "building" {
++            if let Some(progress) = ssh_probe(host, "tail -n 200 /var/log/whitt-neuron-firstboot.log 2>/dev/null | grep -oE '\\[([0-9]+)%\\]' | tail -1 | tr -d '[]%'") {
++                if let Ok(pct) = progress.trim().parse::<u32>() {
++                    let elapsed_min = ssh_probe(host, "echo $(( ($(date +%s) - $(stat -c %Y /var/log/whitt-neuron-firstboot.log 2>/dev/null || echo $(date +%s))) / 60 ))")
++                        .and_then(|s| s.trim().parse::<u32>().ok())
++                        .unwrap_or(0);
++                    let eta_min = if pct > 0 && pct < 100 {
++                        (elapsed_min as u64 * (100 - pct as u64) / pct as u64).max(1)
++                    } else {
++                        0
++                    };
++                    println!("    build progress: {}% — elapsed {}m, ETA ~{}m", pct, elapsed_min, eta_min);
++                }
++            }
++        }
++
++        if !wait || state == "ready" || state == "failed" || state == "offline" {
++            // Q44: auto-check for newer whitt release on GitHub
++            if state == "ready" {
++                if let Ok(latest) = std::fs::read_to_string("/tmp/whitt-latest-release.txt") {
++                    let current = env!("CARGO_PKG_VERSION");
++                    let latest = latest.trim();
++                    if !latest.is_empty() && latest != current {
++                        println!("\n⚠️  whitt update available: {} → {} (run: whitt sbc update --host {})", current, latest, host);
++                    }
++                }
++            }
++            return Ok(());
++        }
++        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
++    }
++}
++
++async fn sbc_update(host: &str, prerelease: bool, version: Option<&str>) -> Result<()> {
++    let gh_args = match version {
++        Some(v) => format!("--pattern whitt-aarch64-{}*", v),
++        None => {
++            if prerelease {
++                "--pattern whitt-aarch64-*".to_string()
++            } else {
++                "--exclude-drafts --exclude-pre-releases --pattern whitt-aarch64-*".to_string()
++            }
++        }
++    };
++
++    println!("==> Downloading whitt aarch64 artifact via gh release download");
++    println!(
++        "    gh release download {} {}",
++        version.unwrap_or("(latest)"),
++        gh_args
++    );
++
++    let status = std::process::Command::new("gh")
++        .args([
++            "release",
++            "download",
++            version.unwrap_or(""),
++            &gh_args,
++            "--output",
++            "/tmp/whitt-aarch64-update",
++        ])
++        .status()
++        .map_err(|e| anyhow::anyhow!("gh spawn failed: {}", e))?;
++    if !status.success() {
++        anyhow::bail!("gh release download exited {:?}", status.code());
++    }
++
++    println!(
++        "==> scp'ing new binary to {}:/usr/local/bin/whitt.new",
++        host
++    );
++    let scp_status = std::process::Command::new("scp")
++        .args([
++            "-o",
++            "ConnectTimeout=10",
++            "-o",
++            "BatchMode=yes",
++            "-o",
++            "StrictHostKeyChecking=accept-new",
++            "/tmp/whitt-aarch64-update",
++            &format!("root@{}:/usr/local/bin/whitt.new", host),
++        ])
++        .status()
++        .map_err(|e| anyhow::anyhow!("scp spawn failed: {}", e))?;
++    if !scp_status.success() {
++        anyhow::bail!("scp exited {:?}", scp_status.code());
++    }
++
++    println!("==> Swapping binary + restarting services");
++    let swap = ssh_probe(
++        host,
++        "mv /usr/local/bin/whitt.new /usr/local/bin/whitt \
++         && chmod +x /usr/local/bin/whitt \
++         && systemctl restart llama-server.service 2>/dev/null || true",
++    );
++    if let Some(s) = swap {
++        if s.contains("auth failed") || s.contains("unreachable") {
++            anyhow::bail!("ssh failed: {}", s);
++        }
++    }
++    println!("updated whitt on {}", host);
++    Ok(())
++}
++
++async fn sbc_llama_update(host: &str, tag: &str) -> Result<()> {
++    println!("==> Updating llama.cpp on {} to tag {}", host, tag);
++    let cmd = format!(
++        "sed -i -E 's|^LLAMA_TAG=.*|LLAMA_TAG={}|' /opt/whitt-neuron/build-llamacpp.sh \
++         && rm -f /usr/local/bin/llama-server \
++         && /opt/whitt-neuron/build-llamacpp.sh \
++         && systemctl restart llama-server.service",
++        tag
++    );
++    let result = ssh_probe(host, &cmd);
++    match result {
++        Some(s) if s.contains("auth failed") || s.contains("unreachable") => {
++            anyhow::bail!("ssh failed: {}", s)
++        }
++        _ => println!("llama.cpp updated to {} on {}", tag, host),
++    }
++    Ok(())
++}
++
++async fn sbc_factory_reset(host: &str, yes: bool) -> Result<()> {
++    if !yes {
++        println!(
++            "This will erase /etc/whitt-neuron/* + firstboot.done on {} and REBOOT the SBC.",
++            host
++        );
++        print!("Type 'yes' to continue: ");
++        use std::io::Write;
++        std::io::stdout().flush().ok();
++        let mut input = String::new();
++        std::io::stdin().read_line(&mut input)?;
++        if input.trim() != "yes" {
++            println!("aborted");
++            return Ok(());
++        }
++    }
++    let cmd = "rm -rf /etc/whitt-neuron/* /var/lib/whitt-neuron/firstboot.done \
++               && systemctl reboot";
++    let result = ssh_probe(host, cmd);
++    match result {
++        Some(s) if s.contains("auth failed") || s.contains("unreachable") => {
++            anyhow::bail!("ssh failed: {}", s)
++        }
++        _ => println!(
++            "factory reset complete — SBC {} rebooting. First-boot will re-run.",
++            host
++        ),
++    }
++    Ok(())
++}
++
++fn generate_completions(shell: CompletionShell) -> Result<()> {
++    #[cfg(feature = "cli-completions")]
++    {
++        use clap::CommandFactory;
++        use clap_complete::Shell;
++        let target = match shell {
++            CompletionShell::Bash => Shell::Bash,
++            CompletionShell::Zsh => Shell::Zsh,
++            CompletionShell::Fish => Shell::Fish,
++            CompletionShell::Powershell => Shell::PowerShell,
++            CompletionShell::Elvish => Shell::Elvish,
++        };
++        let mut cmd = Cli::command();
++        clap_complete::generate(target, &mut cmd, "whitt", &mut std::io::stdout());
++        Ok(())
++    }
++    #[cfg(not(feature = "cli-completions"))]
++    {
++        let _ = shell;
++        anyhow::bail!(
++            "completions require building with --features cli-completions (cargo install --path . --features cli-completions)"
++        )
++    }
++}
+diff --git a/src/config/provider.rs b/src/config/provider.rs
+index 32c93e8c..1e2b6490 100644
+--- a/src/config/provider.rs
++++ b/src/config/provider.rs
+@@ -57,17 +57,21 @@ pub struct ProvidersConfig {
+ }
+ 
+ /// Provider configuration type alias for API compatibility.
+-/// All providers currently use the same structure (LlamaCppVulkanProvider).
+-pub type ProviderConfig = LlamaCppVulkanProvider;
++/// All providers currently use the same structure (LlamaCppProvider).
++pub type ProviderConfig = LlamaCppProvider;
+ 
+ // ---------------------------------------------------------------------------
+-// Llama.cpp with Vulkan provider
++// Llama.cpp provider (HTTP to llama-server; CPU, Vulkan, CUDA, or Metal)
+ // ---------------------------------------------------------------------------
+ 
+-/// Complete configuration for llama.cpp server with Vulkan backend.
++/// Complete configuration for a llama.cpp server.
++///
++/// The engine talks to `llama-server` over HTTP; backend selection
++/// (CPU vs Vulkan/CUDA/Metal) is controlled by llama-server flags, not by
++/// this struct.
+ #[derive(Debug, Clone, Serialize, Deserialize, garde::Validate)]
+ #[serde(deny_unknown_fields)]
+-pub struct LlamaCppVulkanProvider {
++pub struct LlamaCppProvider {
+     /// Connection settings (host, port, timeouts).
+     #[serde(default)]
+     #[garde(skip)]
+@@ -84,6 +88,17 @@ pub struct LlamaCppVulkanProvider {
+     pub requests: Option<RequestsConfig>,
+ }
+ 
++/// Backward-compatible alias. Will be removed in a future release.
++///
++/// The original name implied a Vulkan-only provider, but the engine is
++/// backend-agnostic (it talks HTTP to llama-server regardless of
++/// CPU/Vulkan/CUDA/Metal). Use [`LlamaCppProvider`].
++#[deprecated(
++    since = "0.2.0",
++    note = "Use LlamaCppProvider instead. Works with CPU and GPU llama.cpp servers."
++)]
++pub type LlamaCppVulkanProvider = LlamaCppProvider;
++
+ /// Llama.cpp connection configuration.
+ #[derive(Debug, Clone, Serialize, Deserialize, garde::Validate)]
+ #[serde(deny_unknown_fields)]
