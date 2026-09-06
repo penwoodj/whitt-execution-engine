@@ -246,12 +246,12 @@ impl WorkflowFile {
         if let Some(ref providers) = self.providers {
             for provider_name in providers.providers.keys() {
                 match provider_name.as_str() {
-                    "llama_cpp_with_vulkan" => {}
+                    "llama_cpp_with_vulkan" | "lmstudio" => {}
                     other => {
                         return Err(Error::Validation {
                             message: format!(
                                 "unsupported provider '{}'. \
-                                 Current POC scope only supports 'llama_cpp_with_vulkan'. \
+                                 Supported providers: 'llama_cpp_with_vulkan', 'lmstudio'. \
                                  Per schema line 28: lmstudio | ollama | llama_cpp_with_vulkan",
                                 other
                             ),
@@ -264,12 +264,12 @@ impl WorkflowFile {
             for (model_name, model_spec) in &models.models {
                 let host_type = &model_spec.host.r#type;
                 match host_type.as_str() {
-                    "llama_cpp_with_vulkan" => {}
+                    "llama_cpp_with_vulkan" | "lmstudio" => {}
                     other => {
                         return Err(Error::Validation {
                             message: format!(
                                 "model '{}' has unsupported host.type '{}'. \
-                                 Current POC scope only supports 'llama_cpp_with_vulkan'. \
+                                 Supported host types: 'llama_cpp_with_vulkan', 'lmstudio'. \
                                  Per schema line 71: lmstudio | ollama | llama_cpp_with_vulkan",
                                 model_name, other
                             ),

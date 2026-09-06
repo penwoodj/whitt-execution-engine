@@ -18,6 +18,11 @@ import re
 import sys
 from pathlib import Path
 
+# Backend/repo portability (see scripts/meta-v6/env.sh)
+REPO_ROOT = os.environ.get('WHITT_REPO', '/home/jon/code/whitt-execution-engine')
+BACKEND = os.environ.get('WHITT_BACKEND', 'llamacpp')
+LMSTUDIO_MODEL = os.environ.get('WHITT_LMSTUDIO_MODEL', 'qwen/qwen3.5-9b')
+
 
 SKELETON = '''workflow_id: "{workflow_id}"
 name: "{name}"
@@ -52,6 +57,12 @@ agentic_workflow:
 
   steps:
 '''
+
+if BACKEND == 'lmstudio':
+    SKELETON = (SKELETON
+                .replace('llama_cpp_with_vulkan', 'lmstudio')
+                .replace('port: 8080', 'port: 1234')
+                .replace('Qwen3-5-9B-Q4_K_M', LMSTUDIO_MODEL))
 
 
 def extract_step_blocks(md_text: str) -> list[str]:
@@ -343,7 +354,7 @@ def make_bootstrap_step(prompt_path: str, run_dir: str) -> str:
           - shell:
               command: "cat {prompt_path}"
               args: []
-              working_dir: "/home/jon/code/whitt-execution-engine"
+              working_dir: "{REPO_ROOT}"
               fail_on_error: true
         after_step_succeeds:
           - log:
@@ -426,7 +437,7 @@ def make_synthesis_step(run_dir: str, deliverable_filename: str, prior_step_ids:
           - shell:
               command: "cat {run_dir}/input/prompt.txt"
               args: []
-              working_dir: "/home/jon/code/whitt-execution-engine"
+              working_dir: "{REPO_ROOT}"
               fail_on_error: true
         after_step_succeeds:
           - save_to:
@@ -490,6 +501,22 @@ def main() -> int:
     has_synthesis = False
 
     blocks_clean = [strip_save_to_templates(b) for b in blocks]
+
+    # Dedup step ids: SW4 sometimes emits two blocks with the same step name
+    # (e.g. an original and a refined variant). Python yaml silently keeps the
+    # last one, but the engine's strict parser rejects duplicate mapping keys.
+    # Policy: keep the LAST occurrence (usually the refined variant) — later
+    # depends_on/template references by name still resolve.
+    seen_ids: dict[str, int] = {}
+    for i, b in enumerate(blocks_clean):
+        m = re.match(r'^(\S+?):', b.strip())
+        if m:
+            seen_ids[m.group(1)] = i  # last index wins
+    deduped = [b for i, b in enumerate(blocks_clean)
+               if not (m := re.match(r'^(\S+?):', b.strip())) or seen_ids.get(m.group(1)) == i]
+    if len(deduped) != len(blocks_clean):
+        print(f"[build-workflow] dropped {len(blocks_clean) - len(deduped)} duplicate step block(s)")
+    blocks_clean = deduped
 
     # Dedup save_to paths: SW4 sometimes shares paths across steps, causing data loss.
     blocks_clean = dedup_save_to_paths(blocks_clean)
@@ -580,7 +607,7 @@ def main() -> int:
     # Inject working_dir into all shell hooks so relative paths resolve from repo root.
     # Without this, sed/cat commands on relative paths (e.g. "src/benchmark/runner.rs")
     # fail because CWD is the exec directory, not the repo root.
-    REPO_ROOT = '/home/jon/code/whitt-execution-engine'
+    # REPO_ROOT comes from WHITT_REPO env (module level).
     for i, block in enumerate(blocks_clean):
         if 'shell:' not in block:
             continue

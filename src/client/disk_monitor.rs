@@ -17,10 +17,15 @@ pub struct DiskSpaceInfo {
     pub path: PathBuf,
 }
 
-/// Check disk space for a given path using `df -B1`.
+/// Check disk space for a given path using `df -k -P`.
+///
+/// `-k` (1024-byte blocks) and `-P` (POSIX output, single data line) are
+/// portable across Linux and macOS/BSD, unlike GNU's `df -B1`. The reported
+/// block counts are scaled to bytes below.
 pub fn check_disk_space(path: &Path) -> Result<DiskSpaceInfo> {
     let output = std::process::Command::new("df")
-        .arg("-B1")
+        .arg("-k")
+        .arg("-P")
         .arg(path)
         .output()
         .context("Failed to execute df command")?;
@@ -47,13 +52,16 @@ pub fn check_disk_space(path: &Path) -> Result<DiskSpaceInfo> {
         anyhow::bail!("Unexpected df format: {}", data_line);
     }
 
+    // `df -k` reports sizes in 1024-byte blocks; scale to bytes.
     let total_bytes: u64 = parts[1]
-        .parse()
-        .context("Failed to parse total bytes")?;
+        .parse::<u64>()
+        .context("Failed to parse total blocks")?
+        * 1024;
 
     let available_bytes: u64 = parts[3]
-        .parse()
-        .context("Failed to parse available bytes")?;
+        .parse::<u64>()
+        .context("Failed to parse available blocks")?
+        * 1024;
 
     Ok(DiskSpaceInfo {
         total_bytes,

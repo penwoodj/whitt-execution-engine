@@ -2,7 +2,7 @@
 # META-v6 validator: checks final generated-workflow.yml exists and is valid YAML
 # Output: preview of generated workflow + line count + YAML validity check
 set -euo pipefail
-REPO="/home/jon/code/whitt-execution-engine"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/env.sh"
 META_RUN_ID="${1:-$(cat "${REPO}/.current-meta-run")}"
 WF="${REPO}/docs/benchmarks/outputs/meta-workflow/${META_RUN_ID}/meta/generated-workflow.yml"
 

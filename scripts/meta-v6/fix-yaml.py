@@ -808,6 +808,69 @@ def fix_prose_shell_output(content: str) -> str:
     )
 
 
+def fix_duplicate_step_keys(content: str) -> str:
+    """Drop earlier occurrences of duplicate step keys under `steps:`.
+
+    Python yaml keeps the last duplicate silently; the engine's strict parser
+    rejects the file. Keep the LAST block (usually the refined variant).
+    Step blocks start at 4-space indent: `    step_xxx:`.
+    """
+    lines = content.split('\n')
+    # locate step block boundaries
+    starts = []  # (line_idx, step_name)
+    for i, line in enumerate(lines):
+        m = re.match(r'^    (step_[A-Za-z0-9_]+):\s*$', line)
+        if m:
+            starts.append((i, m.group(1)))
+    names = [n for _, n in starts]
+    dups = {n for n in names if names.count(n) > 1}
+    if not dups:
+        return content
+    # block extent = from its start line to the next start line (or EOF)
+    drop_ranges = []
+    last_idx = {}
+    for pos, (i, n) in enumerate(starts):
+        last_idx[n] = pos
+    for pos, (i, n) in enumerate(starts):
+        if n in dups and last_idx[n] != pos:
+            end = starts[pos + 1][0] if pos + 1 < len(starts) else len(lines)
+            drop_ranges.append((i, end))
+    keep = []
+    j = 0
+    for i, line in enumerate(lines):
+        while j < len(drop_ranges) and i >= drop_ranges[j][1]:
+            j += 1
+        if j < len(drop_ranges) and drop_ranges[j][0] <= i < drop_ranges[j][1]:
+            continue
+        keep.append(line)
+    return '\n'.join(keep)
+
+
+def fix_unescaped_quotes_in_command(content: str) -> str:
+    """Repair `command: "<shell>"` lines that are not valid YAML.
+
+    Models write shell text as if double quotes had no YAML semantics —
+    producing unescaped inner quotes (json.dumps([{"k": "v"}])) or invalid
+    escape sequences (grep 'pub fn\\|pub async fn'). If the line fails a YAML
+    parse, re-emit the raw body as a single-quoted scalar (single-quoted YAML
+    performs no escape processing; only ' needs doubling).
+    """
+    import yaml as _yaml
+
+    lines = content.split('\n')
+    fixed = []
+    for line in lines:
+        m = re.match(r'^(\s*command:\s*)"(.*)"\s*$', line)
+        if m:
+            try:
+                _yaml.safe_load(f'k: "{m.group(2)}"')
+            except _yaml.YAMLError:
+                body = m.group(2).replace("'", "''")
+                line = f"{m.group(1)}'{body}'"
+        fixed.append(line)
+    return '\n'.join(fixed)
+
+
 def main():
     if len(sys.argv) != 2:
         print("Usage: fix-yaml.py <workflow.yml>", file=sys.stderr)
@@ -823,6 +886,8 @@ def main():
 
     content = strip_markdown_fences(content)
     content = fix_missing_newline_after_quote(content)
+    content = fix_duplicate_step_keys(content)
+    content = fix_unescaped_quotes_in_command(content)
     content = fix_gwt_unquoted_equals(content)
     content = fix_inline_save_to(content)
     content = fix_save_to_map_to_list(content)

@@ -1,0 +1,3 @@
+# Task: Markdown Table-of-Contents Generator
+
+Write a Python tool named mdtoc.py that reads a markdown file (path as first CLI argument) and prints a table of contents to stdout built from its `##` and `###` headings (ignore `#` and deeper than `###`). For each `##` heading print `- [Title](#anchor)`; for each `###` heading print `  - [Title](#anchor)` (two-space indent). The anchor is the GitHub style: title lowercased, spaces replaced with hyphens, and characters other than letters, digits and hyphens removed. Preserve document order. Use only the Python standard library. A missing file must print a clear error to stderr and exit nonzero without a traceback.

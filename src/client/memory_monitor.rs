@@ -35,8 +35,27 @@ pub struct MemoryCheckResult {
     pub error_message: Option<String>,
 }
 
-/// Read system memory information from `/proc/meminfo` (Linux only).
+/// Read system memory information.
+///
+/// Uses `/proc/meminfo` on Linux and `sysctl` + `vm_stat` on macOS.
 pub fn check_system_memory() -> Result<MemoryInfo> {
+    #[cfg(target_os = "linux")]
+    {
+        check_system_memory_linux()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        check_system_memory_macos()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        anyhow::bail!("check_system_memory is not supported on this platform")
+    }
+}
+
+/// Read system memory information from `/proc/meminfo` (Linux).
+#[cfg(target_os = "linux")]
+fn check_system_memory_linux() -> Result<MemoryInfo> {
     let content = std::fs::read_to_string("/proc/meminfo")
         .context("Failed to read /proc/meminfo")?;
 
@@ -62,7 +81,74 @@ pub fn check_system_memory() -> Result<MemoryInfo> {
     })
 }
 
+/// Read system memory information via `sysctl` (total) and `vm_stat`
+/// (available) on macOS. "Available" approximates Linux's `MemAvailable` as
+/// the sum of free, inactive, and speculative pages — memory the kernel can
+/// reclaim without swapping.
+#[cfg(target_os = "macos")]
+fn check_system_memory_macos() -> Result<MemoryInfo> {
+    let total_bytes = sysctl_u64("hw.memsize")?;
+    let page_size = sysctl_u64("hw.pagesize")?;
+
+    let output = std::process::Command::new("vm_stat")
+        .output()
+        .context("Failed to execute vm_stat")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("vm_stat command failed: {}", stderr);
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    let free = parse_vm_stat_pages(&stdout, "Pages free:").unwrap_or(0);
+    let inactive = parse_vm_stat_pages(&stdout, "Pages inactive:").unwrap_or(0);
+    let speculative = parse_vm_stat_pages(&stdout, "Pages speculative:").unwrap_or(0);
+
+    let available_bytes = free
+        .saturating_add(inactive)
+        .saturating_add(speculative)
+        .saturating_mul(page_size);
+    let used_bytes = total_bytes.saturating_sub(available_bytes);
+
+    Ok(MemoryInfo {
+        total_bytes,
+        available_bytes,
+        used_bytes,
+    })
+}
+
+/// Read a single integer value from `sysctl -n <key>` (macOS).
+#[cfg(target_os = "macos")]
+fn sysctl_u64(key: &str) -> Result<u64> {
+    let output = std::process::Command::new("sysctl")
+        .arg("-n")
+        .arg(key)
+        .output()
+        .with_context(|| format!("Failed to execute sysctl -n {}", key))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("sysctl -n {} failed: {}", key, stderr);
+    }
+    let value = String::from_utf8_lossy(&output.stdout);
+    value
+        .trim()
+        .parse::<u64>()
+        .with_context(|| format!("Failed to parse sysctl -n {} output: {}", key, value.trim()))
+}
+
+/// Parse a page count for a `vm_stat` line such as `Pages free:   12345.`
+/// (the trailing period is stripped). Returns `None` if the line is absent.
+#[cfg(target_os = "macos")]
+fn parse_vm_stat_pages(output: &str, prefix: &str) -> Option<u64> {
+    for line in output.lines() {
+        if let Some(rest) = line.strip_prefix(prefix) {
+            return rest.trim().trim_end_matches('.').parse::<u64>().ok();
+        }
+    }
+    None
+}
+
 /// Parse a line from /proc/meminfo (format: "Key:     value kB").
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn parse_meminfo_line(line: &str) -> Result<Option<u64>> {
     let parts: Vec<&str> = line.split_whitespace().collect();
     if parts.len() >= 2 {

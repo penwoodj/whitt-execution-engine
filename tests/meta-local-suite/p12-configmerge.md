@@ -1,0 +1,3 @@
+# Task: JSON Config Merger
+
+Write a Python tool named configmerge.py using only the standard library. It takes two CLI arguments: a base JSON config file and an override JSON config file. It prints the merged config to stdout as JSON with indent=2. Merge semantics: objects are merged recursively key by key (override wins on conflicts, keys unique to either side are kept); every non-object value — including arrays — is replaced entirely by the override value when the key exists in both. Files that are missing or contain invalid JSON must produce a clear error on stderr and a nonzero exit code without a traceback.

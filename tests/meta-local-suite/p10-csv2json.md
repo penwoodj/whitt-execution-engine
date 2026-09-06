@@ -1,0 +1,3 @@
+# Task: CSV to JSON Converter with Type Inference
+
+Write a Python tool named csv2json.py using only the standard library. It reads a CSV file with a header row (path as first CLI argument) and prints to stdout a JSON array of objects, one per data row, keys from the header. Infer types per cell: an integer literal becomes a JSON number without decimals; a float literal becomes a JSON number; the strings true/false (any letter case) become JSON booleans; an empty cell becomes JSON null; everything else stays a string. Output must be valid JSON parseable by json.loads, pretty-printed with indent=2. A missing file prints a clear error to stderr and exits nonzero without a traceback.
