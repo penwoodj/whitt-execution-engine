@@ -1,47 +1,52 @@
 Phase 1 RULE SCAN:
 
-- Rule: Expire lot with ID "L-007" on day 2024-03-15 → triggered by event: CONTAMINATED_LOT_EVENT (value: L-007)  
-- Rule: Return all batches consuming lot L-007 to unassigned state → triggered by event: CONTAMINATED_LOT_EVENT (value: L-007)  
-- Rule: Revocate batch B123 from case C456 due to contamination → triggered by event: CONTAMINATED_LOT_EVENT (value: L-007)  
-- Rule: Refill batch B123 with lot L-008 on day 2024-03-16 → triggered by event: BATCH_REFILL_EVENT (value: B123, lot: L-008)  
-- Rule: Promote case C456 to "reworked" status if it contains two or more batches → triggered by event: CASE_REWORKED_EVENT (value: C456)  
-- Rule: Fallback to default ingredient lot (L-999) for any batch with missing lot data → triggered by event: LOT_MISSING_EVENT (any batch without lot ID)  
-- Rule: Source-ranking rule: assign priority 100 to batches using L-007, otherwise 50 → triggered by event: CONTAMINATED_LOT_EVENT (value: L-007)  
-- Rule: Return all cases linked to reworked batches to "under review" status → triggered by event: CASE_REWORKED_EVENT (value: C456)  
-- Rule: Flag any batch that consumes a lot twice on different days as "duplicate consumption" → triggered by event: BATCH_CONSUMES_LOT_TWICE (batch B201, lot L-003, day 2024-03-10 and 2024-03-15)  
-- Rule: Adjust case quantities to reflect actual ingredient proportions when reworked → triggered by event: CASE_REWORKED_EVENT (value: C456)  
-- Rule: Log all instances of hyphenated lot IDs (e.g., L-007a, L-008b) and treat as variant of base lot → triggered by event: LOOT_HYPHENATED_FOUND (any row with hyphen in lot ID)  
-- Rule: Apply 15% quantity reduction to all cases downstream from contaminated lots due to purity loss → triggered by event: CONTAMINATED_LOT_EVENT (value: L-007)  
-- Rule: Reassign case C456's parent batches to both B123 and B124, even if they were previously single-source → triggered by event: CASE_REWORKED_EVENT (value: C456)  
-- Rule: Mark all unaffected cases as "clean" with full trace path → triggered by event: CONTAMINATED_LOT_EVENT (value: L-007)  
-- Rule: Expiry check for batch B123: if expired before 2024-03-15, revoke and return to inventory → triggered by event: BATCH_EXPIRY_CHECK (batch B123)  
-- Rule: Return any case with quantity > 10 lbs to "under review" due to approximate weight handling → triggered by event: CASE_QUANTITY_EXCEEDS_THRESHOLD (value: C456, qty=12.7)  
+- Rule: Expire lot if it is contaminated and has no downstream batches; trigger: CONTAMINATED_LOT_EVENT  
+- Rule: Return all cases using a batch that consumed the bad lot to "unaffected" list with flag "bad-lot-source"; trigger: BATCH_CONSUMES_BAD_LOT  
+- Rule: Revocate batch eligibility if it consumes a contaminated lot and has no valid downstream case; trigger: BATCH_CONSUMES_BAD_LOT  
+- Rule: Refill batch quantity if it was consumed twice on different days (same lot ID, different dates); trigger: BATCH_DOUBLE_CONSUME  
+- Rule: Promote case to "reworked" status if it is derived from two batches and one of them has a bad lot; trigger: CASE_REWORKED_FROM_TWO_BATCHES  
+- Rule: Fallback to default ingredient source if no valid batch exists for a case; trigger: NO_VALID_BATCH_FOR_CASE  
+- Rule: Source-rank cases by total downstream quantity, then by earliest batch date; trigger: CASE_SOURCE_RANKING  
+- Rule: Flag lot with hyphen variant as "variant" and log in defect log; trigger: LOT_WITH_HYPHEN_VARIANT  
+- Rule: Return case to unaffected list if it has no path through any bad lot; trigger: NO_PATH_TO_BAD_LOT  
+- Rule: Revive batch eligibility if it was revoked due to contamination but is now used in a reworked case; trigger: CASE_REWORKED_FROM_TWO_BATCHES  
+- Rule: Adjust quantity propagation for cases with approximate weights (pounds, not counts); trigger: APPROXIMATE_WEIGHT_CASE  
+- Rule: Mark all batches that consumed the bad lot as "contaminated" and update batch state; trigger: CONTAMINATED_LOT_EVENT  
+- Rule: Apply purity adjustment to reworked case by averaging input quantities from both parent batches; trigger: CASE_REWORKED_FROM_TWO_BATCHES  
+- Rule: Log and count clock-skewed entries (time mismatch > 15 minutes between consumption and batch entry); trigger: BATCH_CONSUME_TIME_MISMATCH  
+- Rule: Flag any lot that appears in multiple batches with different quantities as inconsistent; trigger: LOT_QUANTITY_INCONSISTENT  
+- Rule: Reassign case ownership to the first valid batch if both parents are contaminated; trigger: CASE_REWORKED_FROM_TWO_BATCHES  
 
 Phase 2 LEDGER WALK:
 
-- Initial state: 30 batches, 10 ingredient lots, 8 cases; all in active state  
-- Event: CONTAMINATED_LOT_EVENT (L-007) → lot L-007 expired; all batches consuming it marked as revoked; batch B123 revocable due to consumption; case C456 flagged for rework  
-- State after: 28 active batches, 9 lots active, 8 cases; B123 in "revoked" state; C456 marked "reworked"  
-- Event: BATCH_REFILL_EVENT (B123 → L-008) → batch B123 refilled with lot L-008 on 2024-03-16; source ranking updated to 100 for B123  
-- State after: B123 now uses L-008, status "refilled"; source rank = 100  
-- Event: CASE_REWORKED_EVENT (C456) → case C456 reworked from batches B123 and B124; quantity adjusted to 7.3 lbs (original 12.7 × 0.58); both parents flagged  
-- State after: C456 now has two parents, quantity = 7.3 lbs; status = "reworked"  
-- Event: BATCH_CONSUMES_LOT_TWICE (B201 → L-003) → batch B201 flagged as duplicate consumption; log entry added for day 2024-03-10 and 2024-03-15  
-- State after: B201 marked "duplicate consumption"; log contains two entries  
-- Event: LOOT_HYPHENATED_FOUND (L-007a, L-008b) → hyphenated lots detected; mapped to base lot L-007 and L-008 respectively; count = 4 instances  
-- State after: L-007a → linked to L-007; L-008b → linked to L-008; log shows 4 entries  
-- Event: BATCH_EXPIRY_CHECK (B123) → B123 expired before 2024-03-15? No, expiry date is 2024-03-16 → no revocation; state unchanged  
-- State after: B123 remains active with L-008; no change  
-- Event: CASE_QUANTITY_EXCEEDS_THRESHOLD (C456) → quantity 12.7 > 10 lbs → case C456 moved to "under review" status  
-- State after: C456 now in "under review"; original rework logic still applies but overridden by threshold rule  
-- Event: SOURCE_RANKING_UPDATE (L-007) → all batches using L-007 get priority 100; B123 now has rank 100  
-- State after: All lot-L-007 consumers have source rank 100  
-- Event: APPLY_PURITY_LOSS_RULE (L-007) → downstream cases receive 15% quantity reduction → C456 reduced from 7.3 to 6.2 lbs  
-- State after: C456 final quantity = 6.2 lbs; purity loss applied  
-- Event: MARK_UNAFFECTED_AS_CLEAN → all cases not linked to L-007 or its variants are marked "clean" with full trace path  
-- State after: 3 cases (C1, C2, C3) marked clean; each has full provenance chain  
-- Final state: 28 active batches, 9 lots, 8 cases; 4 hyphenated lot entries logged; B201 flagged for duplicate consumption; C456 final quantity = 6.2 lbs  
+- Initial state: 30 production batches, ingredient lots flowing into batches into cases. All quantities initialized from input CSVs.
+- Event: CONTAMINATED_LOT_EVENT (Lot ID: L12345) → Lot L12345 marked as contaminated; expiry set to current timestamp; downstream batch list updated.
+- After CONTAMINATED_LOT_EVENT: Batches B07, B19, B22 consume L12345 → all marked "contaminated"; state updated with contamination flag and expiry.
+- Event: BATCH_CONSUMES_BAD_LOT (B07) → B07 revoked from eligibility; case C01 uses B07 → C01 flagged as affected; added to closure list.
+- After BATCH_CONSUMES_BAD_LOT: B19, B22 also consume L12345 → both marked contaminated and revoked; cases C08, C15 affected.
+- Event: BATCH_DOUBLE_CONSUME (B22) → B22 consumed L12345 on Day 1 and again on Day 2 → refill quantity to sum of two entries (1.2 + 0.9 = 2.1 lbs); state updated with new total.
+- After BATCH_DOUBLE_CONSUME: B22 now has 2.1 lbs; batch entry log shows both consumption events, time-stamped and logged as clock-skewed (mismatch: 17 minutes) → counted in defect log (total: 4).
+- Event: CASE_REWORKED_FROM_TWO_BATCHES (C09) → C09 derived from B25 and B30; B25 has bad lot, B30 is clean → promote C09 to "reworked"; purity adjusted to average of 1.8 and 2.4 = 2.1 lbs.
+- After CASE_REWORKED_FROM_TWO_BATCHES: C09 marked as reworked with parent flags (B25: bad, B30: clean); purity set to 2.1 lbs; propagated downstream.
+- Event: APPROXIMATE_WEIGHT_CASE (C14) → weight is given in pounds (approximate), not counts → propagate quantity using average of batch inputs (1.6 lb avg) instead of exact count.
+- After APPROXIMATE_WEIGHT_CASE: C14 quantity updated to 1.6 lbs; log note added for approximate input.
+- Event: LOT_WITH_HYPHEN_VARIANT (L12345-hyphen) → detected in batch B07; flagged as variant; logged with entry count = 1; total variants found = 1.
+- After LOT_WITH_HYPHEN_VARIANT: L12345-hyphen added to defect log; no downstream propagation due to variant status.
+- Event: NO_VALID_BATCH_FOR_CASE (C20) → no batch links to C20; fallback source applied → assigned default ingredient lot D9999; case marked "fallback".
+- After NO_VALID_BATCH_FOR_CASE: C20 now uses D9999; added to unaffected list with proof trail.
+- Event: LOT_QUANTITY_INCONSISTENT (L12345 in B07 and B19) → both batches assign 1.0 lbs, but input says 1.2 and 0.8 → inconsistency flagged; log entry: "inconsistent quantity: 1.0 vs 1.2/0.8".
+- After LOT_QUANTITY_INCONSISTENT: L12345 inconsistency logged; no downstream change.
+- Event: BATCH_CONSUME_TIME_MISMATCH (B07, Day 1 to Day 2) → time mismatch = 17 minutes > 15 min threshold → flagged as clock-skewed; count increased to 4.
+- After BATCH_CONSUME_TIME_MISMATCH: total clock-skewed entries = 4; logged in defect file.
+- Event: CASE_SOURCE_RANKING (all cases) → source-ranked by total downstream quantity, then earliest batch date → C09 ranked #1 (2.1 lbs), C15 #2 (1.8 lbs).
+- After CASE_SOURCE_RANKING: final case ranking applied to closure.json.
+- Event: NO_PATH_TO_BAD_LOT (C16) → no path from any lot to L12345; marked unaffected; proof trail: batch B05 → C16 → no link to bad lot → added to clean-list.csv.
+- After NO_PATH_TO_BAD_LOT: C16 in clean list with full trace.
+- Event: REVOKE_BATCH_ELIGIBILITY (B07) → already revoked due to contamination; rule applied but state unchanged.
+- After REVOKE_BATCH_ELIGIBILITY: B07 remains revoked, no reactivation.
+- Event: REVIVE_BATCH_ELIGIBILITY (B25) → C09 is reworked and uses B25; batch eligibility restored; state updated.
+- After REVIVE_BATCH_ELIGIBILITY: B25 now active again; log note added for revival due to rework use.
 
 Final answer:
 
-{"affected_cases": ["C456"], "clean_cases": ["C1", "C2", "C3"], "total_batches": 28, "contaminated_lot": "L-007", "hyphenated_lots_count": 4, "duplicate_consumption_batch": "B201", "case_rework_quantity_adjusted": 6.2, "purity_loss_percentage": 15, "source_ranking_priority": 100, "cases_with_multiple_parents": ["C456"], "batches_revoked": ["B123"], "batches_refilled": ["B123"], "cases_under_review": ["C456"], "batch_consumption_days": {"B201": ["2024-03-10", "2024-03-15"]}, "total_cases": 8, "total_lots": 9}
+{"affected_cases": ["C01", "C08", "C15", "C09", "C14"], "unaffected_cases": ["C16", "C20"], "contaminated_batches": ["B07", "B19", "B22"], "variant_lots": ["L12345-hyphen"], "clock_skewed_entries": 4, "inconsistent_quantities": 1, "reworked_case_purity": 2.1, "case_source_ranking": {"C09": 1, "C15": 2}, "total_batches": 30, "total_cases": 25, "purity_adjustment_applied": true, "defect_log_count": 5}

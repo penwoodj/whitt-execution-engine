@@ -1,48 +1,76 @@
-Phase 1 rule list:
+Phase 1 RULE SCAN:
 
-- Rule: LOW selects core if no HIGH; tie-breaker: resumed LOW beats fresh LOW (triggered on any LOW arrival or resume)
-- Rule: Core never idles while a LOW waits (triggered when a LOW is waiting and core is idle)
-- Rule: A LOW banks a checkpoint at (core-get minute + 2) and every 2 RUNNING minutes after, absolute; bank on HIGH's arrival counts (triggered on each LOW start or resume)
-- Rule: On preemption, wasted += minutes run past last bank; owed = duration − banked (triggered when a higher-priority job preempts a lower-priority one)
-- Rule: A job that gets core at minute s with owed k occupies s .. s+k−1 and finishes at s+k; next LOW starts at s+k (triggered on each job assignment)
-- Rule: makespan = largest finish minute (including HIGH) (triggered after every job completion or HIGH arrival)
-- Rule: order = LOW jobs by finish minute (triggered after every job completion)
-- Rule: aging bump: waiting 10 minutes → priority +1 (triggered when a job waits ≥10 minutes past arrival)
+- Rule: A LOW banks a checkpoint at (core-get minute + 2) and every 2 RUNNING minutes after, absolute; a bank landing exactly on HIGH's arrival still counts.  
+  Trigger: Every time a LOW is assigned the core (either fresh or resumed), and during its run.
+
+- Rule: On preemption: wasted += minutes run past its last bank; owed = duration − banked.  
+  Trigger: When a higher-priority job preempts a lower-priority job that is running.
+
+- Rule: A job that gets the core at minute s with owed k occupies s .. s+k−1 and FINISHES AT minute s+k; the next LOW starts that same minute.  
+  Trigger: When a job (LOW) successfully acquires the core, regardless of whether it was fresh or resumed.
+
+- Rule: The core never idles while a LOW waits.  
+  Trigger: Whenever a LOW is waiting for the core and no job is running.
+
+- Rule: A resumed LOW outranks a fresh LOW at any tie.  
+  Trigger: When two LOWs are eligible to run simultaneously (same start time, same priority), and one was previously interrupted.
+
+- Rule: The core holds every minute in [arrive, arrive+dur) for HIGH; otherwise the core goes to the waiting LOW with the SMALLEST ORIGINAL start minute (ties: a resumed LOW beats a fresh one).  
+  Trigger: At each minute m from 0 upward, when checking who gets the core.
+
+- Rule: Waiting jobs age every 10 minutes — priority increases by one level.  
+  Trigger: Every 10 minutes after arrival for any waiting job (including during preemption or resume).
 
 Phase 2 LEDGER WALK:
 
-| m | core | event |
-|---|------|-------|
-| 0 | L1   | L1 arrives, dur=5, start=0 |
-| 1 | L1   | L1 runs (core held) |
-| 2 | L1   | L1 banks at minute 4 (start+2) |
-| 3 | L1   | L1 runs (core held) |
-| 4 | L1   | L1 banks at minute 6 (after 2 running minutes from last bank) |
-| 5 | L1   | L1 finishes at 6; next LOW starts at 6 |
-| 6 | L2   | L2 arrives, dur=3, start=6 |
-| 7 | L2   | L2 runs (core held) |
-| 8 | L2   | L2 banks at minute 10 (start+2) |
-| 9 | L2   | L2 runs (core held) |
-|10 | L2   | L2 banks at minute 12 (after 2 running minutes from last bank) |
-|11 | L3   | L3 arrives, dur=4, start=11 |
-|12 | L3   | L3 starts at 12; banks at 14 (start+2) |
-|13 | L3   | L3 runs (core held) |
-|14 | L3   | L3 banks at minute 16 (after 2 running minutes from last bank) |
-|15 | H    | HIGH arrives, dur=2, start=15 |
-|16 | H    | H runs for 2 minutes: finishes at 17 |
-|17 | H    | HIGH finishes; makespan = 17 |
-|18 | L4   | L4 arrives, dur=6, start=18 |
-|19 | L4   | L4 starts at 19; banks at 21 (start+2) |
-|20 | L4   | L4 runs (core held) |
-|21 | L4   | L4 banks at minute 23 (after 2 running minutes from last bank) |
-|22 | L5   | L5 arrives, dur=2, start=22 |
-|23 | L5   | L5 starts at 23; banks at 25 (start+2) |
-|24 | L5   | L5 runs (core held) |
-|25 | L5   | L5 banks at minute 27 (after 2 running minutes from last bank) |
-|26 | L6   | L6 arrives, dur=1, start=26 |
-|27 | L6   | L6 starts at 27; finishes at 28 |
-|28 | —    | L6 finishes; next LOW starts at 28 |
+m | core | event
+---|------|-----
+0 | HIGH | HIGH arrives at minute 0, duration 30 → holds [0, 30)
+2 | LOW1 | LOW1 (start=0, dur=15) gets core at m=2; banks at 4 and 6; runs until m=17; finishes at 18
+4 | LOW1 | LOW1 banked at m=4 (after start+2); running
+6 | LOW1 | LOW1 banked at m=6; running
+8 | LOW2 | LOW2 (start=5, dur=20) arrives at m=5 → waits until m=8; gets core at m=8; banks at 10 and 12; runs until m=27; finishes at 28
+10 | LOW2 | LOW2 banked at m=10 (start+2); running
+12 | LOW2 | LOW2 banked at m=12; running
+14 | LOW3 | LOW3 (start=10, dur=10) arrives at m=10 → waits until m=14; gets core at m=14; banks at 16 and 18; runs until m=23; finishes at 24
+16 | LOW3 | LOW3 banked at m=16; running
+18 | LOW3 | LOW3 banked at m=18; running
+20 | HIGH | HIGH ends at m=30 → core released
+22 | LOW1 | LOW1 resumes at m=22 (was preempted by HIGH); owed = 15 - 14 = 1; runs from 22 to 23; finishes at 24
+24 | LOW3 | LOW3 finishes at 24 → next LOW starts at 24
+26 | LOW4 | LOW4 (start=20, dur=8) arrives at m=20 → waits until m=26; gets core at m=26; banks at 28; runs until m=33; finishes at 34
+28 | LOW4 | LOW4 banked at m=28; running
+30 | HIGH | HIGH arrives again at m=30, duration 15 → holds [30, 45)
+32 | LOW5 | LOW5 (start=25, dur=12) arrives at m=25 → waits until m=32; gets core at m=32; banks at 34 and 36; runs until m=43; finishes at 44
+34 | LOW5 | LOW5 banked at m=34; running
+36 | LOW5 | LOW5 banked at m=36; running
+38 | LOW6 | LOW6 (start=30, dur=10) arrives at m=30 → waits until m=38; gets core at m=38; banks at 40 and 42; runs until m=47; finishes at 48
+40 | LOW6 | LOW6 banked at m=40; running
+42 | LOW6 | LOW6 banked at m=42; running
+44 | LOW5 | LOW5 finishes at 44 → next LOW starts at 44
+45 | HIGH | HIGH ends at m=45 → core released
+47 | LOW6 | LOW6 finishes at 48 → next LOW starts at 48
 
-Final answer:
+Final Answer:
 
-{"makespan": 28, "wasted": 0, "order": [{"job": "L1", "finish": 6}, {"job": "L2", "finish": 13}, {"job": "L3", "finish": 17}, {"job": "L4", "finish": 28}, {"job": "L5", "finish": 28}], "aging_events": [{"job": "L3", "wait_minutes": 10, "new_priority": "medium"}], "starvation_count": 0}
+{
+  "makespan": 48,
+  "order": [
+    {"job": "LOW1", "finish": 24},
+    {"job": "LOW2", "finish": 28},
+    {"job": "LOW3", "finish": 24},
+    {"job": "LOW4", "finish": 34},
+    {"job": "LOW5", "finish": 44},
+    {"job": "LOW6", "finish": 48}
+  ],
+  "wasted": 1,
+  "aging_events": [
+    {"job": "LOW2", "arrival": 5, "age_minutes": 10, "new_priority": 2},
+    {"job": "LOW3", "arrival": 10, "age_minutes": 10, "new_priority": 2},
+    {"job": "LOW4", "arrival": 20, "age_minutes": 10, "new_priority": 2},
+    {"job": "LOW5", "arrival": 25, "age_minutes": 10, "new_priority": 2},
+    {"job": "LOW6", "arrival": 30, "age_minutes": 10, "new_priority": 2}
+  ],
+  "starvation_count_with_aging": 0,
+  "starvation_count_without_aging": 0
+}

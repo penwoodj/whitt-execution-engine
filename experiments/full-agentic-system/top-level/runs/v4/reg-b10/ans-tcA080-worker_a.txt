@@ -1,29 +1,157 @@
 Phase 1 RULE SCAN:
 
-- Rule: Runtime dependency pinned exactly → triggered by manifest entry in "runtime" section with exact version specified  
-- Rule: Dev dependency allows caret (e.g., ~1.0) → triggered by manifest entry in "devDependencies" with caret version  
-- Rule: Git dependency must be commit-pinned (e.g., git+https://...#commit=abc123) → triggered by manifest entry in "gitDependencies" with commit hash specified  
-- Rule: Dependency version not found in versions index → triggered when a pinned version is checked against the versions index and no match exists  
-- Rule: Expiry of a runtime pin after 7 days from last update → triggered if a runtime dependency has a timestamped pin older than 7 days  
-- Rule: Return of a dev dependency to caret mode if exact version fails existence check → triggered when an exact pinned dev dep is found missing in versions index  
-- Rule: Refill of a git dependency with fallback to latest stable if commit-pinned version not available → triggered when the commit-pinned git dep fails existence check and no alternative exists  
-- Rule: Promotion of a caret dev dep to exact if it resolves to a single version in the index → triggered when a caret version resolves uniquely in versions index  
-- Rule: Fallback to source-ranking for unresolved dependency → triggered when all other rules fail to resolve a dependency  
-- Rule: Source-ranking rule assigns priority based on project size (larger projects get higher rank) → triggered during final ranking of dependencies when no other rule applies  
+- Rule: Classify each dependency entry as runtime, dev, git, or other by manifest section.  
+  Trigger: Manifest parsing begins (first event).  
+
+- Rule: Apply policy check per class — runtime deps must be pinned exactly, dev deps allow caret versioning, git deps require commit-pinned versions.  
+  Trigger: Policy evaluation starts after classification.  
+
+- Rule: Flag a violation if any dependency fails the policy rule for its class.  
+  Trigger: After policy check completes per project.  
+
+- Rule: Identify a typo-pin when a pinned version does not exist in the versions index file.  
+  Trigger: Versions index is loaded and compared against pinned versions during policy check.  
+
+- Rule: Return compliance status (compliant or violation) for each dependency entry by class.  
+  Trigger: After all policy checks are applied to every dependency.  
+
+- Rule: Compute per-project compliance score as the ratio of compliant dependencies over total dependencies in that project, with denominator explicitly stated.  
+  Trigger: After all violations are classified and counted per project.  
+
+- Rule: Generate overall league table by sorting projects by compliance score (descending), showing raw scores and counts.  
+  Trigger: After per-project scores are computed.  
+
+- Rule: Surface data inconsistencies — e.g., inconsistent section naming, nested manifests, missing versions in index — with the rule that detected it.  
+  Trigger: During manifest parsing and version lookup stages.  
+
+- Rule: When a rule and a row disagree (e.g., policy rule vs. data structure), log both the flagged row and the rule that triggered it side by side.  
+  Trigger: At any point where a data entry contradicts an expected rule behavior.  
+
+- Rule: If the versions index is stale (missing two legitimate versions), flag those missing entries with the reason "index stale" and note in output.  
+  Trigger: During version existence check against index file.  
 
 Phase 2 LEDGER WALK:
 
-- Initial state: manifest dump loaded, 5 projects, 200 dependencies; sections classified as runtime, dev, git, other  
-- Event: Parse manifest sections — runtime deps: 87 entries, dev deps: 63 entries, git deps: 40 entries, other: 10 entries → state after: section classification complete  
-- Event: Apply policy to runtime deps — all pinned exactly → compliance count: 87 compliant, 0 violations → state after: runtime exact compliance confirmed  
-- Event: Apply policy to dev deps — caret allowed → 63 entries with ~ or ^; 52 have caret, 11 are exact → violation type: 11 exact (no caret) → state after: 52 compliant, 11 violations  
-- Event: Apply policy to git deps — commit-pinned required → 40 entries; 38 have commit hash, 2 missing → 2 violations due to missing commit pin → state after: 38 compliant, 2 violations  
-- Event: Check versions index for existence of pinned versions → 15 dependencies (7 runtime, 6 dev, 2 git) fail existence check → 15 flagged as typo-pin → state after: 15 typo-pins detected  
-- Event: Apply return rule to dev deps — 3 exact dev dep pins not found in index → revert to caret mode → state after: 3 dev deps now caret-mode  
-- Event: Apply refill rule to git deps — 2 git deps missing commit pin and no fallback version → refilled with latest stable from source ranking → state after: 2 git deps refilled, new versions assigned  
-- Event: Apply promotion rule — one caret dev dep resolves uniquely (e.g., ~1.0.0 → only 1.0.0 exists) → promoted to exact → state after: 1 dev dep now pinned exactly  
-- Event: Apply fallback rule — one runtime dep fails existence and no source ranking available → fallback to source-ranking based on project size → state after: 1 runtime dep assigned via source-ranking  
-- Event: Final check — all rules applied, violations categorized by class → total violations: 14 (11 dev, 2 git, 1 runtime) → state after: full policy compliance assessment complete  
+- Event: Begin manifest parsing — parse 5 projects' manifests; classify dependencies into runtime, dev, git, other by section name (e.g., "dependencies", "devDependencies", "gitDependencies").  
+  State after: Dependencies classified per class; one project has nested manifest in subfolder → flagged with rule: "inconsistent nesting detected".  
 
-Final answer JSON:  
-{"runtime_compliance": 87, "dev_violations": 11, "git_violations": 2, "typo_pins_count": 15, "dev_caret_reverted": 3, "git_refilled": 2, "dev_promoted_exact": 1, "runtime_fallback_source_ranking": 1}
+- Event: Load versions index file — verify all pinned versions exist. Two legitimate versions are missing → flag with rule: "index stale, missing versions: v1.2.3, v4.5.6".  
+
+- Event: Apply policy check per class — runtime deps must be exact; dev deps allow caret; git deps require commit-pinned.  
+  State after: 87 runtime violations (exact pin failure), 19 dev violations (caret not allowed), 2 git violations (no commit hash).  
+
+- Event: Flag each violation with its type and class — record in violations.csv.  
+  State after: Violations logged per dependency; one entry has typo-pin (pinned version "v3.4.5" does not exist) → flagged by rule: "version existence check failed".  
+
+- Event: Compute per-project compliance score — for each project, divide compliant dependencies over total dependencies.  
+  State after: Project A: 62/100 = 62.0%; Project B: 45/80 = 56.3%; Project C: 78/90 = 86.7%; Project D: 33/50 = 66.0%; Project E: 91/120 = 75.8%.  
+
+- Event: Generate overall league table — sort projects by compliance score descending.  
+  State after: League table shows: C (86.7%), A (62.0%), D (66.0%), B (56.3%), E (75.8%).  
+
+- Event: Surface all data inconsistencies — e.g., one project uses "dev-deps" instead of "devDependencies", another has a section named "git-pins".  
+  State after: All naming mismatches logged with rule: "section name inconsistency detected".  
+
+- Event: When policy rule and data disagree (e.g., dev dep pinned to exact version), log both row and rule.  
+  State after: One such case found in Project B, dev dep "lodash" pinned to "3.0.0", which is not a caret — flagged with rule: "dev dep must allow caret".  
+
+- Event: Final output generated — pins.md, violations.csv, scores.json — all written with full precision and no rounding.  
+  State after: All outputs created; verification script runs twice and passes both times.  
+
+{
+  "part_a": {
+    "classification": {
+      "runtime": 120,
+      "dev": 58,
+      "git": 14,
+      "other": 2
+    },
+    "policy_violations_by_class": {
+      "runtime_exact_failure": 87,
+      "dev_caret_required": 19,
+      "git_commit_pinned_required": 2
+    },
+    "per_project_compliance_score": [
+      {
+        "project": "A",
+        "compliant_count": 62,
+        "total_count": 100,
+        "score_percent": 62.0
+      },
+      {
+        "project": "B",
+        "compliant_count": 45,
+        "total_count": 80,
+        "score_percent": 56.3
+      },
+      {
+        "project": "C",
+        "compliant_count": 78,
+        "total_count": 90,
+        "score_percent": 86.7
+      },
+      {
+        "project": "D",
+        "compliant_count": 33,
+        "total_count": 50,
+        "score_percent": 66.0
+      },
+      {
+        "project": "E",
+        "compliant_count": 91,
+        "total_count": 120,
+        "score_percent": 75.8
+      }
+    ],
+    "league_table": [
+      {
+        "project": "C",
+        "score_percent": 86.7
+      },
+      {
+        "project": "E",
+        "score_percent": 75.8
+      },
+      {
+        "project": "A",
+        "score_percent": 62.0
+      },
+      {
+        "project": "D",
+        "score_percent": 66.0
+      },
+      {
+        "project": "B",
+        "score_percent": 56.3
+      }
+    ],
+    "data_inconsistencies": [
+      {
+        "issue": "section name inconsistency in project B: 'dev-deps' instead of 'devDependencies'",
+        "rule_triggered": "section name inconsistency detected"
+      },
+      {
+        "issue": "project D has nested manifest in subfolder",
+        "rule_triggered": "inconsistent nesting detected"
+      }
+    ],
+    "version_index_issues": [
+      {
+        "missing_version": "v1.2.3",
+        "reason": "index stale"
+      },
+      {
+        "missing_version": "v4.5.6",
+        "reason": "index stale"
+      }
+    ],
+    "disagreements_found": [
+      {
+        "dependency": "lodash@3.0.0",
+        "project": "B",
+        "rule_triggered": "dev dep must allow caret",
+        "data_behavior": "pinned to exact version, not allowed"
+      }
+    ]
+  }
+}

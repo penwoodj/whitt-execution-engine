@@ -1,42 +1,85 @@
 Phase 1 RULE SCAN:
 
-- On arrival of a save with v1.5 dialect (field "extra_field"), trigger rule: "v1.5 field mapping" — map "extra_field" to "v2.extra" in the output; mark event as triggering this rule.
-- On arrival of a truncated save, trigger rule: "truncated save recovery" — recover missing fields using default values from v1 schema; if field is present, preserve it; mark event as triggering this rule.
-- On arrival of a save with overloaded field value satisfying both meanings (e.g., value 50), trigger rule: "overloaded field disambiguation" — interpret as count=30 (inventory) and count=20 (gold), record both counts in output; mark event as triggering this rule.
-- On arrival of any save, trigger rule: "money unit conversion" — convert copper to silver at 100 copper = 1 silver; use integer arithmetic only (copper ÷ 100 → silver with remainder as cents); mark event as triggering this rule.
-- On arrival of a save, trigger rule: "field renaming and nesting" — rename flat fields to nested paths per v2 spec (e.g., "player_name" → "game.player.name", "inventory_count" → "game.inventory.count"); mark event as triggering this rule.
-- On arrival of any save, trigger rule: "migration expiry check" — if save timestamp is older than 30 days from now, expire it and remove from migration queue; mark event as triggering this rule.
-- On arrival of a save with missing required field, trigger rule: "fallback to default" — use v1 schema defaults (e.g., money=0, player_name="unknown") for missing fields; mark event as triggering this rule.
+- Field rename rule: on event "save_load", rename field "player_name" to "character_name"; triggered by save_load.  
+- Field nesting rule: on event "save_load", nest "inventory" into "player.profile.inventory"; triggered by save_load.  
+- Money unit conversion rule: on event "save_load", convert money from copper to silver (100 copper = 1 silver), using integer arithmetic; triggered by save_load.  
+- Overloaded field disambiguation rule: on claim "overloaded_field_value", if value ≥ 50, interpret as count of items; if value < 50, interpret as player level; triggered by overloaded_field_value.  
+- V1.5 dialect handling rule: on event "save_load", if save has field "v1_5_extra", extract and store in "player.metadata.v1_5_extra"; triggered by v1_5_extra present.  
+- Truncated save recovery rule: on event "save_load", if save is truncated at byte offset 32, recover missing fields using default values from schema; triggered by truncation detected at offset 32.  
+- Refill rule: on claim "overloaded_field_value" and value < 50, refill the field to 49 (level) after disambiguation; triggered when value < 50 and overloaded_field_value is present.  
+- Fallback rule: if no valid data found in a nested path during load, fallback to root-level default; triggered by missing nested field access.  
+- Source-ranking rule: on event "save_load", rank sources by timestamp of save creation (earliest first); triggered when multiple saves exist with same ID.  
 
 Phase 2 LEDGER WALK:
 
-- Event 1: Save A (v1.5 dialect) arrives → apply "v1.5 field mapping": map "extra_field" to "v2.extra"; state after: save with v2 structure, extra_field now in v2.extra.
-- Event 2: Save B (truncated) arrives → apply "truncated save recovery": recover missing fields using defaults; state after: save with all fields filled per schema, missing fields set to default values.
-- Event 3: Save C (overloaded field value=50) arrives → apply "overloaded field disambiguation": interpret as inventory_count=30, gold_count=20; state after: output contains both counts in separate branches.
-- Event 4: All saves processed → apply "money unit conversion" to all fields with money values (copper units); convert using integer division and modulo; state after: all money values updated exactly via cents arithmetic.
-- Event 5: Field renaming and nesting applied to all saves → rename flat fields to nested paths per v2 spec; state after: all field names match v2 schema, structure is nested.
-- Event 6: Save D (timestamp older than 30 days) arrives → apply "migration expiry check": expire save D; state after: save D removed from queue, no longer in migration list.
-- Event 7: Save E (missing player_name field) arrives → apply "fallback to default": set player_name="unknown"; state after: missing field filled with default.
+- Event: save_load (save_id=01) — state after: player_name → character_name, inventory nested into profile.inventory, money converted from copper to silver via integer arithmetic (e.g., 4567 copper → 45 silver 67 copper), overloaded_field_value=32 → interpreted as level (value < 50).  
+- Event: save_load (save_id=02) — state after: v1_5_extra field detected and stored in player.metadata.v1_5_extra; no truncation, all fields present.  
+- Event: save_load (save_id=03) — state after: truncated at offset 32; recovered missing fields using schema defaults; inventory set to empty array.  
+- Event: save_load (save_id=04) — state after: overloaded_field_value=65 → interpreted as item count (value ≥ 50); field disambiguated correctly.  
+- Event: save_load (save_id=05) — state after: no overload, value=23 → level; refill rule not triggered due to value < 50 and no conflict.  
+- Event: save_load (save_id=06) — state after: field rename applied, money converted, all fields present, no truncation.  
+- Event: save_load (save_id=07) — state after: fallback triggered on missing "player.profile" path; default profile created.  
+- Event: save_load (save_id=08) — state after: source-ranking applied; earliest save (id=01) ranked first due to timestamp.  
+- Event: save_load (save_id=09) — state after: overloaded_field_value=45 → level, no refill; disambiguation rule applied correctly.  
+- Event: save_load (save_id=10) — state after: truncated at offset 32; recovered fields using defaults; inventory = [].  
 
 {
   "part_a": {
-    "field_map": [
-      "player_name -> game.player.name",
-      "inventory_count -> game.inventory.count",
-      "money_copper -> game.money.silver",
-      "extra_field -> v2.extra"
+    "field_map": {
+      "player_name": "character_name",
+      "inventory": "player.profile.inventory"
+    },
+    "money_conversion": {
+      "copper_to_silver": "100 copper = 1 silver, integer arithmetic only (no floating point)"
+    },
+    "overloaded_field_disambiguation": [
+      {
+        "value": 32,
+        "interpretation": "level",
+        "reason": "value < 50"
+      },
+      {
+        "value": 65,
+        "interpretation": "item count",
+        "reason": "value ≥ 50"
+      }
     ],
-    "conversion_rule": "copper_to_silver: integer division by 100, remainder as cents (e.g., 4567 copper → 45 silver, 67 cents)",
-    "overloaded_field_disambiguation": {
-      "value_threshold": 50,
-      "method": "when value satisfies both meanings, split into inventory_count=30 and gold_count=20",
-      "reason": "based on prior rule: values below 40 go to inventory, above 60 to gold; 50 is in overlap zone"
+    "v1_5_handling": [
+      {
+        "save_id": "02",
+        "field": "v1_5_extra",
+        "action": "stored in player.metadata.v1_5_extra"
+      }
+    ],
+    "truncated_recovery": [
+      {
+        "save_id": "03",
+        "offset": 32,
+        "recovered_fields": ["inventory", "player.level"],
+        "defaults_used": true
+      }
+    ],
+    "refill_applied": [
+      {
+        "save_id": "05",
+        "value_before": 23,
+        "action": "no refill (value < 50)",
+        "reason": "disambiguation rule not triggered"
+      }
+    ],
+    "fallback_used": [
+      {
+        "save_id": "07",
+        "path_missing": "player.profile",
+        "default_created": true
+      }
+    ],
+    "source_ranking": {
+      "ranked_by": "timestamp of save creation",
+      "earliest_save": "id=01"
     },
-    "truncated_recovery_defaults": {
-      "missing_field_default": "unknown",
-      "money_default": 0
-    },
-    "expiry_threshold_days": 30,
-    "v1_5_dialect_handling": "map extra_field to v2.extra with no loss"
+    "rules_applied_count": 9,
+    "total_saves_processed": 10,
+    "disambiguation_method_visible": true
   }
 }

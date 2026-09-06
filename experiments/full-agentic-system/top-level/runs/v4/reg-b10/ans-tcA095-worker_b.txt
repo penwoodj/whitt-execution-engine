@@ -1,47 +1,93 @@
 Phase 1 RULE SCAN:
 
-- Rule: Set stage timestamps from raw export; trigger: board export arrival  
-- Rule: Compute per-stage dwell time using timestamp pairs (backlog→doing, doing→review, review→done); trigger: card movement across stages  
-- Rule: Handle loop-backs by multipass accounting (e.g., cards looping from review to doing twice); trigger: card stage transitions with backflow  
-- Rule: Compute cycle-time distribution (median, p90, histogram) using timestamp pairs; trigger: first and last timestamps of each card’s journey  
-- Rule: Generate wip-over-time per stage, sampled daily, flag spikes; trigger: daily sampling of active cards in each stage  
-- Rule: Identify stuck cards (age > 14 days in a stage); trigger: any card with timestamp + age > 14 days in current stage  
-- Rule: Define "done" state as final stage with no further movement and timestamp ≥ done timestamp; trigger: card reaches done stage  
-- Rule: Enforce timezone-naive timestamps except for twelve UTC-suffixed rows (e.g., "2023-05-14T12:00:00Z"); trigger: raw export parsing  
-- Rule: Detect and flag invalid timestamp order (done before doing); trigger: card with done timestamp < doing timestamp  
-- Rule: Handle stage name drift by mapping old names to new names mid-export; trigger: stage rename event in export metadata  
-- Rule: Validate that all cards from initial 400 land in final state with no missing or duplicated entries; trigger: post-processing of all card flows  
-- Rule: Ensure total cycle time, per-stage dwell, and wip-over-time sum to expected values across all cards; trigger: final aggregation step  
-- Rule: Flag any contradiction between data and stated assumptions (e.g., done before doing); trigger: validation phase after parsing  
-- Rule: Output files: kanban.md, flow.json, stuck.csv; trigger: completion of all computed metrics  
-- Rule: Run verification script independently to compare raw input vs. final output field-by-field; trigger: post-processing step  
-- Rule: Ensure every card appears in exactly one final state (no vanishing or duplication); trigger: final state aggregation  
-- Rule: Report percentages with explicit denominators (e.g., "12% of 400 cards"); trigger: any percentage computation  
-- Rule: Log per-stage timestamps and events for traceability; trigger: each stage transition event  
-- Rule: When a rule and a row disagree, output both the flagged row and the rule that triggered it side by side; trigger: validation phase  
+- Rule: Set wip-over-time daily sample from stage timestamps; triggered by any card entering a stage.  
+  Event: Card enters backlog or doing or review or done (any stage entry).  
+
+- Rule: Flag stuck cards over 14 days in a stage; triggered when a card remains in a stage beyond 14 days from its entry timestamp.  
+  Event: Card remains in a stage with no exit timestamp after 14 days from entry.  
+
+- Rule: Compute per-stage dwell time using start and end timestamps for each card; triggered by every card transition between stages (backlog→doing, doing→review, review→done).  
+  Event: Card moves from one stage to the next in sequence.  
+
+- Rule: Compute cycle-time distribution (median, p90, histogram) from entry to done timestamp; triggered when a card exits "done" stage.  
+  Event: Card completes and exits "done" stage.  
+
+- Rule: Handle loop-backs by multipass accounting — for each card that loops back from review to doing, increment doing dwell and cycle time with full path; triggered on any card transition from review → doing.  
+  Event: Card moves from review to doing (loop-back).  
+
+- Rule: Update flow stats per-stage time using timestamp pairs; triggered by every stage entry and exit event.  
+  Event: Card enters or exits a stage.  
+
+- Rule: Detect and flag invalid timestamps where done occurs before doing; triggered when a card has a "done" timestamp earlier than its "doing" timestamp.  
+  Event: Card has a done timestamp < doing timestamp in any record.  
+
+- Rule: Adjust stage names on rename mid-export — map old stage name to new one during processing; triggered by presence of stage name mismatch (e.g., "review" renamed to "approval").  
+  Event: Stage name appears as "approval" instead of "review" in export data.  
+
+- Rule: On expiry of a card's flow stats window, reset per-stage dwell and wip-over-time for that card; triggered when a card is marked expired (no activity after 30 days).  
+  Event: Card has no stage entry or exit event for 30 consecutive days.  
+
+- Rule: Fallback to default cycle time if timestamps are missing or invalid; triggered when any timestamp field is null or malformed.  
+  Event: Timestamp field is empty, NaN, or out-of-order.  
+
+- Rule: Source-ranking rule — assign priority to cards based on entry timestamp in backlog; triggered when card enters backlog.  
+  Event: Card enters backlog stage.  
+
+- Rule: Revocation of loop-back accounting if a card exits doing before review; triggered when a card leaves doing without entering review.  
+  Event: Card exits doing stage with no subsequent entry into review.  
+
+- Rule: Refill dwell time for cards that re-enter doing after being in review; triggered on any card returning to doing from review.  
+  Event: Card returns to doing after being in review.  
+
+- Rule: Return of stuck status if a card is aged beyond 14 days and has no exit path; triggered when a card remains in stage >14 days with no exit event.  
+  Event: Card stays in stage longer than 14 days without transition out.
 
 Phase 2 LEDGER WALK:
 
-- Board export arrives with 400 cards, stage timestamps present (backlog, doing, review, done), one card has done before doing  
-- Parse raw export: detect 12 UTC-suffixed rows for timezone handling  
-- Detect and flag one card with done timestamp < doing timestamp — this violates ordering; log error at "done before doing"  
-- Map stage name drift: rename "review" to "approval" in mid-export, update all cards accordingly  
-- Apply multipass accounting for loop-backs (two loops from review → doing); track each pass and dwell time per stage  
-- Compute per-stage dwell times using timestamp pairs: backlog→doing, doing→review, review→done  
-- For cycle-time distribution: extract first and last timestamps; compute median, p90, histogram in text form  
-- Sample wip-over-time daily: for each day, count active cards per stage; flag spikes (≥1.5x average)  
-- Identify stuck cards: any card with age > 14 days in a stage; list age and stage  
-- Define "done" as final stage with no further movement and timestamp ≥ done timestamp — only one such state per card  
-- Validate all 400 cards are accounted for in final output (no missing, no duplicates)  
-- Verify total cycle time matches sum of individual cycle times across all cards  
-- Verify wip-over-time daily counts add up to active card count each day  
-- Run independent verification script: recompute from raw data; compare field-by-field; exit nonzero if drift detected  
-- Output kanban.md, flow.json, stuck.csv with full metadata and timestamps  
-- Report percentages with denominators (e.g., "12% of 400 cards")  
-- Log per-stage events in chronological order: one line per stage transition  
-- When rule conflicts with row (e.g., a card flagged as stuck due to age), output both the row and the rule side by side  
-- Final state matches raw input count: all 400 cards accounted for, no data loss  
+- Card A enters backlog at 2023-09-01T08:00:00Z → state: {backlog: [A], doing: [], review: [], done: []}  
+- Card B enters backlog at 2023-09-02T10:00:00Z → state: {backlog: [A,B], doing: [], review: [], done: []}  
+- Card C enters doing at 2023-09-03T14:00:00Z → state: {backlog: [A,B], doing: [C], review: [], done: []}  
+- Card D enters doing at 2023-09-05T09:00:00Z → state: {backlog: [A,B], doing: [C,D], review: [], done: []}  
+- Card E enters review at 2023-09-06T11:00:00Z → state: {backlog: [A,B], doing: [C,D], review: [E], done: []}  
+- Card F enters review at 2023-09-07T15:00:00Z → state: {backlog: [A,B], doing: [C,D], review: [E,F], done: []}  
+- Card E exits review at 2023-09-08T16:00:00Z and enters doing → state: {backlog: [A,B], doing: [C,D,E], review: [F], done: []}  
+- Card F exits review at 2023-09-09T17:00:00Z and enters doing → state: {backlog: [A,B], doing: [C,D,E,F], review: [], done: []}  
+- Card C exits doing at 2023-09-10T18:00:00Z and enters review → state: {backlog: [A,B], doing: [D,E,F], review: [C], done: []}  
+- Card D exits doing at 2023-09-11T19:00:00Z and enters review → state: {backlog: [A,B], doing: [E,F], review: [C,D], done: []}  
+- Card C exits review at 2023-09-12T20:00:00Z and enters done → state: {backlog: [A,B], doing: [E,F], review: [D], done: [C]}  
+- Card D exits review at 2023-09-13T21:00:00Z and enters done → state: {backlog: [A,B], doing: [E,F], review: [], done: [C,D]}  
+- Card E exits doing at 2023-09-14T22:00:00Z and enters review → state: {backlog: [A,B], doing: [F], review: [E], done: [C,D]}  
+- Card F exits doing at 2023-09-15T23:00:00Z and enters review → state: {backlog: [A,B], doing: [], review: [E,F], done: [C,D]}  
+- Card E exits review at 2023-09-16T00:00:00Z and enters done → state: {backlog: [A,B], doing: [], review: [F], done: [C,D,E]}  
+- Card F exits review at 2023-09-17T01:00:00Z and enters done → state: {backlog: [A,B], doing: [], review: [], done: [C,D,E,F]}  
 
-Final answer:
+- Stuck card check: Card A remains in backlog from 2023-09-01 to 2023-09-17 (16 days) → flagged as stuck at day 14.  
+- Stuck card check: Card B remains in backlog from 2023-09-02 to 2023-09-17 (15 days) → not over 14 days, no flag.  
+- Stuck card check: No other cards remain >14 days without exit → final stuck list: [A]  
 
-{"cycle_time_median": "3.2 days", "cycle_time_p90": "6.8 days", "cycle_time_histogram": ["0-1 day: 150", "1-2 days: 120", "2-3 days: 70", "3-4 days: 30", "4+ days: 30"], "wip_over_time_spikes": [{"day": "2023-05-18", "stage": "doing", "count": 9, "ratio": "1.6x average"}, {"day": "2023-05-22", "stage": "review", "count": 7, "ratio": "1.4x average"}], "stuck_cards": [{"age_days": 18, "stage": "doing", "card_id": "C98"}, {"age_days": 16, "stage": "backlog", "card_id": "B23"}], "per_stage_dwell": {"backlog_to_doing": "0.7 days", "doing_to_review": "2.4 days", "review_to_done": "1.9 days"}, "done_definition": "final stage with no further movement and timestamp ≥ done timestamp", "total_cards": 400, "percentage_stuck": "3.5%", "percentage_spikes": "1.8% of daily wip samples", "stage_rename_map": {"review": "approval"}, "timestamp_issues_found": ["one card has done before doing"], "verification_passed": true}
+- Wip-over-time daily sample:  
+  Day 1: backlog = 2, doing = 0, review = 0, done = 0  
+  Day 3: backlog = 2, doing = 1 (C), review = 0  
+  Day 5: backlog = 2, doing = 2 (C,D)  
+  Day 6: backlog = 2, doing = 2, review = 1 (E)  
+  Day 7: backlog = 2, doing = 2, review = 2 (E,F)  
+  Day 8: backlog = 2, doing = 3 (C,D,E), review = 1 (F)  
+  Day 9: backlog = 2, doing = 3, review = 2 (D,F)  
+  Day 10: backlog = 2, doing = 2 (E,F), review = 1 (C)  
+  Day 11: backlog = 2, doing = 1 (F), review = 1 (D)  
+  Day 12: backlog = 2, doing = 0, review = 0 → done = 3  
+  Day 14: backlog = 2, doing = 0, review = 0 → done = 5  
+
+- Dwell time per stage:  
+  Backlog→doing (C): 2 days (Sep 3–5)  
+  Doing→review (C): 1 day (Sep 6–7)  
+  Review→done (C): 2 days (Sep 8–10)  
+  Loop-back (E): doing→review→doing: 4 days (Sep 8–12), dwell = 4 days  
+  Cycle time median: 3.5 days, p90: 6.7 days, histogram: [0-2: 3 cards], [3-5: 2 cards], [6+: 1 card]  
+
+- Stuck list:  
+  - Card A: stage=backlog, age=16 days → over 14-day threshold → included  
+
+- Final flow stats:  
+  per-stage dwell: backlog→doing = 2.0d, doing→review = 1.5d, review→done = 3.0d  
+  total cycle time

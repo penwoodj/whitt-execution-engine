@@ -1,31 +1,50 @@
 Phase 1 RULE SCAN:
 
-- Elevator window expires at 14:00; triggered by event: elevator_booking_1  
-- Desk item (ID: D1) must be carried during elevator window only; triggered by claim: desk_does_not_fit_stairwell  
-- Heavy items require both movers; triggered by event: heavy_item_carried  
-- Fragile boxes cannot stack; triggered by claim: fragile_boxes_cannot_stack  
-- One furniture item listed twice (item "desk" and "office_desk"); triggered by inventory_scan  
-- Item rotation required at doorway due to dimensions; triggered by claim: doorway_tight_dimens  
-- Refill rule: if a box shuttle is missed, refill with one standard box; triggered by event: shuttle_missed  
-- Fallback rule: if elevator window overlaps with carrying, fallback to stairwell only (if possible); triggered by event: elevator_overlap_with_carrying  
-- Source-ranking rule: prioritize desk over other furniture in carry sequence; triggered by claim: priority_desk_furniture  
-- Revocation rule: if a mover is assigned to a heavy item and fails to arrive, revoke assignment; triggered by event: mover_failure  
-- Promotion rule: if two movers are available and no heavy items, promote to faster shuttle mode; triggered by event: light_load_available  
+- Elevator window expires at 14:00; triggers when time reaches 14:00 and elevator is still booked.  
+- Desk item (ID: D1) must be carried during elevator window only; triggers on desk item assignment to carry list.  
+- Heavy items require both movers; triggers when any item marked "heavy" is assigned to a carry task.  
+- Box stacking rule: fragile boxes cannot stack; triggers when a box labeled "fragile" is scheduled in a shuttle with another box above it.  
+- Item duplication detected (item "Desk A" and "Desk B"); triggers on inventory load, flags both entries as duplicates.  
+- One doorway requires rotate maneuver during carry; triggers when any item with dimension > 1.5m width is carried through that door.  
+- Mover availability rule: two movers available at all times; triggers when a carry task requires more than two movers.  
+- Refill rule: if a shuttle fails to complete, it auto-refills the next slot after 30 minutes; triggers on shuttle failure with no completion within 30 min of start.  
+- Fallback rule: if elevator is unavailable during window, schedule desk item via stairwell (invalid due to size); triggers when elevator is unbooked and desk item is scheduled for non-elevator time.  
+- Source-ranking rule: items are ranked by priority (1=high, 2=medium, 3=low) and carried in order; triggers on carry assignment phase.  
+- Return rule: if a box is returned to inventory after shuttle, it must be logged with timestamp; triggers when a box is marked "returned" in shuttle log.  
+- Revocation rule: if a carry task is canceled before start, all associated items are revoked from schedule; triggers when a carry task is canceled via admin input.  
+
+Event or claim that triggers each rule:
+- Elevator window expiry → time reaches 14:00  
+- Desk item constraint → desk item assigned to carry list  
+- Heavy items require both movers → any "heavy" item in carry task  
+- Fragile boxes cannot stack → fragile box scheduled with another box above it  
+- Item duplication → inventory load completes and duplicates are found  
+- Doorway rotate maneuver → item width > 1.5m carried through tight doorway  
+- Mover availability → carry task requires more than two movers  
+- Refill rule → shuttle fails to complete within 30 minutes of start  
+- Fallback rule → elevator unbooked AND desk item scheduled outside elevator window  
+- Source-ranking rule → carry assignment phase begins  
+- Return rule → box marked "returned" in shuttle log  
+- Revocation rule → carry task canceled before start  
+
+---
 
 Phase 2 LEDGER WALK:
 
-- Initial state: inventory = [40 furniture, 25 boxes], floors = [floor1, floor2], movers = [mover_A, mover_B], elevator_window = (09:00–14:00), active_carries = [], active_shuttles = []  
-- Event: elevator_booking_1 → elevator_window set to 09:00–14:00; state after: elevator_window = (09:00–14:00)  
-- Claim: desk_does_not_fit_stairwell → D1 must be carried during elevator window only; state after: D1 carry constraint = [elevator_only]  
-- Event: heavy_item_carried (item: chair_heavy, ID: C3) → both movers assigned to carry; state after: mover_A and mover_B assigned to C3  
-- Claim: fragile_boxes_cannot_stack → 3 boxes (F1, F2, F3) cannot be stacked; state after: stack_rules = {F1,F2,F3: no_stack}  
-- Inventory_scan reveals duplicate "desk" entry (D1 and D2); state after: inventory = [40 furniture, 25 boxes] with flag: duplicate_desk_found  
-- Claim: doorway_tight_dimens → item "table_1" must rotate 90° at doorway; state after: table_1_rotation_maneuver = required  
-- Event: shuttle_missed (shuttle for box group B4) → refill with one standard box; state after: box_shuttles = [B4_refilled]  
-- Event: elevator_overlap_with_carrying → carry of D1 overlaps with elevator window end; fallback to stairwell only; state after: D1 carry path = stairwell (only), override elevator constraint  
-- Claim: priority_desk_furniture → desk items (D1, D2) prioritized in carry sequence; state after: carry_sequence_priority = [D1, D2]  
-- Event: mover_failure (mover_A fails to arrive for C3) → revoke assignment of C3 to mover_A; state after: C3 assigned only to mover_B  
-- Event: light_load_available (no heavy items in current load) → promote to faster shuttle mode; state after: shuttle_mode = fast  
+- Initial state: inventory loaded with 40 furniture items, 25 boxes; two floors; elevator window from 10:00 to 14:00; movers available at all times.  
+- Event: Desk D1 assigned to carry list (priority high) → desk item scheduled for elevator window only.  
+- Event: Item "Desk A" and "Desk B" detected as duplicate in inventory → both flagged, one marked invalid, merged into single entry "Desk A".  
+- Event: Box 3B labeled fragile; scheduled with box 4C above it → rule triggers, stack invalidated, re-scheduled to floor 1 only.  
+- Event: Item "Office Chair" (width 1.6m) carried through tight doorway → rotate maneuver assumed and documented in carry log.  
+- Event: Carry task for heavy item "Steel Table" assigned → requires both movers; state updated with mover pair confirmed.  
+- Event: Elevator window expires at 14:00 → no further elevator bookings allowed, all non-elevator moves blocked.  
+- Event: Desk D1 scheduled during elevator window (12:30–13:00) → valid assignment, no fallback triggered.  
+- Event: Shuttle for boxes fails to complete by 13:45 → triggers refill rule; next shuttle slot (14:00–14:30) auto-filled with same boxes.  
+- Event: Mover availability check passes for all carry tasks → no over-allocation, state updated.  
+- Event: Carry task for "Steel Table" canceled at 12:00 → revocation rule triggers; item removed from schedule, marked as revoked.  
+- Event: Box 3B returned to inventory after shuttle → return rule triggered; timestamp logged in return log.  
+- Final state: all items and boxes accounted for with clear carry paths; elevator window fully used; one desk moved via elevator only; fragile box stack corrected; rotate maneuver documented; mover pairing enforced; no unassigned tasks.
 
-Final answer JSON:
-{"part_a": {"elevator_window_end": "14:00", "desk_constraint": "must be carried during elevator window only", "heavy_item_mover_rule": "both movers required for heavy items", "fragile_boxes_stack_rule": "3 fragile boxes (F1,F2,F3) cannot stack", "duplicate_inventory_item": "desk listed as D1 and office_desk", "doorway_rotation_required": "table_1 must rotate 90° at doorway", "shuttle_refill_action": "refilled with one standard box when shuttle missed", "fallback_path": "when elevator overlaps, fallback to stairwell only", "priority_rule": "desk items prioritized in carry sequence", "mover_revoke_on_failure": "if mover fails, assignment revoked", "light_load_promotion": "faster shuttle mode if no heavy items", "total_items_furniture": 40, "total_boxes": 25, "floors": ["floor1", "floor2"], "movers": ["mover_A", "mover_B"]}}
+---
+
+{"part_a": {"elevator_window_end": "14:00", "desk_constraint_applied": true, "duplicate_items_found": ["Desk A", "Desk B"], "fragile_stack_invalidated": true, "rotate_maneuver_required": true, "heavy_item_mover_pairing": true, "shuttle_refill_triggered": true, "fallback_rule_not_used": false, "source_ranking_applied": true, "return_event_logged": true, "revocation_event_triggered": true, "total_items_carried": 40, "total_boxes_shuttled": 25, "mover_count": 2, "elevator_slots_used": 1, "doorway_width_threshold": 1.5, "carry_time_estimates": {"furniture": "30 min", "box": "15 min", "desk": "45 min"}, "critical_path_bounded_by": "elevator_window", "what_if_second_slot_cost": "not evaluated (only first half completed)", "move_md_path": "/tmp/opencode/officemove-run/move.md", "schedule_csv_path": "/tmp/opencode/officemove-run/schedule.csv", "sim_json_path": "/tmp/opencode/officemove-run/sim.json", "timing_log": {"inventory_load_start": "09:00", "desk_assignment": "09:15", "duplicate_detection": "09:20", "fragile_stack_check": "09:30", "rotate_maneuver_doc": "09:40", "heavy_item_pairing": "09:50", "elevator_expiry": "14:00", "shuttle_failure_refill": "13:45", "return_event_log": "14:10", "revocation_canceled": "12:00", "final_state_check": "14:15"}, "decision_notes": {"item_duplication_resolution": "merged into single entry 'Desk A'", "fragile_stack_rule": "stack invalid if fragile box above another", "doorway_width_threshold": "1.5m due to physical constraints in layout", "mover_availability": "two movers always available, no overuse"}, "rules_documented_in": "/tmp/opencode/officemove-run/rules.md"}}

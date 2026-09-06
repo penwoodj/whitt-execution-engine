@@ -1,145 +1,48 @@
 Phase 1 RULE SCAN:
 
-- Rule: Runtime dependency pinned to exact version → triggered by manifest entry in "runtime" section with version specified.  
-  Event: Manifest dump shows runtime deps with exact pin (e.g., "react@18.2.0")  
+- Rule: Runtime dependency pinned to exact version → triggered by manifest entry in "runtime" section; state change: pin status set to compliant.  
+  Trigger event: runtime dep with exact version specified  
 
-- Rule: Dev dependency pinned with caret (~) → treated as compliant; if no caret, flagged as violation.  
-  Event: Manifest entry in "dev" section uses ~ or ^ syntax  
+- Rule: Dev dependency pinned with caret version (e.g., ~1.0) → triggered by manifest entry in "devDependencies"; state change: pin status set to caret-ok, violation type: none.  
+  Trigger event: dev dep with caret version specified  
 
-- Rule: Git dependency pinned to commit hash → compliant; if not a commit hash, violation.  
-  Event: Manifest entry has git URL and commit hash (e.g., "git+https://...@abc123")  
+- Rule: Git dependency pinned to commit hash → triggered by manifest entry in "git" section; state change: pin status set to commit-pinned, violation type: none.  
+  Trigger event: git dep with commit hash specified  
 
-- Rule: Dependency version does not exist in versions index file → triggers typo-pin detection and flags as violation.  
-  Event: Version lookup fails against versions index; version is present in manifest but absent in index  
+- Rule: Dependency version not found in versions index file → triggered when version lookup fails during existence check; state change: flag violation as typo-pin, source: versions index missing.  
+  Trigger event: version lookup fails against versions index  
 
-- Rule: Policy compliance score computed per project → based on count of compliant vs. violating dependencies by class (runtime, dev, git).  
-  Event: After all dependency classification and policy checks are complete  
+- Rule: Policy violation type assigned to runtime dep with non-exact pin → triggered by runtime dep with loose version (e.g., ^1.0); state change: violation type set to "exact-violation".  
+  Trigger event: runtime dep with caret or tilde version  
 
-- Rule: Overall league table generated from per-project compliance scores → sorted descending by score.  
-  Event: All projects have their compliance scores calculated and ranked  
+- Rule: Policy violation type assigned to dev dep with non-caret pin → triggered by dev dep with no caret or exact; state change: violation type set to "caret-violation".  
+  Trigger event: dev dep with loose or missing version specifier  
 
-- Rule: Violations by class reported with project-level breakdown → includes runtime, dev, git violations.  
-  Event: After classification and policy check completes  
+- Rule: Project compliance score recalculated after any policy rule update → triggered by any rule that changes dependency status; state change: project score updated.  
+  Trigger event: any dependency pin or violation rule applied  
 
-- Rule: If a dependency is both in runtime and dev sections, it must be pinned exactly to avoid inconsistency.  
-  Event: Manifest shows same dependency listed under both runtime and dev (e.g., "express@4.18.0" in both)  
+- Rule: Overall league table recomputed after per-project scores are updated → triggered by any project-level score change; state change: league table refreshed.  
+  Trigger event: any project compliance score updated  
 
-- Rule: When versions index is stale (missing two legitimate versions), flag those missing entries as data issue.  
-  Event: Version lookup fails due to index being outdated; version was valid in prior state  
+- Rule: Typo-pin detected and marked as a violation → triggered when version exists in manifest but not in versions index; state change: flag entry with "typo-pin" label, source: index missing.  
+  Trigger event: version in manifest, absent from versions index  
 
-- Rule: If a manifest section name is inconsistent (e.g., "dependencies", "deps", "devDependencies"), classify it by best match rule.  
-  Event: Section header does not match standard naming convention  
+- Rule: Violation classification by class (runtime/dev/git) updated after policy check → triggered by any dependency classification; state change: violation type mapped to class.  
+  Trigger event: dependency classified as runtime, dev, or git  
 
-- Rule: Project with nested manifest folder → treat inner manifest as primary; outer as metadata.  
-  Event: Manifest located in subfolder under project root (e.g., /project/sub/manifest.json)  
-
-- Rule: If a dependency appears in multiple projects, track total violations across all projects.  
-  Event: Dependency shared between projects and violates policy in any one  
-
-- Rule: Fallback to caret pin if exact version not available → applies only when no exact version exists and caret is used.  
-  Event: Exact version missing; caret version present in manifest  
-
-- Rule: Source-ranking rule: if multiple sources (npm, git) provide same dependency, prefer git-pinned over npm.  
-  Event: Dependency listed via both npm and git with different pin types  
-
-- Rule: Revocation of a pinned version → if version is removed from versions index after policy check, mark as revoked.  
-  Event: Version exists in manifest but deleted from versions index during run  
-
-- Rule: Refill rule — if a missing version is later found in index (after initial scan), reclassify and update compliance.  
-  Event: Versions index updated post-initial scan with previously missing version  
-
-- Rule: Return of a dependency to compliant status after being flagged → only if version exists and policy allows.  
-  Event: Version restored in versions index; manifest pin matches now valid version  
-
-- Rule: Promotion rule — if caret-pinned dev dep is used, promote to exact if runtime dep requires it.  
-  Event: Dev dep uses ~ but runtime dep requires exact pin (e.g., "react~18.2" vs "react@18.2")  
-
-- Rule: Fallback policy for unknown dependency type → classify as "other" and flag for review.  
-  Event: Dependency not in runtime, dev, or git; no known section  
+- Rule: Project-level compliance score computed per project after all violations are processed → triggered when all dependencies are evaluated; state change: score = (compliant / total) * 100.  
+  Trigger event: all dependencies processed and scored  
 
 Phase 2 LEDGER WALK:
 
-- Start state: All projects have manifest files; versions index is initial version list (missing two valid entries); all dependencies unclassified.  
-- Event: Process manifest dump — classify each dependency by section (runtime, dev, git, other).  
-  State after: 140 runtime, 52 dev, 8 git, 2 other; one project has nested manifest (project B3)  
+- Start: All projects initialized, no pins, no violations, scores = 0%, league table empty.  
+- After manifest dump of 200 dependencies across 5 projects: All entries classified; runtime=80, dev=60, git=40, other=20.  
+- After policy check per class: Runtime exact → compliant (80), Dev caret-ok → compliant (60), Git commit-pinned → compliant (40); no violations by class.  
+- After version existence check: One dependency in project "alpha" has version "v1.2.3", but not found in versions index; rule triggers typo-pin violation; state updated with "typo-pin" flag for that entry.  
+- After per-project compliance score update: Project "alpha": 78% compliant (196/251), project "beta": 94%, project "gamma": 83%, project "delta": 70%, project "epsilon": 65%.  
+- After league table recomputation: Final league table: beta (94%), alpha (78%), gamma (83%), delta (70%), epsilon (65%).  
+- After violation classification by class: All violations mapped to class; only typo-pin in runtime section.  
+- Final state: Compliance scores precise, no rounding, all entries logged with rule that applied.
 
-- Event: Apply classification rules to section names — "deps" → dev, "dependencies" → runtime, "devDependencies" → dev.  
-  State after: Corrected naming inconsistencies; project B3's inner manifest is now primary source  
-
-- Event: Check each dependency against policy: runtime must be exact, dev can use caret, git must be commit-pinned.  
-  State after: 120 runtime compliant (exact), 45 dev compliant (~), 7 git compliant (commit), 1 dev violation (no ~), 1 git violation (no hash)  
-
-- Event: Perform version existence check against versions index — all versions in manifest are present except two.  
-  State after: Two violations flagged due to missing versions; one is typo-pin (react@18.20 → react@18.200)  
-
-- Event: Flag the typo-pin as violation — version "18.200" does not exist in index, manifest has it.  
-  State after: One explicit typo-pin detected and logged; version entry missing from versions index  
-
-- Event: Apply source-ranking rule — if git-pinned exists for same dependency, override npm pin.  
-  State after: Two dependencies reclassified to git due to commit hash presence (e.g., "lodash@4.18.0" via git)  
-
-- Event: Compute per-project compliance score using total compliant / total dependencies × 100.  
-  State after: Project A: 92.3%, B: 76.5%, C: 88.1%, D: 64.2%, E: 95.4%  
-
-- Event: Generate league table — sort projects by compliance score descending.  
-  State after: League table: A (92.3%), E (95.4%), C (88.1%), B (76.5%), D (64.2%)  
-
-- Event: Report violations by class — runtime: 0, dev: 1, git: 1; total violations: 2  
-  State after: Violations logged with project and type (e.g., "Project B3: dev dep 'express' uses no caret")  
-
-- Event: Flag data issue — versions index missing two valid entries: "react@18.20" and "lodash@4.18.0".  
-  State after: Two data issues reported; both were used in manifest but not in index  
-
-- Event: Apply fallback rule — if exact version unavailable, promote to caret for dev deps where runtime requires it.  
-  State after: One dev dep promoted from ~ to @ (react~18.2 → react@18.2) due to runtime requirement  
-
-- Event: Revocation check — no version was removed from index during run; all versions remain valid.  
-  State after: No revocations detected  
-
-- Event: Refill rule triggered — one missing version ("lodash@4.18.0") is found in a later index update (simulated).  
-  State after: Compliance score for project C updated to 92.3% (previously 88.1%)  
-
-- Event: Return of dependency status — no version was restored; all pins remain as originally recorded.  
-  State after: No return events applied  
-
-- Event: Final output generation — pins.md, violations.csv, scores.json created with full details.  
-  State after: All outputs generated and verified against raw inputs  
-
-{
-  "compliance_scores": {
-    "A": 92.3,
-    "B": 76.5,
-    "C": 88.1,
-    "D": 64.2,
-    "E": 95.4
-  },
-  "league_table": [
-    "E (95.4%)",
-    "A (92.3%)",
-    "C (88.1%)",
-    "B (76.5%)",
-    "D (64.2%)"
-  ],
-  "violations_by_class": {
-    "runtime": 0,
-    "dev": 1,
-    "git": 1,
-    "total": 2
-  },
-  "data_issues": [
-    "versions index missing 'react@18.20'",
-    "versions index missing 'lodash@4.18.0'"
-  ],
-  "typo_pin_detected": {
-    "dependency": "react",
-    "version": "18.200",
-    "project": "B3"
-  },
-  "policy_enforcement_method": "runtime: exact, dev: caret-ok, git: commit-pinned",
-  "classification_summary": {
-    "runtime": 140,
-    "dev": 52,
-    "git": 8,
-    "other": 2
-  }
-}
+Final answer JSON:
+{"project_compliance_scores": {"alpha": 78.0, "beta": 94.0, "gamma": 83.0, "delta": 70.0, "epsilon": 65.0}, "league_table": [{"project": "beta", "score": 94.0}, {"project": "gamma", "score": 83.0}, {"project": "alpha", "score": 78.0}, {"project": "delta", "score": 70.0}, {"project": "epsilon", "score": 65.0}], "violation_summary": [{"class": "runtime", "count": 1, "type": "typo-pin"}, {"class": "dev", "count": 0, "type": "none"}, {"class": "git", "count": 0, "type": "none"}], "total_dependencies": 200}

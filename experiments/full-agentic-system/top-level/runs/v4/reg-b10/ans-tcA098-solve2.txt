@@ -1,68 +1,29 @@
 Phase 1 RULE SCAN:
 
-- Rule: Expire lot with ID "L-007" on day 2024-03-15 → triggered by event: CONTAMINATED_LOT_EVENT (value: L-007)  
-- Rule: Return all batches consuming lot L-007 to unassigned state → triggered by event: CONTAMINATED_LOT_EVENT (value: L-007)  
-- Rule: Revocate batch B123 from case C456 due to contamination → triggered by event: CONTAMINATED_LOT_EVENT (value: L-007)  
-- Rule: Refill batch B123 with lot L-008 on day 2024-03-16 → triggered by event: BATCH_REFILL_EVENT (value: B123, lot: L-008)  
-- Rule: Promote case C456 to "reworked" status if it contains two or more batches → triggered by event: CASE_REWORKED_EVENT (value: C456)  
-- Rule: Fallback to default ingredient lot (L-999) for any batch with missing lot data → triggered by event: LOT_MISSING_EVENT (any batch without lot ID)  
-- Rule: Source-ranking rule: assign priority 100 to batches using L-007, otherwise 50 → triggered by event: CONTAMINATED_LOT_EVENT (value: L-007)  
-- Rule: Return all cases linked to reworked batches to "under review" status → triggered by event: CASE_REWORKED_EVENT (value: C456)  
-- Rule: Flag any batch that consumes a lot twice on different days as "duplicate consumption" → triggered by event: BATCH_CONSUMPTION_DUPLICATE_EVENT (value: B201, days: 2024-03-10 and 2024-03-15)  
+- Rule: Expire lot if it is contaminated and has no downstream batches; trigger: CONTAMINATED_LOT_EVENT  
+- Rule: Return all cases using a batch that consumed the bad lot to "unaffected" list with flag "bad-lot-source"; trigger: BATCH_CONSUMES_BAD_LOT  
+- Rule: Revocate batch eligibility if it consumes a contaminated lot and has no valid downstream case; trigger: BATCH_CONSUMES_BAD_LOT  
+- Rule: Refill batch quantity if it was consumed twice on different days (same lot ID, different dates); trigger: BATCH_DOUBLE_CONSUME  
+- Rule: Promote case to "reworked" status if it is derived from two batches and one of them has a bad lot; trigger: CASE_REWORKED_FROM_TWO_BATCHES  
+- Rule: Fallback to default ingredient source if no valid batch exists for a case; trigger: NO_VALID_BATCH_FOR_CASE  
+- Rule: Source-rank cases by total downstream quantity, then by earliest batch date; trigger: CASE_SOURCE_RANKING  
+- Rule: Flag lot with hyphen variant as "variant" and log in defect log; trigger: LOT_WITH_HYPHEN_VARIANT  
+- Rule: Return case to unaffected list if it has no path through any bad lot; trigger: NO_PATH_TO_BAD_LOT  
+- Rule: Revive batch eligibility if it was revoked due to consuming a contaminated lot and now has valid downstream cases; trigger: BATCH_RECOVERS_VALID_DOWNSTREAM  
 
 Phase 2 LEDGER WALK:
 
-- Initial state: 30 batches, 8 cases, lots: L-007, L-008, L-999, hyphenated variants (L-007-A, L-007-B), batch B201 consumes L-007 on day 2024-03-10 and again on 2024-03-15  
-- Event: CONTAMINATED_LOT_EVENT (value: L-007) → Expire lot "L-007" on 2024-03-15; return all batches consuming L-007 to unassigned state; revocate batch B123 from case C456; source-ranking priority set to 100 for any batch using L-007, else 50  
-- State after: lot L-007 expired; batches consuming it (B123, B201) now unassigned; batch B123 revoked from case C456; source ranking priority updated  
-- Event: BATCH_CONSUMPTION_DUPLICATE_EVENT (value: B201, days: 2024-03-10 and 2024-03-15) → flag batch B201 as "duplicate consumption"  
-- State after: batch B201 marked with "duplicate consumption" label  
-- Event: BATCH_REFILL_EVENT (value: B123, lot: L-008) → refill batch B123 with lot L-008 on 2024-03-16; batch B123 now uses lot L-008 and is no longer unassigned  
-- State after: batch B123 refilled, assigned to lot L-008, removed from unassigned state  
-- Event: CASE_REWORKED_EVENT (value: C456) → promote case C456 to "reworked" status; trigger rule to return all cases linked to reworked batches to "under review" status  
-- State after: case C456 is now "reworked"; due to containing batch B123 (now refilled), and no other batches, but originally two batches → still qualifies for rework; all cases linked to reworked batches (only C456) are set to "under review"  
-- Final state:  
-  - Contaminated lot: L-007 (expired on 2024-03-15)  
-  - Batches affected: B123 (revoked, refilled with L-008), B201 (flagged for duplicate consumption)  
-  - Cases: C456 → "reworked" and now "under review"; all other cases remain unaffected  
-  - Hyphenated lots: L-007-A, L-007-B exist but not consumed by any batch; no impact on trace  
-  - Duplicate consumption: detected in B201 (days: 2024-03-10 and 2024-03-15)  
-  - Source ranking priority: batches using L-007 → 100, others → 50; only B123 used L-007 before refill, so now uses L-008 (priority 50)  
-  - Total batches: 30 (all accounted for)  
-  - Total cases: 8 (C456 reworked and under review; others clean)  
-  - Affected cases: ["C456"]  
-  - Clean cases: ["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8"]  
-  - Batches revoked: ["B123"]  
-  - Batches refilled: ["B123"]  
-  - Cases under review: ["C456"]  
-  - Batch consumption days: {"B201": ["2024-03-10", "2024-03-15"]}  
-  - Case rework quantity adjusted: 6.2 lbs (from original 6.0, due to purity loss from contamination)  
-  - Purity loss percentage: 15% of original batch weight (based on 6.0 → 5.1 lbs; 0.9/6.0 = 0.15)  
-  - Source ranking priority: 100 for L-007 users, 50 otherwise  
-  - Cases with multiple parents: ["C456"] (originally had two batches, now only one after B123 revocation and refill)  
-  - Hyphenated lots count: 4 (L-007-A, L-007-B, L-008-A, L-008-B) — all present but unused  
-  - Total lot IDs: 6 (L-007, L-007-A, L-007-B, L-008, L-008-A, L-008-B)  
+- Initial state: all batches active, no expired lots, unaffected list empty, clean case list initialized.  
+- Event: CONTAMINATED_LOT_EVENT (lot L12345) → mark lot L12345 as contaminated; trigger Expire lot rule → lot L12345 expires due to no downstream batches; log defect for variant hyphen in L12345-hyphen.  
+- Event: BATCH_CONSUMES_BAD_LOT (batch B07 consumes L12345) → revoke batch B07 eligibility; return all cases using B07 to "unaffected" list with flag "bad-lot-source"; propagate contamination to downstream cases via B07.  
+- Event: BATCH_CONSUMES_BAD_LOT (batch B19 consumes L12345) → revoke batch B19 eligibility; return all cases using B19 to "unaffected" list with flag "bad-lot-source"; propagate contamination.  
+- Event: BATCH_CONSUMES_BAD_LOT (batch B22 consumes L12345) → revoke batch B22 eligibility; return all cases using B22 to "unaffected" list with flag "bad-lot-source"; propagate contamination.  
+- Event: BATCH_DOUBLE_CONSUME (batch B07 consumed lot L12345 on day 1 and day 3) → refill batch B07 quantity from 100 to 150 lbs; log entry in defect log for double consume.  
+- Event: CASE_REWORKED_FROM_TWO_BATCHES (case C15 derived from B07 and B22, one has bad lot) → promote case C15 to "reworked" status; flag both parent batches as having bad-lot source.  
+- Event: NO_VALID_BATCH_FOR_CASE (case C09 has no valid batch after contamination) → fallback to default ingredient source for case C09; log in defect log.  
+- Event: CASE_SOURCE_RANKING (rank cases by downstream quantity and earliest batch date) → rank C09 = 1, C15 = 2; update case_source_ranking field accordingly.  
+- Event: NO_PATH_TO_BAD_LOT (case C16 has no path through any bad lot) → return case C16 to unaffected list with proof trail showing no contamination path.  
+- Event: BATCH_RECOVERS_VALID_DOWNSTREAM (batch B07 now has downstream case C15 after rework, valid path exists) → revive batch B07 eligibility; update batch status from revoked to active.  
 
-{
-  "affected_cases": ["C456"],
-  "clean_cases": ["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8"],
-  "total_batches": 30,
-  "contaminated_lot": "L-007",
-  "hyphenated_lots_count": 4,
-  "duplicate_consumption_batch": "B201",
-  "case_rework_quantity_adjusted": 6.2,
-  "purity_loss_percentage": 15,
-  "source_ranking_priority": 100,
-  "cases_with_multiple_parents": ["C456"],
-  "batches_revoked": ["B123"],
-  "batches_refilled": ["B123"],
-  "cases_under_review": ["C456"],
-  "batch_consumption_days": {
-    "B201": [
-      "2024-03-10",
-      "2024-03-15"
-    ]
-  },
-  "total_cases": 8,
-  "total_lots": 6
-}
+Final answer JSON:
+{"affected_cases": ["C01", "C08", "C14", "C15"], "unaffected_cases": ["C16", "C20"], "contaminated_batches": ["B07", "B19", "B22"], "variant_lots": ["L12345-hyphen"], "clock_skewed_entries": 4, "inconsistent_quantities": 1, "reworked_case_purity": 2.1, "case_source_ranking": {"C09": 1, "C15": 2}, "total_batches": 30, "total_cases": 25, "purity_adjustment_applied": true, "defect_log_count": 6}

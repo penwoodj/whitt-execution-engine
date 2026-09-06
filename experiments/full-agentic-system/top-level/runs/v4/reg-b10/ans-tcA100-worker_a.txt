@@ -1,48 +1,29 @@
 Phase 1 RULE SCAN:
 
-- Rule: Field removal detected in endpoint /api/v4/users/123 → triggers on event "endpoint_removed"  
-  Trigger: endpoint_removed  
-
-- Rule: Type narrowing from string to integer in field "age" of endpoint /api/v4/profile → triggers on event "type_narrowed"  
-  Trigger: type_narrowed  
-
-- Rule: Required field added in field "email" at endpoint /api/v5/profile → triggers on event "required_added"  
-  Trigger: required_added  
-
-- Rule: Field renamed from "phone" to "contact_number" with shim parameter "legacy_phone" → triggers on event "field_renamed_with_shim"  
-  Trigger: field_renamed_with_shim  
-
-- Rule: Endpoint /api/v4/old-endpoint is deprecated and removed in v5 → triggers on event "endpoint_deprecated_removed"  
-  Trigger: endpoint_deprecated_removed  
-
-- Rule: Source ranking rule — if a field appears in both versions but only in v5, it gains priority → triggers on event "source_ranking_update"  
-  Trigger: source_ranking_update  
-
-- Rule: Expiry rule — any field with a version-specific expiry date (e.g., expires_at in v4) is revoked in v5 if not present → triggers on event "expiry_revoked"  
-  Trigger: expiry_revoked  
-
-- Rule: Refill rule — if a field was removed and re-added with same name, it is treated as a refill → triggers on event "field_refilled"  
-  Trigger: field_refilled  
-
-- Rule: Fallback rule — when a required field fails to resolve in v5, fallback to v4 schema via shim → triggers on event "fallback_to_v4"  
-  Trigger: fallback_to_v4  
-
-- Rule: Promotion rule — if a field is added and later used in multiple endpoints, it is promoted to core schema → triggers on event "field_promoted"  
-  Trigger: field_promoted  
+- Rule: Field removal in endpoint /api/v1/user/profile triggers breaking change classification if field "email" is removed and was required in v4. Trigger: field_removed_in_endpoint_v5  
+- Rule: Type narrowing from string to integer in path /api/v1/orders/{id}/status causes breaking change; requires type check via schema validation. Trigger: type_narrowed_in_endpoint_v5  
+- Rule: Required field added in endpoint /api/v1/products/price triggers breaking change if the field was not required in v4. Trigger: required_added_in_endpoint_v5  
+- Rule: Field renamed from "address" to "location" with a shim parameter (e.g., ?shim=legacy) is classified as soft-breaking; applies only when both fields exist and shim is present. Trigger: field_renamed_with_shim_present  
+- Rule: Endpoint /api/v1/legacy/auth is deprecated in v5 and removed; triggers full removal from consumer-facing API list. Trigger: endpoint_removed_deprecated_v5  
+- Rule: If a schema path has a redirect declared in prose (e.g., "redirect to /v2/user"), it overrides the schema path and must be flagged as a soft-breaking edge case. Trigger: redirect_declared_in_prose  
+- Rule: Type format loosening from strict date-time to ISO8601 with timezone offset allowed in v5 endpoint /api/v1/events causes soft-breaking; only if no validation is enforced in v4. Trigger: type_format_loosened_v5  
+- Rule: Type format tightening from string to fixed-length string (e.g., "12-digit") in v5 endpoint /api/v1/transactions triggers breaking change due to strictness increase. Trigger: type_format_tightened_v5  
+- Rule: If a schema is unresolvable due to typo in v5 file (e.g., missing comma), the entire schema is marked invalid and treated as a data contradiction; must be reported in decisions. Trigger: schema_unresolvable_typo_v5  
+- Rule: When a field change involves both required and type changes, classify as breaking unless a shim exists. Trigger: compound_field_change_with_required_and_type  
 
 Phase 2 LEDGER WALK:
 
-- Initial state: v4 schema loaded; no changes applied  
-- Event: endpoint_removed → state updated: /api/v4/users/123 now marked as removed, no longer in active endpoints list  
-- Event: type_narrowed → state updated: field "age" in /api/v4/profile now has type integer (was string)  
-- Event: required_added → state updated: field "email" added as required to /api/v5/profile  
-- Event: field_renamed_with_shim → state updated: field "phone" renamed to "contact_number", legacy_phone parameter added for backward compatibility  
-- Event: endpoint_deprecated_removed → state updated: /api/v4/old-endpoint marked as deprecated and removed from all routing tables  
-- Event: source_ranking_update → state updated: fields in v5 now have higher priority than equivalent fields in v4 when both exist  
-- Event: expiry_revoked → state updated: field "expires_at" in v4 is revoked; no longer accessible in any endpoint  
-- Event: field_refilled → state updated: field "status" was removed and re-added in /api/v5/profile with same name, marked as refill  
-- Event: fallback_to_v4 → state updated: when "email" fails to parse in v5, fallback schema uses v4 version of email field  
-- Event: field_promoted → state updated: field "created_at" now promoted to core schema across all endpoints  
+- Initial state: v4 schema loaded; endpoints list = ["/api/v1/user/profile", "/api/v1/orders/{id}/status", "/api/v1/products/price", "/api/v1/legacy/auth"]  
+- Event: field_removed_in_endpoint_v5 → /api/v1/user/profile: "email" removed (was required in v4) → breaking change detected  
+- Event: type_narrowed_in_endpoint_v5 → /api/v1/orders/{id}/status: string → integer; breaking change applied  
+- Event: required_added_in_endpoint_v5 → /api/v1/products/price: new field "currency" added (was not required in v4) → breaking change detected  
+- Event: field_renamed_with_shim_present → /api/v1/user/profile: "address" renamed to "location", with ?shim=legacy; soft-breaking classified  
+- Event: endpoint_removed_deprecated_v5 → /api/v1/legacy/auth removed from endpoints list  
+- Event: redirect_declared_in_prose → /api/v1/orders/{id}/status redirected to /v2/orders/{id}; marked as soft-breaking edge case  
+- Event: type_format_loosened_v5 → /api/v1/events: string (date-time) → ISO8601 with timezone; soft-breaking due to no v4 validation enforcement  
+- Event: type_format_tightened_v5 → /api/v1/transactions: string → "exactly 12 digits"; breaking change applied  
+- Event: schema_unresolvable_typo_v5 → v5 schema at /api/v1/transactions has missing comma; marked invalid, contradiction reported in decisions  
+- Event: compound_field_change_with_required_and_type → /api/v1/products/price: field "price" changed from string to integer and made required → breaking change applied  
 
 Final answer JSON:
-{"part_a": {"endpoint_removed": [{"path": "/api/v4/users/123", "reason": "field removal detected"}], "type_narrowed": [{"path": "/api/v4/profile", "field": "age", "old_type": "string", "new_type": "integer"}], "required_added": [{"path": "/api/v5/profile", "field": "email"}], "field_renamed_with_shim": [{"path": "/api/v4/profile", "old_field": "phone", "new_field": "contact_number", "shim_param": "legacy_phone"}], "endpoint_deprecated_removed": [{"path": "/api/v4/old-endpoint", "status": "deprecated and removed"}], "source_ranking_update": [{"rule": "fields in v5 have higher priority than equivalent fields in v4"}], "expiry_revoked": [{"field": "expires_at", "version": "v4", "action": "revoked"}], "field_refilled": [{"path": "/api/v5/profile", "field": "status", "reason": "removed and re-added with same name"}], "fallback_to_v4": [{"field": "email", "fallback_condition": "fails to parse in v5", "source": "v4 schema"}], "field_promoted": [{"field": "created_at", "new_status": "core_schema"}]}}
+{"part_a": {"endpoint_diffs": [{"path": "/api/v1/user/profile", "changes": ["field_removed: email (required in v4)"], "classification": "breaking"}, {"path": "/api/v1/orders/{id}/status", "changes": ["type_narrowed: string → integer"], "classification": "breaking"}, {"path": "/api/v1/products/price", "changes": ["required_added: currency", "field_type_changed: price (string → integer)"], "classification": "breaking"}, {"path": "/api/v1/user/profile", "changes": ["field_renamed: address → location with ?shim=legacy"], "classification": "soft-breaking"}], "deprecated_endpoints": ["/api/v1/legacy/auth"], "edge_cases": [{"type": "redirect", "path": "/api/v1/orders/{id}/status", "description": "redirected to /v2/orders/{id} in prose"}, {"type": "format_loosening", "path": "/api/v1/events", "description": "string → ISO8601 with timezone, no v4 validation enforced"}, {"type": "format_tightening", "path": "/api/v1/transactions", "description": "string → 12-digit fixed length; breaking change"}, {"type": "schema_typo", "path": "/api/v1/transactions", "description": "missing comma in v5 schema, unresolvable"}], "rules_applied_count": 10, "total_breaking_changes": 4, "soft_breaking_changes": 1, "breaking_change_percentage": "80.0% of field/type changes (4 out of 5)", "soft_breaking_change_percentage": "20.0% of field/type changes (1 out of 5)"}}

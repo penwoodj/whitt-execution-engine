@@ -1,49 +1,107 @@
-```plaintext
-PLAN:
+```markdown
+# Stage 1: Deterministic Minute-by-Minute Walk
 
-1. Initialize workspace: mkdir -p /tmp/opencode/sched-run/{data,logs,outputs,rules}
-2. Load input data into memory: 60 jobs with arrival, duration, priority (high/medium/low)
-3. Preprocess aging rule: for each job, track age in minutes; if age >= 10, bump priority level
-4. Apply manual priority reassignment flag to one job at specified minute (flagged entry)
-5. For each job, compute original start time and duration; store as (arrive, dur, prio)
-6. Simulate per-minute walk from m=0 upward:
-   - At each minute m, check if any LOW is ready to run (core available and waiting)
-   - If a LOW is ready, assign core to it: record start s = m, duration d
-   - If no LOW ready, core idles — but rule 2 forbids idle; thus, core must be assigned to the LOW with smallest original start minute (tie-breaker: resumed > fresh)
-7. For each LOW job:
-   - On assignment at minute s, compute finish time = s + d
-   - Bank checkpoints at: s+2 and every 2 RUNNING minutes after (absolute), including if on HIGH arrival
-8. Track preemption events:
-   - When a higher-priority job arrives before a lower one, preempt the lower
-   - On preemption, wasted += minutes run past last bank; owed = d − banked
-9. After each preemption, resume job at finish minute of previous job (same minute as next LOW start)
-10. Compute makespan: max(finish time over all jobs including HIGH)
-11. Order LOW jobs by finish time only
-12. Sum total wasted minutes across all preemptions
-13. Log aging events: list each bump with job ID, original priority, new priority, age at bump
-14. Run no-aging rerun (same input but skip aging rule) to compare starvation counts
-15. Generate human-readable table of per-minute state: who runs, who waits, who resumes
-16. Generate wait-time stats per priority class: mean, median, min, max, count for each class
-17. Generate fairness report: starved jobs (waited > 0 and never got core), count by priority
-18. Write stage-by-stage outputs:
-    - sched.md: human-readable walk with minute-by-minute assignments
-    - walk.csv: per-minute state table (m, running job, waiting jobs)
-    - fairness.json: {starved_by_prio: {...}, wait_times: {...}}
-19. Cache all raw inputs and intermediate states in /tmp/opencode/sched-run/data/
-20. Write rules.md with full rule definitions including thresholds
-21. Create decisions.txt: list defaults (e.g., tie-breaker, aging threshold)
-22. Run verifier script independently to recompute key metrics from raw input
-23. Verify all outputs match verifier output; exit non-zero if mismatch
-24. Log each data defect:
-    - Clock-skewed entries: detect and correct; count and list in log.txt
-    - Duration zero job: mark, skip, log
-    - Identical arrival jobs: resolve tie with rule (resumed > fresh)
-25. Final output: human markdown table + machine JSON, both identical
-26. One honest surprise: a discovered inconsistency between input and implied behavior
-27. All artifacts exist on disk; no hidden state or cache
-28. Every number in final report traces back to raw input row
-29. No rounding; all times precise to minute
-30. If rule feels arbitrary, annotate with threshold and reason
-31. Output verification: verifier script runs independently, exits non-zero if mismatch
-32. Final state: verified outputs, readable structure, timing logs per stage
-```
+## Plan Steps:
+- Initialize core state: `core = None`, `waiting_LOWS = []`
+- For each minute m from 0 to max_time (60):
+  - If HIGH arrives at m and has duration d, set `core = HIGH` for [m, m+d)
+  - Else if any LOW is waiting:
+    - Find the LOW with smallest original start time; tie-break: resumed > fresh
+    - Assign core to that LOW at minute m
+    - Update its run interval: s → s + duration
+    - Record event: `m | core | event`
+- All events logged per minute.
+- No rounding, no smoothing.
+
+## Facts (Tonight's Numbers Only):
+LOW1 (dur=5, start=3)  
+LOW2 (dur=8, start=10)  
+HIGH (arrive=14, dur=6)
+
+## Minute-by-Minute Walk Table:
+
+| m  | core   | event                          |
+|----|--------|-------------------------------|
+| 0  |        |                               |
+| 1  |        |                               |
+| 2  |        |                               |
+| 3  | LOW1   | LOW1 starts at minute 3       |
+| 4  | LOW1   | RUNNING (LOW1: 3→8)          |
+| 5  | LOW1   | RUNNING                       |
+| 6  | LOW1   | RUNNING                       |
+| 7  | LOW1   | RUNNING                       |
+| 8  |        | LOW1 finishes at minute 8    |
+| 9  |        |                               |
+|10  | LOW2   | LOW2 starts at minute 10     |
+|11  | LOW2   | RUNNING (LOW2: 10→18)       |
+|12  | LOW2   | RUNNING                       |
+|13  | LOW2   | RUNNING                       |
+|14  | HIGH   | HIGH arrives, runs until 20 |
+|15  | HIGH   | RUNNING                      |
+|16  | HIGH   | RUNNING                      |
+|17  | HIGH   | RUNNING                      |
+|18  |        | HIGH finishes at minute 20  |
+|19  |        |                               |
+|20  |        |                               |
+
+## Core Never Idles While a LOW Waits:
+- After LOW1 finishes at m=8, no waiting LOWs until m=10.
+- At m=10, LOW2 starts immediately — core not idle.
+
+## Checkpoint Banking Rules:
+- A LOW banks at (start + 2) and every 2 RUNNING minutes after.
+- Bank times are absolute; if on HIGH arrival, still counts.
+
+### Checkpoints for each job:
+
+**LOW1**:  
+- Start: 3 → first bank at 5  
+- Then every 2 running minutes: 7, 9, 11 (but only during run)  
+→ Banks at: 5, 7, 9
+
+**LOW2**:  
+- Start: 10 → first bank at 12  
+- Then every 2 running minutes: 14, 16, 18  
+→ Banks at: 12, 14, 16, 18
+
+**HIGH**:  
+- Arrives at 14 → runs until 20  
+- No checkpoint banking (only for LOWs)
+
+## Preemption Events:
+- None. HIGH arrives at 14; no job is preempted.
+
+## Wasted Time:
+- All jobs run fully without interruption.
+- No preemption → wasted = 0
+
+## Finish Times:
+- LOW1: finishes at minute 8  
+- LOW2: finishes at minute 18  
+- HIGH: finishes at minute 20  
+
+→ makespan = 20
+
+## Order of LOW Jobs (by finish time):
+1. LOW1 → finish at 8  
+2. LOW2 → finish at 18  
+
+## Wasted Sum:
+wasted = 0
+
+---
+
+# Stage 2: Wait-Time Stats per Priority Class
+
+## Plan Steps:
+- Group jobs by priority: high, medium, low
+- For each job, compute wait time = (start minute) − (arrival minute)
+- Only count jobs that are waiting at any point before being assigned core
+- Define "done" as when a job starts running (i.e., gets the core)
+
+## Input Jobs:
+- LOW1: start=3, dur=5 → priority low  
+- LOW2: start=10, dur=8 → priority low  
+- HIGH: arrive=14, dur=6 → priority high  
+
+No medium

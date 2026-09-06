@@ -1,89 +1,117 @@
 Phase 1 RULE SCAN:
 
-- Rule: Install-without-clean detection triggers when a layer contains apt-get install or similar package installer command with no subsequent remove or cleanup.  
-  Trigger: Any layer with "apt-get install" or equivalent followed by no removal in later layers, AND the layer is not marked as metadata-only.  
-  Reason: This pattern adds bloat that persists; threshold = 10% of cumulative size if repeated across multiple layers.
+- Rule: Install-without-clean detection triggers when a layer contains apt-get install (or equivalent) and no subsequent remove or cleanup command is found in any later layer.  
+  Trigger: Event 2 (wasteful-pattern detection)  
+  Threshold: If the layer has "apt-get install" in its command AND no layer after it has a "rm -rf /var/lib/apt/lists/*" or equivalent cleanup, flag as wasteful.  
+  Reason: This is a known bloat pattern where installed packages are not cleaned up.
 
-- Rule: Duplicated data adds detection triggers when a layer contains identical file paths or content hashes (via checksum comparison) to a prior layer, and the later layer does not remove or overwrite.  
-  Trigger: File path or content hash match between two layers with no intervening removal.  
-  Reason: Redundant data increases size without functional benefit; threshold = 5% of cumulative size if repeated.
+- Rule: Duplicated data adds detection triggers when the same file path appears in two consecutive layers with identical content hashes (or file paths and sizes).  
+  Trigger: Event 2 (wasteful-pattern detection)  
+  Threshold: If layer N has a file at /path/to/file and layer N+1 also has the same file with same size and path, flag as duplicated data adds.  
+  Reason: This indicates redundant storage of identical content.
 
-- Rule: Secrets-in-layer detection triggers when a layer contains any string that matches known secret patterns (e.g., API keys, passwords) in command or file content.  
-  Trigger: Any layer with text matching regex pattern for secrets (e.g., "password=xxx", "token=abc123").  
-  Reason: Security risk; threshold = 100% of layer size if present.
+- Rule: Secrets-in-layer detection triggers when a layer contains any string that matches known secret patterns (e.g., API keys, passwords, tokens) in its command or output.  
+  Trigger: Event 2 (wasteful-pattern detection)  
+  Threshold: If the command or shell output contains a substring matching a known secret pattern (e.g., "password=abc123", "token=xyz789"), flag as secrets-in-layer.  
+  Reason: Exposure of credentials in image layers poses security risks and can be exploited.
 
-- Rule: Add-then-remove pair detection triggers when a layer adds data (via command or file) and a later layer removes it via rm -rf, delete, or equivalent.  
-  Trigger: A layer with file creation or data addition followed by a later layer removing that same path or content.  
-  Reason: Net-zero weight but high history cost; threshold = any such pair where the added size > 0.
+- Rule: Add-then-remove pair detection triggers when a layer adds content (e.g., files, directories) that is later removed by a subsequent layer.  
+  Trigger: Event 3 (add-then-remove pairs)  
+  Threshold: If layer N creates a file or directory at /path/to/file and layer M > N removes it via rm -rf or equivalent, flag as add-then-remove pair.  
+  Reason: These patterns contribute to image bloat without functional benefit; the content is added and then deleted, increasing layer size unnecessarily.
 
-- Rule: Refill rule triggers when a layer is rebuilt from scratch (e.g., new base image) and contains identical commands to a prior layer, indicating redundant work.  
-  Trigger: Layer command matches previous layer exactly in sequence and content.  
-  Reason: Redundant execution; threshold = cumulative size > 10% of total if repeated.
+- Rule: Layer size cumulative rule triggers when layer sizes are summed sequentially from base to top.  
+  Trigger: Event 1 (layer table generation)  
+  Threshold: Cumulative size = sum of all prior layers' sizes + current layer size.  
+  Reason: Required for accurate bloat analysis and slim rebuild estimation.
 
-- Rule: Expiry rule triggers when a layer is marked as "expired" or "obsolete" by metadata (e.g., timestamp older than 7 days).  
-  Trigger: Layer has timestamp older than  or no timestamp at all.  
-  Reason: Outdated layers should be pruned; threshold = 10% of cumulative size if expired and unused.
+- Rule: Zero-size layer handling rule triggers when a layer has zero size but performs metadata-only operations.  
+  Trigger: Event 1 (layer table generation)  
+  Threshold: If the layer command is non-empty but size is 0, log it as "metadata-only" and include in cumulative size calculation.  
+  Reason: Such layers do not add content but may still affect image structure; must be accounted for to avoid underestimating total footprint.
 
-- Rule: Return rule triggers when a layer is marked as "return" in metadata (e.g., rollback, revert).  
-  Trigger: Layer has "return" flag or command like "rollback to layer X".  
-  Reason: Indicates state reversion; threshold = any such layer with size > 0.
+- Rule: Truncated command detection triggers when a layer command ends with an ellipsis (e.g., "...") indicating incomplete or missing execution.  
+  Trigger: Event 1 (layer table generation)  
+  Threshold: If the command field contains "..." or similar truncation, flag as truncated and note in logs.  
+  Reason: Indicates data incompleteness; such layers may not have executed fully, leading to potential misrepresentation of actual behavior.
 
-- Rule: Fallback rule triggers when a layer contains fallback logic (e.g., "if not found, use default") and the default is not actually used.  
-  Trigger: Layer has conditional command with fallback path but no evidence of actual fallback execution.  
-  Reason: Wasted computation; threshold = 15% of cumulative size if unused.
+- Rule: Slim rebuild estimate rule triggers when patterns are identified (install-without-clean, duplicated data adds, add-then-remove pairs).  
+  Trigger: Event 4 (slim rebuild estimate)  
+  Threshold: For each pattern type, calculate projected saving based on layer size and removal.  
+  Reason: Provides a realistic projection of image reduction after fixing bloat patterns; must include uncertainty due to unknown dependencies or missing cleanup.
 
-- Rule: Source-ranking rule triggers when a layer's source (e.g., base image, build step) is ranked lower than previous layers in dependency graph.  
-  Trigger: Layer has source with lower priority or no explicit dependency path.  
-  Reason: May indicate poor optimization; threshold = any such layer where size > cumulative total * 0.1.
-
-- Rule: Promotion rule triggers when a layer is promoted to "production" status via metadata flag.  
-  Trigger: Layer has "promoted=true" in metadata.  
-  Reason: Indicates active use; threshold = only if used by downstream layers.
+- Rule: Bloat source-ranking rule triggers when multiple bloat sources exist in the same layer or across layers.  
+  Trigger: Event 2 (wasteful-pattern detection)  
+  Threshold: Rank bloat sources by total size impact, then by frequency of occurrence.  
+  Reason: Enables prioritization of fixes; higher-impact patterns should be addressed first.
 
 Phase 2 LEDGER WALK:
 
-[timestamp=2024-04-15T08:30:00Z] Layer table generated with index, command, size, cumulative size:
-- Index 0: "RUN mkdir /tmp", size=1024, cumulative=1024
-- Index 1: "RUN apt-get update && apt-get install curl -y", size=3500, cumulative=4524
-- Index 2: "COPY file.txt /app/", size=1000, cumulative=5524
-- Index 3: "RUN echo 'hello' > /tmp/secret", size=100, cumulative=5624
-- Index 4: "RUN rm -rf /tmp/secret", size=0, cumulative=5624 (no change)
-- Index 5: "COPY app.js /app/", size=8000, cumulative=13624
-- Index 6: "RUN apt-get install python3 -y && rm -rf /var/lib/apt/lists/*", size=7000, cumulative=20624
-- Index 7: "COPY config.json /etc/", size=500, cumulative=21124
-- Index 8: "RUN echo 'debug' > /log/debug.log", size=100, cumulative=21224
-- Index 9: "RUN rm -rf /log/debug.log", size=0, cumulative=21224 (no change)
-- Index 10: "COPY data.csv /data/", size=50000, cumulative=26224
-- Index 11: "RUN apt-get install postgresql-client -y", size=3000, cumulative=29224
-- Index 12: "RUN mkdir /backup && cp /data/data.csv /backup/", size=5000, cumulative=34224
-- Index 13: "RUN rm -rf /data/data.csv", size=0, cumulative=34224 (no change)
-- Index 14: "COPY secret.key /etc/secret.key", size=1024, cumulative=35248
-- Index 15: "RUN echo 'password=abc123' > /tmp/pass.txt", size=100, cumulative=35348 → flagged by secrets-in-layer rule (threshold met)
-- Index 16: "RUN rm -rf /tmp/pass.txt", size=0, cumulative=35348
-- Index 17: "COPY app.py /app/", size=20000, cumulative=55348
-- Index 18: "RUN python3 app.py", size=10000, cumulative=65348
-- Index 19: "RUN apt-get install nginx -y && rm -rf /var/lib/apt/lists/*", size=25000, cumulative=90348
-- Index 20: "COPY index.html /usr/share/nginx/html/", size=10000, cumulative=100348
-- Index 21: "RUN echo 'debug' > /var/log/nginx.log", size=100, cumulative=100448
-- Index 22: "RUN rm -rf /var/log/nginx.log", size=0, cumulative=100448 (no change)
-- Index 23: "COPY .dockerignore /root/", size=500, cumulative=100948
-- Index 24: "RUN mkdir /tmp && touch /tmp/backup.txt", size=100, cumulative=101048
-- Index 25: "RUN rm -rf /tmp/backup.txt", size=0, cumulative=101048 (no change)
-- Index 26: "COPY .gitignore /app/", size=300, cumulative=101348
-- Index 27: "RUN echo 'version=1.0' > /etc/version", size=100, cumulative=101448
-- Index 28: "RUN rm -rf /etc/version", size=0, cumulative=101448 (no change)
-- Index 29: "COPY final.tar.gz /output/", size=500000, cumulative=551448
-- Index 30: "RUN tar -xzf final.tar.gz -C /app", size=500000, cumulative=601448 (no change)
-- Index 31: "RUN rm -rf /output/final.tar.gz", size=0, cumulative=601448
-- Index 32: "COPY .dockerignore /app/", size=500, cumulative=601948 → duplicated data adds (same as index 23); flagged
-- Index 33: "RUN echo 'debug' > /log/debug.log", size=100, cumulative=602048 → fallback rule triggered; no actual fallback used; flagged
-- Index 34: "RUN rm -rf /log/debug.log", size=0, cumulative=602048 (no change)
-- Index 35: "COPY app.js /app/", size=8000, cumulative=610048 → duplicated data adds; flagged
-- Index 36: "RUN apt-get install python3 -y && rm -rf /var/lib/apt/lists/*", size=7000, cumulative=680048 → refill rule triggered (same as index 6); flagged
-- Index 37: "COPY config.json /etc/", size=500, cumulative=680548 → source-ranking rule triggered; source not prioritized; flagged
-- Index 38: "RUN echo 'promoted' > /promote", size=100, cumulative=680648 → promotion rule triggered; used by downstream layers; marked
-- Index 39: "RUN rm -rf /promote", size=0, cumulative=680648 (no change)
+Layer 0: command="docker build", size=50MB, cumulative_size=50MB  
+Layer 1: command="apt-get update && apt-get install curl -y", size=30MB, cumulative_size=80MB → Install-without-clean detected (no cleanup later)  
+Layer 2: command="mkdir /tmp/data", size=10MB, cumulative_size=90MB  
+Layer 3: command="echo 'test' > /tmp/data/file.txt", size=5MB, cumulative_size=95MB  
+Layer 4: command="cp /tmp/data/file.txt /home/user/", size=5MB, cumulative_size=100MB → Duplicated data adds detected (same file path and content)  
+Layer 5: command="rm -rf /tmp/data", size=2MB, cumulative_size=102MB → Add-then-remove pair detected (file added in layer 4, removed here)  
+Layer 6: command="apt-get install python3 -y", size=40MB, cumulative_size=142MB → Install-without-clean detected (no cleanup later)  
+Layer 7: command="echo 'secret_key=abc123' > /etc/secret.conf", size=5MB, cumulative_size=147MB → Secrets-in-layer detected  
+Layer 8: command="rm -rf /tmp/data", size=0MB, cumulative_size=147MB → Add-then-remove pair detected (file added in layer 5, removed here)  
+Layer 9: command="mkdir /var/log/app", size=2MB, cumulative_size=149MB  
+Layer 10: command="echo 'log' > /var/log/app/entry.log", size=3MB, cumulative_size=152MB  
+Layer 11: command="rm -rf /var/log/app", size=3MB, cumulative_size=155MB → Add-then-remove pair detected (file added in layer 10, removed here)  
+Layer 12: command="apt-get install nginx -y", size=60MB, cumulative_size=215MB → Install-without-clean detected (no cleanup later)  
+Layer 13: command="echo 'config' > /etc/nginx/conf.d/default.conf", size=4MB, cumulative_size=219MB  
+Layer 14: command="rm -rf /var/lib/apt/lists/*", size=5MB, cumulative_size=224MB → Cleanup applied; install-without-clean no longer active for layer 12  
+Layer 15: command="mkdir /opt/app", size=10MB, cumulative_size=234MB  
+Layer 16: command="echo 'app' > /opt/app/main.py", size=8MB, cumulative_size=242MB  
+Layer 17: command="rm -rf /opt/app", size=9MB, cumulative_size=251MB → Add-then-remove pair detected (file added in layer 16, removed here)  
+Layer 18: command="apt-get install nodejs -y", size=45MB, cumulative_size=296MB → Install-without-clean detected (no cleanup later)  
+Layer 19: command="echo 'node_secret=xyz789' > /home/user/.env", size=5MB, cumulative_size=301MB → Secrets-in-layer detected  
+Layer 20: command="rm -rf /home/user/.env", size=4MB, cumulative_size=305MB → Add-then-remove pair detected (file added in layer 19, removed here)  
+Layer 21: command="mkdir /tmp/cache", size=6MB, cumulative_size=311MB  
+Layer 22: command="echo 'cache' > /tmp/cache/data.txt", size=7MB, cumulative_size=318MB → Duplicated data adds detected (same file path and content as layer 4)  
+Layer 23: command="rm -rf /tmp/cache", size=5MB, cumulative_size=323MB → Add-then-remove pair detected (file added in layer 22, removed here)  
+Layer 24: command="apt-get install postgresql-client -y", size=30MB, cumulative_size=353MB → Install-without-clean detected (no cleanup later)  
+Layer 25: command="echo 'db_config' > /etc/postgres.conf", size=8MB, cumulative_size=361MB  
+Layer 26: command="rm -rf /var/lib/apt/lists/*", size=0MB → Cleanup applied; install-without-clean no longer active for layer 24  
+Layer 27: command="echo 'final' > /tmp/final.txt", size=1MB, cumulative_size=362MB  
+Layer 28: command="rm -rf /tmp/final.txt", size=1MB, cumulative_size=363MB → Add-then-remove pair detected (file added in layer 27, removed here)  
 
-Wasteful-pattern detection:
-- Install-without-clean: Layer 1 (apt-get install curl), no removal later → detected.  
-  Size added: 3500; cumulative = 4524; 10% of cumulative? 45
+Final answer JSON:
+{
+  "layers": [
+    {
+      "index": 0,
+      "command": "docker build",
+      "size": 50,
+      "cumulative_size": 50
+    },
+    {
+      "index": 1,
+      "command": "apt-get update && apt-get install curl -y",
+      "size": 30,
+      "cumulative_size": 80
+    },
+    {
+      "index": 2,
+      "command": "mkdir /tmp/data",
+      "size": 10,
+      "cumulative_size": 90
+    },
+    {
+      "index": 3,
+      "command": "echo 'test' > /tmp/data/file.txt",
+      "size": 5,
+      "cumulative_size": 95
+    },
+    {
+      "index": 4,
+      "command": "cp /tmp/data/file.txt /home/user/",
+      "size": 5,
+      "cumulative_size": 100
+    },
+    {
+      "index": 5,
+      "command": "rm -rf /tmp/data",
+      "size": 2,
+      "cumulative_size":

@@ -1,30 +1,32 @@
-1. Initialize workspace at `/tmp/opencode/courier-run`, create directory structure with `logs/`, `outputs/`, `rules.md`, and `raw_data/`.  
-2. Read input data (deliveries, time windows, as-driven route, recomputed route) into structured format: list of tuples `(x, y, start_time, end_time)` for each delivery, plus route sequences as lists of indices.  
-3. Define Manhattan distance formula: `distance = |Δx| + |Δy|` between two grid points.  
-4. Compute total distance and window compliance for the as-driven route using the defined distance metric; for each stop, check if arrival time is within `[start_time, end_time]`.  
-5. Identify three deliveries that missed their windows: record exact delivery ID, address (x,y), time window, and actual arrival time.  
-6. Apply nearest-neighbor heuristic to generate initial recomputed route from depot, using greedy selection of unvisited closest point.  
-7. Apply 2-opt improvement on the nearest-neighbor route by iteratively swapping two edges that reduce total distance; track all intermediate distances.  
-8. Compute total distance for the recomputed route (nearest-neighbor + 2-opt) with full precision, no rounding.  
-9. Recheck window compliance under the new route: for each stop, verify arrival time is within its time window using Manhattan distance from depot to stop and sequence of moves.  
-10. Identify any missed windows in the recomputed route; if three or more are missed, flag them with full details (ID, address, window, arrival).  
-11. Perform trade-off analysis: compute distance saved = as-driven_distance - recomputed_distance; compute window risk = number of misses under new route vs. old route.  
-12. Evaluate whether the improvement in distance justifies increased risk of missed windows; recommend action (e.g., "accept with caution", "reject due to risk", "improve further").  
-13. Surface all data anomalies:  
-    - Two identical delivery points → flag both, note duplication, disposition ("quarantined" or "rejected") with rule cited.  
-    - One time window wider than working day (e.g., 0–24 hours) → flag and record; disposition ("handled as valid", "rejected").  
-    - Depot appears twice under different names → identify both, merge or reject based on rule: "depot name must be unique; if duplicate, use first entry; disposition 'merged'".  
-14. Output courier.md with human-readable table at top (deliveries, windows, compliance), machine-readable version underneath (same numbers, no rounding).  
-15. Output routes.json: store as JSON array of route sequences (as-driven and recomputed) with full coordinates and distances.  
-16. Output compliance.csv: tab-separated file listing each delivery with arrival time, window start/end, compliance status (yes/no), and distance from prior stop.  
-17. Log timestamps for each stage in a log line per step (e.g., `2024-05-01T10:00:00Z - Stage 1: workspace initialized`).  
-18. Write rules.md with all decisions, including thresholds and rationale (e.g., "if time window > 24h → reject; reason: exceeds working day").  
-19. Implement a standalone verifier script that reads raw input files and recomputes key values independently (as-driven distance, compliance, misses) without importing pipeline code.  
-20. Run the verifier on outputs (`courier.md`, `routes.json`, `compliance.csv`) and record exit codes; if any mismatch, report it explicitly.  
-21. Ensure all percentages include denominators: e.g., "75% of deliveries met windows" → "75% (45/60) of deliveries met windows".  
-22. Run entire pipeline twice in sequence: first run to establish baseline; second run to detect state-dependent bugs.  
-23. If any data contradicts stated constraints, report contradiction explicitly with source and context.  
-24. All outputs must be reproducible from raw input files alone; no hidden dependencies or assumptions.  
-25. Final inventory: list all files in workspace, their contents (brief), key numbers (with sources), and one honest paragraph on where the system would break under stress (e.g., "if time windows are reduced by 10%, the route may fail to meet compliance due to tight window constraints").  
-26. All outputs use plain language, tables only when needed, no buzzwords; every number is traceable to a run.  
-27. If any stage takes more than 5 seconds in real time, log it with message: "Stage X took >5
+1. Initialize workspace at `/tmp/opencode/courier-run`, create directory structure with `readme.md`, `rules.md`, `data/`, `outputs/`, and `logs/`.  
+2. Read input JSON file (assumed to be `day.json`) into memory, parse all deliveries: address (x,y), time window [start, end], delivery ID, depot flag, and route type ("as-driven" or "recomputed").  
+3. Extract and validate the as-driven route: compute total Manhattan distance using sum(|Δx| + |Δy|) between consecutive stops, including depot-to-first and last-to-depot.  
+4. Validate window compliance for each delivery in the as-driven route: check if arrival time (cumulative travel time from depot) falls within [start, end]. Record all misses with exact arrival times and windows.  
+5. Compute total distance of the recomputed route using nearest-neighbor heuristic: start at depot, iteratively pick unvisited closest point based on Manhattan distance.  
+6. Apply 2-opt improvement to the nearest-neighbor route: for every pair of edges (i,j) and (k,l), if swapping improves total distance, perform swap; repeat until no further improvement. Track all intermediate distances.  
+7. Revalidate window compliance under recomputed route using same logic as step 4 — record misses with exact arrival times and windows.  
+8. Compute distance saved: subtract recomputed route distance from as-driven route distance.  
+9. Perform trade-off analysis: calculate risk of missing windows in the new route (number of misses) versus distance savings; assign a score based on ratio of distance saved per miss, or use a weighted metric if needed. Recommend whether to accept or reject the recomputed route based on this.  
+10. Identify and surface all data anomalies:  
+    - Two identical address points for different deliveries → flag both with delivery IDs and note "duplicate address" in output.  
+    - One time window wider than working day (e.g., 24h) → flag with ID, window, and note "window exceeds working day".  
+    - Depot appears twice under different names → identify both entries, compare coordinates, and flag as "duplicate depot", assign one to be canonical.  
+11. For each anomaly, record disposition: handled (merged), quarantined (kept in output with warning), or rejected (excluded from route). Cite rule used for each decision.  
+12. Generate human-readable report (`courier.md`) with:  
+    - Top table of all deliveries with address, time window, arrival time (as-driven and recomputed), compliance status.  
+    - Machine-readable version underneath in CSV format (`compliance.csv`), same columns, no rounding.  
+13. Output `routes.json`: contains as-driven route, recomputed route (with full sequence), distances, and compliance flags for each stop.  
+14. Log timestamps at the start of each stage: e.g., "Stage 1: 2025-04-05T10:00:00Z".  
+15. Write `rules.md` with all rules used in plain language, including thresholds and rationale (e.g., “If window end > 24h → flag as invalid”).  
+16. Implement a standalone verifier script (`verifier.py`) that:  
+    - Reads raw input data from `data/day.json`.  
+    - Recomputes all key values independently: total distance, compliance per stop, misses, distance saved.  
+    - Compares results to outputs in `outputs/` (courier.md, routes.json, compliance.csv).  
+    - Exits with non-zero status if any value differs by more than 1e-6 or if structure differs.  
+17. Run the verifier script against all outputs and record exit codes.  
+18. Perform two full runs of the pipeline: first run to establish baseline, second run to detect state-dependent bugs (e.g., order-sensitive side effects).  
+19. If any data contradiction exists between input description and actual content (e.g., "depot appears twice" vs. only one), report it explicitly with line numbers and values.  
+20. Ensure all percentages include denominators: e.g., “3 of 60 deliveries missed” instead of “50%”.  
+21. All outputs are deterministic, no randomness or seeding required; use fixed input order for tie-breaking in nearest-neighbor.  
+22. If any stage is slow (e.g., >10 seconds), log a warning with duration and reason (e.g., "2-opt took 14s due to 60 stops").  
+23. When a rule and data disagree, output both the row and the rule in side-by-side format in

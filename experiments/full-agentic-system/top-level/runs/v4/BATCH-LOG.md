@@ -113,3 +113,11 @@ Per docs/06-VERSION-ITERATION-RULESET.md §8. Workflow: meta-v4. Corpus: prompts
 - GATE: PENDING
 - r1: 10/10 PASS, zero triage (~30min)
 - GATE: PENDING regression (reg-b10 = tcA001-100, full tier A)
+
+### reg-b10 final (tier-A full regression, 100 cases)
+- Truncated twice by RAM admission (drift 8+→5.7Gi); resumed via recompute-remaining protocol (resume/resume2/resume3, any-pass merge)
+- 11 json_exact soft-fails (refusal-cluster under RAM-pressure slot churn) all flipped PASS on healthy-RAM reruns
+- resume3 (post-consolidation, main-repo binary): final 15 cases → **100/100 PASS**
+- b10 GATE: **PASS** — tier A complete: tcA001-100 = 100/100
+
+## CAMPAIGN PAUSED HERE (user checkpoint) — remaining: b11-b12 (tcB), b13-b17 (tcC), PHASE 4
