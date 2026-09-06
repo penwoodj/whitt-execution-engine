@@ -626,7 +626,10 @@ models:
     }
 
     #[test]
-    fn validate_rejects_lmstudio_provider() {
+    fn validate_accepts_lmstudio_provider() {
+        // Schema source of truth (docs/schema/unified-workflow-schema.yml
+        // line 28) lists lmstudio as a supported provider; acceptance landed
+        // with 801489cf (v5 lmstudio experiments).
         let yaml = r#"
 workflow_id: test-benchmark
 name: "Test Benchmark"
@@ -637,13 +640,9 @@ providers:
       port: 1234
 "#;
         let workflow: WorkflowFile = serde_saphyr::from_str(yaml).expect("parse");
-        let result = workflow.validate();
-        assert!(result.is_err(), "should reject lmstudio provider");
-        let err_msg = format!("{}", result.unwrap_err());
-        assert!(
-            err_msg.contains("unsupported provider 'lmstudio'"),
-            "error should mention unsupported provider, got: {}", err_msg
-        );
+        workflow
+            .validate()
+            .expect("schema line 28: lmstudio is a supported provider");
     }
 
     #[test]
@@ -668,7 +667,8 @@ providers:
     }
 
     #[test]
-    fn validate_rejects_lmstudio_model_host_type() {
+    fn validate_accepts_lmstudio_model_host_type() {
+        // Schema line 71: lmstudio is a valid host.type (landed 801489cf).
         let yaml = r#"
 workflow_id: test-benchmark
 name: "Test Benchmark"
@@ -683,13 +683,9 @@ models:
       type: lmstudio
 "#;
         let workflow: WorkflowFile = serde_saphyr::from_str(yaml).expect("parse");
-        let result = workflow.validate();
-        assert!(result.is_err(), "should reject lmstudio host.type");
-        let err_msg = format!("{}", result.unwrap_err());
-        assert!(
-            err_msg.contains("unsupported host.type 'lmstudio'"),
-            "error should mention unsupported host.type, got: {}", err_msg
-        );
+        workflow
+            .validate()
+            .expect("schema line 71: lmstudio is a valid host.type");
     }
 
     #[test]

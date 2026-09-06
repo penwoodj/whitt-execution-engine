@@ -5469,10 +5469,24 @@ mod tests {
 
     use super::*;
     use std::time::Duration;
+    use std::sync::{Mutex, MutexGuard};
+
+    // Env-mutating tests and env-reading admission/discovery tests share this
+    // lock: parallel runs otherwise race (TMPDIR/WHITT_* flips mid-read).
+    static ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        ENV_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn fixture(rel: &str) -> String {
+        format!("{}/{}", env!("CARGO_MANIFEST_DIR"), rel)
+    }
+
 
     #[test]
-    #[test]
     fn given_env_override_when_zombie_threshold_resolved_then_env_wins() {
+        let _env_guard = env_lock();
         std::env::set_var("WHITT_ZOMBIE_MAX", "8");
         assert_eq!(BenchmarkRunner::zombie_threshold(), 8);
         std::env::remove_var("WHITT_ZOMBIE_MAX");
@@ -5502,6 +5516,7 @@ mod tests {
 
     #[test]
     fn given_tmpdir_env_when_tmp_root_resolved_then_env_wins_over_hardcoded_tmp() {
+        let _env_guard = env_lock();
         // Regression: preflight tmp-space checks hardcoded /tmp and ignored
         // TMPDIR (SUMMARY-overcontext.md:88-91; workaround was a PATH shim
         // faking `df -B1 /tmp` output in experiments/reasoning-enhancer/scripts/shims/df).
@@ -6480,10 +6495,11 @@ workflow_execution_strategy:
 
     #[test]
     fn workflow_model_specs_feed_benchmark_discovery() {
+        let _env_guard = env_lock();
         let mut config = make_test_config();
-        config.workflow_file = Some(
-            "docs/benchmarks/workflows/resource-admission-reject.yml".to_string(),
-        );
+        config.workflow_file = Some(fixture(
+            "docs/benchmarks/workflows/resource-admission-reject.yml"
+        ));
         let workflow = BenchmarkRunner::new(config)
             .load_workflow_config()
             .expect("load workflow config")
@@ -6497,10 +6513,11 @@ workflow_execution_strategy:
 
     #[test]
     fn workflow_resource_admission_collects_host_model_source_paths() {
+        let _env_guard = env_lock();
         let mut config = make_test_config();
-        config.workflow_file = Some(
-            "docs/benchmarks/workflows/resource-admission-simple.yml".to_string(),
-        );
+        config.workflow_file = Some(fixture(
+            "docs/benchmarks/workflows/resource-admission-simple.yml"
+        ));
         let workflow = BenchmarkRunner::new(config)
             .load_workflow_config()
             .expect("load workflow config")
@@ -6624,11 +6641,12 @@ workflow_execution_strategy:
 
     #[tokio::test]
     async fn workflow_resource_admission_rejects_before_preflight_http() {
+        let _env_guard = env_lock();
         let mut config = make_test_config();
         config.server_url = "http://127.0.0.1:9".to_string();
-        config.workflow_file = Some(
-            "docs/benchmarks/workflows/resource-admission-reject.yml".to_string(),
-        );
+        config.workflow_file = Some(fixture(
+            "docs/benchmarks/workflows/resource-admission-reject.yml"
+        ));
         let error = BenchmarkRunner::new(config)
             .run()
             .await
@@ -7550,6 +7568,7 @@ enabled: true
 
     #[test]
     fn given_env_concurrency_override_when_parsed_then_valid_wins_and_invalid_ignored() {
+        let _env_guard = env_lock();
         // Workaround contract from experiments (run-atom.sh:81, SAFETY.md):
         // WHITT_MAX_CONCURRENT_INFERENCES forces sequential inference on 8GB boxes.
         let saved = std::env::var("WHITT_MAX_CONCURRENT_INFERENCES").ok();
@@ -8511,6 +8530,7 @@ agentic_workflow:
 
     #[test]
     fn test_workflow_pipeline_parse_and_hooks() {
+        let _env_guard = env_lock();
         let dir = tempfile::tempdir().unwrap();
         let save_path = dir.path().join("output.txt");
         let log_path = dir.path().join("log.txt");
